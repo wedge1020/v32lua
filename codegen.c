@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include "ast.h"
 
 void  generate_assembly (ASTNode *node)
 {
@@ -17,9 +18,9 @@ void  generate_assembly (ASTNode *node)
 
             case NODE_BINARY_OP:
                 // Evaluate right side first, push to a temporary place/stack, then left side
-                generate_assembly (node -> data.right);
+                generate_assembly (node -> data.binary_op.right);
                 fprintf (stdout, "    PUSH R0\n"); // Push right side value
-                generate_assembly (node -> data.left);
+                generate_assembly (node -> data.binary_op.left);
                 fprintf (stdout, "    POP R1\n"); // Pop right side into R1
                 switch (node -> data.binary_op.op)
                 {

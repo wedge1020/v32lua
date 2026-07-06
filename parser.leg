@@ -44,8 +44,6 @@ void  builder_append (BlockBuilder *bb, ASTNode *node)
 }
 %}
 
-// copying updated parser.leg from the PDF. Just finished the %} section
-
 ########################################################################################
 ##
 ## Hierarchical Grammar Rules
@@ -61,7 +59,7 @@ Program                                   = b:Block
     ASTNode  *root                        = mknode (NODE_PROGRAM);
     root -> data.program.statements       = b -> nodes;
     root -> data.program.statement_count  = b -> count;
-    free(b); // Free the builder wrapper, keep the statements array
+    free (b); // Free the builder wrapper, keep the statements array
     $$                                    = root;
 }
 
@@ -69,8 +67,8 @@ Program                                   = b:Block
 ##
 ## A block is zero or more statements executed sequentially
 ##
-Block       = { $$ = make_builder(); }
-              ( s:Statement { builder_append($$, s); } )*
+Block       = { $$ = mkbuilder (); }
+              ( s:Statement { builder_append ($$, s); } )*
 
 Statement   = Assignment
               / LocalDecl

@@ -1,3 +1,5 @@
+#include "ast.h"
+
 void  ast_free (ASTNode *node)
 {
     int32_t  index          = 0;

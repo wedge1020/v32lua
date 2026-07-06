@@ -1,5 +1,8 @@
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
+
+#include "ast.h"
 
 //////////////////////////////////////////////////////////////////////////////
 //
@@ -29,7 +32,7 @@ ASTNode *mknode_ident (const int8_t *name)
     return (node);
 }
 
-ASTNode *mknode_binop (int  op, ASTNode *left, ASTNode *right)
+ASTNode *mknode_binop (int32_t  op, ASTNode *left, ASTNode *right)
 {
     ASTNode *node                 = mknode (NODE_BINARY_OP);
     node -> data.binary_op.op     = op;

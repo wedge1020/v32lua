@@ -1,25 +1,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdbool.h>
-
-#define  MAX_SYMBOLS 128
-
-struct symbol
-{
-    int8_t *name;
-    bool    is_local;
-};
-typedef struct symbol Symbol;
-
-int  stack_offset; // Used for local variables inside Vircon32 functions
-
-typedef struct SymbolTable SymbolTable;
-struct SymbolTable
-{
-    Symbol       symbols[MAX_SYMBOLS];
-    int32_t      symbol_count;
-    SymbolTable *parent; // Points to the enclosing outer scope
-};
+#include "symtable.h"
 
 // Creates a new inner scope pointing back to the current scope
 SymbolTable *scope_enter (SymbolTable *current_scope)
@@ -105,7 +87,7 @@ Symbol *scope_lookup (SymbolTable *current_scope, const int8_t *name)
                 return (&current -> symbols[index]); // Found local or bound global
             }
         }
-        current           = current - > parent; // Move outward
+        current           = current -> parent; // Move outward
     }
 
     return (NULL); // Not found anywhere (implicitly a runtime global)
