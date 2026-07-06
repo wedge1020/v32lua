@@ -75,6 +75,40 @@ WhileLoop   = WHILE cond:Expression DO body:Block END {
                   $$ = n;
               }
 
+# --- Logical Precedence Layers ---
+# Layer 1 (Lowest): 'or' expressions
+OrExpr      = l:AndExpr ( OR r:AndExpr {
+    ASTNode *n  = mknode (NODE_OR);
+    n -> data.binary_op.left = l;
+    n -> data.binary_op.right = r;
+    l = n;
+} )* { $$ = l; }
+
+# Layer 2: 'and' expressions
+AndExpr = l:CompExpr ( AND r:CompExpr {
+    ASTNode *n = mknode (NODE_AND);
+    n -> data.binary_op.left = l;
+    n -> data.binary_op.right = r;
+    l = n;
+} )* { $$ = l; }
+
+# Layer 3: Comparisons (<, >, ==)
+CompExpr = l:MathExpr Op:COMP_OP r:MathExpr {
+            $$ = mknode_binop (Op, l, r);
+        }
+        / MathExpr
+
+# Layer 4: Mathematical additions (+, -)
+MathExpr = l:Primary ( Op:ADD_OP r:Primary { l = mknode_binop (Op, l, r); } )* { $$ = l; }
+
+# Layer 5 (Highest): Absolute Base Values
+Primary = TRUE_KEY { $$ = mknode (NODE_TRUE); }
+        / FALSE_KEY { $$ = mknode (NODE_FALSE); }
+        / id:Identifier { $$ = mknode_ident (id); free (id); }
+        / num:Number { $$ = mknode_number (num); }
+        / OPEN_P OrExpr CLOSE_P # Parentheses to override precedence
+
+
 ########################################################################################
 ##
 ## Expressions: respecting operator precedence (Comparison < Term)
@@ -92,20 +126,26 @@ Primary     = id:Identifier { $$ = mknode_ident (id); free (id); }
 ##
 ## Lexical Elements & Tokens
 ##
-Identifier  = < [a-zA-Z_][a-zA-Z0-9_]* > Spacing { $$ = strdup(yytext); }
-Number      = < [0-9]+ > Spacing { $$ = atoi(yytext); }
+Identifier  = < [a-zA-Z_][a-zA-Z0-9_]* > Spacing { $$ = strdup (yytext); }
+Number      = < [0-9]+ > Spacing { $$ = atof (yytext); }
 
 ########################################################################################
 ##
 ## Keywords and Operators
 ##
-LOCAL    = 'local' ! [a-zA-Z0-9_] Spacing
-WHILE    = 'while' ! [a-zA-Z0-9_] Spacing
-DO       = 'do'    ! [a-zA-Z0-9_] Spacing
-END      = 'end'   ! [a-zA-Z0-9_] Spacing
-EQUAL    = '='                    Spacing
-COMP_OP  = < '>' / '<' > Spacing { $$ = yytext[0]; }
-ADD_OP   = < '+' / '-' > Spacing { $$ = yytext[0]; }
+LOCAL      = 'local' ! [a-zA-Z0-9_] Spacing
+WHILE      = 'while' ! [a-zA-Z0-9_] Spacing
+DO         = 'do'    ! [a-zA-Z0-9_] Spacing
+END        = 'end'   ! [a-zA-Z0-9_] Spacing
+EQUAL      = '='                    Spacing
+COMP_OP    = < '>' / '<' > Spacing { $$ = yytext[0]; }
+ADD_OP     = < '+' / '-' > Spacing { $$ = yytext[0]; }
+TRUE_KEY   = 'true'  ! [a-zA-Z0-9_] Spacing
+FALSE_KEY  = 'false' ! [a-zA-Z0-9_] Spacing
+AND        = 'and'   ! [a-zA-Z0-9_] Spacing
+OR         = 'or'    ! [a-zA-Z0-9_] Spacing
+
+// page 34 of PDF
 
 ########################################################################################
 ##
