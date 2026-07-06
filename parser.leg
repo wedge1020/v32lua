@@ -4,44 +4,6 @@
 #include <stdint.h>
 #include <string.h>
 #include "ast.h" // Your custom C abstract syntax tree definition
-
-////////////////////////////////////////////////////////////////////////////////////////
-//
-// A dynamic array structure to accumulate statements inside a block
-//
-struct blockbuilder
-{
-    ASTNode **nodes;
-    int32_t   count;
-    int32_t   capacity;
-};
-typedef struct blockbuilder BlockBuilder;
-
-BlockBuilder *mkbuilder ()
-{
-    BlockBuilder *bb    = malloc (sizeof (BlockBuilder));
-    if (bb             != NULL)
-    {
-        bb -> count     = 0;
-        bb -> capacity  = 4;
-        bb -> nodes     = malloc (sizeof (ASTNode *) * bb -> capacity);
-    }
-    return (bb);
-}
-
-void  builder_append (BlockBuilder *bb, ASTNode *node)
-{
-    if (node                       != NULL)
-    {
-        if (bb -> count            >= bb -> capacity)
-        {
-            bb -> capacity          = bb -> capacity * 2;
-            bb -> nodes             = realloc (bb -> nodes,
-                                               sizeof (ASTNode *) * bb -> capacity);
-        }
-        bb -> nodes[bb -> count++]  = node;
-    }
-}
 %}
 
 ########################################################################################

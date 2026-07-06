@@ -63,6 +63,20 @@ struct ASTNode
     } data;
 };
 
+////////////////////////////////////////////////////////////////////////////////////////
+//
+// A dynamic array structure to accumulate statements inside a block
+//
+struct blockbuilder
+{
+    ASTNode **nodes;
+    int32_t   count;
+    int32_t   capacity;
+};
+typedef struct blockbuilder BlockBuilder;
+
+BlockBuilder *mkbuilder ();
+void  builder_append (BlockBuilder *, ASTNode *);
 void  ast_free (ASTNode *);
 
 #endif
