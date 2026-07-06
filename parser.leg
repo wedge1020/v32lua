@@ -1,22 +1,156 @@
 %{
 #include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
 #include "ast.h" // Your custom C abstract syntax tree definition
-%}
 
-# Hierarchical PEG rules
-Statement   = Assignment / FunctionCall / ControlFlow
-Assignment  = id:Identifier EQUAL expr:Expression
+////////////////////////////////////////////////////////////////////////////////////////
+//
+// A dynamic array structure to accumulate statements inside a block
+//
+struct blockbuilder
 {
-	$$      = make_assignment_node (id, expr);
+    ASTNode **nodes;
+    int32_t   count;
+    int32_t   capacity;
+};
+typedef struct blockbuilder BlockBuilder;
+
+BlockBuilder *mkbuilder ()
+{
+    BlockBuilder *bb    = malloc (sizeof (BlockBuilder));
+    if (bb             != NULL)
+    {
+        bb -> count     = 0;
+        bb -> capacity  = 4;
+        bb -> nodes     = malloc (sizeof (ASTNode *) * bb -> capacity);
+    }
+    return (bb);
 }
 
-Expression  = Left:Term ( PLUS Right:Term { Left = make_binary_op('+', Left, Right); } )* { $$ = Left; }
-Term        = id:Identifier { $$ = make_variable_node(id); }
-			/ num:Number { $$ = make_literal_node(num); }
+void  builder_append (BlockBuilder *bb, ASTNode *node)
+{
+    if (node                       != NULL)
+    {
+        if (bb -> count            >= bb -> capacity)
+        {
+            bb -> capacity          = bb -> capacity * 2;
+            bb -> nodes             = realloc (bb -> nodes,
+                                               sizeof (ASTNode *) * bb -> capacity);
+        }
+        bb -> nodes[bb -> count++]  = node;
+    }
+}
+%}
 
-# Lexical elements
+// copying updated parser.leg from the PDF. Just finished the %} section
+
+########################################################################################
+##
+## Hierarchical Grammar Rules
+##
+########################################################################################
+
+########################################################################################
+##
+## The entry point of our script parser
+##
+Program                                   = b:Block
+{
+    ASTNode  *root                        = mknode (NODE_PROGRAM);
+    root -> data.program.statements       = b -> nodes;
+    root -> data.program.statement_count  = b -> count;
+    free(b); // Free the builder wrapper, keep the statements array
+    $$                                    = root;
+}
+
+########################################################################################
+##
+## A block is zero or more statements executed sequentially
+##
+Block       = { $$ = make_builder(); }
+              ( s:Statement { builder_append($$, s); } )*
+
+Statement   = Assignment
+              / LocalDecl
+              / WhileLoop
+
+########################################################################################
+##
+## Assignment: Matches standard assignment: x = 5
+##
+Assignment  = id:Identifier EQUAL e:Expression {
+                  $$ = mknode_assign (id, e);
+                  free(id);
+              }
+
+########################################################################################
+##
+## Local Declarations: Matches explicit local declarations: local y = 10
+## Note: Reuses the assign node structure or a custom local node
+##
+LocalDecl   = LOCAL id:Identifier EQUAL e:Expression {
+                  // For simplicity, we flag this by using a custom constructor
+                  // or wrapping a standard assign node tagged as local
+                  ASTNode *n = mknode_assign (id, e);
+                  n -> type  = NODE_LOCAL_DECL; // Set custom type for symbol tracking
+                  free (id);
+                  $$ = n;
+              }
+
+########################################################################################
+##
+## While loops: while y > 0 do ... end
+##
+WhileLoop   = WHILE cond:Expression DO body:Block END {
+                  ASTNode *n  = mknode (NODE_WHILE);
+                  // Collapse our block builder into raw array fields
+                  ASTNode *body_node = mknode (NODE_PROGRAM);
+                  body_node -> data.program.statements = body -> nodes;
+                  body_node -> data.program.statement_count = body -> count;
+                  free (body);
+                  n -> data.while_loop.condition = cond;
+                  n -> data.while_loop.body = body_node;
+                  $$ = n;
+              }
+
+########################################################################################
+##
+## Expressions: respecting operator precedence (Comparison < Term)
+##
+Expression  = l:Term Op:COMP_OP r:Term {
+                  $$ = mknode_binop (Op, l, r);
+              }
+              / Term
+
+Term        = l:Primary ( Op:ADD_OP r:Primary { l = mknode_binop (Op, l, r); } )* { $$ = l; }
+Primary     = id:Identifier { $$ = mknode_ident (id); free (id); }
+              / num:Number  { $$ = mknode_number (num); }
+
+########################################################################################
+##
+## Lexical Elements & Tokens
+##
 Identifier  = < [a-zA-Z_][a-zA-Z0-9_]* > Spacing { $$ = strdup(yytext); }
 Number      = < [0-9]+ > Spacing { $$ = atoi(yytext); }
-EQUAL       = '=' Spacing
-PLUS        = '+' Spacing
-Spacing     = [ \t\n\r]*
+
+########################################################################################
+##
+## Keywords and Operators
+##
+LOCAL    = 'local' ! [a-zA-Z0-9_] Spacing
+WHILE    = 'while' ! [a-zA-Z0-9_] Spacing
+DO       = 'do'    ! [a-zA-Z0-9_] Spacing
+END      = 'end'   ! [a-zA-Z0-9_] Spacing
+EQUAL    = '='                    Spacing
+COMP_OP  = < '>' / '<' > Spacing { $$ = yytext[0]; }
+ADD_OP   = < '+' / '-' > Spacing { $$ = yytext[0]; }
+
+########################################################################################
+##
+## Eat up white space and new lines safely
+##
+Spacing  = ( [ \t\n\r] )*
+
+%%
