@@ -3,6 +3,13 @@
 #include <string.h>
 #include "codegen.h"
 
+void generate_block(ASTNode* node) {
+    while (node != NULL) {
+        generate_asm(node); // Now safely processes exactly one node
+        node = node->next;
+    }
+}
+
 void generate_asm(ASTNode* node) {
     if (!node) return;
 
@@ -18,7 +25,7 @@ void generate_asm(ASTNode* node) {
             
             printf("  JF R0, __%s_while_end_%d\n", ctx, label_id);
             
-            generate_asm(node->as.while_loop.body);
+            generate_block(node->as.while_loop.body);
             
             printf("  JMP __%s_while_start_%d\n", ctx, label_id);
             printf("__%s_while_end_%d:\n", ctx, label_id);
@@ -44,12 +51,12 @@ void generate_asm(ASTNode* node) {
             
             printf("  JF R0, __%s_else_%d\n", ctx, label_id);
             
-            generate_asm(node->as.if_stmt.if_body);
+            generate_block(node->as.if_stmt.if_body);
             printf("  JMP __%s_end_if_%d\n", ctx, label_id);
             
             printf("__%s_else_%d:\n", ctx, label_id);
             if (node->as.if_stmt.else_body) {
-                generate_asm(node->as.if_stmt.else_body);
+                generate_block(node->as.if_stmt.else_body);
             }
             printf("__%s_end_if_%d:\n", ctx, label_id);
             break;
@@ -61,7 +68,7 @@ void generate_asm(ASTNode* node) {
             printf("  PUSH BP\n");
             printf("  MOV BP, SP\n");
             
-            generate_asm(node->as.function_def.body);
+            generate_block(node->as.function_def.body);
             
             printf("__%s_return:\n", get_current_function_name());
             printf("  MOV SP, BP\n");
@@ -71,8 +78,7 @@ void generate_asm(ASTNode* node) {
             break;
         }
 
-
-case NODE_FUNCTION_CALL: {
+        case NODE_FUNCTION_CALL: {
             int arg_count = 0;
 
             // 1. NEW: Implicit 'self' injection for method calls
@@ -213,30 +219,34 @@ case NODE_FUNCTION_CALL: {
         }
 
         case NODE_TABLE_SET: {
-            generate_asm(node->as.table_set.value);      printf("  PUSH R0\n");
-            generate_asm(node->as.table_set.key);        printf("  PUSH R0\n");
-            generate_asm(node->as.table_set.table_expr); printf("  PUSH R0\n");
+            generate_asm(node->as.table_set.value);
+               printf("  PUSH R0\n");
+            generate_asm(node->as.table_set.key);
+             printf("  PUSH R0\n");
+            generate_asm(node->as.table_set.table_expr);
+            printf("  PUSH R0\n");
             printf("  CALL __builtin_table_set\n");
             // Corrected: Structural stack adjustment
             printf("  ISUB SP, 3\n");
             break;
         }
-case NODE_TABLE_GET: {
-    // 1. Evaluate the key (leaves key identifier/string address in R0)
-    generate_asm(node->as.table_get.key);
-    printf("  PUSH R0\n");
 
-    // 2. Evaluate the table expression (leaves table structure pointer in R0)
-    generate_asm(node->as.table_get.table_expr);
-    printf("  PUSH R0\n");
+        case NODE_TABLE_GET: {
+            // 1. Evaluate the key (leaves key identifier/string address in R0)
+            generate_asm(node->as.table_get.key);
+            printf("  PUSH R0\n");
 
-    // 3. Pop into registers and call runtime helper
-    printf("  POP R1\n"); // R1 = Table Pointer
-    printf("  POP R2\n"); // R2 = Key
-    printf("  CALL __builtin_table_get\n");
-    // Result is now beautifully sitting in R0 for whoever needs it!
-    break;
-}
+            // 2. Evaluate the table expression (leaves table structure pointer in R0)
+            generate_asm(node->as.table_get.table_expr);
+            printf("  PUSH R0\n");
+
+            // 3. Pop into registers and call runtime helper
+            printf("  POP R1\n"); // R1 = Table Pointer
+            printf("  POP R2\n"); // R2 = Key
+            printf("  CALL __builtin_table_get\n");
+            // Result is now beautifully sitting in R0 for whoever needs it!
+            break;
+        }
 
         case NODE_IDENTIFIER: {
             // 1. Check if the identifier is 'self' (the implicit first parameter)
@@ -255,7 +265,6 @@ case NODE_TABLE_GET: {
             printf("  MOV R0, %f\n", node->as.number.val);
             break;
     }
-    generate_asm(node->next);
 }
 
 void generate_global_setup(ASTNode* node) {
