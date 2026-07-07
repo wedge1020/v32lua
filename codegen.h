@@ -122,5 +122,7 @@ void pop_loop(void);
 int current_loop(void);
 
 int get_global_variable_address(const char* name);
+void  generate_global_setup (ASTNode *);
+void  generate_functions (ASTNode *);
 
 #endif // CODEGEN_H

@@ -233,3 +233,35 @@ void generate_asm(ASTNode* node) {
     }
 	generate_asm(node->next);
 }
+
+void generate_global_setup(ASTNode* node) {
+    while (node != NULL) {
+        // Skip function definitions during the initial execution setup phase
+        if (node->type != NODE_FUNCTION_DEF) {
+            // We temporarily break the sibling chain link so generate_asm 
+            // only processes this single statement, preventing double-traversal.
+            ASTNode* next_sibling = node->next;
+            node->next = NULL;
+            
+            generate_asm(node);
+            
+            node->next = next_sibling;
+        }
+        node = node->next;
+    }
+}
+
+void generate_functions(ASTNode* node) {
+    while (node != NULL) {
+        // Only emit code if it's an isolated global function structure
+        if (node->type == NODE_FUNCTION_DEF) {
+            ASTNode* next_sibling = node->next;
+            node->next = NULL;
+            
+            generate_asm(node);
+            
+            node->next = next_sibling;
+        }
+        node = node->next;
+    }
+}

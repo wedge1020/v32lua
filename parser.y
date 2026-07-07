@@ -37,17 +37,22 @@ void emit_runtime_library(void);
 %left '['
 
 %%
+
 program:
     statement_list { 
         printf("; --- Vircon32 Boot Initialization ---\n");
         printf("  MOV R0, 100000\n");
         printf("  MOV [0], R0 ; Initialize heap pointer at RAM address 0\n\n");
         
-        printf("; --- Compiled Code Entry Vector ---\n");
-        generate_asm($1); 
+        printf("; --- Execution Entry: Global Setup Routine ---\n");
+        generate_global_setup($1); 
         
-        // Corrected Vircon32 halt instruction
-        printf("  HLT\n"); 
+        printf("\n; --- Jump to Main Application Logic ---\n");
+        printf("  CALL _main\n");
+        printf("  HLT        ; Safely halt CPU after main exits\n\n"); 
+        
+        printf("; --- Compiled Function Segments ---\n");
+        generate_functions($1);
         
         emit_string_data_section();
     }
