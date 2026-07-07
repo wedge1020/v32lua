@@ -10,6 +10,9 @@ void yyerror(const char *s);
 
 // Inline helper functions for memory allocation during AST compilation
 ASTNode* make_node(NodeType type);
+ASTNode* make_node_ident (const char*);
+ASTNode* make_node_string(const char*);
+
 void emit_runtime_library(void);
 // Add your new helper prototype here:
 char* mangle_method_name(const char* table_name, const char* method_name);
@@ -244,14 +247,8 @@ expr:
         $$ = make_node(NODE_NUMBER);
         $$->as.number.val = $1;
     }
-    | TOKEN_IDENTIFIER {
-        $$ = make_node(NODE_IDENTIFIER);
-        $$->as.id.name = $1;
-    }
-    | TOKEN_STRING {
-        $$ = make_node(NODE_STRING);
-        $$->as.string_val.value = $1;
-    }
+	| TOKEN_IDENTIFIER { $$ = make_node_ident($1); }
+    | TOKEN_STRING     { $$ = make_node_string($1); }
     | table_constructor { $$ = $1; }
     | expr '[' expr ']' {
         $$ = make_node(NODE_TABLE_GET);
@@ -264,9 +261,9 @@ expr:
     | expr TOKEN_GT expr      { $$ = make_node(NODE_RELATIONAL); $$->as.binary.operator = OP_GT;  $$->as.binary.left = $1; $$->as.binary.right = $3; }
     | expr TOKEN_LE expr      { $$ = make_node(NODE_RELATIONAL); $$->as.binary.operator = OP_LE;  $$->as.binary.left = $1; $$->as.binary.right = $3; }
     | expr TOKEN_GE expr      { $$ = make_node(NODE_RELATIONAL); $$->as.binary.operator = OP_GE;  $$->as.binary.left = $1; $$->as.binary.right = $3; }
-    | expr TOKEN_AND expr     { $$ = make_node(NODE_AND); $$->as.binary.left = $1; $$->as.binary.right = $3; }
-    | expr TOKEN_OR expr      { $$ = make_node(NODE_OR);  $$->as.binary.left = $1; $$->as.binary.right = $3; }
-    | expr TOKEN_CONCAT expr  { $$ = make_node(NODE_CONCAT); $$->as.binary.left = $1; $$->as.binary.right = $3; }
+    | expr TOKEN_AND expr     { $$ = make_node(NODE_AND);        $$->as.binary.left     = $1;     $$->as.binary.right = $3; }
+    | expr TOKEN_OR expr      { $$ = make_node(NODE_OR);         $$->as.binary.left     = $1;     $$->as.binary.right = $3; }
+    | expr TOKEN_CONCAT expr  { $$ = make_node(NODE_CONCAT);     $$->as.binary.left     = $1;     $$->as.binary.right = $3; }
     | expr '.' TOKEN_IDENTIFIER {
         ASTNode* node = make_node(NODE_TABLE_GET);
         node->as.table_get.table_expr = $1;
@@ -319,6 +316,13 @@ ASTNode* make_node_ident (const char* name) {
     // protecting it from being overwritten by the lexer's buffer.
     node->as.id.name = strdup(name);
 
+    return node;
+}
+
+ASTNode* make_node_string(const char* str_value) {
+    ASTNode* node = make_node(NODE_STRING);
+    // strdup protects the string from being overwritten by the lexer
+    node->as.string_val.value = strdup(str_value);
     return node;
 }
 
