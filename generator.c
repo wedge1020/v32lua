@@ -229,7 +229,7 @@ void generate_asm(ASTNode* node) {
             // and overwrites R1 with the boolean result.
             switch(node->as.binary.operator) {
                 case OP_EQ: printf("  FEQ R1, R0\n"); break; // R1 = (R1 == R0)
-                case OP_NE: printf("  FNE R1, R0\n"); break; // R1 = (R1 != R0)
+                case OP_NEQ: printf("  FNE R1, R0\n"); break; // R1 = (R1 != R0)
                 case OP_LT: printf("  FLT R1, R0\n"); break; // R1 = (R1 < R0)
                 case OP_LE: printf("  FLE R1, R0\n"); break; // R1 = (R1 <= R0)
                 case OP_GT: printf("  FGT R1, R0\n"); break; // R1 = (R1 > R0)
