@@ -146,13 +146,13 @@ statement:
     | expr '.' TOKEN_IDENTIFIER '=' expr {
         ASTNode* node = make_node(NODE_TABLE_SET);
         node->as.table_set.table_expr = $1;
-        node->as.table_set.key = make_node(NODE_STRING);
+		node->as.table_set.key = make_node_string($3);
         node->as.table_set.value = $5;
         $$ = node;
     }
     | TOKEN_FUNCTION TOKEN_IDENTIFIER ':' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
         // 1. Inject 'self' as a hidden first argument into the parameter list
-        ASTNode* self_param = make_node(NODE_IDENTIFIER);
+		ASTNode* self_param = make_node_ident("self");
         self_param->next = $6; // Prepended to user-defined parameters
         
         // 2. Desugar into a standard table function definition structure
@@ -165,8 +165,8 @@ statement:
         
         // 3. Chain it to a setup node that binds it to the table at boot time
         ASTNode* bind_node = make_node(NODE_TABLE_SET);
-        bind_node->as.table_set.table_expr = make_node(NODE_IDENTIFIER);
-        bind_node->as.table_set.key = make_node(NODE_STRING);
+		bind_node->as.table_set.table_expr = make_node_ident($2);
+		bind_node->as.table_set.key = make_node_string($4);
         bind_node->as.table_set.value = func_node; 
         
         // This ensures the function goes to Pass 2 and binding goes to Pass 1!
@@ -214,13 +214,8 @@ function_def:
         ASTNode* func_ptr = make_node(NODE_FUNCTION_POINTER);
         func_ptr->as.func_ptr.mangled_name = strdup(mangled_name);
 
-        // 4. Generate the lookup components for the string key
-        ASTNode* key_node = make_node(NODE_STRING);
-        key_node->as.string_val.value = strdup($4);
-
-        // 5. Generate the base identifier lookup for the target table
-        ASTNode* table_node = make_node(NODE_IDENTIFIER);
-        table_node->as.id.name = $2;
+		ASTNode* key_node = make_node_string($4);
+		ASTNode* table_node = make_node_ident($2);
 
         // 6. Tie it all into a table assignment: table[key] = func_ptr
         ASTNode* table_set = make_node(NODE_TABLE_SET);
@@ -268,7 +263,7 @@ expr:
         ASTNode* node = make_node(NODE_TABLE_GET);
         node->as.table_get.table_expr = $1;
         // Turn the identifier string into a constant string node for the key
-        node->as.table_get.key = make_node(NODE_STRING); 
+		node->as.table_get.key = make_node_string($3);
         $$ = node;
     }
     | expr ':' TOKEN_IDENTIFIER '(' argument_list ')' {
@@ -281,7 +276,7 @@ expr:
         // The target to resolve at runtime is the function inside the table: object.method
         ASTNode* dynamic_lookup = make_node(NODE_TABLE_GET);
         dynamic_lookup->as.table_get.table_expr = $1;
-        dynamic_lookup->as.table_get.key = make_node(NODE_STRING);
+		dynamic_lookup->as.table_get.key = make_node_string($3);
         node->as.call.target = dynamic_lookup;
         
         node->as.call.args_head = $5;
