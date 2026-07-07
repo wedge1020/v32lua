@@ -20,7 +20,75 @@ typedef enum {
 } OpType;
 
 // Forward declaration of AST Node
-typedef struct ASTNode ASTNode;
+typedef struct astnode ASTNode;
+// Place this inside codegen.h, right after the enums
+struct astnode {
+    NodeType type;
+    ASTNode* next;  // For statement lists and sequential chaining
+    
+    union {
+        // Control Flow
+        struct {
+            ASTNode* condition;
+            ASTNode* body;
+        } while_loop;
+
+        struct {
+            ASTNode* condition;
+            ASTNode* if_body;
+            ASTNode* else_body;
+        } if_stmt;
+
+        // Functions
+        struct {
+            char* name;
+            ASTNode* body;
+        } function_def;
+
+        struct {
+            ASTNode* expressions_head;
+            int parent_func_arg_count;
+        } return_stmt;
+
+        // Assignments
+        struct {
+            ASTNode* targets_head;
+            ASTNode* right_side_call;
+        } mult_assign;
+
+        // Binary Operations (Math, Logic, Relational, Concat)
+        struct {
+            int operator; // Holds OpType or character literal like '+'
+            ASTNode* left;
+            ASTNode* right;
+        } binary;
+
+        // Tables
+        struct {
+            ASTNode* table_expr;
+            ASTNode* key;
+            ASTNode* value;
+        } table_set;
+
+        struct {
+            ASTNode* table_expr;
+            ASTNode* key;
+        } table_get;
+
+        // Terminal Literals / Identifiers
+        struct {
+            char* value;
+        } string_val;
+
+        struct {
+            char* name;
+        } id;
+
+        struct {
+            double val;
+        } number;
+    } as;
+};
 
 // Variable Symbol Definition
 typedef struct Symbol {

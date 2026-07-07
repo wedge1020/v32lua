@@ -14,7 +14,7 @@ ASTNode* make_node(NodeType type);
 %union {
     double number_val;
     char* string_val;
-    struct ASTNode* ast_node;
+    ASTNode* ast_node;
 }
 
 %token <number_val> TOKEN_NUMBER
@@ -32,6 +32,7 @@ ASTNode* make_node(NodeType type);
 %right TOKEN_CONCAT
 %left '+' '-'
 %left '*' '/'
+%left '['
 
 %%
 
