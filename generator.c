@@ -148,7 +148,7 @@ void generate_asm(ASTNode* node) {
             break;
         }
 
-		case NODE_ADD: {
+        case NODE_ADD: {
             // 1. Evaluate the left-hand side expression (result lands in R0)
             generate_asm(node->as.binary.left);
             printf("  PUSH R0\n");
@@ -160,9 +160,37 @@ void generate_asm(ASTNode* node) {
             // 3. Perform the addition (R1 = R1 + R0)
             // Note: Use FADD if your compiler treats all Lua numbers as floats,
             // or IADD if you are dealing strictly with integers.
-            printf("  IADD R1, R0\n");
+            printf("  FADD R1, R0\n");
 
             // 4. Place the final result back into R0 for the rest of the pipeline
+            printf("  MOV R0, R1\n");
+            break;
+        }
+
+        case NODE_SUB: {
+            generate_asm(node->as.binary.left);
+            printf("  PUSH R0\n");
+            generate_asm(node->as.binary.right);
+            printf("  POP R1\n");    // R1 = Left, R0 = Right
+            printf("  FSUB R1, R0\n"); // R1 = R1 - R0 (Left - Right)
+            printf("  MOV R0, R1\n");  // Move final result back to R0
+            break;
+        }
+        case NODE_MUL: {
+            generate_asm(node->as.binary.left);
+            printf("  PUSH R0\n");
+            generate_asm(node->as.binary.right);
+            printf("  POP R1\n");
+            printf("  FMUL R1, R0\n"); // R1 = left * right
+            printf("  MOV R0, R1\n");
+            break;
+        }
+        case NODE_DIV: {
+            generate_asm(node->as.binary.left);
+            printf("  PUSH R0\n");
+            generate_asm(node->as.binary.right);
+            printf("  POP R1\n");
+            printf("  FDIV R1, R0\n"); // R1 = left / right
             printf("  MOV R0, R1\n");
             break;
         }
@@ -190,19 +218,25 @@ void generate_asm(ASTNode* node) {
         }
 
         case NODE_RELATIONAL: {
+            // 1. Evaluate Left and Right operands
             generate_asm(node->as.binary.left);
             printf("  PUSH R0\n");
             generate_asm(node->as.binary.right);
-            printf("  POP R1\n");
+            printf("  POP R1\n");    // R1 = Left, R0 = Right
             
-            switch (node->as.binary.operator) {
-                case OP_EQ:  printf("  IEQ R1, R0\n"); break;
-                case OP_NEQ: printf("  INE R1, R0\n"); break;
-                case OP_LT:  printf("  ILT R1, R0\n"); break; 
-                case OP_GT:  printf("  IGT R1, R0\n"); break; 
-                case OP_LE:  printf("  ILE R1, R0\n"); break; 
-                case OP_GE:  printf("  IGE R1, R0\n"); break; 
+            // 2. Perform destructive comparison. 
+            // Vircon32: "INSTRUCTION R1, R0" checks (R1 operator R0) 
+            // and overwrites R1 with the boolean result.
+            switch(node->as.binary.operator) {
+                case OP_EQ: printf("  FEQ R1, R0\n"); break; // R1 = (R1 == R0)
+                case OP_NE: printf("  FNE R1, R0\n"); break; // R1 = (R1 != R0)
+                case OP_LT: printf("  FLT R1, R0\n"); break; // R1 = (R1 < R0)
+                case OP_LE: printf("  FLE R1, R0\n"); break; // R1 = (R1 <= R0)
+                case OP_GT: printf("  FGT R1, R0\n"); break; // R1 = (R1 > R0)
+                case OP_GE: printf("  FGE R1, R0\n"); break; // R1 = (R1 >= R0)
             }
+            
+            // 3. Move the boolean result from R1 into R0 for the pipeline
             printf("  MOV R0, R1\n");
             break;
         }
