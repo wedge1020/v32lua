@@ -69,34 +69,41 @@ void generate_asm(ASTNode* node) {
             pop_function_context();
             break;
         }
+
+
 case NODE_FUNCTION_CALL: {
-    int arg_count = 0;
-    
-    // OOP INJECTION: If this is a method call, push the object ('self') FIRST
-    if (node->as.call.is_method_call) {
-        generate_asm(node->as.call.target_table); // Evaluates the object pointer
-        printf("  PUSH R0\n");
-        arg_count++;
-    }
+            int arg_count = 0;
 
-    // Evaluate and push the rest of the explicit arguments
-    ASTNode* current_arg = node->as.call.args_head;
-    while (current_arg != NULL) {
-        generate_asm(current_arg);
-        printf("  PUSH R0\n");
-        arg_count++;
-        current_arg = current_arg->next;
-    }
+            // 1. NEW: Implicit 'self' injection for method calls
+            if (node->as.call.is_method_call) {
+                printf("  ; --- Injecting implicit 'self' ---\n");
+                // Evaluate the table object itself (the left side of the dot/colon)
+                generate_asm(node->as.call.target->as.table_get.table_expr);
+                printf("  PUSH R0\n");
+                arg_count++;
+            }
 
-    // Dynamic resolve and call remains exactly the same!
-    generate_asm(node->as.call.target);
-    printf("  CALL R0\n");
+            // 2. Evaluate and push explicitly provided arguments
+            ASTNode* current_arg = node->as.call.args_head;
+            while (current_arg != NULL) {
+                generate_asm(current_arg);
+                printf("  PUSH R0\n");
+                arg_count++;
+                current_arg = current_arg->next;
+            }
 
-    if (arg_count > 0) {
-        printf("  ISUB SP, %d\n", arg_count);
-    }
-    break;
-}
+            // 3. Evaluate the target expression (the actual function address lookup)
+            generate_asm(node->as.call.target);
+
+            // 4. Dynamically call the address stored in R0
+            printf("  CALL R0\n");
+
+            // 5. Clean up the stack (arg_count now correctly includes 'self'!)
+            if (arg_count > 0) {
+                printf("  ISUB SP, %d\n", arg_count);
+            }
+            break;
+        }
 
 		case NODE_FUNCTION_POINTER: {
             printf("  ; Load address of the mangled function into R0\n");
@@ -219,7 +226,7 @@ case NODE_TABLE_GET: {
     printf("  PUSH R0\n");
 
     // 2. Evaluate the table expression (leaves table structure pointer in R0)
-    generate_asm(node->as.table_get.table);
+    generate_asm(node->as.table_get.table_expr);
     printf("  PUSH R0\n");
 
     // 3. Pop into registers and call runtime helper

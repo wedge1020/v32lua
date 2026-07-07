@@ -33,30 +33,33 @@ typedef enum {
 } Operator;
 
 // --- AST Node Structure ---
-typedef struct ASTNode {
+typedef struct astnode ASTNode;
+struct astnode {
     NodeType type;
-    struct ASTNode* next; // For linked lists of statements/expressions
+    ASTNode* next; // For linked lists of statements/expressions
 
     union {
         struct {
-            struct ASTNode* condition;
-            struct ASTNode* body;
+            ASTNode* condition;
+            ASTNode* body;
         } while_loop;
 
         struct {
-            struct ASTNode* condition;
-            struct ASTNode* if_body;
-            struct ASTNode* else_body;
+            ASTNode* condition;
+            ASTNode* if_body;
+            ASTNode* else_body;
         } if_stmt;
 
         struct {
             char* name;
-            struct ASTNode* body;
+            ASTNode* params;  // <-- Add this to hold your 'self' parameter (and others)
+            ASTNode* body;
         } function_def;
 
         struct {
-            struct ASTNode* target; // FIXED: Replaced 'char* name' with an expression node
-            struct ASTNode* args_head;
+            ASTNode* target;
+            ASTNode* args_head;
+            int is_method_call; // <-- Add this boolean flag
         } call;
 
         // Inside your ASTNode union:
@@ -65,18 +68,18 @@ typedef struct ASTNode {
         } func_ptr;
 
         struct {
-            struct ASTNode* expressions_head;
+            ASTNode* expressions_head;
             int parent_func_arg_count;
         } return_stmt;
 
         struct {
-            struct ASTNode* right_side_call;
-            struct ASTNode* targets_head;
+            ASTNode* right_side_call;
+            ASTNode* targets_head;
         } mult_assign;
 
         struct {
-            struct ASTNode* left;
-            struct ASTNode* right;
+            ASTNode* left;
+            ASTNode* right;
             Operator operator;
         } binary;
 
@@ -85,14 +88,14 @@ typedef struct ASTNode {
         } string_val;
 
         struct {
-            struct ASTNode* table_expr;
-            struct ASTNode* key;
-            struct ASTNode* value;
+            ASTNode* table_expr;
+            ASTNode* key;
+            ASTNode* value;
         } table_set;
 
         struct {
-            struct ASTNode* table_expr;
-            struct ASTNode* key;
+            ASTNode* table_expr;
+            ASTNode* key;
         } table_get;
 
         struct {
@@ -103,7 +106,7 @@ typedef struct ASTNode {
             double val;
         } number;
     } as;
-} ASTNode;
+};
 
 // --- Core Compiler Functions ---
 void generate_asm(ASTNode* node);
