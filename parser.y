@@ -113,6 +113,33 @@ function_def:
     }
     ;
 
+function_declaration:
+    /* Standard Function: function my_func() ... end */
+    FUNCTION IDENTIFIER '(' parameter_list ')' block END {
+        $$ = create_function_def_node($2, $4, $6);
+    }
+    |
+    /* Table Function: function my_table.my_func() ... end */
+    FUNCTION IDENTIFIER '.' IDENTIFIER '(' parameter_list ')' block END {
+        // 1. Create a mangled, unique name for the assembly label
+        char mangled_name[256];
+        sprintf(mangled_name, "%s_%s", $2, $4);
+
+        // 2. Create the actual function definition node using the mangled name
+        ASTNode* func_def = create_function_def_node(strdup(mangled_name), $6, $8);
+
+        // 3. Create a node that represents the memory address of this function
+        // (This tells the generator to emit: MOV R0, _mangled_name)
+        ASTNode* func_ptr = create_function_pointer_node(strdup(mangled_name));
+
+        // 4. Create the table assignment: my_table["my_func"] = func_ptr
+        ASTNode* table_set = create_table_set_node($2, $4, func_ptr);
+
+        // 5. Combine them into a sequence/block so BOTH get processed
+        $$ = create_sequence_node(func_def, table_set);
+    }
+;
+
 return_stmt:
     TOKEN_RETURN expr {
         $$ = make_node(NODE_RETURN);

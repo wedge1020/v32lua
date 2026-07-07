@@ -8,6 +8,7 @@ typedef enum {
     NODE_IF,
     NODE_FUNCTION_DEF,
     NODE_FUNCTION_CALL,
+    NODE_FUNCTION_POINTER,
     NODE_RETURN,
     NODE_MULTIPLE_ASSIGNMENT,
     NODE_AND,
@@ -54,9 +55,14 @@ typedef struct ASTNode {
         } function_def;
 
         struct {
-            char* name;
-            struct ASTNode* args_head; 
-        } call; // Standardized as 'call' to fix the GCC error
+            struct ASTNode* target; // FIXED: Replaced 'char* name' with an expression node
+            struct ASTNode* args_head;
+        } call;
+
+        // Inside your ASTNode union:
+        struct {
+            char* mangled_name;
+        } func_ptr;
 
         struct {
             struct ASTNode* expressions_head;

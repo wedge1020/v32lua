@@ -72,23 +72,34 @@ void generate_asm(ASTNode* node) {
 
         case NODE_FUNCTION_CALL: {
             int arg_count = 0;
-            ASTNode* current_arg = node->as.call.args_head; 
-            
+            ASTNode* current_arg = node->as.call.args_head;
+
+            // 1. Evaluate and push all arguments
             while (current_arg != NULL) {
                 generate_asm(current_arg);
                 printf("  PUSH R0\n");
                 arg_count++;
                 current_arg = current_arg->next;
             }
-            
-            printf("  CALL _%s\n", node->as.call.name);
-            
+
+            // 2. Evaluate the target expression (e.g., table lookup or variable)
+            // This will leave the function's memory address in R0
+            generate_asm(node->as.call.target);
+
+            // 3. Dynamically call the address stored in R0
+            printf("  CALL R0\n");
+
+            // 4. Clean up the stack
             if (arg_count > 0) {
-                // Corrected: Structural stack pointer cleanup requires integer subtraction
                 printf("  ISUB SP, %d\n", arg_count);
             }
             break;
         }
+
+        case NODE_FUNCTION_POINTER:
+            // Load the physical RAM/ROM address of the function label into R0
+            printf("  MOV R0, _%s\n", node->as.func_ptr.mangled_name);
+            break;
 
         case NODE_RETURN: {
             ASTNode* expr = node->as.return_stmt.expressions_head;
