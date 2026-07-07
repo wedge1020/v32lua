@@ -71,7 +71,8 @@ void emit_runtime_library(void) {
     printf("  IADD R4, 3       ; Allocate 3 words (NextPtr, Key, Value)\n");
     printf("  MOV [0], R4      ; Update heap pointer\n");
 
-    printf("  MOV [R3 + 0], 0  ; Node.Next = null\n");
+	printf("  MOV  R4, 0\n"); 
+    printf("  MOV [R3 + 0], R4 ; Node.Next = null\n");
     printf("  MOV [R3 + 1], R1 ; Node.Key = key\n");
     printf("  MOV [R3 + 2], R2 ; Node.Value = value\n");
     printf("  MOV [R0], R3     ; Link previous node (or root) to this new node\n");
@@ -115,13 +116,14 @@ void emit_runtime_library(void) {
 
     // --- Built-in: Table Assignment (__builtin_table_set) ---
     // Minimal mock runtime stub for key/value tables
+	/*
     printf("\n__builtin_table_set:\n");
     printf("  PUSH BP\n");
     printf("  MOV BP, SP\n");
     printf("  ; Custom array/hash mapping logic would go here\n");
     printf("  MOV SP, BP\n");
     printf("  POP BP\n");
-    printf("  RET\n");
+    printf("  RET\n");*/
 }
 
 int main(int argc, char** argv) {

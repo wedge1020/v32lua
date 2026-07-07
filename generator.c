@@ -96,10 +96,11 @@ void generate_asm(ASTNode* node) {
             break;
         }
 
-        case NODE_FUNCTION_POINTER:
-            // Load the physical RAM/ROM address of the function label into R0
+		case NODE_FUNCTION_POINTER: {
+            printf("  ; Load address of the mangled function into R0\n");
             printf("  MOV R0, _%s\n", node->as.func_ptr.mangled_name);
             break;
+        }
 
         case NODE_RETURN: {
             ASTNode* expr = node->as.return_stmt.expressions_head;
