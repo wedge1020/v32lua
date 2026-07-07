@@ -148,6 +148,25 @@ void generate_asm(ASTNode* node) {
             break;
         }
 
+		case NODE_ADD: {
+            // 1. Evaluate the left-hand side expression (result lands in R0)
+            generate_asm(node->as.binary.left);
+            printf("  PUSH R0\n");
+
+            // 2. Evaluate the right-hand side expression (result lands in R0)
+            generate_asm(node->as.binary.right);
+            printf("  POP R1\n"); // Move left-hand side into R1
+
+            // 3. Perform the addition (R1 = R1 + R0)
+            // Note: Use FADD if your compiler treats all Lua numbers as floats,
+            // or IADD if you are dealing strictly with integers.
+            printf("  IADD R1, R0\n");
+
+            // 4. Place the final result back into R0 for the rest of the pipeline
+            printf("  MOV R0, R1\n");
+            break;
+        }
+
         case NODE_AND: {
             int label_id = get_next_label();
             generate_asm(node->as.binary.left);

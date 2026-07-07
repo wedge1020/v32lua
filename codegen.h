@@ -11,6 +11,7 @@ typedef enum {
     NODE_FUNCTION_POINTER,
     NODE_RETURN,
     NODE_MULTIPLE_ASSIGNMENT,
+    NODE_ADD,
     NODE_AND,
     NODE_OR,
     NODE_RELATIONAL,
@@ -119,6 +120,8 @@ void emit_string_data_section(void);
 void push_function_context(const char* name);
 void pop_function_context(void);
 const char* get_current_function_name(void);
+
+ASTNode *make_node_binary (NodeType, ASTNode *, ASTNode *);
 
 void push_loop(int id);
 void pop_loop(void);
