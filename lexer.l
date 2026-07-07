@@ -42,7 +42,7 @@
 "["                     { return '['; }
 "]"                     { return ']'; }
 "."                     { return '.'; }
-":"                     { return '.'; }
+":"                     { return ':'; }
 
 [a-zA-Z_][a-zA-Z0-9_]* { 
                             yylval.string_val = strdup(yytext); 
@@ -62,5 +62,4 @@
                         }
 
 .                       { printf("Lexical Error on line %d: Unexpected character %s\n", yylineno, yytext); }
-
 %%
