@@ -33,6 +33,8 @@
 "<"                     { return TOKEN_LT; }
 ">"                     { return TOKEN_GT; }
 ".."                    { return TOKEN_CONCAT; }
+"("         { return '('; }
+")"         { return ')'; }
 "="                     { return '='; }
 ","                     { return ','; }
 "{"                     { return '{'; }

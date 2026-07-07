@@ -6,9 +6,6 @@
 extern int yyparse(void);
 extern FILE* yyin;
 
-// Prototype declared here to satisfy parser.y requirements cleanly
-void emit_runtime_library(void);
-
 void emit_runtime_library(void) {
     printf("\n; ==========================================\n");
     printf("; --- Vircon32 Lua Compiler Runtime Lib ---\n");
@@ -26,11 +23,11 @@ void emit_runtime_library(void) {
     printf("  MOV R2, [R0]\n");
     printf("  IEQ R2, 0\n");
     printf("  JT R2, __strcat_copy_loop\n");
-    printf("  IADD R0, 1       ; Move to next word (Fixed to IADD)\n");
+    printf("  IADD R0, 1       ; Move to next word\n");
     printf("  JMP __strcat_find_end\n");
     
     printf("\n__strcat_copy_loop:\n");
-    printf("  MOV R3, [R1]     ; Load character into intermediate register (Fixed!)\n");
+    printf("  MOV R3, [R1]     ; Load character into intermediate register\n");
     printf("  MOV [R0], R3     ; Store character into destination address\n");
     printf("  IEQ R3, 0        ; Check for null-terminator\n");
     printf("  JT R3, __strcat_done\n");
@@ -77,9 +74,14 @@ int main(int argc, char** argv) {
 
     // Print out basic initialization assembly boilerplate for the emulator
     printf("; --- Program Initialization ---\n");
-    printf("  MOV [0], 20000   ; Initialize heap pointer to dynamic RAM region\n");
-    printf("  CALL _main       ; Jump directly to user's main structure\n");
-    printf("  HLT\n\n");
+    printf("  MOV R0, 20000    ; Load immediate into register\n");
+    printf("  MOV [0], R0      ; Initialize heap pointer to dynamic RAM region\n");
+    
+    // --- The Game Loop ---
+    printf("\n__game_loop:\n");
+    printf("  CALL _main       ; Execute the user's main function\n");
+    printf("  WAIT             ; Pause CPU execution until the next video frame\n");
+    printf("  JMP __game_loop  ; Loop forever\n\n");
 
     // Run the Parser (which loops calls to the Code Generator automatically)
     if (yyparse() != 0) {
