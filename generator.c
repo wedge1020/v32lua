@@ -231,4 +231,5 @@ void generate_asm(ASTNode* node) {
             printf("  MOV R0, %f\n", node->as.number.val);
             break;
     }
+	generate_asm(node->next);
 }
