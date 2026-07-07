@@ -84,7 +84,8 @@ void generate_asm(ASTNode* node) {
             printf("  CALL _%s\n", node->as.call.name);
             
             if (arg_count > 0) {
-                printf("  SUB SP, %d\n", arg_count);
+                // Corrected: Structural stack pointer cleanup requires integer subtraction
+                printf("  ISUB SP, %d\n", arg_count);
             }
             break;
         }
@@ -171,7 +172,8 @@ void generate_asm(ASTNode* node) {
             generate_asm(node->as.binary.right);
             printf("  PUSH R0\n");
             printf("  CALL __builtin_strcat\n");
-            printf("  SUB SP, 2\n");
+            // Corrected: Structural stack adjustment
+            printf("  ISUB SP, 2\n");
             break;
         }
 
@@ -181,7 +183,8 @@ void generate_asm(ASTNode* node) {
             printf("  MOV R1, 0\n");
             printf("  MOV [R0], R1\n");
             printf("  MOV R1, [0]\n");
-            printf("  ADD R1, 1\n");
+            // Corrected: Pointer allocation math requires integer addition
+            printf("  IADD R1, 1\n"); 
             printf("  MOV [0], R1 ; Update active RAM heap track pointer\n");
             printf("  POP R0\n");
             break;
@@ -192,7 +195,8 @@ void generate_asm(ASTNode* node) {
             generate_asm(node->as.table_set.key);        printf("  PUSH R0\n");
             generate_asm(node->as.table_set.table_expr); printf("  PUSH R0\n");
             printf("  CALL __builtin_table_set\n");
-            printf("  SUB SP, 3\n");
+            // Corrected: Structural stack adjustment
+            printf("  ISUB SP, 3\n");
             break;
         }
 
@@ -200,7 +204,8 @@ void generate_asm(ASTNode* node) {
             generate_asm(node->as.table_get.key);        printf("  PUSH R0\n");
             generate_asm(node->as.table_get.table_expr); printf("  PUSH R0\n");
             printf("  CALL __builtin_table_get\n");
-            printf("  SUB SP, 2\n");
+            // Corrected: Structural stack adjustment
+            printf("  ISUB SP, 2\n");
             break;
         }
         

@@ -49,8 +49,6 @@ program:
         printf("  HLT\n"); 
         
         emit_string_data_section();
-        // emit_global_variables() has been REMOVED!
-        emit_runtime_library();
     }
     ;
 
