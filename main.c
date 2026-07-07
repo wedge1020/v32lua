@@ -113,17 +113,6 @@ void emit_runtime_library(void) {
     printf("  MOV SP, BP\n");
     printf("  POP BP\n");
     printf("  RET\n");
-
-    // --- Built-in: Table Assignment (__builtin_table_set) ---
-    // Minimal mock runtime stub for key/value tables
-	/*
-    printf("\n__builtin_table_set:\n");
-    printf("  PUSH BP\n");
-    printf("  MOV BP, SP\n");
-    printf("  ; Custom array/hash mapping logic would go here\n");
-    printf("  MOV SP, BP\n");
-    printf("  POP BP\n");
-    printf("  RET\n");*/
 }
 
 int main(int argc, char** argv) {
@@ -137,17 +126,6 @@ int main(int argc, char** argv) {
     } else {
         printf("; Reading from standard input (type your code and press Ctrl+D):\n");
     }
-
-    // Print out basic initialization assembly boilerplate for the emulator
-    printf("; --- Program Initialization ---\n");
-    printf("  MOV R0, 20000    ; Load immediate into register\n");
-    printf("  MOV [0], R0      ; Initialize heap pointer to dynamic RAM region\n");
-    
-    // --- The Game Loop ---
-    printf("\n__game_loop:\n");
-    printf("  CALL _main       ; Execute the user's main function\n");
-    printf("  WAIT             ; Pause CPU execution until the next video frame\n");
-    printf("  JMP __game_loop  ; Loop forever\n\n");
 
     // Run the Parser (which loops calls to the Code Generator automatically)
     if (yyparse() != 0) {
