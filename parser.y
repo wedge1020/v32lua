@@ -312,6 +312,16 @@ ASTNode* make_node(NodeType type) {
     return n;
 }
 
+ASTNode* make_node_ident (const char* name) {
+    ASTNode* node = make_node(NODE_IDENTIFIER);
+
+    // Use strdup to ensure the AST owns the memory for the string,
+    // protecting it from being overwritten by the lexer's buffer.
+    node->as.id.name = strdup(name);
+
+    return node;
+}
+
 char* mangle_method_name(const char* table_name, const char* method_name) {
     if (table_name == NULL || method_name == NULL) {
         return NULL;

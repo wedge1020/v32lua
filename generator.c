@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "codegen.h"
 
 void generate_asm(ASTNode* node) {
@@ -105,7 +106,7 @@ case NODE_FUNCTION_CALL: {
             break;
         }
 
-		case NODE_FUNCTION_POINTER: {
+        case NODE_FUNCTION_POINTER: {
             printf("  ; Load address of the mangled function into R0\n");
             printf("  MOV R0, _%s\n", node->as.func_ptr.mangled_name);
             break;
@@ -238,8 +239,15 @@ case NODE_TABLE_GET: {
 }
 
         case NODE_IDENTIFIER: {
-            int addr = get_global_variable_address(node->as.id.name);
-            printf("  MOV R0, [%d] ; Fetching from RAM variable: _%s\n", addr, node->as.id.name);
+            // 1. Check if the identifier is 'self' (the implicit first parameter)
+            if (strcmp(node->as.id.name, "self") == 0) {
+                printf("  ; --- Loading local parameter 'self' ---\n");
+                printf("  MOV R0, [BP+2]\n"); // Fetch the table pointer from the stack frame
+            }
+            // 2. Otherwise, treat it as a standard variable lookup
+            else {
+                printf("  MOV R0, [__var_%s]\n", node->as.id.name);
+            }
             break;
         }
             
@@ -247,7 +255,7 @@ case NODE_TABLE_GET: {
             printf("  MOV R0, %f\n", node->as.number.val);
             break;
     }
-	generate_asm(node->next);
+    generate_asm(node->next);
 }
 
 void generate_global_setup(ASTNode* node) {
@@ -280,4 +288,41 @@ void generate_functions(ASTNode* node) {
         }
         node = node->next;
     }
+}
+
+void generate_program(ASTNode* head) {
+    // 1. Emitting the Vircon32 Bootstrapper
+    printf("; --- Compiled Code Entry Vector ---\n");
+    printf("  CALL __init_globals  ; Run top-level setups first\n");
+    printf("  CALL _main           ; Then hand control to the user\n");
+    printf("  HLT                  ; Halt CPU when main finishes\n\n");
+
+    // 2. PASS 1: Generate all Functions (Safe Global Scope)
+    printf("; --- Function Definitions ---\n");
+    ASTNode* current = head;
+    while (current != NULL) {
+        if (current->type == NODE_FUNCTION_DEF) {
+            generate_asm(current);
+        }
+        current = current->next;
+    }
+
+    // 3. PASS 2: Collect all loose statements into the Init Vector
+    printf("\n; --- Global Initialization Vector ---\n");
+    printf("__init_globals:\n");
+    printf("  PUSH BP\n");
+    printf("  MOV BP, SP\n");
+
+    current = head;
+    while (current != NULL) {
+        // If it is NOT a function definition, it belongs in the boot routine!
+        if (current->type != NODE_FUNCTION_DEF) {
+            generate_asm(current);
+        }
+        current = current->next;
+    }
+
+    printf("  MOV SP, BP\n");
+    printf("  POP BP\n");
+    printf("  RET\n");
 }
