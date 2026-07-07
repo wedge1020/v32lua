@@ -26,21 +26,22 @@
 "and"                   { return TOKEN_AND; }
 "or"                    { return TOKEN_OR; }
 
-"=="                    { return TOKEN_EQ; }
-"~="                    { return TOKEN_NEQ; }
-"<="                    { return TOKEN_LE; }
-">="                    { return TOKEN_GE; }
-"<"                     { return TOKEN_LT; }
-">"                     { return TOKEN_GT; }
-".."                    { return TOKEN_CONCAT; }
-"("         { return '('; }
-")"         { return ')'; }
+"=="                    { return TOKEN_EQ;       }
+"~="                    { return TOKEN_NEQ;      }
+"<="                    { return TOKEN_LE;       }
+">="                    { return TOKEN_GE;       }
+"<"                     { return TOKEN_LT;       }
+">"                     { return TOKEN_GT;       }
+".."                    { return TOKEN_CONCAT;   }
+"("                     { return '('; }
+")"                     { return ')'; }
 "="                     { return '='; }
 ","                     { return ','; }
 "{"                     { return '{'; }
 "}"                     { return '}'; }
 "["                     { return '['; }
 "]"                     { return ']'; }
+"."                     { return '.'; }
 
 [a-zA-Z_][a-zA-Z0-9_]* { 
                             yylval.string_val = strdup(yytext); 

@@ -2,6 +2,7 @@
 #include "codegen.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 extern int yylineno;
 extern int yylex(void);
@@ -106,39 +107,47 @@ assignment:
     ;
 
 function_def:
+    /* Standard Function: function my_func() ... end */
     TOKEN_FUNCTION TOKEN_IDENTIFIER '(' ')' statement_list TOKEN_END {
         $$ = make_node(NODE_FUNCTION_DEF);
         $$->as.function_def.name = $2;
         $$->as.function_def.body = $5;
     }
-    ;
-
-function_declaration:
-    /* Standard Function: function my_func() ... end */
-    FUNCTION IDENTIFIER '(' parameter_list ')' block END {
-        $$ = create_function_def_node($2, $4, $6);
-    }
     |
-    /* Table Function: function my_table.my_func() ... end */
-    FUNCTION IDENTIFIER '.' IDENTIFIER '(' parameter_list ')' block END {
-        // 1. Create a mangled, unique name for the assembly label
+    /* Table Function Desugaring: function my_table.my_func() ... end */
+    TOKEN_FUNCTION TOKEN_IDENTIFIER '.' TOKEN_IDENTIFIER '(' ')' statement_list TOKEN_END {
+        // 1. Create a unique mangled label for assembly execution flow
         char mangled_name[256];
-        sprintf(mangled_name, "%s_%s", $2, $4);
+        snprintf(mangled_name, sizeof(mangled_name), "%s_%s", $2, $4);
 
-        // 2. Create the actual function definition node using the mangled name
-        ASTNode* func_def = create_function_def_node(strdup(mangled_name), $6, $8);
+        // 2. Build the structural function definition body
+        ASTNode* func_def = make_node(NODE_FUNCTION_DEF);
+        func_def->as.function_def.name = strdup(mangled_name);
+        func_def->as.function_def.body = $7;
 
-        // 3. Create a node that represents the memory address of this function
-        // (This tells the generator to emit: MOV R0, _mangled_name)
-        ASTNode* func_ptr = create_function_pointer_node(strdup(mangled_name));
+        // 3. Instantiate a function pointer node evaluating to that address
+        ASTNode* func_ptr = make_node(NODE_FUNCTION_POINTER);
+        func_ptr->as.func_ptr.mangled_name = strdup(mangled_name);
 
-        // 4. Create the table assignment: my_table["my_func"] = func_ptr
-        ASTNode* table_set = create_table_set_node($2, $4, func_ptr);
+        // 4. Generate the lookup components for the string key
+        ASTNode* key_node = make_node(NODE_STRING);
+        key_node->as.string_val.value = strdup($4);
 
-        // 5. Combine them into a sequence/block so BOTH get processed
-        $$ = create_sequence_node(func_def, table_set);
+        // 5. Generate the base identifier lookup for the target table
+        ASTNode* table_node = make_node(NODE_IDENTIFIER);
+        table_node->as.id.name = $2;
+
+        // 6. Tie it all into a table assignment: table[key] = func_ptr
+        ASTNode* table_set = make_node(NODE_TABLE_SET);
+        table_set->as.table_set.table_expr = table_node;
+        table_set->as.table_set.key = key_node;
+        table_set->as.table_set.value = func_ptr;
+
+        // 7. Chain them sequentially so the compiler outputs both properties cleanly
+        func_def->next = table_set;
+        $$ = func_def;
     }
-;
+    ;
 
 return_stmt:
     TOKEN_RETURN expr {
