@@ -81,6 +81,35 @@ void emit_runtime_library(void) {
     printf("  MOV SP, BP\n");
     printf("  POP BP\n");
     printf("  RET\n");
+/*
+__builtin_table_get:
+  ; Inputs:
+  ;   R1 = Table Node Pointer (The head of the linked list)
+  ;   R2 = Key (The string pointer/hash we are looking for)
+  ; Output:
+  ;   R0 = The value found (or 0 if not found)
+
+  MOV R0, 0          ; Default return value to 0 (nil/null)
+  MOV R3, R1         ; R3 = Current node pointer
+
+__table_get_loop:
+  CMP R3, 0          ; Have we reached the end of the list?
+  JE __table_get_notFound
+
+  MOV R4, [R3 + 1]   ; R4 = Current node's Key
+  CMP R4, R2         ; Does it match the key we want?
+  JE __table_get_found
+
+  MOV R3, [R3 + 0]   ; Move to the next node (Node.Next)
+  JMP __table_get_loop
+
+__table_get_found:
+  MOV R0, [R3 + 2]   ; R0 = Current node's Value
+  RET
+
+__table_get_notFound:
+  RET
+*/
 
     // --- Built-in: Table Retrieval (__builtin_table_get) ---
     // Stack incoming: [BP+3]=Key, [BP+2]=Table_Ptr

@@ -19,6 +19,10 @@ void emit_runtime_library(void);
     ASTNode* ast_node;
 }
 
+/* --- ADD THESE LINES AT THE TOP OF YOUR FILE --- */
+%type <ast_node> parameter_list
+%type <ast_node> argument_list
+
 %token <number_val> TOKEN_NUMBER
 %token <string_val> TOKEN_IDENTIFIER TOKEN_STRING
 %token TOKEN_WHILE TOKEN_BREAK TOKEN_IF TOKEN_THEN TOKEN_ELSE TOKEN_END 
@@ -72,6 +76,43 @@ statement_list:
     }
     ;
 
+parameter_list:
+    /* empty */ { 
+        $$ = NULL; 
+    }
+    | TOKEN_IDENTIFIER { 
+        $$ = make_node(NODE_IDENTIFIER); 
+    }
+    | parameter_list ',' TOKEN_IDENTIFIER {
+        ASTNode* new_node = make_node(NODE_IDENTIFIER);
+        // Chain the new parameter to the end of the list
+        ASTNode* current = $1;
+        while (current->next != NULL) {
+            current = current->next;
+        }
+        current->next = new_node;
+        $$ = $1;
+    }
+    ;
+
+argument_list:
+    /* empty */ { 
+        $$ = NULL; 
+    }
+    | expr { 
+        $$ = $1; 
+    }
+    | argument_list ',' expr {
+        // Chain the new expression to the end of the argument list
+        ASTNode* current = $1;
+        while (current->next != NULL) {
+            current = current->next;
+        }
+        current->next = $3;
+        $$ = $1;
+    }
+    ;
+
 statement:
     assignment                   { $$ = $1; }
     | TOKEN_WHILE expr statement_list TOKEN_END {
@@ -96,6 +137,36 @@ statement:
     }
     | function_def               { $$ = $1; }
     | return_stmt                { $$ = $1; }
+    | expr '.' TOKEN_IDENTIFIER '=' expr {
+        ASTNode* node = make_node(NODE_TABLE_SET);
+        node->as.table_set.table = $1;
+        node->as.table_set.key = create_string_node($3);
+        node->as.table_set.value = $5;
+        $$ = node;
+    }
+    | TOKEN_FUNCTION TOKEN_IDENTIFIER ':' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
+        // 1. Inject 'self' as a hidden first argument into the parameter list
+        ASTNode* self_param = create_identifier_node("self");
+        self_param->next = $6; // Prepended to user-defined parameters
+        
+        // 2. Desugar into a standard table function definition structure
+        ASTNode* func_node = make_node(NODE_FUNCTION_DEF);
+        
+        // Combine table name and method name for the unique backend label (e.g., "player_bounce")
+        func_node->as.function_def.name = mangle_method_name($2, $4);
+        func_node->as.function_def.params = self_param;
+        func_node->as.function_def.body = $8;
+        
+        // 3. Chain it to a setup node that binds it to the table at boot time
+        ASTNode* bind_node = create_ast_node(NODE_TABLE_SET);
+        bind_node->as.table_set.table = create_identifier_node($2);
+        bind_node->as.table_set.key = create_string_node($4);
+        bind_node->as.table_set.value = func_node; 
+        
+        // This ensures the function goes to Pass 2 and binding goes to Pass 1!
+        func_node->next = bind_node; 
+        $$ = func_node;
+    }
     ;
 
 assignment:
@@ -193,7 +264,31 @@ expr:
     | expr TOKEN_AND expr     { $$ = make_node(NODE_AND); $$->as.binary.left = $1; $$->as.binary.right = $3; }
     | expr TOKEN_OR expr      { $$ = make_node(NODE_OR);  $$->as.binary.left = $1; $$->as.binary.right = $3; }
     | expr TOKEN_CONCAT expr  { $$ = make_node(NODE_CONCAT); $$->as.binary.left = $1; $$->as.binary.right = $3; }
+    | expr '.' TOKEN_IDENTIFIER {
+        ASTNode* node = create_ast_node(NODE_TABLE_GET);
+        node->as.table_get.table = $1;
+        // Turn the identifier string into a constant string node for the key
+        node->as.table_get.key = create_string_node($3); 
+        $$ = node;
+    }
+    | expr ':' TOKEN_IDENTIFIER '(' argument_list ')' {
+        ASTNode* node = create_ast_node(NODE_FUNCTION_CALL);
+        
+        // The table itself is the object context ('self')
+        node->as.call.target_table = $1; 
+        node->as.call.is_method_call = 1;
+        
+        // The target to resolve at runtime is the function inside the table: object.method
+        ASTNode* dynamic_lookup = create_ast_node(NODE_TABLE_GET);
+        dynamic_lookup->as.table_get.table = $1;
+        dynamic_lookup->as.table_get.key = create_string_node($3);
+        node->as.call.target = dynamic_lookup;
+        
+        node->as.call.args_head = $5;
+        $$ = node;
+    }
     ;
+
 
 table_constructor:
     '{' '}' {

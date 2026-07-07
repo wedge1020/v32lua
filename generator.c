@@ -69,32 +69,34 @@ void generate_asm(ASTNode* node) {
             pop_function_context();
             break;
         }
+case NODE_FUNCTION_CALL: {
+    int arg_count = 0;
+    
+    // OOP INJECTION: If this is a method call, push the object ('self') FIRST
+    if (node->as.call.is_method_call) {
+        generate_asm(node->as.call.target_table); // Evaluates the object pointer
+        printf("  PUSH R0\n");
+        arg_count++;
+    }
 
-        case NODE_FUNCTION_CALL: {
-            int arg_count = 0;
-            ASTNode* current_arg = node->as.call.args_head;
+    // Evaluate and push the rest of the explicit arguments
+    ASTNode* current_arg = node->as.call.args_head;
+    while (current_arg != NULL) {
+        generate_asm(current_arg);
+        printf("  PUSH R0\n");
+        arg_count++;
+        current_arg = current_arg->next;
+    }
 
-            // 1. Evaluate and push all arguments
-            while (current_arg != NULL) {
-                generate_asm(current_arg);
-                printf("  PUSH R0\n");
-                arg_count++;
-                current_arg = current_arg->next;
-            }
+    // Dynamic resolve and call remains exactly the same!
+    generate_asm(node->as.call.target);
+    printf("  CALL R0\n");
 
-            // 2. Evaluate the target expression (e.g., table lookup or variable)
-            // This will leave the function's memory address in R0
-            generate_asm(node->as.call.target);
-
-            // 3. Dynamically call the address stored in R0
-            printf("  CALL R0\n");
-
-            // 4. Clean up the stack
-            if (arg_count > 0) {
-                printf("  ISUB SP, %d\n", arg_count);
-            }
-            break;
-        }
+    if (arg_count > 0) {
+        printf("  ISUB SP, %d\n", arg_count);
+    }
+    break;
+}
 
 		case NODE_FUNCTION_POINTER: {
             printf("  ; Load address of the mangled function into R0\n");
@@ -211,16 +213,23 @@ void generate_asm(ASTNode* node) {
             printf("  ISUB SP, 3\n");
             break;
         }
+case NODE_TABLE_GET: {
+    // 1. Evaluate the key (leaves key identifier/string address in R0)
+    generate_asm(node->as.table_get.key);
+    printf("  PUSH R0\n");
 
-        case NODE_TABLE_GET: {
-            generate_asm(node->as.table_get.key);        printf("  PUSH R0\n");
-            generate_asm(node->as.table_get.table_expr); printf("  PUSH R0\n");
-            printf("  CALL __builtin_table_get\n");
-            // Corrected: Structural stack adjustment
-            printf("  ISUB SP, 2\n");
-            break;
-        }
-        
+    // 2. Evaluate the table expression (leaves table structure pointer in R0)
+    generate_asm(node->as.table_get.table);
+    printf("  PUSH R0\n");
+
+    // 3. Pop into registers and call runtime helper
+    printf("  POP R1\n"); // R1 = Table Pointer
+    printf("  POP R2\n"); // R2 = Key
+    printf("  CALL __builtin_table_get\n");
+    // Result is now beautifully sitting in R0 for whoever needs it!
+    break;
+}
+
         case NODE_IDENTIFIER: {
             int addr = get_global_variable_address(node->as.id.name);
             printf("  MOV R0, [%d] ; Fetching from RAM variable: _%s\n", addr, node->as.id.name);
