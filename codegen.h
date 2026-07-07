@@ -108,4 +108,8 @@ typedef struct Scope {
 void generate_asm(ASTNode* node);
 void emit_runtime_library(void);
 
+// Add these to the bottom of codegen.h, right before #endif
+void track_global_variable(const char* name);
+void emit_global_variables(void);
+
 #endif

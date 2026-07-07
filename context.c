@@ -1,97 +1,138 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "codegen.h"
 
-// --- String Pool Linked List ---
-typedef struct StringNode {
+// --- Label Generator ---
+static int label_counter = 0;
+int get_next_label(void) {
+    return label_counter++;
+}
+
+// --- String Literal Tracking ---
+typedef struct StringLiteralNode {
     int id;
     char* value;
-    struct StringNode* next;
-} StringNode;
+    struct StringLiteralNode* next;
+} StringLiteralNode;
 
-static StringNode* string_pool_head = NULL;
-static StringNode* string_pool_tail = NULL;
-static int string_count = 0;
+static StringLiteralNode* strings_head = NULL;
+static int string_counter = 0;
 
 int add_string_literal(const char* str) {
-    StringNode* new_node = (StringNode*)malloc(sizeof(StringNode));
-    new_node->id = string_count++;
-    new_node->value = strdup(str);
-    new_node->next = NULL;
-
-    if (string_pool_tail == NULL) {
-        string_pool_head = new_node;
-        string_pool_tail = new_node;
-    } else {
-        string_pool_tail->next = new_node;
-        string_pool_tail = new_node;
+    // Check if duplicate string already exists
+    StringLiteralNode* current = strings_head;
+    while (current != NULL) {
+        if (strcmp(current->value, str) == 0) {
+            return current->id;
+        }
+        current = current->next;
     }
+
+    StringLiteralNode* new_node = (StringLiteralNode*)malloc(sizeof(StringLiteralNode));
+    new_node->id = string_counter++;
+    new_node->value = strdup(str);
+    new_node->next = strings_head;
+    strings_head = new_node;
     return new_node->id;
 }
 
-void emit_string_data_section() {
-    if (string_pool_head == NULL) return;
-    printf("\n; --- Static String Data ---\n");
-    StringNode* current = string_pool_head;
+void emit_string_data_section(void) {
+    if (strings_head == NULL) return;
+    
+    printf("\n; --- String Literal Allocations ---\n");
+    StringLiteralNode* current = strings_head;
     while (current != NULL) {
         printf("__string_%d:\n", current->id);
-        printf("  string \"%s\"\n", current->value);
+        printf("  integer ");
+        for (int i = 0; current->value[i] != '\0'; i++) {
+            printf("%d, ", (int)current->value[i]);
+        }
+        printf("0\n"); // Null terminator word
         current = current->next;
     }
 }
 
 // --- Function Context Stack ---
-typedef struct FuncContextNode {
-    char* name;
-    struct FuncContextNode* next;
-} FuncContextNode;
+#define MAX_SUB_DEPTH 128
+static const char* function_context_stack[MAX_SUB_DEPTH];
+static int function_context_top = -1;
 
-static FuncContextNode* func_stack_head = NULL;
-
-void push_function_context(const char* func_name) {
-    FuncContextNode* new_node = (FuncContextNode*)malloc(sizeof(FuncContextNode));
-    new_node->name = strdup(func_name);
-    new_node->next = func_stack_head;
-    func_stack_head = new_node;
-}
-
-void pop_function_context() {
-    if (func_stack_head != NULL) {
-        FuncContextNode* temp = func_stack_head;
-        func_stack_head = func_stack_head->next;
-        free(temp->name);
-        free(temp);
+void push_function_context(const char* name) {
+    if (function_context_top >= MAX_SUB_DEPTH - 1) {
+        fprintf(stderr, "Compiler Error: Function context stack overflow\n");
+        exit(1);
     }
+    function_context_stack[++function_context_top] = name;
 }
 
-const char* get_current_function_name() {
-    return (func_stack_head == NULL) ? "main" : func_stack_head->name;
+void pop_function_context(void) {
+    if (function_context_top < 0) {
+        fprintf(stderr, "Compiler Error: Function context stack underflow\n");
+        exit(1);
+    }
+    function_context_top--;
 }
 
-// --- Loop Label tracking ---
-typedef struct LoopNode {
-    int id;
-    struct LoopNode* next;
-} LoopNode;
+const char* get_current_function_name(void) {
+    if (function_context_top < 0) {
+        return "global";
+    }
+    return function_context_stack[function_context_top];
+}
 
-static LoopNode* loop_stack_head = NULL;
+// --- Loop Stack (for break statements) ---
+static int loop_stack[MAX_SUB_DEPTH];
+static int loop_stack_top = -1;
 
 void push_loop(int id) {
-    LoopNode* node = (LoopNode*)malloc(sizeof(LoopNode));
-    node->id = id;
-    node->next = loop_stack_head;
-    loop_stack_head = node;
-}
-
-void pop_loop() {
-    if (loop_stack_head != NULL) {
-        LoopNode* temp = loop_stack_head;
-        loop_stack_head = loop_stack_head->next;
-        free(temp);
+    if (loop_stack_top >= MAX_SUB_DEPTH - 1) {
+        fprintf(stderr, "Compiler Error: Loop stack overflow\n");
+        exit(1);
     }
+    loop_stack[++loop_stack_top] = id;
 }
 
-int current_loop() {
-    return (loop_stack_head == NULL) ? -1 : loop_stack_head->id;
+void pop_loop(void) {
+    if (loop_stack_top < 0) {
+        fprintf(stderr, "Compiler Error: Loop stack underflow\n");
+        exit(1);
+    }
+    loop_stack_top--;
 }
 
-static int label_counter = 0;
-int get_next_label() { return ++label_counter; }
+int current_loop(void) {
+    if (loop_stack_top < 0) {
+        return -1;
+    }
+    return loop_stack[loop_stack_top];
+}
+
+// --- Direct RAM Allocator ---
+typedef struct GlobalVarNode {
+    char* name;
+    int ram_address;
+    struct GlobalVarNode* next;
+} GlobalVarNode;
+
+static GlobalVarNode* globals_head = NULL;
+static int next_ram_address = 1; // Address 0 is reserved for our __heap_pointer
+
+int get_global_variable_address(const char* name) {
+    GlobalVarNode* current = globals_head;
+    while (current != NULL) {
+        if (strcmp(current->name, name) == 0) {
+            return current->ram_address;
+        }
+        current = current->next;
+    }
+
+    // Allocate a raw RAM location to avoid Cartridge ROM write conflicts
+    GlobalVarNode* new_node = (GlobalVarNode*)malloc(sizeof(GlobalVarNode));
+    new_node->name = strdup(name);
+    new_node->ram_address = next_ram_address++;
+    new_node->next = globals_head;
+    globals_head = new_node;
+    
+    return new_node->ram_address;
+}

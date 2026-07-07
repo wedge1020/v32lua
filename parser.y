@@ -35,12 +35,20 @@ ASTNode* make_node(NodeType type);
 %left '['
 
 %%
-
 program:
     statement_list { 
+        printf("; --- Vircon32 Boot Initialization ---\n");
+        printf("  MOV R0, 100000\n");
+        printf("  MOV [0], R0 ; Initialize heap pointer at RAM address 0\n\n");
+        
         printf("; --- Compiled Code Entry Vector ---\n");
         generate_asm($1); 
+        
+        // Corrected Vircon32 halt instruction
+        printf("  HLT\n"); 
+        
         emit_string_data_section();
+        // emit_global_variables() has been REMOVED!
         emit_runtime_library();
     }
     ;
