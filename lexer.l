@@ -42,6 +42,7 @@
 "["                     { return '['; }
 "]"                     { return ']'; }
 "."                     { return '.'; }
+":"                     { return '.'; }
 
 [a-zA-Z_][a-zA-Z0-9_]* { 
                             yylval.string_val = strdup(yytext); 
