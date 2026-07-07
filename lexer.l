@@ -7,6 +7,8 @@
 
 %option noyywrap
 %option yylineno
+/* Add these options to disable the unused functions */
+%option nounput noinput
 
 %%
 

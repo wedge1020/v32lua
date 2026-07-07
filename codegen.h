@@ -1,84 +1,93 @@
 #ifndef CODEGEN_H
 #define CODEGEN_H
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-
-// AST Node Types
+// --- Enums ---
 typedef enum {
-    NODE_WHILE, NODE_BREAK, NODE_IF, NODE_FUNCTION_DEF, 
-    NODE_FUNCTION_CALL, NODE_RETURN, NODE_MULTIPLE_ASSIGNMENT,
-    NODE_RELATIONAL, NODE_AND, NODE_OR, NODE_STRING, 
-    NODE_CONCAT, NODE_TABLE_CONSTRUCTOR, NODE_TABLE_SET, NODE_TABLE_GET,
-    NODE_IDENTIFIER, NODE_NUMBER
+    NODE_WHILE,
+    NODE_BREAK,
+    NODE_IF,
+    NODE_FUNCTION_DEF,
+    NODE_FUNCTION_CALL,
+    NODE_RETURN,
+    NODE_MULTIPLE_ASSIGNMENT,
+    NODE_AND,
+    NODE_OR,
+    NODE_RELATIONAL,
+    NODE_STRING,
+    NODE_CONCAT,
+    NODE_TABLE_CONSTRUCTOR,
+    NODE_TABLE_SET,
+    NODE_TABLE_GET,
+    NODE_IDENTIFIER,
+    NODE_NUMBER
 } NodeType;
 
-// Operator Types
 typedef enum {
-    OP_EQ, OP_NEQ, OP_LT, OP_GT, OP_LE, OP_GE
-} OpType;
+    OP_EQ,
+    OP_NEQ,
+    OP_LT,
+    OP_GT,
+    OP_LE,
+    OP_GE
+} Operator;
 
-// Forward declaration of AST Node
-typedef struct astnode ASTNode;
-// Place this inside codegen.h, right after the enums
-struct astnode {
+// --- AST Node Structure ---
+typedef struct ASTNode {
     NodeType type;
-    ASTNode* next;  // For statement lists and sequential chaining
-    
+    struct ASTNode* next; // For linked lists of statements/expressions
+
     union {
-        // Control Flow
         struct {
-            ASTNode* condition;
-            ASTNode* body;
+            struct ASTNode* condition;
+            struct ASTNode* body;
         } while_loop;
 
         struct {
-            ASTNode* condition;
-            ASTNode* if_body;
-            ASTNode* else_body;
+            struct ASTNode* condition;
+            struct ASTNode* if_body;
+            struct ASTNode* else_body;
         } if_stmt;
 
-        // Functions
         struct {
             char* name;
-            ASTNode* body;
+            struct ASTNode* body;
         } function_def;
 
         struct {
-            ASTNode* expressions_head;
+            char* name;
+            struct ASTNode* args_head; 
+        } call; // Standardized as 'call' to fix the GCC error
+
+        struct {
+            struct ASTNode* expressions_head;
             int parent_func_arg_count;
         } return_stmt;
 
-        // Assignments
         struct {
-            ASTNode* targets_head;
-            ASTNode* right_side_call;
+            struct ASTNode* right_side_call;
+            struct ASTNode* targets_head;
         } mult_assign;
 
-        // Binary Operations (Math, Logic, Relational, Concat)
         struct {
-            int operator; // Holds OpType or character literal like '+'
-            ASTNode* left;
-            ASTNode* right;
+            struct ASTNode* left;
+            struct ASTNode* right;
+            Operator operator;
         } binary;
 
-        // Tables
-        struct {
-            ASTNode* table_expr;
-            ASTNode* key;
-            ASTNode* value;
-        } table_set;
-
-        struct {
-            ASTNode* table_expr;
-            ASTNode* key;
-        } table_get;
-
-        // Terminal Literals / Identifiers
         struct {
             char* value;
         } string_val;
+
+        struct {
+            struct ASTNode* table_expr;
+            struct ASTNode* key;
+            struct ASTNode* value;
+        } table_set;
+
+        struct {
+            struct ASTNode* table_expr;
+            struct ASTNode* key;
+        } table_get;
 
         struct {
             char* name;
@@ -88,28 +97,24 @@ struct astnode {
             double val;
         } number;
     } as;
-};
+} ASTNode;
 
-// Variable Symbol Definition
-typedef struct Symbol {
-    char* name;
-    int is_global;
-    int stack_offset;
-    struct Symbol* next;
-} Symbol;
-
-// Dynamic Scope Stack via Linked List
-typedef struct Scope {
-    Symbol* head;
-    struct Scope* parent;
-} Scope;
-
-// Global Compiler Context
+// --- Core Compiler Functions ---
 void generate_asm(ASTNode* node);
-void emit_runtime_library(void);
 
-// Add these to the bottom of codegen.h, right before #endif
-void track_global_variable(const char* name);
-void emit_global_variables(void);
+// --- Context & Memory Management (implemented in context.c) ---
+int get_next_label(void);
+int add_string_literal(const char* str);
+void emit_string_data_section(void);
 
-#endif
+void push_function_context(const char* name);
+void pop_function_context(void);
+const char* get_current_function_name(void);
+
+void push_loop(int id);
+void pop_loop(void);
+int current_loop(void);
+
+int get_global_variable_address(const char* name);
+
+#endif // CODEGEN_H

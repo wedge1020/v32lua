@@ -9,6 +9,7 @@ void yyerror(const char *s);
 
 // Inline helper functions for memory allocation during AST compilation
 ASTNode* make_node(NodeType type);
+void emit_runtime_library(void);
 %}
 
 %union {

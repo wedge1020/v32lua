@@ -2,17 +2,6 @@
 #include <stdlib.h>
 #include "codegen.h"
 
-// External system utilities provided by context.c
-int get_next_label(void);
-int add_string_literal(const char* str);
-const char* get_current_function_name(void);
-void push_function_context(const char* name);
-void pop_function_context(void);
-void push_loop(int id);
-void pop_loop(void);
-int current_loop(void);
-int get_global_variable_address(const char* name);
-
 void generate_asm(ASTNode* node) {
     if (!node) return;
 
@@ -26,7 +15,6 @@ void generate_asm(ASTNode* node) {
             printf("__%s_while_start_%d:\n", ctx, label_id);
             generate_asm(node->as.while_loop.condition);
             
-            // Corrected: Explicitly pass expression evaluation target register R0
             printf("  JF R0, __%s_while_end_%d\n", ctx, label_id);
             
             generate_asm(node->as.while_loop.body);
@@ -53,7 +41,6 @@ void generate_asm(ASTNode* node) {
             
             generate_asm(node->as.if_stmt.condition);
             
-            // Corrected: Explicitly pass expression evaluation target register R0
             printf("  JF R0, __%s_else_%d\n", ctx, label_id);
             
             generate_asm(node->as.if_stmt.if_body);
@@ -69,7 +56,6 @@ void generate_asm(ASTNode* node) {
 
         case NODE_FUNCTION_DEF: {
             push_function_context(node->as.function_def.name);
-            // Corrected: Prefixed user function label with an underscore
             printf("_%s:\n", node->as.function_def.name);
             printf("  PUSH BP\n");
             printf("  MOV BP, SP\n");
@@ -84,11 +70,10 @@ void generate_asm(ASTNode* node) {
             break;
         }
 
-case NODE_FUNCTION_CALL: {
+        case NODE_FUNCTION_CALL: {
             int arg_count = 0;
-            ASTNode* current_arg = node->as.function_call.args_head; // Note: adjust 'args_head' if your struct uses a different name
+            ASTNode* current_arg = node->as.call.args_head; 
             
-            // 1. Evaluate and push arguments onto the stack
             while (current_arg != NULL) {
                 generate_asm(current_arg);
                 printf("  PUSH R0\n");
@@ -96,10 +81,8 @@ case NODE_FUNCTION_CALL: {
                 current_arg = current_arg->next;
             }
             
-            // 2. Call the function (with the leading underscore)
-            printf("  CALL _%s\n", node->as.function_call.name);
+            printf("  CALL _%s\n", node->as.call.name);
             
-            // 3. Clean up the stack frame after the function returns
             if (arg_count > 0) {
                 printf("  SUB SP, %d\n", arg_count);
             }
@@ -112,7 +95,7 @@ case NODE_FUNCTION_CALL: {
             int arg_count = node->as.return_stmt.parent_func_arg_count;
             
             while (expr != NULL) {
-                generate_asm(expr); // Result lands cleanly in R0
+                generate_asm(expr); 
                 if (ret_idx == 0)      { /* Value naturally preserved in R0 */ }
                 else if (ret_idx == 1) { printf("  MOV R2, R0\n"); }
                 else if (ret_idx == 2) { printf("  MOV R3, R0\n"); }
@@ -140,7 +123,6 @@ case NODE_FUNCTION_CALL: {
             int label_id = get_next_label();
             generate_asm(node->as.binary.left);
             
-            // Corrected: Early exit evaluation via conditional target checking
             printf("  JF R0, __short_and_%d\n", label_id);
             
             generate_asm(node->as.binary.right);
@@ -152,7 +134,6 @@ case NODE_FUNCTION_CALL: {
             int label_id = get_next_label();
             generate_asm(node->as.binary.left);
             
-            // Corrected: Early exit evaluation via conditional target checking
             printf("  JT R0, __short_or_%d\n", label_id);
             
             generate_asm(node->as.binary.right);
@@ -166,7 +147,6 @@ case NODE_FUNCTION_CALL: {
             generate_asm(node->as.binary.right);
             printf("  POP R1\n");
             
-            // Corrected: 2-operand destructive style using standard Vircon32 integer opcodes
             switch (node->as.binary.operator) {
                 case OP_EQ:  printf("  IEQ R1, R0\n"); break;
                 case OP_NEQ: printf("  INE R1, R0\n"); break;
@@ -175,7 +155,6 @@ case NODE_FUNCTION_CALL: {
                 case OP_LE:  printf("  ILE R1, R0\n"); break; 
                 case OP_GE:  printf("  IGE R1, R0\n"); break; 
             }
-            // Move structural boolean output traces back to standard evaluation register R0
             printf("  MOV R0, R1\n");
             break;
         }
