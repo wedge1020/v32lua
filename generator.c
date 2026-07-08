@@ -346,24 +346,40 @@ void generate_asm(ASTNode* node) {
             
         case NODE_ASM: {
             printf("  ; --- Begin Inline ASM Bubble (existing register states preserved) ---\n");
-            
-            // 1. PUSH all currently active/locked temporary registers
+
+            // 1. Allocate and snapshot stack controls to safe RAM slots
+            int sp_snap = get_global_variable_address("__asm_snap_sp");
+            int bp_snap = get_global_variable_address("__asm_snap_bp");
+            printf("  MOV [%d], SP\n", sp_snap);
+            printf("  MOV [%d], BP\n", bp_snap);
+
+            // 2. Map and snapshot ONLY the currently allocated active registers
             for (int i = 0; i < NUM_GPRS; i++) {
                 if (is_register_locked(i)) {
-                    printf("  PUSH R%d\n", i);
-                }
-            }
-
-            // 2. Output User's Raw Assembly
-            emit_interpolated_asm(node->as.inline_asm.code);
-
-            // 3. POP registers in reverse order to seamlessly restore state
-            for (int i = NUM_GPRS - 1; i >= 0; i--) {
-                if (is_register_locked(i)) {
-                    printf("  POP R%d\n", i);
+                    char snap_name[16];
+                    sprintf(snap_name, "__asm_snap_r%d", i);
+                    int reg_ram_addr = get_global_variable_address(snap_name);
+                    printf("  MOV [%d], R%d\n", reg_ram_addr, i);
                 }
             }
             
+            // 3. Output User's Raw Assembly
+            emit_interpolated_asm(node->as.inline_asm.code);
+
+            // 4. Restore the allocated active working registers from RAM
+            for (int i = 0; i < NUM_GPRS; i++) {
+                if (is_register_locked(i)) {
+                    char snap_name[16];
+                    sprintf(snap_name, "__asm_snap_r%d", i);
+                    int reg_ram_addr = get_global_variable_address(snap_name);
+                    printf("  MOV R%d, [%d]\n", i, reg_ram_addr);
+                }
+            }
+
+            // 5. Force restore the stack frame and pointer, deleting any user stack errors
+            printf("  MOV BP, [%d]\n", bp_snap);
+            printf("  MOV SP, [%d]\n", sp_snap);
+
             printf("  ; --- End Inline ASM Bubble (previous register states restored) ---\n");
             break;
         }

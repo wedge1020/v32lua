@@ -161,6 +161,29 @@ If  instead  you  are  doing   something  more  involved  (like  manually
 manipulating the  stack), you need  any and all protections  removed, and
 the **___rawasm___** inline variant is available for those scenarios.
 
+Furthermore, to improve safety (whenever  you have access to assembly you
+can  always cause  damage  if  you're not  careful),  the "safer"  inline
+assembly variant (`___asm___`) will back up the entire register inventory
+to memory,  and restoring it  when done. So even  if one messes  with the
+stack pointers  or the  stack, at  least those  registers will  revert to
+their previous states upon exiting the safer inline asm bubble.
+
+### commenting plus documenting
+
+This lua compiler supports both the single and multi-line comment styles,
+and with the addition of an `@` to the opening comment symbol, will cause
+the entirety of the lua comment to be transposed as assembly comments.
+
+```
+    --@ check for collisions
+```
+
+will show up in place on the generated assembly:
+
+```
+; lua comment: check for collisions
+```
+
 ### function return values
 
 Lua functions  support multiple return  values. That should  currently be
