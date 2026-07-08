@@ -15,7 +15,7 @@
 [ \t\r\n]+              { /* Skip whitespace - Fixed single backslashes */ }
 
     /* 1. Transposed Multiline Comment: --@[[ ... ]] */
-"--@[[".*"]]" {
+"--@[["([^\]]|\][^\]])*"]]" {
     // Strip the opening "--@[[" and closing "]]" to extract the comment text
     int len = strlen(yytext);
 
@@ -49,13 +49,10 @@
 }
 
     /* 2. Standard Multiline Comment: --[[ ... ]] (Silently Skipped) */
-"--[[".*"]]" { /* Skip standard multiline comments safely */ }
+"--[["([^\]]|\][^\]])*"]]" { /* Skip standard multiline comments safely */ }
 
     /* 3. Transposed Single-Line Comment: --@ ... */
-"--@".* {
-    // Print the content following the "--@" directly as an assembly comment
-    printf(";; lua comment: %s\n", yytext + 3);
-}
+"--@".* { fprintf (stdout, ";; lua comment: %s\n", yytext + 3); }
 
     /* 4. Standard Single-Line Comment: Matches '--' with text, or a bare '--' */
 "--".* { /* Skip standard single-line comments safely */ }
