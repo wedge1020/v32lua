@@ -6,10 +6,10 @@ YACC = bison
 # --- Flags ---
 # -Wall -Wextra: Enable helpful compiler warnings
 # -g: Include debug symbols (helpful if it crashes)
-CFLAGS = -Wall -Wextra -g
+CFLAGS = -Wall -Wextra -g -I ../inc
 
 # --- Output Executable ---
-TARGET = v32lua
+TARGET = ../bin/v32lua
 
 # --- Object Files ---
 # These are the compiled binary chunks that get linked together at the end.

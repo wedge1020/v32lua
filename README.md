@@ -65,6 +65,27 @@ unfamiliar, but also not unwelcome.
 
 Interested in seeing this journey continue.
 
+## dependencies
+
+Currently, the dependencies are few:
+
+  * C99 compatible C compiler
+  * GNU make
+  * flex
+  * bison
+
+Primary  development environment  is Linux,  so there  may be  unexpected
+issues on Windows or macOS- both will need testing at some point.
+
+## building
+
+To build this compiler, go into the `src/` directory and run `make`.
+
+The usual `make clean` is also available.
+
+Compiled binary  will be stored  in the `bin/`  directory at the  base of
+this repository.
+
 ## lua compiler
 
 I  am pleased  to report  that  some good  progress has  been made.  This
