@@ -35,8 +35,8 @@ char* mangle_method_name(const char* table_name, const char* method_name);
 %token TOKEN_FUNCTION TOKEN_ASM TOKEN_RAWASM TOKEN_RETURN TOKEN_AND TOKEN_OR
 %token TOKEN_EQ TOKEN_NEQ TOKEN_LE TOKEN_GE TOKEN_LT TOKEN_GT TOKEN_CONCAT
 
-%type <ast_node> statement statement_list expr assignment function_def return_stmt table_constructor function_call
-%type <ast_node> else_branch  /* <-- ADD THIS */
+%type <ast_node> statement statement_list expr assignment function_def return_stmt
+%type <ast_node> table_constructor function_call else_branch
 
 /* Operator Precedence Rules (PEMDAS + Logic Core) */
 %left TOKEN_OR
@@ -52,21 +52,21 @@ char* mangle_method_name(const char* table_name, const char* method_name);
 
 program:
     statement_list { 
-        printf("; --- Program Initialization ---\n");
-        printf("  MOV R0, 20000    ; Load immediate into register\n");
-        printf("  MOV [0], R0      ; Initialize heap pointer to dynamic RAM region\n\n");
+        printf(";; --- Program Initialization ---\n");
+        printf("    MOV   R0, 20000    ; Load immediate into register\n");
+        printf("    MOV   [0], R0      ; Initialize heap pointer to dynamic RAM region\n\n");
         
-        printf("; --- Global Setup Routine (Table & Method Registration) ---\n");
-        generate_global_setup($1); 
+        printf(";; --- Global Setup Routine (Table & Method Registration) ---\n");
+        generate_global_setup ($1); 
         
-        printf("\n; --- Main Console Game Loop ---\n");
+        printf("\n;; --- Main Console Game Loop ---\n");
         printf("__game_loop:\n");
-        printf("  CALL _main       ; Execute the user's main function\n");
-        printf("  WAIT             ; Pause CPU execution until the next video frame\n");
-        printf("  JMP __game_loop  ; Loop forever\n\n"); 
+        printf("    CALL  _main       ; Execute the user's main function\n");
+        printf("    WAIT             ; Pause CPU execution until the next video frame\n");
+        printf("    JMP   __game_loop  ; Loop forever\n\n"); 
         
-        printf("; --- Compiled Function Segments ---\n");
-        generate_functions($1);
+        printf(";; --- Compiled Function Segments ---\n");
+        generate_functions ($1);
         
         // If your compiler uses a trailing string data section handler, keep it here:
         // emit_string_data_section();
@@ -123,7 +123,7 @@ argument_list:
 
 statement:
     assignment                   { $$ = $1; }
-    | function_call              { $$ = $1; }  /* <-- ADD THIS LINE */
+    | function_call              { $$ = $1; }
     | TOKEN_WHILE expr statement_list TOKEN_END {
         $$ = make_node(NODE_WHILE);
         $$->as.while_loop.condition = $2;
