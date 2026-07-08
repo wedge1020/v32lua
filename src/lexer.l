@@ -12,20 +12,77 @@
 
 %%
 
-[ \t\r\n]+              { /* Skip whitespace */ }
-"--".* { /* Skip single-line comments */ }
+[ \t\\r\\n]+              { /* Skip whitespace */ }
 
-"while"                 { return TOKEN_WHILE; }
-"break"                 { return TOKEN_BREAK; }
-"if"                    { return TOKEN_IF; }
-"elseif"                { return TOKEN_ELSEIF; } /* <-- ADD THIS */
-"then"                  { return TOKEN_THEN; }
-"else"                  { return TOKEN_ELSE; }
-"end"                   { return TOKEN_END; }
+    /* 1. Transposed Multiline Comment: --@[[ ... ]] */
+"--@\[\[([^*]|\*+[^\]])*\]\]" {
+    // Strip the opening "--@[[" and closing "]]" to extract the comment text
+    int len = strlen(yytext);
+    // Print directly to the generated assembly file stream
+    fprintf (stdout, ";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\n");
+    fprintf (stdout, ";; ");
+    fprintf (stdout, ";; lua comment: ");
+    for (int index = 5; index < len - 2; index++)
+    {
+        // If a newline is encountered, wrap the line and start a new comment ...
+        if (yytext[index] == '\n')
+        {
+            fprintf (stdout, "\n;; lua comment: ");
+        }
+
+        //////////////////////////////////////////////////////////////////////////////////////
+        //
+        // ... in the case of encountering a carriage return, do nothing ...
+        //
+        else if (yytext[index] == '\r')
+        {
+            ;
+        }
+
+        //////////////////////////////////////////////////////////////////////////////////////
+        //
+        // ... in the case of encountering a tab, collapse it to a single space ...
+        //
+        else if (yytext[index] == '\t')
+        {
+            fprintf (stdout, " ");
+        }
+
+        //////////////////////////////////////////////////////////////////////////////////////
+        //
+        // ... otherwise, display the encountered character:
+        //
+        else
+        {
+            putchar(yytext[index]);
+        }
+    }
+    fprintf (stdout, "\n;; \n");
+}
+
+    /* 2. Standard Multiline Comment: --[[ ... ]] (Silently Skipped) */
+"--\[\[([^*]|\*+[^\]])*\]\]" { /* Skip standard multiline comments */ }
+
+    /* 3. Transposed Single-Line Comment: --@ ... */
+"--@".* {
+    // Print the content following the "--@" directly as an assembly comment
+    printf(";; lua comment: %s\n", yytext + 3);
+}
+
+    /* 4. Standard Single-Line Comment (Your existing rule, updated to match standard only) */
+"--[^@].*" { /* Skip standard single-line comments */ }
+
+"while"                 { return TOKEN_WHILE;    }
+"break"                 { return TOKEN_BREAK;    }
+"if"                    { return TOKEN_IF;       }
+"elseif"                { return TOKEN_ELSEIF;   }
+"then"                  { return TOKEN_THEN;     }
+"else"                  { return TOKEN_ELSE;     }
+"end"                   { return TOKEN_END;      }
 "function"              { return TOKEN_FUNCTION; }
-"return"                { return TOKEN_RETURN; }
-"and"                   { return TOKEN_AND; }
-"or"                    { return TOKEN_OR; }
+"return"                { return TOKEN_RETURN;   }
+"and"                   { return TOKEN_AND;      }
+"or"                    { return TOKEN_OR;       }
 
 "=="                    { return TOKEN_EQ;       }
 "~="                    { return TOKEN_NEQ;      }
