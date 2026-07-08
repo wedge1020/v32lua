@@ -3,10 +3,63 @@
 #include <string.h>
 #include "codegen.h"
 
-// --- Label Generator ---
-static int label_counter = 0;
+// --- Label Generator & Function Context Stack ---
+
+// Define the node structure for our linked list stack
+typedef struct FunctionContextNode {
+    const char* name;
+    int label_counter;
+    struct FunctionContextNode* next;
+} FunctionContextNode;
+
+// Head pointer for the stack
+static FunctionContextNode* context_stack_head = NULL;
+
+// Fallback counter for statements outside functions
+static int global_label_counter = 0; 
+
 int get_next_label(void) {
-    return label_counter++;
+    if (context_stack_head == NULL) {
+        // We are in the global scope
+        return global_label_counter++;
+    }
+    // Return and increment the counter for the current function scope
+    return context_stack_head->label_counter++;
+}
+
+void push_function_context(const char* name) {
+    FunctionContextNode* new_node = (FunctionContextNode*)malloc(sizeof(FunctionContextNode));
+    if (new_node == NULL) {
+        fprintf(stderr, "Compiler Error: Out of memory allocating function context\n");
+        exit(1);
+    }
+    
+    // Initialize the new context
+    new_node->name = name; 
+    new_node->label_counter = 0; // Reset counter for this new function
+    
+    // Push it onto the top of the stack
+    new_node->next = context_stack_head;
+    context_stack_head = new_node;
+}
+
+void pop_function_context(void) {
+    if (context_stack_head == NULL) {
+        fprintf(stderr, "Compiler Error: Function context stack underflow\n");
+        exit(1);
+    }
+    
+    // Pop and free the top node to prevent memory leaks
+    FunctionContextNode* old_head = context_stack_head;
+    context_stack_head = context_stack_head->next;
+    free(old_head);
+}
+
+const char* get_current_function_name(void) {
+    if (context_stack_head == NULL) {
+        return "global";
+    }
+    return context_stack_head->name;
 }
 
 // --- String Literal Tracking ---
@@ -53,35 +106,8 @@ void emit_string_data_section(void) {
     }
 }
 
-// --- Function Context Stack ---
-#define MAX_SUB_DEPTH 128
-static const char* function_context_stack[MAX_SUB_DEPTH];
-static int function_context_top = -1;
-
-void push_function_context(const char* name) {
-    if (function_context_top >= MAX_SUB_DEPTH - 1) {
-        fprintf(stderr, "Compiler Error: Function context stack overflow\n");
-        exit(1);
-    }
-    function_context_stack[++function_context_top] = name;
-}
-
-void pop_function_context(void) {
-    if (function_context_top < 0) {
-        fprintf(stderr, "Compiler Error: Function context stack underflow\n");
-        exit(1);
-    }
-    function_context_top--;
-}
-
-const char* get_current_function_name(void) {
-    if (function_context_top < 0) {
-        return "global";
-    }
-    return function_context_stack[function_context_top];
-}
-
 // --- Loop Stack (for break statements) ---
+#define MAX_SUB_DEPTH 128
 static int loop_stack[MAX_SUB_DEPTH];
 static int loop_stack_top = -1;
 

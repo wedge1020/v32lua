@@ -5,6 +5,7 @@
 #include <string.h>
 
 extern int yylineno;
+extern FILE* yyin;
 extern int yylex(void);
 void yyerror(const char *s);
 
@@ -34,7 +35,7 @@ char* mangle_method_name(const char* table_name, const char* method_name);
 %token TOKEN_FUNCTION TOKEN_RETURN TOKEN_AND TOKEN_OR
 %token TOKEN_EQ TOKEN_NEQ TOKEN_LE TOKEN_GE TOKEN_LT TOKEN_GT TOKEN_CONCAT
 
-%type <ast_node> statement statement_list expr assignment function_def return_stmt table_constructor
+%type <ast_node> statement statement_list expr assignment function_def return_stmt table_constructor function_call
 
 /* Operator Precedence Rules (PEMDAS + Logic Core) */
 %left TOKEN_OR
@@ -121,7 +122,7 @@ argument_list:
 
 statement:
     assignment                   { $$ = $1; }
-    | expr                       { $$ = $1; }  /* <-- ADD THIS LINE */
+    | function_call              { $$ = $1; }  /* <-- ADD THIS LINE */
     | TOKEN_WHILE expr statement_list TOKEN_END {
         $$ = make_node(NODE_WHILE);
         $$->as.while_loop.condition = $2;
@@ -270,21 +271,22 @@ expr:
         node->as.table_get.key = make_node_string($3);
         $$ = node;
     }
-    | TOKEN_IDENTIFIER '(' argument_list ')' {
+    | function_call { $$ = $1; }
+    ;
+
+function_call:
+    TOKEN_IDENTIFIER '(' argument_list ')' {
         ASTNode* node = make_node(NODE_FUNCTION_CALL);
         node->as.call.target = make_node_ident($1);
-        node->as.call.is_method_call = 0; // Standard call, no 'self' injection
+        node->as.call.is_method_call = 0; 
         node->as.call.args_head = $3;
         $$ = node;
     }
     | expr ':' TOKEN_IDENTIFIER '(' argument_list ')' {
         ASTNode* node = make_node(NODE_FUNCTION_CALL);
-        
-        // The table itself is the object context ('self')
-        node->as.call.target = $1; 
+        node->as.call.target = $1;
         node->as.call.is_method_call = 1;
         
-        // The target to resolve at runtime is the function inside the table: object.method
         ASTNode* dynamic_lookup = make_node(NODE_TABLE_GET);
         dynamic_lookup->as.table_get.table_expr = $1;
         dynamic_lookup->as.table_get.key = make_node_string($3);
@@ -295,7 +297,6 @@ expr:
     }
     ;
 
-
 table_constructor:
     '{' '}' {
         $$ = make_node(NODE_TABLE_CONSTRUCTOR);
@@ -305,8 +306,41 @@ table_constructor:
 %%
 
 void yyerror(const char *s) {
-    fprintf(stderr, "Compilation Parser Error on line %d: %s\n", yylineno, s);
+    // 1. Print the standard error message with the line number
+    fprintf(stderr, "\nCompilation Parser Error on line %d: %s\n", yylineno, s);
+
+    // 2. Attempt to pull the exact line of code from the source file
+    if (yyin != NULL) {
+        // Rewind the file descriptor back to the absolute beginning of the source file
+        rewind(yyin);
+        
+        char line_buffer[1024];
+        int current_line = 1;
+        
+        // Scan through the file sequentially until we hit the line that crashed
+        while (fgets(line_buffer, sizeof(line_buffer), yyin)) {
+            if (current_line == yylineno) {
+                // Print it out nicely formatted
+                fprintf(stderr, "      |\n");
+                fprintf(stderr, " %4d | %s", yylineno, line_buffer);
+                
+                // If the file didn't have a trailing newline, add one so the output is clean
+                if (strchr(line_buffer, '\n') == NULL) {
+                    fprintf(stderr, "\n");
+                }
+                fprintf(stderr, "      |\n\n");
+                break;
+            }
+            current_line++;
+        }
+    }
+
+    // 3. Halt the compiler immediately
+    exit(1);
 }
+/*void yyerror(const char *s) {
+    fprintf(stderr, "Compilation Parser Error on line %d: %s\n", yylineno, s);
+}*/
 
 ASTNode* make_node(NodeType type) {
     ASTNode* n = (ASTNode*)calloc(1, sizeof(ASTNode));
