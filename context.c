@@ -30,7 +30,7 @@ int get_next_label(void) {
 void push_function_context(const char* name) {
     FunctionContextNode* new_node = (FunctionContextNode*)malloc(sizeof(FunctionContextNode));
     if (new_node == NULL) {
-		compiler_error(ERR_INTERNAL, -1, "Outmof memory allocating function context\n");
+        compiler_error(ERR_INTERNAL, -1, "Out of memory allocating function context for '%s'", name);
     }
     
     // Initialize the new context
@@ -44,7 +44,7 @@ void push_function_context(const char* name) {
 
 void pop_function_context(void) {
     if (context_stack_head == NULL) {
-		compiler_error(ERR_INTERNAL, -1, "Function context stack underflow\n");
+        compiler_error(ERR_INTERNAL, -1, "Function context stack underflow (tried to pop global scope)");
     }
     
     // Pop and free the top node to prevent memory leaks
@@ -81,6 +81,10 @@ int add_string_literal(const char* str) {
     }
 
     StringLiteralNode* new_node = (StringLiteralNode*)malloc(sizeof(StringLiteralNode));
+    if (new_node == NULL) {
+        compiler_error(ERR_INTERNAL, -1, "Out of memory allocating string literal");
+    }
+    
     new_node->id = string_counter++;
     new_node->value = strdup(str);
     new_node->next = strings_head;
@@ -105,30 +109,45 @@ void emit_string_data_section(void) {
 }
 
 // --- Loop Stack (for break statements) ---
-#define MAX_SUB_DEPTH 128
-static int loop_stack[MAX_SUB_DEPTH];
-static int loop_stack_top = -1;
+
+// Define the node structure for our linked list stack
+typedef struct LoopContextNode {
+    int loop_id;
+    struct LoopContextNode* next;
+} LoopContextNode;
+
+// Head pointer for the loop stack
+static LoopContextNode* loop_stack_head = NULL;
 
 void push_loop(int id) {
-    if (loop_stack_top >= MAX_SUB_DEPTH - 1) {
-		compiler_error(ERR_INTERNAL, -1, "Loop stack overflow (Exceeded %d)", MAX_SUB_DEPTH);
+    LoopContextNode* new_node = (LoopContextNode*)malloc(sizeof(LoopContextNode));
+    if (new_node == NULL) {
+        compiler_error(ERR_INTERNAL, -1, "Out of memory allocating loop context");
     }
-    loop_stack[++loop_stack_top] = id;
+    
+    new_node->loop_id = id;
+    
+    // Push it onto the top of the stack
+    new_node->next = loop_stack_head;
+    loop_stack_head = new_node;
 }
 
 void pop_loop(void) {
-    if (loop_stack_top < 0) {
-        fprintf(stderr, "Compiler Error: Loop stack underflow\n");
-        exit(1);
+    if (loop_stack_head == NULL) {
+        compiler_error(ERR_INTERNAL, -1, "Loop stack underflow (No loop to pop)");
     }
-    loop_stack_top--;
+    
+    // Pop and free the top node to prevent memory leaks
+    LoopContextNode* old_head = loop_stack_head;
+    loop_stack_head = loop_stack_head->next;
+    free(old_head);
 }
 
 int current_loop(void) {
-    if (loop_stack_top < 0) {
-        return -1;
+    if (loop_stack_head == NULL) {
+        return -1; // Return -1 if we are not currently inside any loop
     }
-    return loop_stack[loop_stack_top];
+    return loop_stack_head->loop_id;
 }
 
 // --- Direct RAM Allocator ---
@@ -152,6 +171,10 @@ int get_global_variable_address(const char* name) {
 
     // Allocate a raw RAM location to avoid Cartridge ROM write conflicts
     GlobalVarNode* new_node = (GlobalVarNode*)malloc(sizeof(GlobalVarNode));
+    if (new_node == NULL) {
+        compiler_error(ERR_INTERNAL, -1, "Out of memory allocating global variable node");
+    }
+    
     new_node->name = strdup(name);
     new_node->ram_address = next_ram_address++;
     new_node->next = globals_head;
