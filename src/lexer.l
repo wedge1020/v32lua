@@ -15,7 +15,7 @@
 [ \t\r\n]+              { /* Skip whitespace - Fixed single backslashes */ }
 
     /* 1. Transposed Multiline Comment: --@[[ ... ]] */
-"--@[["([^\]]|\]+[^\]])*"]]" {
+"--@[[".*"]]" {
     // Strip the opening "--@[[" and closing "]]" to extract the comment text
     int len = strlen(yytext);
 
@@ -49,7 +49,7 @@
 }
 
     /* 2. Standard Multiline Comment: --[[ ... ]] (Silently Skipped) */
-"--[["([^\]]|\]+[^\]])*"]]" { /* Skip standard multiline comments safely */ }
+"--[[".*"]]" { /* Skip standard multiline comments safely */ }
 
     /* 3. Transposed Single-Line Comment: --@ ... */
 "--@".* {
@@ -58,7 +58,7 @@
 }
 
     /* 4. Standard Single-Line Comment: Matches '--' with text, or a bare '--' */
-"--"([^@\n].*)? { /* Skip standard single-line comments safely */ }
+"--".* { /* Skip standard single-line comments safely */ }
 
 "while"                 { return TOKEN_WHILE;    }
 "break"                 { return TOKEN_BREAK;    }
@@ -82,6 +82,9 @@
 "__asm__"               { return TOKEN_ASM;      }
 "__rawasm__"            { return TOKEN_RAWASM;   }
 "+"                     { return '+'; }
+"-"                     { return '-'; }
+"*"                     { return '*'; }
+"/"                     { return '/'; }
 "("                     { return '('; }
 ")"                     { return ')'; }
 "="                     { return '='; }

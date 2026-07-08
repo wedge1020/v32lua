@@ -74,13 +74,21 @@ program:
     ;
 
 statement_list:
-    statement                    { $$ = $1; }
-    | statement_list statement   { 
-        // Simple sequential chaining configuration block
-        ASTNode* head = $1;
-        while(head->next != NULL) head = head->next;
-        head->next = $2;
-        $$ = $1;
+    /* empty */ { 
+        $$ = NULL; 
+    }
+    | statement_list statement { 
+        if ($1 == NULL) {
+            $$ = $2;
+        } else {
+            // Chain the new statement to the end of the existing list
+            ASTNode* head = $1;
+            while(head->next != NULL) {
+                head = head->next;
+            }
+            head->next = $2;
+            $$ = $1;
+        }
     }
     ;
 
@@ -122,77 +130,26 @@ argument_list:
     ;
 
 statement:
-    assignment                   { $$ = $1; }
+      assignment                 { $$ = $1; }
     | function_call              { $$ = $1; }
-    | TOKEN_WHILE expr statement_list TOKEN_END {
-        $$ = make_node(NODE_WHILE);
-        $$->as.while_loop.condition = $2;
-        $$->as.while_loop.body = $3;
-    }
-    | TOKEN_BREAK {
-        $$ = make_node(NODE_BREAK);
-    }
-    | TOKEN_IF expr TOKEN_THEN statement_list else_branch TOKEN_END {
-        $$ = make_node(NODE_IF);
-        $$->as.if_stmt.condition = $2;
-        $$->as.if_stmt.if_body = $4;
-        $$->as.if_stmt.else_body = $5;
-    }
-    else_branch:
-    /* empty (no else block at all) */ { 
-        $$ = NULL; 
-    }
-    | TOKEN_ELSE statement_list { 
-        $$ = $2; 
-    }
-    | TOKEN_ELSEIF expr TOKEN_THEN statement_list else_branch {
-        // Desugar the 'elseif' into a standard NODE_IF
-        $$ = make_node(NODE_IF);
-        $$->as.if_stmt.condition = $2;
-        $$->as.if_stmt.if_body = $4;
-        $$->as.if_stmt.else_body = $5; // Recursively chain further else/elseifs
-    }
+    | TOKEN_WHILE expr statement_list TOKEN_END { /* your while code */ }
+    | TOKEN_BREAK                { /* your break code */ }
+    | TOKEN_IF expr TOKEN_THEN statement_list else_branch TOKEN_END { /* your if code */ }
     | function_def               { $$ = $1; }
     | return_stmt                { $$ = $1; }
-    | expr '.' TOKEN_IDENTIFIER '=' expr {
-        ASTNode* node = make_node(NODE_TABLE_SET);
-        node->as.table_set.table_expr = $1;
-        node->as.table_set.key = make_node_string($3);
-        node->as.table_set.value = $5;
-        $$ = node;
+    | expr '.' TOKEN_IDENTIFIER '=' expr { /* your table assign code */ }
+    | TOKEN_FUNCTION TOKEN_IDENTIFIER ':' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END { /* your table method code */ }
+    | TOKEN_ASM '(' TOKEN_STRING ')'     { /* asm code */ }
+    | TOKEN_RAWASM '(' TOKEN_STRING ')'  { /* rawasm code */ }
+    ;  /* <--- THIS SEMICOLON IS CRITICAL */
+
+else_branch:
+    /* empty */                  { $$ = NULL; }
+    | TOKEN_ELSE statement_list  { $$ = $2; }
+    | TOKEN_ELSEIF expr TOKEN_THEN statement_list else_branch { 
+        /* your elseif code */ 
     }
-    | TOKEN_FUNCTION TOKEN_IDENTIFIER ':' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
-        // 1. Inject 'self' as a hidden first argument into the parameter list
-        ASTNode* self_param = make_node_ident("self");
-        self_param->next = $6; // Prepended to user-defined parameters
-        
-        // 2. Desugar into a standard table function definition structure
-        ASTNode* func_node = make_node(NODE_FUNCTION_DEF);
-        
-        // Combine table name and method name for the unique backend label (e.g., "player_bounce")
-        func_node->as.function_def.name = mangle_method_name($2, $4);
-        func_node->as.function_def.params = self_param;
-        func_node->as.function_def.body = $8;
-        
-        // 3. Chain it to a setup node that binds it to the table at boot time
-        ASTNode* bind_node = make_node(NODE_TABLE_SET);
-        bind_node->as.table_set.table_expr = make_node_ident($2);
-        bind_node->as.table_set.key = make_node_string($4);
-        bind_node->as.table_set.value = func_node; 
-        
-        // This ensures the function goes to Pass 2 and binding goes to Pass 1!
-        func_node->next = bind_node; 
-        $$ = func_node;
-    }
-    | TOKEN_ASM '(' TOKEN_STRING ')' {
-        $$ = make_node(NODE_ASM);
-        $$->as.inline_asm.code = $3;
-    }
-    | TOKEN_RAWASM '(' TOKEN_STRING ')' {
-        $$ = make_node(NODE_RAWASM);
-        $$->as.inline_asm.code = $3;
-    }
-    ;
+    ;  /* <--- THIS SEMICOLON IS CRITICAL TOO */
 
 assignment:
     TOKEN_IDENTIFIER '=' expr {
@@ -212,14 +169,15 @@ assignment:
 
 function_def:
     /* Standard Function: function my_func() ... end */
-    TOKEN_FUNCTION TOKEN_IDENTIFIER '(' ')' statement_list TOKEN_END {
+    TOKEN_FUNCTION TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
         $$ = make_node(NODE_FUNCTION_DEF);
         $$->as.function_def.name = $2;
-        $$->as.function_def.body = $5;
+        $$->as.function_def.params = $4;
+        $$->as.function_def.body = $6;
     }
     |
     /* Table Function Desugaring: function my_table.my_func() ... end */
-    TOKEN_FUNCTION TOKEN_IDENTIFIER '.' TOKEN_IDENTIFIER '(' ')' statement_list TOKEN_END {
+    TOKEN_FUNCTION TOKEN_IDENTIFIER '.' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
         // 1. Create a unique mangled label for assembly execution flow
         char mangled_name[256];
         snprintf(mangled_name, sizeof(mangled_name), "%s_%s", $2, $4);
@@ -227,7 +185,7 @@ function_def:
         // 2. Build the structural function definition body
         ASTNode* func_def = make_node(NODE_FUNCTION_DEF);
         func_def->as.function_def.name = strdup(mangled_name);
-        func_def->as.function_def.body = $7;
+        func_def->as.function_def.body = $8;
 
         // 3. Instantiate a function pointer node evaluating to that address
         ASTNode* func_ptr = make_node(NODE_FUNCTION_POINTER);
