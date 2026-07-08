@@ -202,11 +202,23 @@ the entirety of the lua comment to be transposed as assembly comments.
 will show up in place on the generated assembly:
 
 ```
-; lua comment: check for collisions
+;; lua comment: check for collisions
 ```
+
+The `--@[[`  through `]]`  will do the  same pass-through  for multi-line
+comments.
 
 ### function return values
 
 Lua functions  support multiple return  values. That should  currently be
 implemented in my compiler. R0, R2, and R3 for the first 3 return values,
 then any additional ones get placed on the stack.
+
+### compiler error reporting
+
+There is a minimal, but evolving  error reporting ability in place. There
+are  4 categories  of  error: LEXICAL,  SYNTAX,  SEMANTIC, and  INTERNAL.
+Associated line numbers and actual  line of content, as appropriate, will
+be displayed on any error.
+
+Processing proceeds to the first encountered error, then forcibly exits.
