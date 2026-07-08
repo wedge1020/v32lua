@@ -31,11 +31,12 @@ char* mangle_method_name(const char* table_name, const char* method_name);
 
 %token <number_val> TOKEN_NUMBER
 %token <string_val> TOKEN_IDENTIFIER TOKEN_STRING
-%token TOKEN_WHILE TOKEN_BREAK TOKEN_IF TOKEN_THEN TOKEN_ELSE TOKEN_END 
+%token TOKEN_WHILE TOKEN_BREAK TOKEN_IF TOKEN_ELSEIF TOKEN_THEN TOKEN_ELSE TOKEN_END 
 %token TOKEN_FUNCTION TOKEN_RETURN TOKEN_AND TOKEN_OR
 %token TOKEN_EQ TOKEN_NEQ TOKEN_LE TOKEN_GE TOKEN_LT TOKEN_GT TOKEN_CONCAT
 
 %type <ast_node> statement statement_list expr assignment function_def return_stmt table_constructor function_call
+%type <ast_node> else_branch  /* <-- ADD THIS */
 
 /* Operator Precedence Rules (PEMDAS + Logic Core) */
 %left TOKEN_OR
@@ -131,17 +132,25 @@ statement:
     | TOKEN_BREAK {
         $$ = make_node(NODE_BREAK);
     }
-    | TOKEN_IF expr TOKEN_THEN statement_list TOKEN_END {
+    | TOKEN_IF expr TOKEN_THEN statement_list else_branch TOKEN_END {
         $$ = make_node(NODE_IF);
         $$->as.if_stmt.condition = $2;
         $$->as.if_stmt.if_body = $4;
-        $$->as.if_stmt.else_body = NULL;
+        $$->as.if_stmt.else_body = $5;
     }
-    | TOKEN_IF expr TOKEN_THEN statement_list TOKEN_ELSE statement_list TOKEN_END {
+	else_branch:
+    /* empty (no else block at all) */ { 
+        $$ = NULL; 
+    }
+    | TOKEN_ELSE statement_list { 
+        $$ = $2; 
+    }
+    | TOKEN_ELSEIF expr TOKEN_THEN statement_list else_branch {
+        // Desugar the 'elseif' into a standard NODE_IF
         $$ = make_node(NODE_IF);
         $$->as.if_stmt.condition = $2;
         $$->as.if_stmt.if_body = $4;
-        $$->as.if_stmt.else_body = $6;
+        $$->as.if_stmt.else_body = $5; // Recursively chain further else/elseifs
     }
     | function_def               { $$ = $1; }
     | return_stmt                { $$ = $1; }

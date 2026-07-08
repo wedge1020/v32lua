@@ -18,6 +18,7 @@
 "while"                 { return TOKEN_WHILE; }
 "break"                 { return TOKEN_BREAK; }
 "if"                    { return TOKEN_IF; }
+"elseif"                { return TOKEN_ELSEIF; } /* <-- ADD THIS */
 "then"                  { return TOKEN_THEN; }
 "else"                  { return TOKEN_ELSE; }
 "end"                   { return TOKEN_END; }
