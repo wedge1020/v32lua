@@ -10,6 +10,36 @@ void generate_block(ASTNode* node) {
     }
 }
 
+static void emit_interpolated_asm(const char* raw_code) {
+    const char* p = raw_code;
+
+    while (*p) {
+        if (*p == '{') {
+            p++; // Skip the '{'
+            char var_name[256];
+            int i = 0;
+
+            // Extract the variable name until we hit '}'
+            while (*p && *p != '}' && i < 255) {
+                var_name[i++] = *p++;
+            }
+            var_name[i] = '\0'; // Null-terminate
+
+            if (*p == '}') p++; // Skip the '}'
+
+            // Output the Vircon32 memory bracket syntax for your variables
+            // Example: {height} becomes [__var_height]
+            printf("[__var_%s]", var_name);
+
+        } else {
+            // Just output standard assembly characters
+            putchar(*p);
+            p++;
+        }
+    }
+    putchar('\n');
+}
+
 void generate_asm(ASTNode* node) {
     if (!node) return;
 
@@ -325,7 +355,7 @@ void generate_asm(ASTNode* node) {
             }
 
             // 2. Output User's Raw Assembly
-            printf("%s\n", node->as.inline_asm.code); 
+            emit_interpolated_asm(node->as.inline_asm.code);
 
             // 3. POP registers in reverse order to seamlessly restore state
             for (int i = NUM_GPRS - 1; i >= 0; i--) {
@@ -340,7 +370,7 @@ void generate_asm(ASTNode* node) {
 
         case NODE_RAWASM: {
             printf("  ; --- Begin Raw ASM (Unprotected) ---\n");
-            printf("%s\n", node->as.inline_asm.code);
+            emit_interpolated_asm(node->as.inline_asm.code);
             printf("  ; --- End Raw ASM ---\n");
             break;
         }

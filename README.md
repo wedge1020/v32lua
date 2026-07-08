@@ -144,12 +144,14 @@ call:
 
 ```
     ___asm___("
-        MOV   R0, 7
-        IADD  R0, 14"
+        MOV   R4, {value}
+        IADD  R4, 14"
+        MOV   {value}, R4
     ")
 ```
 
-You can embed assembly comments, labels, etc.
+You can embed  assembly comments, labels, etc. And yes,  it even supports
+the use of curly braces around lua variables.
 
 The intention is that, if you need  to do something quick, like an IOPort
 transaction, you  can use the  relatively "safe" inline assembly  to pull
@@ -157,7 +159,7 @@ that off.
 
 If  instead  you  are  doing   something  more  involved  (like  manually
 manipulating the  stack), you need  any and all protections  removed, and
-the rawasm inline variant is available for those scenarios.
+the **___rawasm___** inline variant is available for those scenarios.
 
 ### function return values
 
