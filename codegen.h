@@ -6,6 +6,11 @@
 // We will track general purpose registers R0 through R13.
 #define NUM_GPRS 14 
 
+void lock_register(int reg);
+void unlock_register(int reg);
+int is_register_locked(int reg);
+int allocate_register(void); 
+
 // --- Enums ---
 typedef enum {
     NODE_WHILE,
@@ -29,8 +34,8 @@ typedef enum {
     NODE_TABLE_SET,
     NODE_TABLE_GET,
     NODE_IDENTIFIER,
-    NODE_ASM,
-    NODE_NUMBER
+    NODE_NUMBER,
+    NODE_ASM        // <-- Added Inline Assembly Node
 } NodeType;
 
 typedef enum {
@@ -69,17 +74,16 @@ struct astnode {
 
         struct {
             char* name;
-            ASTNode* params;  // <-- Add this to hold your 'self' parameter (and others)
+            ASTNode* params;
             ASTNode* body;
         } function_def;
 
         struct {
             ASTNode* target;
             ASTNode* args_head;
-            int is_method_call; // <-- Add this boolean flag
+            int is_method_call; 
         } call;
 
-        // Inside your ASTNode union:
         struct {
             char* mangled_name;
         } func_ptr;
@@ -120,12 +124,12 @@ struct astnode {
         } id;
 
         struct {
-            char* code;
-        } inline_asm;
-
-        struct {
             double val;
         } number;
+
+        struct {
+            char* code;
+        } inline_asm; // <-- Added Inline Assembly Payload
     } as;
 };
 
@@ -148,15 +152,9 @@ void pop_loop(void);
 int current_loop(void);
 
 int get_global_variable_address(const char* name);
-void  generate_global_setup (ASTNode *);
-void  generate_functions (ASTNode *);
+void generate_global_setup(ASTNode *);
+void generate_functions(ASTNode *);
 
-// Variadic function (like printf) so you can format custom error messages
-void compiler_error(ErrorType type, int line_num, const char* format, ...);
-
-void lock_register(int reg);
-void unlock_register(int reg);
-int is_register_locked(int reg);
-int allocate_register(void);
+void compiler_error(ErrorType, int, const char*, ...);
 
 #endif // CODEGEN_H

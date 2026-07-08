@@ -35,35 +35,11 @@ void generate_asm(ASTNode* node) {
 
         case NODE_BREAK: {
             int current_id = current_loop();
-			if (current_id == -1) {
-				// Notice how you can pass custom formatted strings!
-				compiler_error(ERR_SEMANTIC, -1, "'break' declaration found outside loop body scope.");
-			}
+            if (current_id == -1) {
+                fprintf(stderr, "Compiler Runtime Error: 'break' declaration found outside loop body scope.\n");
+                exit(1);
+            }
             printf("  JMP __%s_while_end_%d\n", get_current_function_name(), current_id);
-            break;
-        }
-
-		case NODE_ASM: {
-            printf("  ; --- Begin Inline ASM Bubble ---\n");
-            
-            // 1. PUSH all currently locked registers
-            for (int i = 0; i < NUM_GPRS; i++) {
-                if (is_register_locked(i)) {
-                    printf("  PUSH R%d\n", i);
-                }
-            }
-
-            // 2. Insert User's Raw Assembly
-            printf("%s\n", node->as.inline_asm.code); 
-
-            // 3. POP registers in reverse order to restore state
-            for (int i = NUM_GPRS - 1; i >= 0; i--) {
-                if (is_register_locked(i)) {
-                    printf("  POP R%d\n", i);
-                }
-            }
-            
-            printf("  ; --- End Inline ASM Bubble ---\n");
             break;
         }
 
@@ -105,16 +81,13 @@ void generate_asm(ASTNode* node) {
         case NODE_FUNCTION_CALL: {
             int arg_count = 0;
 
-            // 1. NEW: Implicit 'self' injection for method calls
             if (node->as.call.is_method_call) {
                 printf("  ; --- Injecting implicit 'self' ---\n");
-                // Evaluate the table object itself (the left side of the dot/colon)
                 generate_asm(node->as.call.target->as.table_get.table_expr);
                 printf("  PUSH R0\n");
                 arg_count++;
             }
 
-            // 2. Evaluate and push explicitly provided arguments
             ASTNode* current_arg = node->as.call.args_head;
             while (current_arg != NULL) {
                 generate_asm(current_arg);
@@ -123,13 +96,9 @@ void generate_asm(ASTNode* node) {
                 current_arg = current_arg->next;
             }
 
-            // 3. Evaluate the target expression (the actual function address lookup)
             generate_asm(node->as.call.target);
-
-            // 4. Dynamically call the address stored in R0
             printf("  CALL R0\n");
 
-            // 5. Clean up the stack (arg_count now correctly includes 'self'!)
             if (arg_count > 0) {
                 printf("  ISUB SP, %d\n", arg_count);
             }
@@ -173,49 +142,54 @@ void generate_asm(ASTNode* node) {
         }
 
         case NODE_ADD: {
-            // 1. Evaluate the left-hand side expression (result lands in R0)
             generate_asm(node->as.binary.left);
-            printf("  PUSH R0\n");
+            int left_reg = allocate_register();
+            printf("  MOV R%d, R0\n", left_reg);
 
-            // 2. Evaluate the right-hand side expression (result lands in R0)
             generate_asm(node->as.binary.right);
-            printf("  POP R1\n"); // Move left-hand side into R1
-
-            // 3. Perform the addition (R1 = R1 + R0)
-            // Note: Use FADD if your compiler treats all Lua numbers as floats,
-            // or IADD if you are dealing strictly with integers.
-            printf("  FADD R1, R0\n");
-
-            // 4. Place the final result back into R0 for the rest of the pipeline
-            printf("  MOV R0, R1\n");
+            printf("  FADD R%d, R0\n", left_reg);
+            printf("  MOV R0, R%d\n", left_reg); // Result back to R0
+            
+            unlock_register(left_reg);
             break;
         }
 
         case NODE_SUB: {
             generate_asm(node->as.binary.left);
-            printf("  PUSH R0\n");
+            int left_reg = allocate_register();
+            printf("  MOV R%d, R0\n", left_reg);
+
             generate_asm(node->as.binary.right);
-            printf("  POP R1\n");    // R1 = Left, R0 = Right
-            printf("  FSUB R1, R0\n"); // R1 = R1 - R0 (Left - Right)
-            printf("  MOV R0, R1\n");  // Move final result back to R0
+            printf("  FSUB R%d, R0\n", left_reg);
+            printf("  MOV R0, R%d\n", left_reg);
+            
+            unlock_register(left_reg);
             break;
         }
+        
         case NODE_MUL: {
             generate_asm(node->as.binary.left);
-            printf("  PUSH R0\n");
+            int left_reg = allocate_register();
+            printf("  MOV R%d, R0\n", left_reg);
+
             generate_asm(node->as.binary.right);
-            printf("  POP R1\n");
-            printf("  FMUL R1, R0\n"); // R1 = left * right
-            printf("  MOV R0, R1\n");
+            printf("  FMUL R%d, R0\n", left_reg);
+            printf("  MOV R0, R%d\n", left_reg);
+            
+            unlock_register(left_reg);
             break;
         }
+        
         case NODE_DIV: {
             generate_asm(node->as.binary.left);
-            printf("  PUSH R0\n");
+            int left_reg = allocate_register();
+            printf("  MOV R%d, R0\n", left_reg);
+
             generate_asm(node->as.binary.right);
-            printf("  POP R1\n");
-            printf("  FDIV R1, R0\n"); // R1 = left / right
-            printf("  MOV R0, R1\n");
+            printf("  FDIV R%d, R0\n", left_reg);
+            printf("  MOV R0, R%d\n", left_reg);
+            
+            unlock_register(left_reg);
             break;
         }
 
@@ -242,26 +216,23 @@ void generate_asm(ASTNode* node) {
         }
 
         case NODE_RELATIONAL: {
-            // 1. Evaluate Left and Right operands
             generate_asm(node->as.binary.left);
-            printf("  PUSH R0\n");
+            int left_reg = allocate_register();
+            printf("  MOV R%d, R0\n", left_reg);
+
             generate_asm(node->as.binary.right);
-            printf("  POP R1\n");    // R1 = Left, R0 = Right
             
-            // 2. Perform destructive comparison. 
-            // Vircon32: "INSTRUCTION R1, R0" checks (R1 operator R0) 
-            // and overwrites R1 with the boolean result.
             switch(node->as.binary.operator) {
-                case OP_EQ: printf("  FEQ R1, R0\n"); break; // R1 = (R1 == R0)
-                case OP_NEQ: printf("  FNE R1, R0\n"); break; // R1 = (R1 != R0)
-                case OP_LT: printf("  FLT R1, R0\n"); break; // R1 = (R1 < R0)
-                case OP_LE: printf("  FLE R1, R0\n"); break; // R1 = (R1 <= R0)
-                case OP_GT: printf("  FGT R1, R0\n"); break; // R1 = (R1 > R0)
-                case OP_GE: printf("  FGE R1, R0\n"); break; // R1 = (R1 >= R0)
+                case OP_EQ: printf("  FEQ R%d, R0\n", left_reg); break;
+                case OP_NEQ: printf("  FNE R%d, R0\n", left_reg); break;
+                case OP_LT: printf("  FLT R%d, R0\n", left_reg); break;
+                case OP_LE: printf("  FLE R%d, R0\n", left_reg); break;
+                case OP_GT: printf("  FGT R%d, R0\n", left_reg); break;
+                case OP_GE: printf("  FGE R%d, R0\n", left_reg); break;
             }
             
-            // 3. Move the boolean result from R1 into R0 for the pipeline
-            printf("  MOV R0, R1\n");
+            printf("  MOV R0, R%d\n", left_reg);
+            unlock_register(left_reg);
             break;
         }
 
@@ -277,62 +248,63 @@ void generate_asm(ASTNode* node) {
             generate_asm(node->as.binary.right);
             printf("  PUSH R0\n");
             printf("  CALL __builtin_strcat\n");
-            // Corrected: Structural stack adjustment
             printf("  ISUB SP, 2\n");
             break;
         }
 
         case NODE_TABLE_CONSTRUCTOR: {
-            printf("  MOV R0, [0] ; Read __heap_pointer from RAM slot 0\n");
-            printf("  PUSH R0\n");
-            printf("  MOV R1, 0\n");
-            printf("  MOV [R0], R1\n");
-            printf("  MOV R1, [0]\n");
-            // Corrected: Pointer allocation math requires integer addition
-            printf("  IADD R1, 1\n"); 
-            printf("  MOV [0], R1 ; Update active RAM heap track pointer\n");
-            printf("  POP R0\n");
+            printf("  MOV R0, [0] ; Read __heap_pointer\n");
+            int ptr_reg = allocate_register();
+            printf("  MOV R%d, R0\n", ptr_reg);
+            
+            int zero_reg = allocate_register();
+            printf("  MOV R%d, 0\n", zero_reg);
+            printf("  MOV [R%d], R%d ; Initialize to nil/0\n", ptr_reg, zero_reg);
+            unlock_register(zero_reg);
+            
+            printf("  MOV R0, [0]\n");
+            printf("  IADD R0, 1\n"); 
+            printf("  MOV [0], R0 ; Advance heap pointer\n");
+            
+            printf("  MOV R0, R%d ; Return allocated pointer\n", ptr_reg);
+            unlock_register(ptr_reg);
             break;
         }
 
         case NODE_TABLE_SET: {
             generate_asm(node->as.table_set.value);
-               printf("  PUSH R0\n");
+            printf("  PUSH R0\n");
             generate_asm(node->as.table_set.key);
-             printf("  PUSH R0\n");
+            printf("  PUSH R0\n");
             generate_asm(node->as.table_set.table_expr);
             printf("  PUSH R0\n");
             printf("  CALL __builtin_table_set\n");
-            // Corrected: Structural stack adjustment
             printf("  ISUB SP, 3\n");
             break;
         }
 
         case NODE_TABLE_GET: {
-            // 1. Evaluate the key (leaves key identifier/string address in R0)
             generate_asm(node->as.table_get.key);
-            printf("  PUSH R0\n");
+            int key_reg = allocate_register();
+            printf("  MOV R%d, R0\n", key_reg);
 
-            // 2. Evaluate the table expression (leaves table structure pointer in R0)
             generate_asm(node->as.table_get.table_expr);
-            printf("  PUSH R0\n");
-
-            // 3. Pop into registers and call runtime helper
-            printf("  POP R1\n"); // R1 = Table Pointer
-            printf("  POP R2\n"); // R2 = Key
+            
+            // Expected by __builtin_table_get: R1 = Table Pointer, R2 = Key
+            printf("  MOV R1, R0\n");
+            printf("  MOV R2, R%d\n", key_reg);
             printf("  CALL __builtin_table_get\n");
-            // Result is now beautifully sitting in R0 for whoever needs it!
+            
+            unlock_register(key_reg);
+            // Result safely sitting in R0
             break;
         }
 
         case NODE_IDENTIFIER: {
-            // 1. Check if the identifier is 'self' (the implicit first parameter)
             if (strcmp(node->as.id.name, "self") == 0) {
                 printf("  ; --- Loading local parameter 'self' ---\n");
-                printf("  MOV R0, [BP+2]\n"); // Fetch the table pointer from the stack frame
-            }
-            // 2. Otherwise, treat it as a standard variable lookup
-            else {
+                printf("  MOV R0, [BP+2]\n"); 
+            } else {
                 printf("  MOV R0, [__var_%s]\n", node->as.id.name);
             }
             break;
@@ -341,20 +313,39 @@ void generate_asm(ASTNode* node) {
         case NODE_NUMBER:
             printf("  MOV R0, %f\n", node->as.number.val);
             break;
+            
+        case NODE_ASM: {
+            printf("  ; --- Begin Inline ASM Bubble ---\n");
+            
+            // 1. PUSH all currently active/locked temporary registers
+            for (int i = 0; i < NUM_GPRS; i++) {
+                if (is_register_locked(i)) {
+                    printf("  PUSH R%d\n", i);
+                }
+            }
+
+            // 2. Output User's Raw Assembly
+            printf("%s\n", node->as.inline_asm.code); 
+
+            // 3. POP registers in reverse order to seamlessly restore state
+            for (int i = NUM_GPRS - 1; i >= 0; i--) {
+                if (is_register_locked(i)) {
+                    printf("  POP R%d\n", i);
+                }
+            }
+            
+            printf("  ; --- End Inline ASM Bubble ---\n");
+            break;
+        }
     }
 }
 
 void generate_global_setup(ASTNode* node) {
     while (node != NULL) {
-        // Skip function definitions during the initial execution setup phase
         if (node->type != NODE_FUNCTION_DEF) {
-            // We temporarily break the sibling chain link so generate_asm 
-            // only processes this single statement, preventing double-traversal.
             ASTNode* next_sibling = node->next;
             node->next = NULL;
-            
             generate_asm(node);
-            
             node->next = next_sibling;
         }
         node = node->next;
@@ -363,13 +354,10 @@ void generate_global_setup(ASTNode* node) {
 
 void generate_functions(ASTNode* node) {
     while (node != NULL) {
-        // Only emit code if it's an isolated global function structure
         if (node->type == NODE_FUNCTION_DEF) {
             ASTNode* next_sibling = node->next;
             node->next = NULL;
-            
             generate_asm(node);
-            
             node->next = next_sibling;
         }
         node = node->next;
@@ -377,13 +365,11 @@ void generate_functions(ASTNode* node) {
 }
 
 void generate_program(ASTNode* head) {
-    // 1. Emitting the Vircon32 Bootstrapper
     printf("; --- Compiled Code Entry Vector ---\n");
     printf("  CALL __init_globals  ; Run top-level setups first\n");
     printf("  CALL _main           ; Then hand control to the user\n");
     printf("  HLT                  ; Halt CPU when main finishes\n\n");
 
-    // 2. PASS 1: Generate all Functions (Safe Global Scope)
     printf("; --- Function Definitions ---\n");
     ASTNode* current = head;
     while (current != NULL) {
@@ -393,7 +379,6 @@ void generate_program(ASTNode* head) {
         current = current->next;
     }
 
-    // 3. PASS 2: Collect all loose statements into the Init Vector
     printf("\n; --- Global Initialization Vector ---\n");
     printf("__init_globals:\n");
     printf("  PUSH BP\n");
@@ -401,7 +386,6 @@ void generate_program(ASTNode* head) {
 
     current = head;
     while (current != NULL) {
-        // If it is NOT a function definition, it belongs in the boot routine!
         if (current->type != NODE_FUNCTION_DEF) {
             generate_asm(current);
         }
