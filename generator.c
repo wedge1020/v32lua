@@ -35,10 +35,10 @@ void generate_asm(ASTNode* node) {
 
         case NODE_BREAK: {
             int current_id = current_loop();
-            if (current_id == -1) {
-                fprintf(stderr, "Compiler Runtime Error: 'break' declaration found outside loop body scope.\n");
-                exit(1);
-            }
+			if (current_id == -1) {
+				// Notice how you can pass custom formatted strings!
+				compiler_error(ERR_SEMANTIC, -1, "'break' declaration found outside loop body scope.");
+			}
             printf("  JMP __%s_while_end_%d\n", get_current_function_name(), current_id);
             break;
         }

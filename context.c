@@ -30,8 +30,7 @@ int get_next_label(void) {
 void push_function_context(const char* name) {
     FunctionContextNode* new_node = (FunctionContextNode*)malloc(sizeof(FunctionContextNode));
     if (new_node == NULL) {
-        fprintf(stderr, "Compiler Error: Out of memory allocating function context\n");
-        exit(1);
+		compiler_error(ERR_INTERNAL, -1, "Outmof memory allocating function context\n");
     }
     
     // Initialize the new context
@@ -45,8 +44,7 @@ void push_function_context(const char* name) {
 
 void pop_function_context(void) {
     if (context_stack_head == NULL) {
-        fprintf(stderr, "Compiler Error: Function context stack underflow\n");
-        exit(1);
+		compiler_error(ERR_INTERNAL, -1, "Function context stack underflow\n");
     }
     
     // Pop and free the top node to prevent memory leaks
@@ -113,8 +111,7 @@ static int loop_stack_top = -1;
 
 void push_loop(int id) {
     if (loop_stack_top >= MAX_SUB_DEPTH - 1) {
-        fprintf(stderr, "Compiler Error: Loop stack overflow\n");
-        exit(1);
+		compiler_error(ERR_INTERNAL, -1, "Loop stack overflow (Exceeded %d)", MAX_SUB_DEPTH);
     }
     loop_stack[++loop_stack_top] = id;
 }

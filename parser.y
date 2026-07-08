@@ -306,41 +306,8 @@ table_constructor:
 %%
 
 void yyerror(const char *s) {
-    // 1. Print the standard error message with the line number
-    fprintf(stderr, "\nCompilation Parser Error on line %d: %s\n", yylineno, s);
-
-    // 2. Attempt to pull the exact line of code from the source file
-    if (yyin != NULL) {
-        // Rewind the file descriptor back to the absolute beginning of the source file
-        rewind(yyin);
-        
-        char line_buffer[1024];
-        int current_line = 1;
-        
-        // Scan through the file sequentially until we hit the line that crashed
-        while (fgets(line_buffer, sizeof(line_buffer), yyin)) {
-            if (current_line == yylineno) {
-                // Print it out nicely formatted
-                fprintf(stderr, "      |\n");
-                fprintf(stderr, " %4d | %s", yylineno, line_buffer);
-                
-                // If the file didn't have a trailing newline, add one so the output is clean
-                if (strchr(line_buffer, '\n') == NULL) {
-                    fprintf(stderr, "\n");
-                }
-                fprintf(stderr, "      |\n\n");
-                break;
-            }
-            current_line++;
-        }
-    }
-
-    // 3. Halt the compiler immediately
-    exit(1);
+    compiler_error(ERR_SYNTAX, yylineno, "%s", s);
 }
-/*void yyerror(const char *s) {
-    fprintf(stderr, "Compilation Parser Error on line %d: %s\n", yylineno, s);
-}*/
 
 ASTNode* make_node(NodeType type) {
     ASTNode* n = (ASTNode*)calloc(1, sizeof(ASTNode));

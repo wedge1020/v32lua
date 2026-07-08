@@ -36,6 +36,13 @@ typedef enum {
     OP_GE
 } Operator;
 
+typedef enum {
+    ERR_LEXICAL,
+    ERR_SYNTAX,
+    ERR_SEMANTIC,
+    ERR_INTERNAL
+} ErrorType;
+
 // --- AST Node Structure ---
 typedef struct astnode ASTNode;
 struct astnode {
@@ -133,5 +140,8 @@ int current_loop(void);
 int get_global_variable_address(const char* name);
 void  generate_global_setup (ASTNode *);
 void  generate_functions (ASTNode *);
+
+// Variadic function (like printf) so you can format custom error messages
+void compiler_error(ErrorType type, int line_num, const char* format, ...);
 
 #endif // CODEGEN_H

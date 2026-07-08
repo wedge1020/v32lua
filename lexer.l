@@ -62,5 +62,5 @@
                             return TOKEN_STRING;
                         }
 
-.                       { printf("Lexical Error on line %d: Unexpected character %s\n", yylineno, yytext); }
+.  { compiler_error(ERR_LEXICAL, yylineno, "Unexpected character '%s'", yytext); }
 %%
