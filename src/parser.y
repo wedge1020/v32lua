@@ -360,14 +360,14 @@ char* mangle_method_name(const char* table_name, const char* method_name) {
     size_t len = strlen(table_name) + 1 + strlen(method_name) + 1;
 
     // Allocate memory for the new mangled string
-    char* mangled = (char*)malloc(len);
-    if (mangled == NULL) {
-        fprintf(stderr, "Fatal compiler error: Memory allocation failed during method name mangling.\n");
-        exit(1);
+    char *mangled = (char*) malloc (len);
+    if (mangled == NULL)
+    {
+        compiler_error (ERR_INTERNAL, -1, "Memory allocation failed in name mangler\n");
     }
 
     // Safely format the new string
-    snprintf(mangled, len, "%s_%s", table_name, method_name);
+    snprintf (mangled, len, "%s_%s", table_name, method_name);
 
-    return mangled;
+    return (mangled);
 }
