@@ -43,6 +43,30 @@ void generate_asm(ASTNode* node) {
             break;
         }
 
+		case NODE_ASM: {
+            printf("  ; --- Begin Inline ASM Bubble ---\n");
+            
+            // 1. PUSH all currently locked registers
+            for (int i = 0; i < NUM_GPRS; i++) {
+                if (is_register_locked(i)) {
+                    printf("  PUSH R%d\n", i);
+                }
+            }
+
+            // 2. Insert User's Raw Assembly
+            printf("%s\n", node->as.inline_asm.code); 
+
+            // 3. POP registers in reverse order to restore state
+            for (int i = NUM_GPRS - 1; i >= 0; i--) {
+                if (is_register_locked(i)) {
+                    printf("  POP R%d\n", i);
+                }
+            }
+            
+            printf("  ; --- End Inline ASM Bubble ---\n");
+            break;
+        }
+
         case NODE_IF: {
             int label_id = get_next_label();
             const char* ctx = get_current_function_name();

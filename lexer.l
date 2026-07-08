@@ -34,6 +34,7 @@
 "<"                     { return TOKEN_LT;       }
 ">"                     { return TOKEN_GT;       }
 ".."                    { return TOKEN_CONCAT;   }
+"__asm__"               { return TOKEN_ASM;      }
 "+"                     { return '+'; }
 "("                     { return '('; }
 ")"                     { return ')'; }

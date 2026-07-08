@@ -32,7 +32,7 @@ char* mangle_method_name(const char* table_name, const char* method_name);
 %token <number_val> TOKEN_NUMBER
 %token <string_val> TOKEN_IDENTIFIER TOKEN_STRING
 %token TOKEN_WHILE TOKEN_BREAK TOKEN_IF TOKEN_ELSEIF TOKEN_THEN TOKEN_ELSE TOKEN_END 
-%token TOKEN_FUNCTION TOKEN_RETURN TOKEN_AND TOKEN_OR
+%token TOKEN_FUNCTION TOKEN_ASM TOKEN_RETURN TOKEN_AND TOKEN_OR
 %token TOKEN_EQ TOKEN_NEQ TOKEN_LE TOKEN_GE TOKEN_LT TOKEN_GT TOKEN_CONCAT
 
 %type <ast_node> statement statement_list expr assignment function_def return_stmt table_constructor function_call
@@ -183,6 +183,10 @@ statement:
         // This ensures the function goes to Pass 2 and binding goes to Pass 1!
         func_node->next = bind_node; 
         $$ = func_node;
+    }
+    | TOKEN_ASM '(' TOKEN_STRING ')' {
+        $$ = make_node(NODE_ASM);
+        $$->as.inline_asm.code = $3;
     }
     ;
 

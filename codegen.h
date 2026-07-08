@@ -1,6 +1,11 @@
 #ifndef CODEGEN_H
 #define CODEGEN_H
 
+// --- Register Inventory ---
+// Vircon32 has R0-R15, but R14 is BP and R15 is SP. 
+// We will track general purpose registers R0 through R13.
+#define NUM_GPRS 14 
+
 // --- Enums ---
 typedef enum {
     NODE_WHILE,
@@ -24,6 +29,7 @@ typedef enum {
     NODE_TABLE_SET,
     NODE_TABLE_GET,
     NODE_IDENTIFIER,
+    NODE_ASM,
     NODE_NUMBER
 } NodeType;
 
@@ -114,6 +120,10 @@ struct astnode {
         } id;
 
         struct {
+            char* code;
+        } inline_asm;
+
+        struct {
             double val;
         } number;
     } as;
@@ -143,5 +153,10 @@ void  generate_functions (ASTNode *);
 
 // Variadic function (like printf) so you can format custom error messages
 void compiler_error(ErrorType type, int line_num, const char* format, ...);
+
+void lock_register(int reg);
+void unlock_register(int reg);
+int is_register_locked(int reg);
+int allocate_register(void);
 
 #endif // CODEGEN_H
