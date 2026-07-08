@@ -315,7 +315,7 @@ void generate_asm(ASTNode* node) {
             break;
             
         case NODE_ASM: {
-            printf("  ; --- Begin Inline ASM Bubble ---\n");
+            printf("  ; --- Begin Inline ASM Bubble (existing register states preserved) ---\n");
             
             // 1. PUSH all currently active/locked temporary registers
             for (int i = 0; i < NUM_GPRS; i++) {
@@ -334,7 +334,14 @@ void generate_asm(ASTNode* node) {
                 }
             }
             
-            printf("  ; --- End Inline ASM Bubble ---\n");
+            printf("  ; --- End Inline ASM Bubble (previous register states restored) ---\n");
+            break;
+        }
+
+        case NODE_RAWASM: {
+            printf("  ; --- Begin Raw ASM (Unprotected) ---\n");
+            printf("%s\n", node->as.inline_asm.code);
+            printf("  ; --- End Raw ASM ---\n");
             break;
         }
     }

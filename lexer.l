@@ -35,6 +35,7 @@
 ">"                     { return TOKEN_GT;       }
 ".."                    { return TOKEN_CONCAT;   }
 "__asm__"               { return TOKEN_ASM;      }
+"__rawasm__"            { return TOKEN_RAWASM;   }
 "+"                     { return '+'; }
 "("                     { return '('; }
 ")"                     { return ')'; }

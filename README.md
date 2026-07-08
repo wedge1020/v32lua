@@ -121,13 +121,43 @@ main()  is a  "magical" function,  in that  it will  automatically repeat
 itself (after  a `WAIT` is  issued). This is intended  to be akin  to the
 `TIC()` function in TIC-80.
 
-### assembly
+### produced assembly
 
 Various test runs  have been performed to evaluate  the assembly language
 generated. Currently  things are rather  heavily stack based,  `R0` being
 heavily used.
 
 I do want to try register allocation functionality in time.
+
+### inline assembly
+
+For convenience, this lua compiler supports inline assembly, in a fashion
+similar to that of the official Vircon32 C compiler.
+
+In fact, there are TWO inline assembly variants:
+
+  * `__asm__` - preserves register states around inline asm "bubble"
+  * `__rawasm__` - does not preserve register states (dangerous)
+
+To use either, simply  embed it in your lua code as  you would a function
+call:
+
+```
+    ___asm___("
+        MOV   R0, 7
+        IADD  R0, 14"
+    ")
+```
+
+You can embed assembly comments, labels, etc.
+
+The intention is that, if you need  to do something quick, like an IOPort
+transaction, you  can use the  relatively "safe" inline assembly  to pull
+that off.
+
+If  instead  you  are  doing   something  more  involved  (like  manually
+manipulating the  stack), you need  any and all protections  removed, and
+the rawasm inline variant is available for those scenarios.
 
 ### function return values
 

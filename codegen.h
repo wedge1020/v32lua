@@ -35,7 +35,8 @@ typedef enum {
     NODE_TABLE_GET,
     NODE_IDENTIFIER,
     NODE_NUMBER,
-    NODE_ASM        // <-- Added Inline Assembly Node
+    NODE_ASM,
+	NODE_RAWASM
 } NodeType;
 
 typedef enum {
