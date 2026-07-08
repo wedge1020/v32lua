@@ -12,56 +12,44 @@
 
 %%
 
-[ \t\\r\\n]+              { /* Skip whitespace */ }
+[ \t\r\n]+              { /* Skip whitespace - Fixed single backslashes */ }
 
     /* 1. Transposed Multiline Comment: --@[[ ... ]] */
-"--@\[\[([^*]|\*+[^\]])*\]\]" {
+"--@[["([^\]]|\]+[^\]])*"]]" {
     // Strip the opening "--@[[" and closing "]]" to extract the comment text
     int len = strlen(yytext);
-    // Print directly to the generated assembly file stream
-    fprintf (stdout, ";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\n");
-    fprintf (stdout, ";; ");
-    fprintf (stdout, ";; lua comment: ");
+
+    fprintf(stdout, ";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\n");
+    fprintf(stdout, ";; \n");
+    fprintf(stdout, ";; lua comment: ");
+
     for (int index = 5; index < len - 2; index++)
     {
-        // If a newline is encountered, wrap the line and start a new comment ...
+        // If a newline is encountered, wrap the line and start a new comment block line
         if (yytext[index] == '\n')
         {
-            fprintf (stdout, "\n;; lua comment: ");
+            fprintf(stdout, "\n;; lua comment: ");
         }
-
-        //////////////////////////////////////////////////////////////////////////////////////
-        //
-        // ... in the case of encountering a carriage return, do nothing ...
-        //
+        // Collapse tabs to a single space for cleaner assembly output
+        else if (yytext[index] == '\t')
+        {
+            fprintf(stdout, " ");
+        }
+        // Completely skip carriage returns to avoid double spacing issues
         else if (yytext[index] == '\r')
         {
             ;
         }
-
-        //////////////////////////////////////////////////////////////////////////////////////
-        //
-        // ... in the case of encountering a tab, collapse it to a single space ...
-        //
-        else if (yytext[index] == '\t')
-        {
-            fprintf (stdout, " ");
-        }
-
-        //////////////////////////////////////////////////////////////////////////////////////
-        //
-        // ... otherwise, display the encountered character:
-        //
         else
         {
             putchar(yytext[index]);
         }
     }
-    fprintf (stdout, "\n;; \n");
+    fprintf(stdout, "\n;; \n");
 }
 
     /* 2. Standard Multiline Comment: --[[ ... ]] (Silently Skipped) */
-"--\[\[([^*]|\*+[^\]])*\]\]" { /* Skip standard multiline comments */ }
+"--[["([^\]]|\]+[^\]])*"]]" { /* Skip standard multiline comments safely */ }
 
     /* 3. Transposed Single-Line Comment: --@ ... */
 "--@".* {
@@ -69,8 +57,8 @@
     printf(";; lua comment: %s\n", yytext + 3);
 }
 
-    /* 4. Standard Single-Line Comment (Your existing rule, updated to match standard only) */
-"--[^@].*" { /* Skip standard single-line comments */ }
+    /* 4. Standard Single-Line Comment: Matches '--' with text, or a bare '--' */
+"--"([^@\n].*)? { /* Skip standard single-line comments safely */ }
 
 "while"                 { return TOKEN_WHILE;    }
 "break"                 { return TOKEN_BREAK;    }

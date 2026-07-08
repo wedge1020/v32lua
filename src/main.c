@@ -1,3 +1,25 @@
+//
+// v32lua: a Vircon32-targetting lua compiler, written in C. It compiles lua code to
+//         Vircon32 assembly.
+//
+// NOTE: Vircon32 comparison instructions are destructive to destination register, 
+//       and overwrite with a 0 (false) or 1 (true), which can then be used with
+//       the JT or JF instructions. The comparisons are all 2 operand:
+//
+//       IEQ R0, R1 ; R0 = (R0 == R1)
+//       JT  R0, _label
+//
+//       Integer comparison instructions are: IEQ, INE, ILT, ILE, IGT, and IGE
+//       floating point comparisons are:      FEQ, FNE, FLT, FLE, FGT, and FGE
+//
+// There are 16 general purpose registers (R0-R15):
+//
+// R0  - R10: completely available for general use
+// R11 - R13: general use, but are also used by MOVS, SETS, and CMPS
+// R14 - R15: the stack base pointer and stack pointer register
+//
+////////////////////////////////////////////////////////////////////////////////////////
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -73,7 +95,7 @@ void emit_runtime_library(void) {
     printf("  IADD R4, 3       ; Allocate 3 words (NextPtr, Key, Value)\n");
     printf("  MOV [0], R4      ; Update heap pointer\n");
 
-	printf("  MOV  R4, 0\n"); 
+    printf("  MOV  R4, 0\n"); 
     printf("  MOV [R3 + 0], R4 ; Node.Next = null\n");
     printf("  MOV [R3 + 1], R1 ; Node.Key = key\n");
     printf("  MOV [R3 + 2], R2 ; Node.Value = value\n");
