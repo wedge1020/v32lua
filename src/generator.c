@@ -38,14 +38,14 @@ static int resolve_static_path(ASTNode* node, char* path_buffer) {
 
     if (node->type == NODE_IDENTIFIER) {
         strcpy(path_buffer, node->as.id.name);
-        return 1;
+        return (1);
     }
 
     if (node->type == NODE_TABLE_GET && node->as.table_get.key->type == NODE_STRING) {
         char base_path[256] = {0};
         if (resolve_static_path(node->as.table_get.table_expr, base_path)) {
             sprintf(path_buffer, "%s.%s", base_path, node->as.table_get.key->as.string_val.value);
-            return 1;
+            return (1);
         }
     }
     
@@ -152,20 +152,24 @@ static void emit_asm(const char* format, ...) {
     }
 }
 
-static int check_needs_stack(ASTNode *node) {
-    if (!node) return 0;
+static int check_needs_stack (ASTNode *node)
+{
+    if (node  == NULL)
+    {
+        return (0);
+    }
 
-    switch (node->type) {
+    switch (node -> type) {
         case NODE_FUNCTION_CALL:
         case NODE_CONCAT:
         case NODE_TABLE_SET:
         case NODE_TABLE_GET:
         case NODE_ASM:
         case NODE_RAWASM:
-            return 1;
+            return (1);
 
         case NODE_IDENTIFIER:
-            if (node->as.id.name && strcmp(node->as.id.name, "self") == 0) return 1;
+            if (node->as.id.name && strcmp(node->as.id.name, "self") == 0) return (1);
             break;
 
         case NODE_RETURN: {
@@ -173,29 +177,30 @@ static int check_needs_stack(ASTNode *node) {
             ASTNode *expr = node->as.return_stmt.expressions_head;
             while (expr) {
                 ret_count++;
-                if (check_needs_stack(expr)) return 1;
+                if (check_needs_stack(expr)) return (1);
                 expr = expr->next;
             }
-            if (ret_count > 3) return 1;
+            if (ret_count > 3) return (1);
             break;
         }
 
         case NODE_WHILE:
-            if (check_needs_stack(node->as.while_loop.condition)) return 1;
-            if (check_needs_stack(node->as.while_loop.body)) return 1;
+            if (check_needs_stack(node->as.while_loop.condition)) return (1);
+            if (check_needs_stack(node->as.while_loop.body)) return (1);
             break;
 
         case NODE_IF:
-            if (check_needs_stack(node->as.if_stmt.condition)) return 1;
-            if (check_needs_stack(node->as.if_stmt.if_body)) return 1;
-            if (check_needs_stack(node->as.if_stmt.else_body)) return 1;
+            if (check_needs_stack (node -> as.if_stmt.condition)) return (1);
+            if (check_needs_stack (node -> as.if_stmt.if_body))   return (1);
+            if (check_needs_stack (node -> as.if_stmt.else_body)) return (1);
+            fprintf (stderr, "[IF] stack check: doesn't need one\n");
             break;
 
         case NODE_MULTIPLE_ASSIGNMENT: {
             ASTNode* curr_tgt = node->as.mult_assign.targets_head;
-            while (curr_tgt) { if (check_needs_stack(curr_tgt)) return 1; curr_tgt = curr_tgt->next; }
+            while (curr_tgt) { if (check_needs_stack(curr_tgt)) return (1); curr_tgt = curr_tgt->next; }
             ASTNode* curr_val = node->as.mult_assign.values_head;
-            while (curr_val) { if (check_needs_stack(curr_val)) return 1; curr_val = curr_val->next; }
+            while (curr_val) { if (check_needs_stack(curr_val)) return (1); curr_val = curr_val->next; }
             break;
         }
 
@@ -206,24 +211,26 @@ static int check_needs_stack(ASTNode *node) {
         case NODE_AND:
         case NODE_OR:
         case NODE_RELATIONAL:
-            if (check_needs_stack(node->as.binary.left)) return 1;
-            if (check_needs_stack(node->as.binary.right)) return 1;
+            if (check_needs_stack(node->as.binary.left))  return (1);
+            if (check_needs_stack(node->as.binary.right)) return (1);
             break;
 
         default:
             break;
     }
 
-    return check_needs_stack(node->next);
+    return check_needs_stack (node -> next);
 }
 
-void generate_block (ASTNode *node) {
-    while (node != NULL) {
-        int temp_reg = allocate_register();
-        generate_asm (node, temp_reg); 
-        unlock_register(temp_reg);
-        
-        node = node -> next;
+void  generate_block (ASTNode *head)
+{
+    ASTNode *current   = head;
+    while (current    != NULL)
+    {
+        int  temp_reg  = allocate_register();
+        generate_asm (current, temp_reg);
+        unlock_register (temp_reg);
+        current        = current -> next; // Move to the next sibling statement
     }
 }
 
@@ -244,16 +251,25 @@ static void emit_interpolated_asm (const char *raw_code) {
         }
     }
     putchar ('\n');
-    last_emitted_inst[0] = '\0';
-    last_emitted_dest[0] = '\0';
-    last_emitted_src[0] = '\0';
+    last_emitted_inst[0]  = '\0';
+    last_emitted_dest[0]  = '\0';
+    last_emitted_src[0]   = '\0';
 }
 
-void generate_asm (ASTNode *node, int dest_reg) {
-    if (!node) return;
+void  generate_asm (ASTNode *node, int  dest_reg)
+{
+    if (node == NULL)
+    {
+        fprintf (stderr, "[generate_asm] NULL, bailing\n");
+        return;
+    }
 
-    switch (node -> type) {
-        
+    fprintf (stderr, "[generate_asm] node -> type: %d\n", node -> type);
+    if (node -> next != NULL)
+    fprintf (stderr, "[generate_asm] node -> next -> type: %d\n", node -> next -> type);
+
+    switch (node -> type)
+    {
         case NODE_WHILE: {
             int label_id = get_next_label ();
             const char *ctx = get_current_function_name ();
@@ -284,41 +300,43 @@ void generate_asm (ASTNode *node, int dest_reg) {
         }
 
         case NODE_IF: {
-            int label_id = get_next_label ();
-            const char *ctx = get_current_function_name ();
+            fprintf (stderr, "[IF] Encountered an if statement!\n");
+            int  label_id    = get_next_label ();
+            const char *ctx  = get_current_function_name ();
             
-            int cond_reg = allocate_register();
+            int cond_reg     = allocate_register ();
             generate_asm (node -> as.if_stmt.condition, cond_reg);
             
             emit_asm ("JF R%d, __%s_else_%d\n", cond_reg, ctx, label_id);
-            unlock_register(cond_reg);
+            unlock_register (cond_reg);
             
             generate_block (node -> as.if_stmt.if_body);
             emit_asm ("JMP __%s_end_if_%d\n", ctx, label_id);
             
             emit_asm ("__%s_else_%d:\n", ctx, label_id);
-            if (node -> as.if_stmt.else_body) generate_block (node -> as.if_stmt.else_body);
+            if (node -> as.if_stmt.else_body)
+                generate_block (node -> as.if_stmt.else_body);
             emit_asm ("__%s_end_if_%d:\n", ctx, label_id);
             break;
         }
 
-		case NODE_FUNCTION_DEF: {
-			const char* func_name = node->as.function_def.name;
-			push_function_context(func_name);
+        case NODE_FUNCTION_DEF: {
+            const char *func_name  = node->as.function_def.name;
+            push_function_context (func_name);
 
-			// 1. Cache the parameter names for this function scope
-			current_param_count = 0;
-			ASTNode *p = node->as.function_def.params; // Traverses the parameter list
-			while (p != NULL && current_param_count < 32) {
-				if (p->type == NODE_IDENTIFIER) {
-					current_params[current_param_count++] = p->as.id.name;
-				}
-				p = p->next;
-			}
+            // 1. Cache the parameter names for this function scope
+            current_param_count = 0;
+            ASTNode *p = node->as.function_def.params; // Traverses the parameter list
+            while (p != NULL && current_param_count < 32) {
+                if (p->type == NODE_IDENTIFIER) {
+                    current_params[current_param_count++] = p->as.id.name;
+                }
+                p = p -> next;
+            }
 
-			// Emit function prologue
-			emit_asm("__function_%s:\n", func_name);
-            int needs_stack = check_needs_stack(node -> as.function_def.body);
+            // Emit function prologue
+            emit_asm("__function_%s:\n", func_name);
+            int needs_stack = check_needs_stack (node -> as.function_def.body);
             if (needs_stack) {
                 emit_asm ("PUSH BP\n");
                 emit_asm ("MOV BP, SP\n");
@@ -326,22 +344,22 @@ void generate_asm (ASTNode *node, int dest_reg) {
                 emit_asm ("    ;; --- Frame pointer omitted (Leaf Function Optimization) ---\n");
             }
 
-			// 2. Generate the internal body code
-			generate_asm(node->as.function_def.body, 0);
+            // 2. Generate the internal body code
+            generate_asm (node->as.function_def.body, 0);
 
-			// Emit function epilogue
-			emit_asm("__%s_return:\n", func_name);
+            // Emit function epilogue
+            emit_asm("__%s_return:\n", func_name);
             if (needs_stack) {
                 emit_asm ("MOV SP, BP\n");
                 emit_asm ("POP BP\n");
             }
-			emit_asm("    RET\n");
+            emit_asm("    RET\n");
 
-			// 3. Wipe the parameter cache when exiting function scope
-			current_param_count = 0;
-			pop_function_context();
-			break;
-		}
+            // 3. Wipe the parameter cache when exiting function scope
+            current_param_count = 0;
+            pop_function_context();
+            break;
+        }
 
         case NODE_FUNCTION_CALL: {
             // 1. HARDWARE INTRINSIC INTERCEPT
@@ -368,24 +386,24 @@ void generate_asm (ASTNode *node, int dest_reg) {
                             }
                             
                             if (is_preset) {
-                                emit_asm("    MOV   R%d, %u ; Preset color '%s'\n", color_reg, color_hex, color_name);
+                                emit_asm("MOV R%d, %u ; Preset color '%s'\n", color_reg, color_hex, color_name);
                             } else {
-                                generate_asm(arg, color_reg);
+                                generate_asm (arg, color_reg);
                             }
                         } else {
-                            generate_asm(arg, color_reg);
+                            generate_asm (arg, color_reg);
                         }
-                        emit_asm("    OUT   GPU_ClearColor, R%d\n", color_reg);
-                        unlock_register(color_reg);
+                        emit_asm("OUT GPU_ClearColor, R%d\n", color_reg);
+                        unlock_register (color_reg);
                     }
                     
-                    int cmd_reg = allocate_register();
-                    emit_asm("    MOV   R%d, 1 ; GPU Command Code for Clear Screen\n", cmd_reg);
-                    emit_asm("    OUT   GPU_Command, R%d\n", cmd_reg);
-                    unlock_register(cmd_reg);
+                    int cmd_reg = allocate_register ();
+                    emit_asm("MOV R%d, 1 ; GPU Command Code for Clear Screen\n", cmd_reg);
+                    emit_asm("OUT GPU_Command, R%d\n", cmd_reg);
+                    unlock_register (cmd_reg);
                     
                     if (dest_reg != 0) {
-                        emit_asm("    MOV   R%d, 0 ; return nil\n", dest_reg);
+                        emit_asm ("MOV R%d, 0 ; return nil\n", dest_reg);
                     }
                     return; // Terminate early
                 }
@@ -455,16 +473,20 @@ void generate_asm (ASTNode *node, int dest_reg) {
         }
 
         case NODE_MULTIPLE_ASSIGNMENT: {
-            int temp_regs[NUM_GPRS]; 
-            int val_count = 0;
+            int  temp_regs[NUM_GPRS]; 
+            int  val_count      = 0;
             
             // 1. Count total targets so we know how many returns to unpack
-            int targets_total = 0;
-            ASTNode* tgt = node->as.mult_assign.targets_head;
-            while(tgt) { targets_total++; tgt = tgt->next; }
+            int  targets_total  = 0;
+            ASTNode *tgt        = node -> as.mult_assign.targets_head;
+            while (tgt)
+            {
+                targets_total   = targets_total + 1;
+                tgt             = tgt -> next;
+            }
 
             // 2. Evaluate right side values safely into temporary registers
-            ASTNode* current_val = node->as.mult_assign.values_head;
+            ASTNode *current_val  = node -> as.mult_assign.values_head;
             while (current_val != NULL && val_count < NUM_GPRS) {
                 
                 // If this is the LAST expression, and it is a function call, expand it!
@@ -472,7 +494,7 @@ void generate_asm (ASTNode *node, int dest_reg) {
                     emit_asm("    ;; --- Expanding multiple returns from function call ---\n");
                     
                     // Call the function directly (dest_reg = 0 leaves results in R0, R2, R3)
-                    generate_asm(current_val, 0); 
+                    generate_asm (current_val, 0); 
                     
                     int needed_returns = targets_total - val_count;
                     
@@ -492,7 +514,7 @@ void generate_asm (ASTNode *node, int dest_reg) {
                 } else {
                     // Standard evaluation (automatically handles non-last function calls too!)
                     temp_regs[val_count] = allocate_register();
-                    generate_asm(current_val, temp_regs[val_count]);
+                    generate_asm (current_val, temp_regs[val_count]);
                     val_count++;
                 }
                 current_val = current_val->next;
@@ -724,32 +746,32 @@ void generate_asm (ASTNode *node, int dest_reg) {
             break;
         }
 
-		case NODE_IDENTIFIER: {
-			// Step A: Check if this identifier is a local function parameter
-			int param_index = -1;
-			for (int i = 0; i < current_param_count; i++) {
-				if (strcmp(node->as.id.name, current_params[i]) == 0) {
-					param_index = i;
-					break;
-				}
-			}
+        case NODE_IDENTIFIER: {
+            // Step A: Check if this identifier is a local function parameter
+            int param_index = -1;
+            for (int i = 0; i < current_param_count; i++) {
+                if (strcmp(node->as.id.name, current_params[i]) == 0) {
+                    param_index = i;
+                    break;
+                }
+            }
 
-			if (param_index != -1) {
-				// It's a parameter! Calculate its offset relative to BP.
-				// Param 0 is at [BP + 2], Param 1 is at [BP + 3], etc.
-				int offset = 2 + param_index;
-				emit_asm("    MOV   R%d, [BP + %d]  ; Load parameter: %s\n", dest_reg, offset, node->as.id.name);
-			} else {
-				// Step B: Standard Global Variable
-				// Explicitly call this to guarantee it registers in the RAM map!
-				//int addr = get_global_variable_address(node->as.id.name);
-				get_global_variable_address(node->as.id.name);
-				const char* prefix = get_global_prefix(node->as.id.name);
-				emit_asm("    MOV   R%d, [%s%s]\n", dest_reg, prefix, node->as.id.name);
-			}
-			break;
-		}
-							  /*
+            if (param_index != -1) {
+                // It's a parameter! Calculate its offset relative to BP.
+                // Param 0 is at [BP + 2], Param 1 is at [BP + 3], etc.
+                int offset = 2 + param_index;
+                emit_asm("MOV R%d, [BP + %d]  ; Load parameter: %s\n", dest_reg, offset, node->as.id.name);
+            } else {
+                // Step B: Standard Global Variable
+                // Explicitly call this to guarantee it registers in the RAM map!
+                //int addr = get_global_variable_address(node->as.id.name);
+                get_global_variable_address(node->as.id.name);
+                const char* prefix = get_global_prefix(node->as.id.name);
+                emit_asm("MOV R%d, [%s%s]\n", dest_reg, prefix, node->as.id.name);
+            }
+            break;
+        }
+                              /*
         case NODE_IDENTIFIER: {
             if (strcmp (node -> as.id.name, "self") == 0) {
                 emit_asm ("    ;; --- Loading local parameter 'self' ---\n");
@@ -909,13 +931,13 @@ void  generate_program (ASTNode *head)
     emit_asm ("CALL __function_main ; Then hand control to the user\n");
     emit_asm ("HLT ; Halt CPU when main finishes\n\n");
 
-	emit_asm ("\n;; --- Function Definitions ---\n");
+    emit_asm ("\n;; --- Function Definitions ---\n");
     current         = head;
     while (current != NULL) {
         // Case A: Standalone function definition (if any remain)
         if (current -> type == NODE_FUNCTION_DEF) {
             generate_asm (current, 0);
-			emit_asm ("\n");
+            emit_asm ("\n");
         }
         // Case B: Function wrapped inside an assignment (First-Class Functions)
         else if (current -> type == NODE_MULTIPLE_ASSIGNMENT) {

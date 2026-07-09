@@ -68,10 +68,11 @@ typedef struct astnode {
             struct astnode* body;
         } while_loop;
 
-        struct {
-            struct astnode* condition;
-            struct astnode* if_body;
-            struct astnode* else_body; // Can be NULL
+        struct
+		{
+            struct astnode *condition;
+            struct astnode *if_body;
+            struct astnode *else_body; // Can be NULL
         } if_stmt;
 
 		struct {
@@ -96,13 +97,13 @@ typedef struct astnode {
         } return_stmt;
 
         struct {
-            struct astnode* targets_head; // Linked list of variables to assign to
-            struct astnode* values_head;  // Linked list of expressions to assign
+            struct astnode *targets_head; // Linked list of variables to assign to
+            struct astnode *values_head;  // Linked list of expressions to assign
         } mult_assign;
 
         struct {
-            struct astnode* left;
-            struct astnode* right;
+            struct astnode *left;
+            struct astnode *right;
             Operator operator;
         } binary;
 

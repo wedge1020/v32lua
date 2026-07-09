@@ -23,4 +23,4 @@ all: $(ASM_OUTS)
 
 # Clean target drops all generated assembly test files
 clean:
-	rm -f *.asm
+	rm -f *.asm *.vbin

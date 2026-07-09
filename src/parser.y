@@ -55,26 +55,29 @@ char* mangle_method_name(const char* table_name, const char* method_name);
 %%
 
 program:
-    statement_list {
+    statement_list
+    {
         generate_program($1); // This automatically orchestrates globals, functions, and layout
     }
     ;
 
 statement_list:
-    /* empty */ { 
-        $$ = NULL;
-    }
-    | statement_list statement { 
-        if ($1 == NULL) {
-            $$ = $2;
-        } else {
-            // Chain the new statement to the end of the existing list
-            ASTNode* head = $1;
-            while(head->next != NULL) {
-                head = head->next;
+    statement { $$                  = $1; }
+    | statement_list statement
+    {
+        if ($1                     == NULL)
+        { 
+            $$                      = $2; 
+        }
+        else
+        {
+            ASTNode *current        = $1;
+            while (current -> next != NULL)
+            {
+                current             = current -> next;
             }
-            head->next = $2;
-            $$ = $1;
+            current -> next         = $2; // Link the IF statement to the end
+            $$                      = $1;
         }
     }
     ;
@@ -122,18 +125,30 @@ statement:
     | function_call              { $$ = $1; }
     | TOKEN_WHILE expr statement_list TOKEN_END { /* your while code */ }
     | TOKEN_BREAK                { /* your break code */ }
-    | TOKEN_IF expr TOKEN_THEN statement_list else_branch TOKEN_END { /* your if code */ }
+    | TOKEN_IF expr TOKEN_THEN statement_list else_branch TOKEN_END { 
+            $$                          = make_node (NODE_IF);
+            $$ -> as.if_stmt.condition  = $2;
+            $$ -> as.if_stmt.if_body    = $4;
+            $$ -> as.if_stmt.else_body  = $5;
+			fprintf (stderr, "[parser] IF\n");
+    }
     | function_def               { $$ = $1; }
     | return_stmt                { $$ = $1; }
-	| expr '.' TOKEN_IDENTIFIER '=' expr {
+    | expr '.' TOKEN_IDENTIFIER '=' expr {
         $$ = make_node(NODE_TABLE_SET);
         $$->as.table_set.table_expr = $1;
         $$->as.table_set.key = make_node_string($3);
         $$->as.table_set.value = $5;
     }
     | TOKEN_FUNCTION TOKEN_IDENTIFIER ':' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END { /* your table method code */ }
-    | TOKEN_ASM '(' TOKEN_STRING ')'     { /* asm code */ }
-    | TOKEN_RAWASM '(' TOKEN_STRING ')'  { /* rawasm code */ }
+    | TOKEN_ASM '(' TOKEN_STRING ')' { 
+        $$ = make_node(NODE_ASM);
+        $$->as.inline_asm.code = $3;
+    }
+    | TOKEN_RAWASM '(' TOKEN_STRING ')' { 
+        $$ = make_node(NODE_RAWASM);
+        $$->as.inline_asm.code = $3;
+    }
     | TOKEN_COMMENT_LINE {
         $$ = make_node(NODE_COMMENT_LINE);
         $$->as.string_val.value = $1;
@@ -145,10 +160,15 @@ statement:
     ;
 
 else_branch:
-    /* empty */                  { $$ = NULL; }
-    | TOKEN_ELSE statement_list  { $$ = $2; }
-    | TOKEN_ELSEIF expr TOKEN_THEN statement_list else_branch { 
-        /* your elseif code */ 
+    /* empty */                  { $$  = NULL; }
+    | TOKEN_ELSE statement_list  { $$  = $2; }
+    | TOKEN_ELSEIF expr TOKEN_THEN statement_list else_branch
+    {
+        // Treat elseif exactly like a nested IF statement assigned to the else_body
+        $$                             = make_node(NODE_IF);
+        $$ -> as.if_stmt.condition     = $2;
+        $$ -> as.if_stmt.if_body       = $4;
+        $$ -> as.if_stmt.else_body     = $5;
     }
     ;
 
@@ -195,14 +215,14 @@ assignment:
     ;
 
 function_def:
-	/*
+    /*
     TOKEN_FUNCTION TOKEN_IDENTIFIER '(' parameter_list ')' stanement_list TOKEN_END {
         $$ = make_node(NODE_FUNCTION_DEF);
         $$->as.function_def.name = strdup($2);
         $$->as.function_def.params = $4;
         $$->as.function_def.body = $6;
     }*/
-	/* Standard Function: function my_func() ... end */
+    /* Standard Function: function my_func() ... end */
     TOKEN_FUNCTION TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
         // 1. Build the structural function definition
         ASTNode* func_def = make_node(NODE_FUNCTION_DEF);
@@ -223,15 +243,6 @@ function_def:
         func_def->next = assign;
         $$ = func_def;
     }
-    /*
-	| TOKEN_FUNCTION TOKEN_IDENTIFIER '(' ')' statement_list TOKEN_END
-	{
-		$$ = make_node(NODE_FUNCTION_DEF);
-		$$->as.function_def.name = $2;
-		$$->as.function_def.body = $5;
-		$$->as.function_def.params = NULL;
-		mark_global_as_function($2);
-	}*/
     |
     /* Table Function Desugaring: function my_table.my_func() ... end */
     TOKEN_FUNCTION TOKEN_IDENTIFIER '.' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
