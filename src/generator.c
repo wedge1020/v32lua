@@ -300,7 +300,7 @@ void generate_asm (ASTNode *node, int dest_reg) {
 
         case NODE_FUNCTION_DEF: {
             push_function_context (node -> as.function_def.name);
-            emit_asm ("_%s:\n", node -> as.function_def.name);
+            emit_asm ("__function_%s:\n", node -> as.function_def.name);
             
             int needs_stack = check_needs_stack(node -> as.function_def.body);
             if (needs_stack) {
@@ -404,7 +404,7 @@ void generate_asm (ASTNode *node, int dest_reg) {
 
         case NODE_FUNCTION_POINTER: {
             emit_asm ("  ; Load address of the mangled function\n");
-            emit_asm ("    MOV   R%d, _%s\n", dest_reg, node -> as.func_ptr.mangled_name);
+            emit_asm ("    MOV   R%d, __function_%s\n", dest_reg, node -> as.func_ptr.mangled_name);
             break;
         }
 
@@ -704,7 +704,7 @@ void generate_asm (ASTNode *node, int dest_reg) {
                 emit_asm ("  ; --- Loading local parameter 'self' ---\n");
                 emit_asm ("    MOV   R%d, [BP+2]\n", dest_reg); 
             } else {
-                emit_asm ("    MOV   R%d, [var_%s]\n", dest_reg, node -> as.id.name);
+				emit_asm("MOV R%d, [%s%s]\n", dest_reg, get_global_prefix(node->as.id.name), node->as.id.name);
             }
             break;
         }
@@ -808,6 +808,14 @@ void generate_functions (ASTNode *node) {
 
 void  generate_program (ASTNode *head)
 {
+    // --- 1. PRE-PASS: Mark all variables that are functions ---
+    ASTNode* current = head;
+    while (current != NULL) {
+        if (current->type == NODE_FUNCTION_DEF) {
+            mark_global_as_function(current->as.function_def.name);
+        }
+        current = current->next;
+    }
     // 1. Open a temporary buffer for the generation pass
     current_out_stream = tmpfile();
     if (!current_out_stream)
@@ -845,7 +853,7 @@ void  generate_program (ASTNode *head)
     if (has_globals) {
         emit_asm ("CALL __init_globals  ; Run top-level setups first\n");
     }
-    emit_asm ("CALL _main ; Then hand control to the user\n");
+    emit_asm ("CALL __function_main ; Then hand control to the user\n");
     emit_asm ("HLT ; Halt CPU when main finishes\n\n");
 
     emit_asm ("\n;; --- Function Definitions ---\n");

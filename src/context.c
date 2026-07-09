@@ -1,3 +1,27 @@
+void mark_global_as_function(const char* name) {
+    // Ensure the variable is allocated an address first
+    get_global_variable_address(name);
+    
+    GlobalVarNode* current = globals_head;
+    while (current != NULL) {
+        if (strcmp(current->name, name) == 0) {
+            current->is_function = 1;
+            return;
+        }
+        current = current->next;
+    }
+}
+
+const char* get_global_prefix(const char* name) {
+    GlobalVarNode* current = globals_head;
+    while (current != NULL) {
+        if (strcmp(current->name, name) == 0) {
+            return current->is_function ? "func_" : "var_";
+        }
+        current = current->next;
+    }
+    return "var_"; // Default fallback for safety
+}
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -188,6 +212,7 @@ int current_loop(void) {
 typedef struct GlobalVarNode {
     char* name;
     int ram_address;
+    int is_function;
     struct GlobalVarNode* next;
 } GlobalVarNode;
 
@@ -218,11 +243,13 @@ int get_global_variable_address(const char* name) {
 }
 
 void emit_variable_map(void) {
-    // Assuming 'globals_head' is your linked list of variables in context.c
     GlobalVarNode *current = globals_head;
     while (current != NULL) {
-        // Emit them as constants exactly like heap_pointer
-        fprintf(stdout, "%%define var_%s %d\n", current->name, current->ram_address);
+        // Use get_global_prefix instead of a hardcoded "var_"
+        fprintf(stdout, "%%define %s%s %d\n", 
+                get_global_prefix(current->name), 
+                current->name, 
+                current->ram_address);
         current = current->next;
     }
 }

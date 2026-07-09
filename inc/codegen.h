@@ -161,4 +161,7 @@ int current_loop(void);
 int get_global_variable_address(const char* name);
 void emit_variable_map(void);
 
+void mark_global_as_function(const char* name);
+const char* get_global_prefix(const char* name);
+
 #endif // CODEGEN_H

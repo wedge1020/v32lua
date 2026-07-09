@@ -194,12 +194,26 @@ assignment:
     ;
 
 function_def:
-    /* Standard Function: function my_func() ... end */
+	/* Standard Function: function my_func() ... end */
     TOKEN_FUNCTION TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
-        $$ = make_node(NODE_FUNCTION_DEF);
-        $$->as.function_def.name = $2;
-        $$->as.function_def.params = $4;
-        $$->as.function_def.body = $6;
+        // 1. Build the structural function definition
+        ASTNode* func_def = make_node(NODE_FUNCTION_DEF);
+        func_def->as.function_def.name = strdup($2);
+        func_def->as.function_def.params = $4;
+        func_def->as.function_def.body = $6;
+
+        // 2. Instantiate a function pointer node for the address
+        ASTNode* func_ptr = make_node(NODE_FUNCTION_POINTER);
+        func_ptr->as.func_ptr.mangled_name = strdup($2);
+
+        // 3. Assign the pointer to the global variable (e.g., var_add)
+        ASTNode* assign = make_node(NODE_MULTIPLE_ASSIGNMENT);
+        assign->as.mult_assign.targets_head = make_node_ident($2);
+        assign->as.mult_assign.values_head = func_ptr;
+
+        // 4. Chain them sequentially for the global init vector
+        func_def->next = assign;
+        $$ = func_def;
     }
     |
     /* Table Function Desugaring: function my_table.my_func() ... end */
