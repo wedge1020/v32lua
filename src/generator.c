@@ -63,6 +63,76 @@ static void emit_asm(const char* format, ...) {
     }
 }
 
+// Recursively scans a block of AST nodes to determine if it performs any operations
+// that require an explicit stack frame layout (Leaf Function Optimization).
+static int check_needs_stack(ASTNode *node) {
+    if (!node) return 0;
+
+    switch (node->type) {
+        // Core operations that invoke internal subroutines, alter SP, or manipulate context
+        case NODE_FUNCTION_CALL:
+        case NODE_CONCAT:
+        case NODE_TABLE_SET:
+        case NODE_TABLE_GET:
+        case NODE_ASM:
+        case NODE_RAWASM:
+            return 1;
+
+        case NODE_IDENTIFIER:
+            // OOP method invocations that read implicit 'self' parameters depend on [BP+2]
+            if (node->as.id.name && strcmp(node->as.id.name, "self") == 0) {
+                return 1;
+            }
+            break;
+
+        case NODE_RETURN: {
+            int ret_count = 0;
+            ASTNode *expr = node->as.return_stmt.expressions_head;
+            while (expr) {
+                ret_count++;
+                if (check_needs_stack(expr)) return 1;
+                expr = expr->next;
+            }
+            // Vircon32 layout spills return parameters 4+ directly onto stack offsets via BP
+            if (ret_count > 3) return 1;
+            break;
+        }
+
+        case NODE_WHILE:
+            if (check_needs_stack(node->as.while_loop.condition)) return 1;
+            if (check_needs_stack(node->as.while_loop.body)) return 1;
+            break;
+
+        case NODE_IF:
+            if (check_needs_stack(node->as.if_stmt.condition)) return 1;
+            if (check_needs_stack(node->as.if_stmt.if_body)) return 1;
+            if (check_needs_stack(node->as.if_stmt.else_body)) return 1;
+            break;
+
+        case NODE_MULTIPLE_ASSIGNMENT:
+            if (check_needs_stack(node->as.mult_assign.right_side_call)) return 1;
+            if (check_needs_stack(node->as.mult_assign.targets_head)) return 1;
+            break;
+
+        case NODE_ADD:
+        case NODE_SUB:
+        case NODE_MUL:
+        case NODE_DIV:
+        case NODE_AND:
+        case NODE_OR:
+        case NODE_RELATIONAL:
+            if (check_needs_stack(node->as.binary.left)) return 1;
+            if (check_needs_stack(node->as.binary.right)) return 1;
+            break;
+
+        default:
+            break;
+    }
+
+    // Traverse remaining sequential sibling statements in this block
+    return check_needs_stack(node->next);
+}
+
 void generate_block (ASTNode *node) {
     while (node != NULL) {
         int temp_reg = allocate_register();
@@ -161,14 +231,23 @@ void generate_asm (ASTNode *node, int dest_reg) {
         case NODE_FUNCTION_DEF: {
             push_function_context (node -> as.function_def.name);
             emit_asm ("_%s:\n", node -> as.function_def.name);
-            emit_asm ("    PUSH  BP\n");
-            emit_asm ("    MOV   BP, SP\n");
+            
+            // Run AST pre-scan to determine if stack activation record can be safely omitted
+            int needs_stack = check_needs_stack(node -> as.function_def.body);
+            if (needs_stack) {
+                emit_asm ("    PUSH  BP\n");
+                emit_asm ("    MOV   BP, SP\n");
+            } else {
+                emit_asm ("  ; --- Frame pointer omitted (Leaf Function Optimization) ---\n");
+            }
             
             generate_block (node -> as.function_def.body);
             
             emit_asm ("__%s_return:\n", get_current_function_name ());
-            emit_asm ("    MOV   SP, BP\n");
-            emit_asm ("    POP   BP\n");
+            if (needs_stack) {
+                emit_asm ("    MOV   SP, BP\n");
+                emit_asm ("    POP   BP\n");
+            }
             emit_asm ("  RET\n");
             pop_function_context ();
             break;
@@ -245,8 +324,7 @@ void generate_asm (ASTNode *node, int dest_reg) {
         case NODE_MULTIPLE_ASSIGNMENT: {
             generate_asm (node -> as.mult_assign.right_side_call, dest_reg);
             if (node -> as.mult_assign.targets_head && node -> as.mult_assign.targets_head -> type == NODE_IDENTIFIER) {
-                // We call get_global_variable_address to ensure the variable is registered in RAM, 
-                // but we emit the [__var_NAME] string label for consistency.
+                // Ensure global variable tracker structures map out RAM allocation offsets
                 get_global_variable_address (node -> as.mult_assign.targets_head -> as.id.name);
                 emit_asm ("    MOV   [__var_%s], R%d ; Assigning to RAM-based variable\n", node -> as.mult_assign.targets_head -> as.id.name, dest_reg);
             }
@@ -438,14 +516,14 @@ void generate_asm (ASTNode *node, int dest_reg) {
         case NODE_ASM: {
             emit_asm ("  ; --- Begin Inline ASM Bubble (existing register states preserved) ---\n");
 
-            int sp_snap = get_global_variable_address ("__asm_snap_sp");
-            int bp_snap = get_global_variable_address ("__asm_snap_bp");
+            // Cleaned up unused variable declarations while keeping memory maps safe
+            get_global_variable_address ("__asm_snap_sp");
+            get_global_variable_address ("__asm_snap_bp");
             emit_asm ("    MOV   [__var___asm_snap_sp], SP\n");
             emit_asm ("    MOV   [__var___asm_snap_bp], BP\n");
 
             for (int i = 0; i < NUM_GPRS; i++) {
                 if (is_register_locked (i)) {
-                    // Make sure the ram addresses are reserved safely in context
                     char snap_name[32];
                     sprintf (snap_name, "__asm_snap_r%d", i);
                     get_global_variable_address (snap_name);
