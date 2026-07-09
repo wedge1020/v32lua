@@ -4,6 +4,10 @@
 #include <stdarg.h>
 #include "codegen.h"
 
+// --- Current Function Parameter Tracking ---
+static const char* current_params[32];
+static int current_param_count = 0;
+
 // --- Output Routing ---
 static FILE* current_out_stream = NULL;
 
@@ -298,10 +302,22 @@ void generate_asm (ASTNode *node, int dest_reg) {
             break;
         }
 
-        case NODE_FUNCTION_DEF: {
-            push_function_context (node -> as.function_def.name);
-            emit_asm ("__function_%s:\n", node -> as.function_def.name);
-            
+		case NODE_FUNCTION_DEF: {
+			const char* func_name = node->as.function_def.name;
+			push_function_context(func_name);
+
+			// 1. Cache the parameter names for this function scope
+			current_param_count = 0;
+			ASTNode *p = node->as.function_def.params; // Traverses the parameter list
+			while (p != NULL && current_param_count < 32) {
+				if (p->type == NODE_IDENTIFIER) {
+					current_params[current_param_count++] = p->as.id.name;
+				}
+				p = p->next;
+			}
+
+			// Emit function prologue
+			emit_asm("__function_%s:\n", func_name);
             int needs_stack = check_needs_stack(node -> as.function_def.body);
             if (needs_stack) {
                 emit_asm ("PUSH BP\n");
@@ -309,18 +325,23 @@ void generate_asm (ASTNode *node, int dest_reg) {
             } else {
                 emit_asm ("    ;; --- Frame pointer omitted (Leaf Function Optimization) ---\n");
             }
-            
-            generate_block (node -> as.function_def.body);
-            
-            emit_asm ("__%s_return:\n", get_current_function_name ());
+
+			// 2. Generate the internal body code
+			generate_asm(node->as.function_def.body, 0);
+
+			// Emit function epilogue
+			emit_asm("__%s_return:\n", func_name);
             if (needs_stack) {
                 emit_asm ("MOV SP, BP\n");
                 emit_asm ("POP BP\n");
             }
-            emit_asm ("RET\n");
-            pop_function_context ();
-            break;
-        }
+			emit_asm("    RET\n");
+
+			// 3. Wipe the parameter cache when exiting function scope
+			current_param_count = 0;
+			pop_function_context();
+			break;
+		}
 
         case NODE_FUNCTION_CALL: {
             // 1. HARDWARE INTRINSIC INTERCEPT
@@ -703,6 +724,32 @@ void generate_asm (ASTNode *node, int dest_reg) {
             break;
         }
 
+		case NODE_IDENTIFIER: {
+			// Step A: Check if this identifier is a local function parameter
+			int param_index = -1;
+			for (int i = 0; i < current_param_count; i++) {
+				if (strcmp(node->as.id.name, current_params[i]) == 0) {
+					param_index = i;
+					break;
+				}
+			}
+
+			if (param_index != -1) {
+				// It's a parameter! Calculate its offset relative to BP.
+				// Param 0 is at [BP + 2], Param 1 is at [BP + 3], etc.
+				int offset = 2 + param_index;
+				emit_asm("    MOV   R%d, [BP + %d]  ; Load parameter: %s\n", dest_reg, offset, node->as.id.name);
+			} else {
+				// Step B: Standard Global Variable
+				// Explicitly call this to guarantee it registers in the RAM map!
+				//int addr = get_global_variable_address(node->as.id.name);
+				get_global_variable_address(node->as.id.name);
+				const char* prefix = get_global_prefix(node->as.id.name);
+				emit_asm("    MOV   R%d, [%s%s]\n", dest_reg, prefix, node->as.id.name);
+			}
+			break;
+		}
+							  /*
         case NODE_IDENTIFIER: {
             if (strcmp (node -> as.id.name, "self") == 0) {
                 emit_asm ("    ;; --- Loading local parameter 'self' ---\n");
@@ -711,7 +758,7 @@ void generate_asm (ASTNode *node, int dest_reg) {
                 emit_asm("MOV R%d, [%s%s]\n", dest_reg, get_global_prefix (node->as.id.name), node->as.id.name);
             }
             break;
-        }
+        }*/
             
         case NODE_NUMBER:
             emit_asm ("MOV R%d, %f\n", dest_reg, node -> as.number.val);
@@ -862,11 +909,25 @@ void  generate_program (ASTNode *head)
     emit_asm ("CALL __function_main ; Then hand control to the user\n");
     emit_asm ("HLT ; Halt CPU when main finishes\n\n");
 
-    emit_asm ("\n;; --- Function Definitions ---\n");
+	emit_asm ("\n;; --- Function Definitions ---\n");
+    current         = head;
     while (current != NULL) {
+        // Case A: Standalone function definition (if any remain)
         if (current -> type == NODE_FUNCTION_DEF) {
             generate_asm (current, 0);
-            emit_asm ("\n");
+			emit_asm ("\n");
+        }
+        // Case B: Function wrapped inside an assignment (First-Class Functions)
+        else if (current -> type == NODE_MULTIPLE_ASSIGNMENT) {
+            // Unpack the right-hand side values of the assignment
+            //ASTNode *val = current->as.mult_assign.values;
+            ASTNode *val = current->as.mult_assign.targets_head;
+            while (val != NULL) {
+                if (val->type == NODE_FUNCTION_DEF) {
+                    generate_asm (val, 0); // Emit the function body with dest_reg = 0
+                }
+                val = val->next;
+            }
         }
         current = current -> next;
     }

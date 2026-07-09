@@ -84,10 +84,11 @@ parameter_list:
         $$ = NULL;
     }
     | TOKEN_IDENTIFIER { 
-        $$ = make_node(NODE_IDENTIFIER);
+        $$ = make_node_ident($1); 
     }
     | parameter_list ',' TOKEN_IDENTIFIER {
-        ASTNode* new_node = make_node(NODE_IDENTIFIER);
+        ASTNode* new_node = make_node_ident($3);
+        
         // Chain the new parameter to the end of the list
         ASTNode* current = $1;
         while (current->next != NULL) {
@@ -194,6 +195,13 @@ assignment:
     ;
 
 function_def:
+	/*
+    TOKEN_FUNCTION TOKEN_IDENTIFIER '(' parameter_list ')' stanement_list TOKEN_END {
+        $$ = make_node(NODE_FUNCTION_DEF);
+        $$->as.function_def.name = strdup($2);
+        $$->as.function_def.params = $4;
+        $$->as.function_def.body = $6;
+    }*/
 	/* Standard Function: function my_func() ... end */
     TOKEN_FUNCTION TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
         // 1. Build the structural function definition
@@ -215,6 +223,15 @@ function_def:
         func_def->next = assign;
         $$ = func_def;
     }
+    /*
+	| TOKEN_FUNCTION TOKEN_IDENTIFIER '(' ')' statement_list TOKEN_END
+	{
+		$$ = make_node(NODE_FUNCTION_DEF);
+		$$->as.function_def.name = $2;
+		$$->as.function_def.body = $5;
+		$$->as.function_def.params = NULL;
+		mark_global_as_function($2);
+	}*/
     |
     /* Table Function Desugaring: function my_table.my_func() ... end */
     TOKEN_FUNCTION TOKEN_IDENTIFIER '.' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
