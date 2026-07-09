@@ -4,11 +4,28 @@
 #include <stdarg.h>
 #include "codegen.h"
 
-// --- Peephole Optimizer State ---
-static char last_emitted_instruction[256] = "";
+// --- Columnar & Peephole Optimizer State ---
+static char last_emitted_inst[32]   = "";
+static char last_emitted_dest[128] = "";
+static char last_emitted_src[128]  = "";
 
-// A smart wrapper around fprintf that intercepts assembly before it is printed
-// to eliminate redundant instructions.
+// Helper to strip leading and trailing whitespace completely
+static void trim_spaces(char *str) {
+    int len = strlen(str);
+    while (len > 0 && (str[len-1] == ' ' || str[len-1] == '\t' || str[len-1] == '\r' || str[len-1] == '\n')) {
+        str[len-1] = '\0';
+        len--;
+    }
+    int start = 0;
+    while (str[start] == ' ' || str[start] == '\t') {
+        start++;
+    }
+    if (start > 0) {
+        memmove(str, str + start, strlen(str + start) + 1);
+    }
+}
+
+// Intercepts, structures, optimizes, and formats all emitted assembly instructions
 static void emit_asm(const char* format, ...) {
     char current_instruction[256];
     va_list args;
@@ -17,49 +34,113 @@ static void emit_asm(const char* format, ...) {
     vsprintf(current_instruction, format, args);
     va_end(args);
 
-    // We only attempt to optimize lines that look like standard instructions 
-    // (starting with spaces, avoiding labels and comments)
-    if (strncmp(current_instruction, "    MOV", 7) == 0) {
-        char dest[128] = {0}, src[128] = {0};
+    char *p = current_instruction;
+    while (*p == ' ' || *p == '\t') p++;
+
+    // EXCLUSION RULE: If it's a blank line, a full-line structural comment, or a label, print as-is
+    if (*p == '\0' || *p == '\r' || *p == '\n' || *p == ';' || strchr(p, ':') != NULL) {
+        fprintf(stdout, "%s", current_instruction);
         
-        // Parse the destination and source from the current MOV instruction
-        if (sscanf(current_instruction, "    MOV   %[^,], %s", dest, src) == 2) {
-            
-            // Clean up any trailing newlines from parsing
-            src[strcspn(src, "\r\n")] = 0;
-            dest[strcspn(dest, "\r\n")] = 0;
+        // Reset optimizer history across structural boundaries (labels / empty lines)
+        if (strchr(p, ':') != NULL || *p == '\0' || *p == '\r' || *p == '\n') {
+            last_emitted_inst[0] = '\0';
+            last_emitted_dest[0] = '\0';
+            last_emitted_src[0] = '\0';
+        }
+        return;
+    }
+
+    // --- Core Instruction Component Parsing ---
+    char inst[32] = {0};
+    char operands[256] = {0};
+    char comment[256] = {0};
+
+    // 1. Extract Mnemonic
+    int inst_len = 0;
+    while (*p && *p != ' ' && *p != '\t' && *p != '\r' && *p != '\n' && *p != ';') {
+        if (inst_len < 31) inst[inst_len++] = *p;
+        p++;
+    }
+    inst[inst_len] = '\0';
+
+    while (*p == ' ' || *p == '\t') p++;
+
+    // 2. Extract Operands
+    int op_len = 0;
+    while (*p && *p != ';' && *p != '\r' && *p != '\n') {
+        if (op_len < 255) operands[op_len++] = *p;
+        p++;
+    }
+    operands[op_len] = '\0';
+    trim_spaces(operands);
+
+    // 3. Extract Trailing Comment
+    if (*p == ';') {
+        p++;
+        while (*p == ' ' || *p == '\t') p++; // Clean up extra spaces inside the comment
+        int c_len = 0;
+        while (*p && *p != '\r' && *p != '\n') {
+            if (c_len < 255) comment[c_len++] = *p;
+            p++;
+        }
+        comment[c_len] = '\0';
+        trim_spaces(comment);
+    }
+
+    // --- Enhanced Peephole Optimizer Logic ---
+    if (strcmp(inst, "MOV") == 0) {
+        char dest[128] = {0}, src[128] = {0};
+        if (sscanf(operands, "%[^,], %[^\n]", dest, src) == 2) {
+            trim_spaces(dest);
+            trim_spaces(src);
 
             // PEEPHOLE RULE 1: Redundant Register Move (e.g., MOV R0, R0)
             if (strcmp(dest, src) == 0) {
-                fprintf(stdout, "    ; Peephole optimized out: %s", current_instruction);
-                return; // Skip emitting
+                fprintf(stdout, "    ; Peephole optimized out: %s %s\n", inst, operands);
+                return;
             }
 
             // PEEPHOLE RULE 2: Redundant Load/Store Reversal
-            char last_dest[128] = {0}, last_src[128] = {0};
-            if (sscanf(last_emitted_instruction, "    MOV   %[^,], %s", last_dest, last_src) == 2) {
-                last_src[strcspn(last_src, "\r\n")] = 0;
-                last_dest[strcspn(last_dest, "\r\n")] = 0;
-                
-                // If current is "MOV A, B" and last was "MOV B, A"
-                if (strcmp(dest, last_src) == 0 && strcmp(src, last_dest) == 0) {
-                    fprintf(stdout, "    ; Peephole optimized out: %s", current_instruction);
-                    return; // Skip emitting
+            if (strcmp(last_emitted_inst, "MOV") == 0) {
+                if (strcmp(dest, last_emitted_src) == 0 && strcmp(src, last_emitted_dest) == 0) {
+                    fprintf(stdout, "    ; Peephole optimized out: %s %s\n", inst, operands);
+                    return;
                 }
             }
         }
     }
 
-    // If it survived the optimizer, print it to the file
-    fprintf(stdout, "%s", current_instruction);
-
-    // Only remember actual instructions for peephole lookbacks. 
-    // If we hit a label (starts with text) or a blank line, clear the memory 
-    // so we don't accidentally optimize across branch boundaries.
-    if (current_instruction[0] == ' ' && current_instruction[4] != ';') {
-        strcpy(last_emitted_instruction, current_instruction);
+    // --- Production Columnar Alignment Generation ---
+    if (strlen(comment) > 0) {
+        if (strlen(operands) > 0) {
+            fprintf(stdout, "    %-5s %-30s ; %s\n", inst, operands, comment);
+        } else {
+            fprintf(stdout, "    %-5s %-30s ; %s\n", inst, "", comment);
+        }
     } else {
-        last_emitted_instruction[0] = '\0';
+        if (strlen(operands) > 0) {
+            fprintf(stdout, "    %-5s %s\n", inst, operands);
+        } else {
+            fprintf(stdout, "    %-5s\n", inst);
+        }
+    }
+
+    // Save history state cleanly for next peephole loop checks
+    strcpy(last_emitted_inst, inst);
+    if (strcmp(inst, "MOV") == 0) {
+        char dest[128] = {0}, src[128] = {0};
+        if (sscanf(operands, "%[^,], %[^\n]", dest, src) == 2) {
+            trim_spaces(dest);
+            trim_spaces(src);
+            strcpy(last_emitted_dest, dest);
+            strcpy(last_emitted_src, src);
+        } else {
+            last_emitted_dest[0] = '\0';
+            last_emitted_src[0] = '\0';
+        }
+    } else {
+        last_emitted_dest[0] = '\0';
+        last_emitted_src[0] = '\0';
     }
 }
 
@@ -69,7 +150,6 @@ static int check_needs_stack(ASTNode *node) {
     if (!node) return 0;
 
     switch (node->type) {
-        // Core operations that invoke internal subroutines, alter SP, or manipulate context
         case NODE_FUNCTION_CALL:
         case NODE_CONCAT:
         case NODE_TABLE_SET:
@@ -79,7 +159,6 @@ static int check_needs_stack(ASTNode *node) {
             return 1;
 
         case NODE_IDENTIFIER:
-            // OOP method invocations that read implicit 'self' parameters depend on [BP+2]
             if (node->as.id.name && strcmp(node->as.id.name, "self") == 0) {
                 return 1;
             }
@@ -93,7 +172,6 @@ static int check_needs_stack(ASTNode *node) {
                 if (check_needs_stack(expr)) return 1;
                 expr = expr->next;
             }
-            // Vircon32 layout spills return parameters 4+ directly onto stack offsets via BP
             if (ret_count > 3) return 1;
             break;
         }
@@ -129,7 +207,6 @@ static int check_needs_stack(ASTNode *node) {
             break;
     }
 
-    // Traverse remaining sequential sibling statements in this block
     return check_needs_stack(node->next);
 }
 
@@ -167,8 +244,11 @@ static void emit_interpolated_asm (const char *raw_code) {
         }
     }
     putchar ('\n');
-    // Clear optimizer state after raw asm since we don't know what it did
-    last_emitted_instruction[0] = '\0'; 
+    
+    // Clear optimizer state after raw asm blocks
+    last_emitted_inst[0] = '\0';
+    last_emitted_dest[0] = '\0';
+    last_emitted_src[0] = '\0';
 }
 
 void generate_asm (ASTNode *node, int dest_reg) {
@@ -232,7 +312,6 @@ void generate_asm (ASTNode *node, int dest_reg) {
             push_function_context (node -> as.function_def.name);
             emit_asm ("_%s:\n", node -> as.function_def.name);
             
-            // Run AST pre-scan to determine if stack activation record can be safely omitted
             int needs_stack = check_needs_stack(node -> as.function_def.body);
             if (needs_stack) {
                 emit_asm ("    PUSH  BP\n");
@@ -324,7 +403,6 @@ void generate_asm (ASTNode *node, int dest_reg) {
         case NODE_MULTIPLE_ASSIGNMENT: {
             generate_asm (node -> as.mult_assign.right_side_call, dest_reg);
             if (node -> as.mult_assign.targets_head && node -> as.mult_assign.targets_head -> type == NODE_IDENTIFIER) {
-                // Ensure global variable tracker structures map out RAM allocation offsets
                 get_global_variable_address (node -> as.mult_assign.targets_head -> as.id.name);
                 emit_asm ("    MOV   [__var_%s], R%d ; Assigning to RAM-based variable\n", node -> as.mult_assign.targets_head -> as.id.name, dest_reg);
             }
@@ -516,7 +594,6 @@ void generate_asm (ASTNode *node, int dest_reg) {
         case NODE_ASM: {
             emit_asm ("  ; --- Begin Inline ASM Bubble (existing register states preserved) ---\n");
 
-            // Cleaned up unused variable declarations while keeping memory maps safe
             get_global_variable_address ("__asm_snap_sp");
             get_global_variable_address ("__asm_snap_bp");
             emit_asm ("    MOV   [__var___asm_snap_sp], SP\n");
@@ -617,7 +694,7 @@ void generate_program (ASTNode *head) {
         current = current -> next;
     }
 
-    emit_asm ("    MOV   SP, BP\n");
-    emit_asm ("    POP   BP\n");
-    emit_asm ("    RET\n");
+    emit_asm ("MOV   SP, BP\n");
+    emit_asm ("POP   BP\n");
+    emit_asm ("RET\n");
 }
