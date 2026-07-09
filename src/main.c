@@ -37,11 +37,11 @@ void emit_runtime_library(void) {
 
     // --- Built-in: String Concatenation ---
     // Expects two arguments on the stack: [BP+3]=dest_str_ptr, [BP+2]=src_str_ptr
-    printf("\n__builtin_strcat:\n");
-    printf("  PUSH BP\n");
-    printf("  MOV BP, SP\n");
-    printf("  MOV R0, [BP + 3] ; Destination pointer\n");
-    printf("  MOV R1, [BP + 2] ; Source pointer\n");
+    printf("__builtin_strcat:\n");
+    printf("    PUSH  BP\n");
+    printf("    MOV   BP, SP\n");
+    printf("    MOV   R0, [BP + 3] ; Destination pointer\n");
+    printf("    MOV   R1, [BP + 2] ; Source pointer\n");
     
     printf("\n__strcat_find_end:\n");
     printf("  MOV R2, [R0]\n");

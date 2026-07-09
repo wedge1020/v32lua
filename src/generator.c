@@ -109,13 +109,13 @@ static void emit_asm(const char* format, ...) {
             trim_spaces(src);
 
             if (strcmp(dest, src) == 0) {
-                fprintf(out(), "    ; Peephole optimized out: %s %s\n", inst, operands);
+                fprintf(out(), "    ;; Peephole optimized out: %s %s\n", inst, operands);
                 return;
             }
 
             if (strcmp(last_emitted_inst, "MOV") == 0) {
                 if (strcmp(dest, last_emitted_src) == 0 && strcmp(src, last_emitted_dest) == 0) {
-                    fprintf(out(), "    ; Peephole optimized out: %s %s\n", inst, operands);
+                    fprintf(out(), "    ;; Peephole optimized out: %s %s\n", inst, operands);
                     return;
                 }
             }
@@ -259,11 +259,11 @@ void generate_asm (ASTNode *node, int dest_reg) {
             int cond_reg = allocate_register();
             generate_asm (node -> as.while_loop.condition, cond_reg);
             
-            emit_asm ("    JF    R%d, __%s_while_end_%d\n", cond_reg, ctx, label_id);
+            emit_asm ("JF R%d, __%s_while_end_%d\n", cond_reg, ctx, label_id);
             unlock_register(cond_reg);
             
             generate_block (node -> as.while_loop.body);
-            emit_asm ("    JMP   __%s_while_start_%d\n", ctx, label_id);
+            emit_asm ("JMP __%s_while_start_%d\n", ctx, label_id);
             emit_asm ("__%s_while_end_%d:\n", ctx, label_id);
             pop_loop ();
             break;
@@ -275,7 +275,7 @@ void generate_asm (ASTNode *node, int dest_reg) {
                 fprintf (stderr, "Compiler Runtime Error: 'break' declaration found outside loop body scope.\n");
                 exit (1);
             }
-            emit_asm ("    JMP   __%s_while_end_%d\n", get_current_function_name (), current_id);
+            emit_asm ("JMP __%s_while_end_%d\n", get_current_function_name (), current_id);
             break;
         }
 
@@ -286,11 +286,11 @@ void generate_asm (ASTNode *node, int dest_reg) {
             int cond_reg = allocate_register();
             generate_asm (node -> as.if_stmt.condition, cond_reg);
             
-            emit_asm ("    JF    R%d, __%s_else_%d\n", cond_reg, ctx, label_id);
+            emit_asm ("JF R%d, __%s_else_%d\n", cond_reg, ctx, label_id);
             unlock_register(cond_reg);
             
             generate_block (node -> as.if_stmt.if_body);
-            emit_asm ("    JMP   __%s_end_if_%d\n", ctx, label_id);
+            emit_asm ("JMP __%s_end_if_%d\n", ctx, label_id);
             
             emit_asm ("__%s_else_%d:\n", ctx, label_id);
             if (node -> as.if_stmt.else_body) generate_block (node -> as.if_stmt.else_body);
@@ -304,20 +304,20 @@ void generate_asm (ASTNode *node, int dest_reg) {
             
             int needs_stack = check_needs_stack(node -> as.function_def.body);
             if (needs_stack) {
-                emit_asm ("    PUSH  BP\n");
-                emit_asm ("    MOV   BP, SP\n");
+                emit_asm ("PUSH BP\n");
+                emit_asm ("MOV BP, SP\n");
             } else {
-                emit_asm ("  ; --- Frame pointer omitted (Leaf Function Optimization) ---\n");
+                emit_asm ("    ;; --- Frame pointer omitted (Leaf Function Optimization) ---\n");
             }
             
             generate_block (node -> as.function_def.body);
             
             emit_asm ("__%s_return:\n", get_current_function_name ());
             if (needs_stack) {
-                emit_asm ("    MOV   SP, BP\n");
-                emit_asm ("    POP   BP\n");
+                emit_asm ("MOV SP, BP\n");
+                emit_asm ("POP BP\n");
             }
-            emit_asm ("  RET\n");
+            emit_asm ("RET\n");
             pop_function_context ();
             break;
         }
@@ -327,7 +327,7 @@ void generate_asm (ASTNode *node, int dest_reg) {
             char target_path[256] = {0};
             if (resolve_static_path(node->as.call.target, target_path)) {
                 if (strcmp(target_path, "ioports.gpu.clear") == 0) {
-                    emit_asm("  ; --- Intrinsic: ioports.gpu.clear() ---\n");
+                    emit_asm("    ;; --- Intrinsic: ioports.gpu.clear() ---\n");
                     ASTNode *arg = node->as.call.args_head;
                     
                     if (arg != NULL) {
@@ -448,7 +448,7 @@ void generate_asm (ASTNode *node, int dest_reg) {
                 
                 // If this is the LAST expression, and it is a function call, expand it!
                 if (current_val->next == NULL && current_val->type == NODE_FUNCTION_CALL) {
-                    emit_asm("  ; --- Expanding multiple returns from function call ---\n");
+                    emit_asm("    ;; --- Expanding multiple returns from function call ---\n");
                     
                     // Call the function directly (dest_reg = 0 leaves results in R0, R2, R3)
                     generate_asm(current_val, 0); 
@@ -458,15 +458,15 @@ void generate_asm (ASTNode *node, int dest_reg) {
                     // Unpack up to 3 values from our ABI return registers
                     if (needed_returns > 0 && val_count < NUM_GPRS) {
                         temp_regs[val_count] = allocate_register();
-                        emit_asm("    MOV   R%d, R0\n", temp_regs[val_count++]);
+                        emit_asm("MOV R%d, R0\n", temp_regs[val_count++]);
                     }
                     if (needed_returns > 1 && val_count < NUM_GPRS) {
                         temp_regs[val_count] = allocate_register();
-                        emit_asm("    MOV   R%d, R2\n", temp_regs[val_count++]);
+                        emit_asm("MOV R%d, R2\n", temp_regs[val_count++]);
                     }
                     if (needed_returns > 2 && val_count < NUM_GPRS) {
                         temp_regs[val_count] = allocate_register();
-                        emit_asm("    MOV   R%d, R3\n", temp_regs[val_count++]);
+                        emit_asm("MOV R%d, R3\n", temp_regs[val_count++]);
                     }
                 } else {
                     // Standard evaluation (automatically handles non-last function calls too!)
@@ -486,12 +486,12 @@ void generate_asm (ASTNode *node, int dest_reg) {
                     get_global_variable_address(current_target->as.id.name);
                     
                     if (target_idx < val_count) {
-                        emit_asm("    MOV   [__var_%s], R%d\n", current_target->as.id.name, temp_regs[target_idx]);
+                        emit_asm("MOV [__var_%s], R%d\n", current_target->as.id.name, temp_regs[target_idx]);
                     } else {
                         // Fill remaining targets with nil (0)
                         int zero_reg = allocate_register();
-                        emit_asm("    MOV   R%d, 0\n", zero_reg);
-                        emit_asm("    MOV   [__var_%s], R%d ; nil fallback\n", current_target->as.id.name, zero_reg);
+                        emit_asm("MOV R%d, 0\n", zero_reg);
+                        emit_asm("MOV [__var_%s], R%d ; nil fallback\n", current_target->as.id.name, zero_reg);
                         unlock_register(zero_reg);
                     }
                 }
@@ -510,7 +510,7 @@ void generate_asm (ASTNode *node, int dest_reg) {
             generate_asm (node -> as.binary.left, dest_reg);
             int right_reg = allocate_register ();
             generate_asm (node -> as.binary.right, right_reg);
-            emit_asm ("    FADD  R%d, R%d\n", dest_reg, right_reg);
+            emit_asm ("FADD R%d, R%d\n", dest_reg, right_reg);
             unlock_register (right_reg);
             break;
         }
@@ -519,7 +519,7 @@ void generate_asm (ASTNode *node, int dest_reg) {
             generate_asm (node -> as.binary.left, dest_reg);
             int right_reg = allocate_register ();
             generate_asm (node -> as.binary.right, right_reg);
-            emit_asm ("    FSUB  R%d, R%d\n", dest_reg, right_reg);
+            emit_asm ("FSUB R%d, R%d\n", dest_reg, right_reg);
             unlock_register (right_reg);
             break;
         }
@@ -528,7 +528,7 @@ void generate_asm (ASTNode *node, int dest_reg) {
             generate_asm (node -> as.binary.left, dest_reg);
             int right_reg = allocate_register ();
             generate_asm (node -> as.binary.right, right_reg);
-            emit_asm ("    FMUL  R%d, R%d\n", dest_reg, right_reg);
+            emit_asm ("FMUL R%d, R%d\n", dest_reg, right_reg);
             unlock_register (right_reg);
             break;
         }
@@ -537,7 +537,7 @@ void generate_asm (ASTNode *node, int dest_reg) {
             generate_asm (node -> as.binary.left, dest_reg);
             int right_reg = allocate_register ();
             generate_asm (node -> as.binary.right, right_reg);
-            emit_asm ("    FDIV  R%d, R%d\n", dest_reg, right_reg);
+            emit_asm ("FDIV R%d, R%d\n", dest_reg, right_reg);
             unlock_register (right_reg);
             break;
         }
@@ -545,7 +545,7 @@ void generate_asm (ASTNode *node, int dest_reg) {
         case NODE_AND: {
             int label_id = get_next_label ();
             generate_asm (node -> as.binary.left, dest_reg);
-            emit_asm ("    JF    R%d, __short_and_%d\n", dest_reg, label_id);
+            emit_asm ("JF R%d, __short_and_%d\n", dest_reg, label_id);
             generate_asm (node -> as.binary.right, dest_reg);
             emit_asm ("__short_and_%d:\n", label_id);
             break;
@@ -554,7 +554,7 @@ void generate_asm (ASTNode *node, int dest_reg) {
         case NODE_OR: {
             int label_id = get_next_label ();
             generate_asm (node -> as.binary.left, dest_reg);
-            emit_asm ("    JT    R%d, __short_or_%d\n", dest_reg, label_id);
+            emit_asm ("JT R%d, __short_or_%d\n", dest_reg, label_id);
             generate_asm (node -> as.binary.right, dest_reg);
             emit_asm ("__short_or_%d:\n", label_id);
             break;
@@ -565,12 +565,12 @@ void generate_asm (ASTNode *node, int dest_reg) {
             int right_reg = allocate_register ();
             generate_asm (node -> as.binary.right, right_reg);
             switch (node -> as.binary.operator) {
-                case OP_EQ:  emit_asm ("    FEQ   R%d, R%d\n", dest_reg, right_reg); break;
-                case OP_NEQ: emit_asm ("    FNE   R%d, R%d\n", dest_reg, right_reg); break;
-                case OP_LT:  emit_asm ("    FLT   R%d, R%d\n", dest_reg, right_reg); break;
-                case OP_LE:  emit_asm ("    FLE   R%d, R%d\n", dest_reg, right_reg); break;
-                case OP_GT:  emit_asm ("    FGT   R%d, R%d\n", dest_reg, right_reg); break;
-                case OP_GE:  emit_asm ("    FGE   R%d, R%d\n", dest_reg, right_reg); break;
+                case OP_EQ:  emit_asm ("FEQ R%d, R%d\n", dest_reg, right_reg); break;
+                case OP_NEQ: emit_asm ("FNE R%d, R%d\n", dest_reg, right_reg); break;
+                case OP_LT:  emit_asm ("FLT R%d, R%d\n", dest_reg, right_reg); break;
+                case OP_LE:  emit_asm ("FLE R%d, R%d\n", dest_reg, right_reg); break;
+                case OP_GT:  emit_asm ("FGT R%d, R%d\n", dest_reg, right_reg); break;
+                case OP_GE:  emit_asm ("FGE R%d, R%d\n", dest_reg, right_reg); break;
             }
             unlock_register (right_reg);
             break;
@@ -578,24 +578,25 @@ void generate_asm (ASTNode *node, int dest_reg) {
 
         case NODE_STRING: {
             int str_id = add_string_literal (node -> as.string_val.value);
-            emit_asm ("    MOV   R%d, __string_%d\n", dest_reg, str_id);
+            emit_asm ("MOV R%d, __string_%d\n", dest_reg, str_id);
             break;
         }
 
         case NODE_CONCAT: {
             int left_reg = allocate_register();
             generate_asm (node -> as.binary.left, left_reg);
-            emit_asm ("    PUSH  R%d\n", left_reg);
+            emit_asm ("PUSH R%d\n", left_reg);
             unlock_register(left_reg);
             
             int right_reg = allocate_register();
             generate_asm (node -> as.binary.right, right_reg);
-            emit_asm ("    PUSH  R%d\n", right_reg);
+            emit_asm ("PUSH R%d\n", right_reg);
             unlock_register(right_reg);
             
-            emit_asm ("    CALL  __builtin_strcat\n");
-            emit_asm ("    ISUB  SP, 2\n");
-            if (dest_reg != 0) emit_asm ("    MOV   R%d, R0\n", dest_reg);
+            emit_asm ("CALL __builtin_strcat\n");
+            emit_asm ("ISUB SP, 2\n");
+            if (dest_reg != 0)
+				emit_asm ("MOV R%d, R0\n", dest_reg);
             break;
         }
 
@@ -624,37 +625,37 @@ void generate_asm (ASTNode *node, int dest_reg) {
                 char full_path[512];
                 sprintf(full_path, "%s.%s", base_path, node->as.table_set.key->as.string_val.value);
 
-				if (strcmp(full_path, "ioports.gpu.texture") == 0) {
-					int val_reg = allocate_register();
-					generate_asm(node->as.table_set.value, val_reg);
+                if (strcmp(full_path, "ioports.gpu.texture") == 0) {
+                    int val_reg = allocate_register();
+                    generate_asm(node->as.table_set.value, val_reg);
 
-					emit_asm (";; --- Intrinsic: Cast Lua Float to Hardware Integer ---\n");
-					emit_asm ("CFI R%d\n", val_reg); // Convert Float to Int in-place (Single operand)
-					emit_asm ("OUT GPU_SelectedTexture, R%d\n", val_reg);
+                    emit_asm ("    ;; --- Intrinsic: Cast Lua Float to Hardware Integer ---\n");
+                    emit_asm ("CFI R%d\n", val_reg); // Convert Float to Int in-place (Single operand)
+                    emit_asm ("OUT GPU_SelectedTexture, R%d\n", val_reg);
 
-					unlock_register(val_reg);
-					return; // Skip standard dynamic table assignment
-				}
+                    unlock_register(val_reg);
+                    return; // Skip standard dynamic table assignment
+                }
             }
 
             // 2. STANDARD TABLE SET (Fallback)
             int val_reg = allocate_register();
             generate_asm (node -> as.table_set.value, val_reg);
-            emit_asm ("    PUSH  R%d\n", val_reg);
+            emit_asm ("PUSH R%d\n", val_reg);
             unlock_register(val_reg);
             
             int key_reg = allocate_register();
             generate_asm (node -> as.table_set.key, key_reg);
-            emit_asm ("    PUSH  R%d\n", key_reg);
+            emit_asm ("PUSH R%d\n", key_reg);
             unlock_register(key_reg);
             
             int tbl_reg = allocate_register();
             generate_asm (node -> as.table_set.table_expr, tbl_reg);
-            emit_asm ("    PUSH  R%d\n", tbl_reg);
+            emit_asm ("PUSH R%d\n", tbl_reg);
             unlock_register(tbl_reg);
             
-            emit_asm ("    CALL  __builtin_table_set\n");
-            emit_asm ("    ISUB  SP, 3\n");
+            emit_asm ("CALL __builtin_table_set\n");
+            emit_asm ("ISUB SP, 3\n");
             break;
         }
 
@@ -668,16 +669,16 @@ void generate_asm (ASTNode *node, int dest_reg) {
                 char full_path[512];
                 sprintf(full_path, "%s.%s", base_path, node->as.table_get.key->as.string_val.value);
                 
-				if (strcmp(full_path, "ioports.gpu.texture") == 0) {
-					if (dest_reg != 0) {
-						emit_asm ("    ;; --- Intrinsic: Read Hardware Integer ---\n");
-						emit_asm ("    IN    R%d, GPU_SelectedTexture\n", dest_reg);
+                if (strcmp(full_path, "ioports.gpu.texture") == 0) {
+                    if (dest_reg != 0) {
+                        emit_asm ("    ;; --- Intrinsic: Read Hardware Integer ---\n");
+                        emit_asm ("IN R%d, GPU_SelectedTexture\n", dest_reg);
 
-						emit_asm ("    ;; --- Intrinsic: Cast to Lua Float ---\n");
-						emit_asm ("    CIF   R%d\n", dest_reg); // Convert Integer to Float in-place (Single operand)
-					}
-					return; // Skip standard dynamic table lookup
-				}
+                        emit_asm ("    ;; --- Intrinsic: Cast to Lua Float ---\n");
+                        emit_asm ("CIF R%d\n", dest_reg); // Convert Integer to Float in-place (Single operand)
+                    }
+                    return; // Skip standard dynamic table lookup
+                }
             }
 
             // 2. STANDARD TABLE GET (Fallback)
@@ -842,30 +843,31 @@ void  generate_program (ASTNode *head)
     // 2. Generate the code
     emit_asm (";; --- Compiled Code Entry Vector ---\n");
     if (has_globals) {
-        emit_asm ("    CALL  __init_globals  ; Run top-level setups first\n");
+        emit_asm ("CALL __init_globals  ; Run top-level setups first\n");
     }
-    emit_asm ("    CALL  _main           ; Then hand control to the user\n");
-    emit_asm ("    HLT                   ; Halt CPU when main finishes\n\n");
+    emit_asm ("CALL _main ; Then hand control to the user\n");
+    emit_asm ("HLT ; Halt CPU when main finishes\n\n");
 
-    emit_asm ("; --- Function Definitions ---\n");
+    emit_asm ("\n;; --- Function Definitions ---\n");
     ASTNode *current = head;
     while (current != NULL) {
         if (current -> type == NODE_FUNCTION_DEF) {
             generate_asm (current, 0);
+			emit_asm ("\n");
         }
         current = current -> next;
     }
 
     // 3. Only emit the global init vector if there is actually work to do
     if (has_globals) {
-        emit_asm ("\n;; --- Global Initialization Vector ---\n");
+        emit_asm (";; --- Global Initialization Vector ---\n");
         emit_asm ("__init_globals:\n");
 
         if (globals_need_stack) {
-            emit_asm ("    PUSH  BP\n");
-            emit_asm ("    MOV   BP, SP\n");
+            emit_asm ("PUSH BP\n");
+            emit_asm ("MOV BP, SP\n");
         } else {
-            emit_asm ("  ; --- Frame pointer omitted (Leaf Function Optimization) ---\n");
+            emit_asm ("    ;; --- Frame pointer omitted (Leaf Function Optimization) ---\n");
         }
 
         current = head;
@@ -879,10 +881,10 @@ void  generate_program (ASTNode *head)
         }
 
         if (globals_need_stack) {
-            emit_asm ("    MOV   SP, BP\n");
-            emit_asm ("    POP   BP\n");
+            emit_asm ("MOV SP, BP\n");
+            emit_asm ("POP BP\n");
         }
-        emit_asm ("  RET\n");
+        emit_asm ("RET\n");
     }
 
     // 4. Generation complete. Now output the required headers to the REAL stdout
@@ -896,11 +898,11 @@ void  generate_program (ASTNode *head)
     // 5. Dump the compiled code from the temp buffer directly underneath
     rewind(current_out_stream);
     char buffer[1024];
-    while (fgets(buffer, sizeof(buffer), current_out_stream)) {
-        fprintf(stdout, "%s", buffer);
+    while (fgets (buffer, sizeof (buffer), current_out_stream)) {
+        fprintf (stdout, "%s", buffer);
     }
 
     // 6. Clean up
-    fclose(current_out_stream);
+    fclose (current_out_stream);
     current_out_stream = NULL;
 }
