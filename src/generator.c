@@ -623,14 +623,18 @@ void generate_asm (ASTNode *node, int dest_reg) {
                 
                 char full_path[512];
                 sprintf(full_path, "%s.%s", base_path, node->as.table_set.key->as.string_val.value);
-                
-                if (strcmp(full_path, "ioports.gpu.texture") == 0) {
-                    int val_reg = allocate_register();
-                    generate_asm(node->as.table_set.value, val_reg);
-                    emit_asm("    OUT   GPU_SelectedTexture, R%d\n", val_reg); 
-                    unlock_register(val_reg);
-                    return; // Skip standard table set!
-                }
+
+				if (strcmp(full_path, "ioports.gpu.texture") == 0) {
+					int val_reg = allocate_register();
+					generate_asm(node->as.table_set.value, val_reg);
+
+					emit_asm (";; --- Intrinsic: Cast Lua Float to Hardware Integer ---\n");
+					emit_asm ("CFI R%d\n", val_reg); // Convert Float to Int in-place (Single operand)
+					emit_asm ("OUT GPU_SelectedTexture, R%d\n", val_reg);
+
+					unlock_register(val_reg);
+					return; // Skip standard dynamic table assignment
+				}
             }
 
             // 2. STANDARD TABLE SET (Fallback)
@@ -664,12 +668,16 @@ void generate_asm (ASTNode *node, int dest_reg) {
                 char full_path[512];
                 sprintf(full_path, "%s.%s", base_path, node->as.table_get.key->as.string_val.value);
                 
-                if (strcmp(full_path, "ioports.gpu.texture") == 0) {
-                    if (dest_reg != 0) {
-                        emit_asm("    IN    R%d, GPU_SelectedTexture\n", dest_reg);
-                    }
-                    return; // Skip standard table get!
-                }
+				if (strcmp(full_path, "ioports.gpu.texture") == 0) {
+					if (dest_reg != 0) {
+						emit_asm ("    ;; --- Intrinsic: Read Hardware Integer ---\n");
+						emit_asm ("    IN    R%d, GPU_SelectedTexture\n", dest_reg);
+
+						emit_asm ("    ;; --- Intrinsic: Cast to Lua Float ---\n");
+						emit_asm ("    CIF   R%d\n", dest_reg); // Convert Integer to Float in-place (Single operand)
+					}
+					return; // Skip standard dynamic table lookup
+				}
             }
 
             // 2. STANDARD TABLE GET (Fallback)
