@@ -233,7 +233,7 @@ static void emit_interpolated_asm (const char *raw_code) {
             while (*p && *p != '}' && i < 255) var_name[i++] = *p++;
             var_name[i] = '\0'; 
             if (*p == '}') p++; 
-            fprintf (out(), "[__var_%s]", var_name);
+            fprintf (out(), "[var_%s]", var_name);
         } else {
             putchar (*p);
             p++;
@@ -486,12 +486,12 @@ void generate_asm (ASTNode *node, int dest_reg) {
                     get_global_variable_address(current_target->as.id.name);
                     
                     if (target_idx < val_count) {
-                        emit_asm("MOV [__var_%s], R%d\n", current_target->as.id.name, temp_regs[target_idx]);
+                        emit_asm("MOV [var_%s], R%d\n", current_target->as.id.name, temp_regs[target_idx]);
                     } else {
                         // Fill remaining targets with nil (0)
                         int zero_reg = allocate_register();
                         emit_asm("MOV R%d, 0\n", zero_reg);
-                        emit_asm("MOV [__var_%s], R%d ; nil fallback\n", current_target->as.id.name, zero_reg);
+                        emit_asm("MOV [var_%s], R%d ; nil fallback\n", current_target->as.id.name, zero_reg);
                         unlock_register(zero_reg);
                     }
                 }
@@ -596,21 +596,21 @@ void generate_asm (ASTNode *node, int dest_reg) {
             emit_asm ("CALL __builtin_strcat\n");
             emit_asm ("ISUB SP, 2\n");
             if (dest_reg != 0)
-				emit_asm ("MOV R%d, R0\n", dest_reg);
+                emit_asm ("MOV R%d, R0\n", dest_reg);
             break;
         }
 
         case NODE_TABLE_CONSTRUCTOR: {
-            emit_asm ("    MOV   R%d, [__heap_pointer] ; Read __heap_pointer\n", dest_reg);
+            emit_asm ("    MOV   R%d, [heap_pointer] ; Read heap_pointer\n", dest_reg);
             int zero_reg = allocate_register ();
             emit_asm ("    MOV   R%d, 0\n", zero_reg);
             emit_asm ("    MOV   [R%d], R%d ; Initialize to nil/0\n", dest_reg, zero_reg);
             unlock_register (zero_reg);
             
             int temp_reg = allocate_register();
-            emit_asm ("    MOV   R%d, [__heap_pointer]\n", temp_reg);
+            emit_asm ("    MOV   R%d, [heap_pointer]\n", temp_reg);
             emit_asm ("    IADD  R%d, 1\n", temp_reg); 
-            emit_asm ("    MOV   [__heap_pointer], R%d ; Advance heap pointer\n", temp_reg);
+            emit_asm ("    MOV   [heap_pointer], R%d ; Advance heap pointer\n", temp_reg);
             unlock_register(temp_reg);
             break;
         }
@@ -704,7 +704,7 @@ void generate_asm (ASTNode *node, int dest_reg) {
                 emit_asm ("  ; --- Loading local parameter 'self' ---\n");
                 emit_asm ("    MOV   R%d, [BP+2]\n", dest_reg); 
             } else {
-                emit_asm ("    MOV   R%d, [__var_%s]\n", dest_reg, node -> as.id.name);
+                emit_asm ("    MOV   R%d, [var_%s]\n", dest_reg, node -> as.id.name);
             }
             break;
         }
@@ -717,15 +717,15 @@ void generate_asm (ASTNode *node, int dest_reg) {
             emit_asm ("  ; --- Begin Inline ASM Bubble (existing register states preserved) ---\n");
             get_global_variable_address ("__asm_snap_sp");
             get_global_variable_address ("__asm_snap_bp");
-            emit_asm ("    MOV   [__var___asm_snap_sp], SP\n");
-            emit_asm ("    MOV   [__var___asm_snap_bp], BP\n");
+            emit_asm ("    MOV   [var___asm_snap_sp], SP\n");
+            emit_asm ("    MOV   [var___asm_snap_bp], BP\n");
 
             for (int i = 0; i < NUM_GPRS; i++) {
                 if (is_register_locked (i)) {
                     char snap_name[32];
                     sprintf (snap_name, "__asm_snap_r%d", i);
                     get_global_variable_address (snap_name);
-                    emit_asm ("    MOV   [__var_%s], R%d\n", snap_name, i);
+                    emit_asm ("    MOV   [var_%s], R%d\n", snap_name, i);
                 }
             }
             
@@ -735,12 +735,12 @@ void generate_asm (ASTNode *node, int dest_reg) {
                 if (is_register_locked (i)) {
                     char snap_name[32];
                     sprintf (snap_name, "__asm_snap_r%d", i);
-                    emit_asm ("    MOV   R%d, [__var_%s]\n", i, snap_name);
+                    emit_asm ("    MOV   R%d, [var_%s]\n", i, snap_name);
                 }
             }
 
-            emit_asm ("    MOV   BP, [__var___asm_snap_bp]\n");
-            emit_asm ("    MOV   SP, [__var___asm_snap_sp]\n");
+            emit_asm ("    MOV   BP, [var___asm_snap_bp]\n");
+            emit_asm ("    MOV   SP, [var___asm_snap_sp]\n");
             emit_asm ("  ; --- End Inline ASM Bubble ---\n");
             break;
         }
@@ -853,7 +853,7 @@ void  generate_program (ASTNode *head)
     while (current != NULL) {
         if (current -> type == NODE_FUNCTION_DEF) {
             generate_asm (current, 0);
-			emit_asm ("\n");
+            emit_asm ("\n");
         }
         current = current -> next;
     }
@@ -890,7 +890,7 @@ void  generate_program (ASTNode *head)
 
     // 4. Generation complete. Now output the required headers to the REAL stdout
     fprintf(stdout, ";; --- System Constants ---\n");
-    fprintf(stdout, "%%define __heap_pointer 0\n");
+    fprintf(stdout, "%%define heap_pointer 0\n");
 
     fprintf(stdout, "\n;; --- Global Variable RAM Map ---\n");
     emit_variable_map();

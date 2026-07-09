@@ -138,10 +138,10 @@ typedef struct astnode {
 // --- Core Compiler Functions ---
 void generate_asm(ASTNode* node, int dest_reg);
 void generate_program(ASTNode* head);
-void generate_global_setup(ASTNode* node);     // <-- Add this
-void generate_functions(ASTNode* node);        // <-- Add this
+void generate_global_setup(ASTNode* node);
+void generate_functions(ASTNode* node);
 
-void compiler_error(ErrorType type, int line, const char* format, ...); // <-- Add this
+void compiler_error(ErrorType type, int line, const char* format, ...);
 
 // --- Context & Memory Management ---
 int get_next_label(void);

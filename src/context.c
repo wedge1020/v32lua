@@ -192,7 +192,7 @@ typedef struct GlobalVarNode {
 } GlobalVarNode;
 
 static GlobalVarNode* globals_head = NULL;
-static int next_ram_address = 1; // Address 0 is reserved for our __heap_pointer
+static int next_ram_address = 1; // Address 0 is reserved for our heap_pointer
 
 int get_global_variable_address(const char* name) {
     GlobalVarNode* current = globals_head;
@@ -221,8 +221,8 @@ void emit_variable_map(void) {
     // Assuming 'globals_head' is your linked list of variables in context.c
     GlobalVarNode *current = globals_head;
     while (current != NULL) {
-        // Emit them as constants exactly like __heap_pointer
-        fprintf(stdout, "%%define __var_%s %d\n", current->name, current->ram_address);
+        // Emit them as constants exactly like heap_pointer
+        fprintf(stdout, "%%define var_%s %d\n", current->name, current->ram_address);
         current = current->next;
     }
 }
