@@ -56,52 +56,51 @@ typedef enum {
 } ErrorType;
 
 // --- AST Node Structure ---
-typedef struct astnode ASTNode;
-struct astnode {
+typedef struct astnode {
     NodeType type;
-    ASTNode* next; // For linked lists of statements/expressions
+    struct astnode* next; // Sibling pointer for statements in a block
 
     union {
         struct {
-            ASTNode* condition;
-            ASTNode* body;
+            struct astnode* condition;
+            struct astnode* body;
         } while_loop;
 
         struct {
-            ASTNode* condition;
-            ASTNode* if_body;
-            ASTNode* else_body;
+            struct astnode* condition;
+            struct astnode* if_body;
+            struct astnode* else_body; // Can be NULL
         } if_stmt;
 
-        struct {
+		struct {
             char* name;
-            ASTNode* params;
-            ASTNode* body;
+            struct astnode* params;
+            struct astnode* body;
         } function_def;
 
         struct {
-            ASTNode* target;
-            ASTNode* args_head;
-            int is_method_call; 
+            struct astnode* target;
+            struct astnode* args_head; // Linked list of arguments
+            int is_method_call;
         } call;
-
+        
         struct {
             char* mangled_name;
         } func_ptr;
-
+        
         struct {
-            ASTNode* expressions_head;
+            struct astnode* expressions_head; // Linked list of return values
             int parent_func_arg_count;
         } return_stmt;
 
         struct {
-            ASTNode* right_side_call;
-            ASTNode* targets_head;
+            struct astnode* targets_head; // Linked list of variables to assign to
+            struct astnode* values_head;  // Linked list of expressions to assign
         } mult_assign;
 
         struct {
-            ASTNode* left;
-            ASTNode* right;
+            struct astnode* left;
+            struct astnode* right;
             Operator operator;
         } binary;
 
@@ -110,14 +109,14 @@ struct astnode {
         } string_val;
 
         struct {
-            ASTNode* table_expr;
-            ASTNode* key;
-            ASTNode* value;
+            struct astnode* table_expr;
+            struct astnode* key;
+            struct astnode* value;
         } table_set;
 
         struct {
-            ASTNode* table_expr;
-            ASTNode* key;
+            struct astnode* table_expr;
+            struct astnode* key;
         } table_get;
 
         struct {
@@ -130,14 +129,19 @@ struct astnode {
 
         struct {
             char* code;
-        } inline_asm; // <-- Added Inline Assembly Payload
+        } inline_asm; 
     } as;
-};
+} ASTNode;
 
 // --- Core Compiler Functions ---
-void generate_asm(ASTNode *, int);
+void generate_asm(ASTNode* node, int dest_reg);
+void generate_program(ASTNode* head);
+void generate_global_setup(ASTNode* node);     // <-- Add this
+void generate_functions(ASTNode* node);        // <-- Add this
 
-// --- Context & Memory Management (implemented in context.c) ---
+void compiler_error(ErrorType type, int line, const char* format, ...); // <-- Add this
+
+// --- Context & Memory Management ---
 int get_next_label(void);
 int add_string_literal(const char* str);
 void emit_string_data_section(void);
@@ -153,9 +157,5 @@ void pop_loop(void);
 int current_loop(void);
 
 int get_global_variable_address(const char* name);
-void generate_global_setup(ASTNode *);
-void generate_functions(ASTNode *);
-
-void compiler_error(ErrorType, int, const char*, ...);
 
 #endif // CODEGEN_H

@@ -25,9 +25,11 @@ char* mangle_method_name(const char* table_name, const char* method_name);
     ASTNode* ast_node;
 }
 
-/* --- ADD THESE LINES AT THE TOP OF YOUR FILE --- */
+/* --- AST Node Types --- */
 %type <ast_node> parameter_list
 %type <ast_node> argument_list
+%type <ast_node> var_list       /* Added for multiple assignment */
+%type <ast_node> expr_list      /* Added for multiple assignment */
 
 %token <number_val> TOKEN_NUMBER
 %token <string_val> TOKEN_IDENTIFIER TOKEN_STRING
@@ -46,7 +48,8 @@ char* mangle_method_name(const char* table_name, const char* method_name);
 %left '+' '-'
 %left '*' '/'
 %left '['
-%left '.' ':'
+%left '.'
+%left ':'
 
 %%
 
@@ -75,7 +78,7 @@ program:
 
 statement_list:
     /* empty */ { 
-        $$ = NULL; 
+        $$ = NULL;
     }
     | statement_list statement { 
         if ($1 == NULL) {
@@ -94,10 +97,10 @@ statement_list:
 
 parameter_list:
     /* empty */ { 
-        $$ = NULL; 
+        $$ = NULL;
     }
     | TOKEN_IDENTIFIER { 
-        $$ = make_node(NODE_IDENTIFIER); 
+        $$ = make_node(NODE_IDENTIFIER);
     }
     | parameter_list ',' TOKEN_IDENTIFIER {
         ASTNode* new_node = make_node(NODE_IDENTIFIER);
@@ -113,10 +116,10 @@ parameter_list:
 
 argument_list:
     /* empty */ { 
-        $$ = NULL; 
+        $$ = NULL;
     }
     | expr { 
-        $$ = $1; 
+        $$ = $1;
     }
     | argument_list ',' expr {
         // Chain the new expression to the end of the argument list
@@ -141,7 +144,7 @@ statement:
     | TOKEN_FUNCTION TOKEN_IDENTIFIER ':' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END { /* your table method code */ }
     | TOKEN_ASM '(' TOKEN_STRING ')'     { /* asm code */ }
     | TOKEN_RAWASM '(' TOKEN_STRING ')'  { /* rawasm code */ }
-    ;  /* <--- THIS SEMICOLON IS CRITICAL */
+    ;
 
 else_branch:
     /* empty */                  { $$ = NULL; }
@@ -149,17 +152,43 @@ else_branch:
     | TOKEN_ELSEIF expr TOKEN_THEN statement_list else_branch { 
         /* your elseif code */ 
     }
-    ;  /* <--- THIS SEMICOLON IS CRITICAL TOO */
+    ;
 
-assignment:
-    TOKEN_IDENTIFIER '=' expr {
-        $$ = make_node(NODE_MULTIPLE_ASSIGNMENT);
-        ASTNode* target = make_node(NODE_IDENTIFIER);
-        target->as.id.name = $1;
-        $$->as.mult_assign.targets_head = target;
-        $$->as.mult_assign.right_side_call = $3;
+/* --- LIST RULES FOR MULTIPLE ASSIGNMENT --- */
+var_list:
+    TOKEN_IDENTIFIER { 
+        $$ = make_node_ident($1); 
     }
-    | expr '[' expr ']' '=' expr {
+    | var_list ',' TOKEN_IDENTIFIER { 
+        ASTNode* new_ident = make_node_ident($3);
+        ASTNode* curr = $1;
+        while(curr->next) curr = curr->next;
+        curr->next = new_ident;
+        $$ = $1; 
+    }
+    ;
+
+expr_list:
+    expr { 
+        $$ = $1; 
+    }
+    | expr_list ',' expr { 
+        ASTNode* curr = $1;
+        while(curr->next) curr = curr->next;
+        curr->next = $3;
+        $$ = $1; 
+    }
+    ;
+
+/* --- ASSIGNMENT RULES --- */
+assignment:
+    var_list '=' expr_list {
+        $$ = make_node(NODE_MULTIPLE_ASSIGNMENT);
+        $$->as.mult_assign.targets_head = $1;
+        $$->as.mult_assign.values_head = $3;
+    }
+    |
+    expr '[' expr ']' '=' expr {
         $$ = make_node(NODE_TABLE_SET);
         $$->as.table_set.table_expr = $1;
         $$->as.table_set.key = $3;
@@ -193,7 +222,7 @@ function_def:
 
         ASTNode* key_node = make_node_string($4);
         ASTNode* table_node = make_node_ident($2);
-
+        
         // 6. Tie it all into a table assignment: table[key] = func_ptr
         ASTNode* table_set = make_node(NODE_TABLE_SET);
         table_set->as.table_set.table_expr = table_node;
@@ -227,18 +256,19 @@ expr:
         $$->as.table_get.table_expr = $1;
         $$->as.table_get.key = $3;
     }
-    | expr '+' expr {
-        $$ = make_node_binary(NODE_ADD, $1, $3);
-    }
+    | expr '+' expr { $$ = make_node_binary(NODE_ADD, $1, $3); }
+    | expr '-' expr { $$ = make_node_binary(NODE_SUB, $1, $3); }
+    | expr '*' expr { $$ = make_node_binary(NODE_MUL, $1, $3); }
+    | expr '/' expr { $$ = make_node_binary(NODE_DIV, $1, $3); }
     | expr TOKEN_EQ expr      { $$ = make_node(NODE_RELATIONAL); $$->as.binary.operator = OP_EQ;  $$->as.binary.left = $1; $$->as.binary.right = $3; }
     | expr TOKEN_NEQ expr     { $$ = make_node(NODE_RELATIONAL); $$->as.binary.operator = OP_NEQ; $$->as.binary.left = $1; $$->as.binary.right = $3; }
     | expr TOKEN_LT expr      { $$ = make_node(NODE_RELATIONAL); $$->as.binary.operator = OP_LT;  $$->as.binary.left = $1; $$->as.binary.right = $3; }
     | expr TOKEN_GT expr      { $$ = make_node(NODE_RELATIONAL); $$->as.binary.operator = OP_GT;  $$->as.binary.left = $1; $$->as.binary.right = $3; }
     | expr TOKEN_LE expr      { $$ = make_node(NODE_RELATIONAL); $$->as.binary.operator = OP_LE;  $$->as.binary.left = $1; $$->as.binary.right = $3; }
     | expr TOKEN_GE expr      { $$ = make_node(NODE_RELATIONAL); $$->as.binary.operator = OP_GE;  $$->as.binary.left = $1; $$->as.binary.right = $3; }
-    | expr TOKEN_AND expr     { $$ = make_node(NODE_AND);        $$->as.binary.left     = $1;     $$->as.binary.right = $3; }
-    | expr TOKEN_OR expr      { $$ = make_node(NODE_OR);         $$->as.binary.left     = $1;     $$->as.binary.right = $3; }
-    | expr TOKEN_CONCAT expr  { $$ = make_node(NODE_CONCAT);     $$->as.binary.left     = $1;     $$->as.binary.right = $3; }
+    | expr TOKEN_AND expr     { $$ = make_node(NODE_AND);        $$->as.binary.left = $1;     $$->as.binary.right = $3; }
+    | expr TOKEN_OR expr      { $$ = make_node(NODE_OR);         $$->as.binary.left = $1;     $$->as.binary.right = $3; }
+    | expr TOKEN_CONCAT expr  { $$ = make_node(NODE_CONCAT);     $$->as.binary.left = $1;     $$->as.binary.right = $3; }
     | expr '.' TOKEN_IDENTIFIER {
         ASTNode* node = make_node(NODE_TABLE_GET);
         node->as.table_get.table_expr = $1;
@@ -257,7 +287,8 @@ function_call:
         node->as.call.args_head = $3;
         $$ = node;
     }
-    | expr ':' TOKEN_IDENTIFIER '(' argument_list ')' {
+    |
+    expr ':' TOKEN_IDENTIFIER '(' argument_list ')' {
         ASTNode* node = make_node(NODE_FUNCTION_CALL);
         node->as.call.target = $1;
         node->as.call.is_method_call = 1;
@@ -266,7 +297,6 @@ function_call:
         dynamic_lookup->as.table_get.table_expr = $1;
         dynamic_lookup->as.table_get.key = make_node_string($3);
         node->as.call.target = dynamic_lookup;
-        
         node->as.call.args_head = $5;
         $$ = node;
     }
@@ -293,7 +323,6 @@ ASTNode* make_node(NodeType type) {
 
 ASTNode* make_node_ident (const char* name) {
     ASTNode* node = make_node(NODE_IDENTIFIER);
-
     // Use strdup to ensure the AST owns the memory for the string,
     // protecting it from being overwritten by the lexer's buffer.
     node->as.id.name = strdup(name);
@@ -316,7 +345,6 @@ char* mangle_method_name(const char* table_name, const char* method_name) {
     // Calculate required string length:
     // Length of table_name + 1 (for the underscore) + Length of method_name + 1 (for the null terminator)
     size_t len = strlen(table_name) + 1 + strlen(method_name) + 1;
-
     // Allocate memory for the new mangled string
     char *mangled = (char*) malloc (len);
     if (mangled == NULL)
@@ -326,6 +354,5 @@ char* mangle_method_name(const char* table_name, const char* method_name) {
 
     // Safely format the new string
     snprintf (mangled, len, "%s_%s", table_name, method_name);
-
     return (mangled);
 }
