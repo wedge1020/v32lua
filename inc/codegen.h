@@ -36,7 +36,9 @@ typedef enum {
     NODE_IDENTIFIER,
     NODE_NUMBER,
     NODE_ASM,
-	NODE_RAWASM
+	NODE_RAWASM,
+	NODE_COMMENT_LINE,
+	NODE_COMMENT_BLOCK
 } NodeType;
 
 typedef enum {

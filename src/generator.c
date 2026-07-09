@@ -628,6 +628,32 @@ void generate_asm (ASTNode *node, int dest_reg) {
             emit_interpolated_asm (node -> as.inline_asm.code);
             emit_asm ("  ; --- End Raw ASM ---\n");
             break;
+		}
+
+		case NODE_COMMENT_LINE: {
+            fprintf(stdout, ";; lua comment: %s\n", node->as.string_val.value);
+            break;
+        }
+
+        case NODE_COMMENT_BLOCK: {
+            fprintf(stdout, ";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\n");
+            fprintf(stdout, ";; \n");
+            fprintf(stdout, ";; lua comment: ");
+            
+            char *text = node->as.string_val.value;
+            for (int i = 0; text[i] != '\0'; i++) {
+                if (text[i] == '\n') {
+                    fprintf(stdout, "\n;; lua comment: ");
+                } else if (text[i] == '\t') {
+                    fprintf(stdout, " ");
+                } else if (text[i] == '\r') {
+                    ; // Skip carriage returns
+                } else {
+                    putchar(text[i]);
+                }
+            }
+            fprintf(stdout, "\n;; \n");
+            break;
         }
     }
 }

@@ -33,6 +33,7 @@ char* mangle_method_name(const char* table_name, const char* method_name);
 
 %token <number_val> TOKEN_NUMBER
 %token <string_val> TOKEN_IDENTIFIER TOKEN_STRING
+%token <string_val> TOKEN_COMMENT_LINE TOKEN_COMMENT_BLOCK
 %token TOKEN_WHILE TOKEN_BREAK TOKEN_IF TOKEN_ELSEIF TOKEN_THEN TOKEN_ELSE TOKEN_END 
 %token TOKEN_FUNCTION TOKEN_ASM TOKEN_RAWASM TOKEN_RETURN TOKEN_AND TOKEN_OR
 %token TOKEN_EQ TOKEN_NEQ TOKEN_LE TOKEN_GE TOKEN_LT TOKEN_GT TOKEN_CONCAT
@@ -144,6 +145,14 @@ statement:
     | TOKEN_FUNCTION TOKEN_IDENTIFIER ':' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END { /* your table method code */ }
     | TOKEN_ASM '(' TOKEN_STRING ')'     { /* asm code */ }
     | TOKEN_RAWASM '(' TOKEN_STRING ')'  { /* rawasm code */ }
+    | TOKEN_COMMENT_LINE {
+        $$ = make_node(NODE_COMMENT_LINE);
+        $$->as.string_val.value = $1;
+    }
+    | TOKEN_COMMENT_BLOCK {
+        $$ = make_node(NODE_COMMENT_BLOCK);
+        $$->as.string_val.value = $1;
+    }
     ;
 
 else_branch:
