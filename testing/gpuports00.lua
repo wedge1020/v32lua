@@ -1,3 +1,5 @@
+current=0
+
 function main()
     current=ioports.gpu.texture
 	value=4

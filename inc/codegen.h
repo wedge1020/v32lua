@@ -159,5 +159,6 @@ void pop_loop(void);
 int current_loop(void);
 
 int get_global_variable_address(const char* name);
+void emit_variable_map(void);
 
 #endif // CODEGEN_H

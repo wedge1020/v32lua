@@ -216,3 +216,13 @@ int get_global_variable_address(const char* name) {
     
     return new_node->ram_address;
 }
+
+void emit_variable_map(void) {
+    // Assuming 'globals_head' is your linked list of variables in context.c
+    GlobalVarNode *current = globals_head;
+    while (current != NULL) {
+        // Emit them as constants exactly like __heap_pointer
+        fprintf(stdout, "%%define __var_%s %d\n", current->name, current->ram_address);
+        current = current->next;
+    }
+}

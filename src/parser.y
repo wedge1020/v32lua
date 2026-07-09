@@ -124,7 +124,12 @@ statement:
     | TOKEN_IF expr TOKEN_THEN statement_list else_branch TOKEN_END { /* your if code */ }
     | function_def               { $$ = $1; }
     | return_stmt                { $$ = $1; }
-    | expr '.' TOKEN_IDENTIFIER '=' expr { /* your table assign code */ }
+	| expr '.' TOKEN_IDENTIFIER '=' expr {
+        $$ = make_node(NODE_TABLE_SET);
+        $$->as.table_set.table_expr = $1;
+        $$->as.table_set.key = make_node_string($3);
+        $$->as.table_set.value = $5;
+    }
     | TOKEN_FUNCTION TOKEN_IDENTIFIER ':' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END { /* your table method code */ }
     | TOKEN_ASM '(' TOKEN_STRING ')'     { /* asm code */ }
     | TOKEN_RAWASM '(' TOKEN_STRING ')'  { /* rawasm code */ }

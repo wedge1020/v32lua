@@ -4,6 +4,13 @@
 #include <stdarg.h>
 #include "codegen.h"
 
+// --- Output Routing ---
+static FILE* current_out_stream = NULL;
+
+static FILE* out() {
+    return current_out_stream ? current_out_stream : stdout;
+}
+
 // --- Columnar & Peephole Optimizer State ---
 static char last_emitted_inst[32]   = "";
 static char last_emitted_dest[128] = "";
@@ -53,7 +60,7 @@ static void emit_asm(const char* format, ...) {
     while (*p == ' ' || *p == '\t') p++;
 
     if (*p == '\0' || *p == '\r' || *p == '\n' || *p == ';' || strchr(p, ':') != NULL) {
-        fprintf(stdout, "%s", current_instruction);
+        fprintf(out(), "%s", current_instruction);
         if (strchr(p, ':') != NULL || *p == '\0' || *p == '\r' || *p == '\n') {
             last_emitted_inst[0] = '\0';
             last_emitted_dest[0] = '\0';
@@ -102,13 +109,13 @@ static void emit_asm(const char* format, ...) {
             trim_spaces(src);
 
             if (strcmp(dest, src) == 0) {
-                fprintf(stdout, "    ; Peephole optimized out: %s %s\n", inst, operands);
+                fprintf(out(), "    ; Peephole optimized out: %s %s\n", inst, operands);
                 return;
             }
 
             if (strcmp(last_emitted_inst, "MOV") == 0) {
                 if (strcmp(dest, last_emitted_src) == 0 && strcmp(src, last_emitted_dest) == 0) {
-                    fprintf(stdout, "    ; Peephole optimized out: %s %s\n", inst, operands);
+                    fprintf(out(), "    ; Peephole optimized out: %s %s\n", inst, operands);
                     return;
                 }
             }
@@ -116,11 +123,11 @@ static void emit_asm(const char* format, ...) {
     }
 
     if (strlen(comment) > 0) {
-        if (strlen(operands) > 0) fprintf(stdout, "    %-5s %-30s ; %s\n", inst, operands, comment);
-        else fprintf(stdout, "    %-5s %-30s ; %s\n", inst, "", comment);
+        if (strlen(operands) > 0) fprintf(out(), "    %-5s %-30s ; %s\n", inst, operands, comment);
+        else fprintf(out(), "    %-5s %-30s ; %s\n", inst, "", comment);
     } else {
-        if (strlen(operands) > 0) fprintf(stdout, "    %-5s %s\n", inst, operands);
-        else fprintf(stdout, "    %-5s\n", inst);
+        if (strlen(operands) > 0) fprintf(out(), "    %-5s %s\n", inst, operands);
+        else fprintf(out(), "    %-5s\n", inst);
     }
 
     strcpy(last_emitted_inst, inst);
@@ -226,7 +233,7 @@ static void emit_interpolated_asm (const char *raw_code) {
             while (*p && *p != '}' && i < 255) var_name[i++] = *p++;
             var_name[i] = '\0'; 
             if (*p == '}') p++; 
-            fprintf (stdout, "[__var_%s]", var_name);
+            fprintf (out(), "[__var_%s]", var_name);
         } else {
             putchar (*p);
             p++;
@@ -734,31 +741,31 @@ void generate_asm (ASTNode *node, int dest_reg) {
             emit_interpolated_asm (node -> as.inline_asm.code);
             emit_asm ("  ; --- End Raw ASM ---\n");
             break;
-		}
+        }
 
-		case NODE_COMMENT_LINE: {
-            fprintf(stdout, ";; lua comment: %s\n", node->as.string_val.value);
+        case NODE_COMMENT_LINE: {
+            fprintf(out(), ";; lua comment: %s\n", node->as.string_val.value);
             break;
         }
 
         case NODE_COMMENT_BLOCK: {
-            fprintf(stdout, ";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\n");
-            fprintf(stdout, ";; \n");
-            fprintf(stdout, ";; lua comment: ");
+            fprintf(out(), ";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\n");
+            fprintf(out(), ";; \n");
+            fprintf(out(), ";; lua comment: ");
             
             char *text = node->as.string_val.value;
             for (int i = 0; text[i] != '\0'; i++) {
                 if (text[i] == '\n') {
-                    fprintf(stdout, "\n;; lua comment: ");
+                    fprintf(out(), "\n;; lua comment: ");
                 } else if (text[i] == '\t') {
-                    fprintf(stdout, " ");
+                    fprintf(out(), " ");
                 } else if (text[i] == '\r') {
                     ; // Skip carriage returns
                 } else {
                     putchar(text[i]);
                 }
             }
-            fprintf(stdout, "\n;; \n");
+            fprintf(out(), "\n;; \n");
             break;
         }
     }
@@ -790,13 +797,45 @@ void generate_functions (ASTNode *node) {
     }
 }
 
-void  generate_program (ASTNode *head) {
-    // Define the system heap pointer address constant at the absolute top
-    fprintf(stdout, ";; --- System Constants ---\n");
-    fprintf(stdout, "%%define __heap_pointer 0\n\n"); // Using fprintf to bypass emit_asm columnar logic for directives
+void  generate_program (ASTNode *head)
+{
+    // 1. Open a temporary buffer for the generation pass
+    current_out_stream = tmpfile();
+    if (!current_out_stream)
+    {
+        fprintf(stderr, "Compiler Error: Could not create temp file for code generation.\n");
+        exit(1);
+    }
 
+    // --- PRE-SCAN: Do we actually need a global initialization vector? ---
+    int has_globals = 0;
+    int globals_need_stack = 0;
+    ASTNode *scan = head;
+    while (scan != NULL) {
+        // Comments and function definitions don't count as executable global code
+        if (scan->type != NODE_FUNCTION_DEF &&
+            scan->type != NODE_COMMENT_LINE &&
+            scan->type != NODE_COMMENT_BLOCK) {
+
+            has_globals = 1;
+
+            // Check if this specific global statement triggers stack usage
+            // We copy the node and sever its 'next' pointer temporarily to prevent
+            // check_needs_stack from recursing through the entire remaining script.
+            ASTNode isolated_node = *scan;
+            isolated_node.next = NULL;
+            if (check_needs_stack(&isolated_node)) {
+                globals_need_stack = 1;
+            }
+        }
+        scan = scan->next;
+    }
+
+    // 2. Generate the code
     emit_asm (";; --- Compiled Code Entry Vector ---\n");
-    emit_asm ("    CALL  __init_globals  ; Run top-level setups first\n");
+    if (has_globals) {
+        emit_asm ("    CALL  __init_globals  ; Run top-level setups first\n");
+    }
     emit_asm ("    CALL  _main           ; Then hand control to the user\n");
     emit_asm ("    HLT                   ; Halt CPU when main finishes\n\n");
 
@@ -809,22 +848,51 @@ void  generate_program (ASTNode *head) {
         current = current -> next;
     }
 
-    emit_asm ("\n;; --- Global Initialization Vector ---\n");
-    emit_asm ("__init_globals:\n");
-    emit_asm ("    PUSH  BP\n");
-    emit_asm ("    MOV   BP, SP\n");
+    // 3. Only emit the global init vector if there is actually work to do
+    if (has_globals) {
+        emit_asm ("\n;; --- Global Initialization Vector ---\n");
+        emit_asm ("__init_globals:\n");
 
-    current = head;
-    while (current != NULL) {
-        if (current -> type != NODE_FUNCTION_DEF) {
-            int temp_reg = allocate_register();
-            generate_asm (current, temp_reg);
-            unlock_register (temp_reg);
+        if (globals_need_stack) {
+            emit_asm ("    PUSH  BP\n");
+            emit_asm ("    MOV   BP, SP\n");
+        } else {
+            emit_asm ("  ; --- Frame pointer omitted (Leaf Function Optimization) ---\n");
         }
-        current = current -> next;
+
+        current = head;
+        while (current != NULL) {
+            if (current -> type != NODE_FUNCTION_DEF) {
+                int temp_reg = allocate_register();
+                generate_asm (current, temp_reg);
+                unlock_register (temp_reg);
+            }
+            current = current -> next;
+        }
+
+        if (globals_need_stack) {
+            emit_asm ("    MOV   SP, BP\n");
+            emit_asm ("    POP   BP\n");
+        }
+        emit_asm ("  RET\n");
     }
 
-    emit_asm ("    MOV   SP, BP\n");
-    emit_asm ("    POP   BP\n");
-    emit_asm ("  RET\n");
+    // 4. Generation complete. Now output the required headers to the REAL stdout
+    fprintf(stdout, ";; --- System Constants ---\n");
+    fprintf(stdout, "%%define __heap_pointer 0\n");
+
+    fprintf(stdout, "\n;; --- Global Variable RAM Map ---\n");
+    emit_variable_map();
+    fprintf(stdout, "\n");
+
+    // 5. Dump the compiled code from the temp buffer directly underneath
+    rewind(current_out_stream);
+    char buffer[1024];
+    while (fgets(buffer, sizeof(buffer), current_out_stream)) {
+        fprintf(stdout, "%s", buffer);
+    }
+
+    // 6. Clean up
+    fclose(current_out_stream);
+    current_out_stream = NULL;
 }
