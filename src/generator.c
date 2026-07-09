@@ -20,6 +20,27 @@ static void trim_spaces(char *str) {
     if (start > 0) memmove(str, str + start, strlen(str + start) + 1);
 }
 
+// Recursively flattens an AST chain like table_get(table_get("ioports", "gpu"), "clear")
+// into a flat C string "ioports.gpu.clear". Returns 1 if successful, 0 if dynamic.
+static int resolve_static_path(ASTNode* node, char* path_buffer) {
+    if (!node) return 0;
+
+    if (node->type == NODE_IDENTIFIER) {
+        strcpy(path_buffer, node->as.id.name);
+        return 1;
+    }
+
+    if (node->type == NODE_TABLE_GET && node->as.table_get.key->type == NODE_STRING) {
+        char base_path[256] = {0};
+        if (resolve_static_path(node->as.table_get.table_expr, base_path)) {
+            sprintf(path_buffer, "%s.%s", base_path, node->as.table_get.key->as.string_val.value);
+            return 1;
+        }
+    }
+    
+    return 0;
+}
+
 static void emit_asm(const char* format, ...) {
     char current_instruction[256];
     va_list args;
@@ -295,6 +316,54 @@ void generate_asm (ASTNode *node, int dest_reg) {
         }
 
         case NODE_FUNCTION_CALL: {
+            // 1. HARDWARE INTRINSIC INTERCEPT
+            char target_path[256] = {0};
+            if (resolve_static_path(node->as.call.target, target_path)) {
+                if (strcmp(target_path, "ioports.gpu.clear") == 0) {
+                    emit_asm("  ; --- Intrinsic: ioports.gpu.clear() ---\n");
+                    ASTNode *arg = node->as.call.args_head;
+                    
+                    if (arg != NULL) {
+                        int color_reg = allocate_register();
+                        if (arg->type == NODE_STRING) {
+                            const char *color_name = arg->as.string_val.value;
+                            unsigned int color_hex = 0x000000FF; // Default (Opaque Black)
+                            int is_preset = 1;
+                            
+                            if (strcmp(color_name, "black") == 0)       color_hex = 0x000000FF; 
+                            else if (strcmp(color_name, "white") == 0)  color_hex = 0xFFFFFFFF;
+                            else if (strcmp(color_name, "blue") == 0)   color_hex = 0x0000FFFF;
+                            else if (strcmp(color_name, "red") == 0)    color_hex = 0xFF0000FF;
+                            else if (strcmp(color_name, "green") == 0)  color_hex = 0x00FF00FF;
+                            else {
+                                is_preset = 0; 
+                            }
+                            
+                            if (is_preset) {
+                                emit_asm("    MOV   R%d, %u ; Preset color '%s'\n", color_reg, color_hex, color_name);
+                            } else {
+                                generate_asm(arg, color_reg);
+                            }
+                        } else {
+                            generate_asm(arg, color_reg);
+                        }
+                        emit_asm("    OUT   GPU_ClearColor, R%d\n", color_reg);
+                        unlock_register(color_reg);
+                    }
+                    
+                    int cmd_reg = allocate_register();
+                    emit_asm("    MOV   R%d, 1 ; GPU Command Code for Clear Screen\n", cmd_reg);
+                    emit_asm("    OUT   GPU_Command, R%d\n", cmd_reg);
+                    unlock_register(cmd_reg);
+                    
+                    if (dest_reg != 0) {
+                        emit_asm("    MOV   R%d, 0 ; return nil\n", dest_reg);
+                    }
+                    return; // Terminate early
+                }
+            }
+
+            // 2. STANDARD LUA FUNCTION CALL (Fallback)
             int arg_count = 0;
 
             if (node -> as.call.is_method_call) {
@@ -539,6 +608,25 @@ void generate_asm (ASTNode *node, int dest_reg) {
         }
 
         case NODE_TABLE_SET: {
+            char base_path[256] = {0};
+            
+            // 1. HARDWARE INTRINSIC CHECK
+            if (resolve_static_path(node->as.table_set.table_expr, base_path) && 
+                node->as.table_set.key->type == NODE_STRING) {
+                
+                char full_path[512];
+                sprintf(full_path, "%s.%s", base_path, node->as.table_set.key->as.string_val.value);
+                
+                if (strcmp(full_path, "ioports.gpu.texture") == 0) {
+                    int val_reg = allocate_register();
+                    generate_asm(node->as.table_set.value, val_reg);
+                    emit_asm("    OUT   GPU_SelectedTexture, R%d\n", val_reg); 
+                    unlock_register(val_reg);
+                    return; // Skip standard table set!
+                }
+            }
+
+            // 2. STANDARD TABLE SET (Fallback)
             int val_reg = allocate_register();
             generate_asm (node -> as.table_set.value, val_reg);
             emit_asm ("    PUSH  R%d\n", val_reg);
@@ -560,6 +648,24 @@ void generate_asm (ASTNode *node, int dest_reg) {
         }
 
         case NODE_TABLE_GET: {
+            char base_path[256] = {0};
+            
+            // 1. HARDWARE INTRINSIC CHECK
+            if (resolve_static_path(node->as.table_get.table_expr, base_path) && 
+                node->as.table_get.key->type == NODE_STRING) {
+                
+                char full_path[512];
+                sprintf(full_path, "%s.%s", base_path, node->as.table_get.key->as.string_val.value);
+                
+                if (strcmp(full_path, "ioports.gpu.texture") == 0) {
+                    if (dest_reg != 0) {
+                        emit_asm("    IN    R%d, GPU_SelectedTexture\n", dest_reg);
+                    }
+                    return; // Skip standard table get!
+                }
+            }
+
+            // 2. STANDARD TABLE GET (Fallback)
             int key_reg = allocate_register ();
             generate_asm (node -> as.table_get.key, key_reg);
 
@@ -686,15 +792,15 @@ void generate_functions (ASTNode *node) {
 
 void  generate_program (ASTNode *head) {
     // Define the system heap pointer address constant at the absolute top
-    emit_asm (";; --- System Constants ---\n");
-    fprintf (stdout, "%%define __heap_pointer 0\n\n"); // Alternatively: "__heap_pointer EQU 0\n\n"
+    fprintf(stdout, ";; --- System Constants ---\n");
+    fprintf(stdout, "%%define __heap_pointer 0\n\n"); // Using fprintf to bypass emit_asm columnar logic for directives
 
     emit_asm (";; --- Compiled Code Entry Vector ---\n");
     emit_asm ("    CALL  __init_globals  ; Run top-level setups first\n");
     emit_asm ("    CALL  _main           ; Then hand control to the user\n");
-    emit_asm ("    HLT                   ; Halt CPU when main finishes\n\n\n");
+    emit_asm ("    HLT                   ; Halt CPU when main finishes\n\n");
 
-    emit_asm (";; --- Function Definitions ---\n");
+    emit_asm ("; --- Function Definitions ---\n");
     ASTNode *current = head;
     while (current != NULL) {
         if (current -> type == NODE_FUNCTION_DEF) {
