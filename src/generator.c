@@ -687,14 +687,14 @@ void generate_functions (ASTNode *node) {
 void  generate_program (ASTNode *head) {
     // Define the system heap pointer address constant at the absolute top
     emit_asm (";; --- System Constants ---\n");
-    emit_asm ("\%define __heap_pointer 0\n\n"); // Alternatively: "__heap_pointer EQU 0\n\n"
+    fprintf (stdout, "%%define __heap_pointer 0\n\n"); // Alternatively: "__heap_pointer EQU 0\n\n"
 
     emit_asm (";; --- Compiled Code Entry Vector ---\n");
     emit_asm ("    CALL  __init_globals  ; Run top-level setups first\n");
     emit_asm ("    CALL  _main           ; Then hand control to the user\n");
-    emit_asm ("    HLT                   ; Halt CPU when main finishes\n\n");
+    emit_asm ("    HLT                   ; Halt CPU when main finishes\n\n\n");
 
-    emit_asm ("; --- Function Definitions ---\n");
+    emit_asm (";; --- Function Definitions ---\n");
     ASTNode *current = head;
     while (current != NULL) {
         if (current -> type == NODE_FUNCTION_DEF) {

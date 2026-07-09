@@ -55,25 +55,8 @@ char* mangle_method_name(const char* table_name, const char* method_name);
 %%
 
 program:
-    statement_list { 
-        printf(";; --- Program Initialization ---\n");
-        printf("    MOV   R0, 20000    ; Load immediate into register\n");
-        printf("    MOV   [0], R0      ; Initialize heap pointer to dynamic RAM region\n\n");
-        
-        printf(";; --- Global Setup Routine (Table & Method Registration) ---\n");
-        generate_global_setup ($1); 
-        
-        printf("\n;; --- Main Console Game Loop ---\n");
-        printf("__game_loop:\n");
-        printf("    CALL  _main       ; Execute the user's main function\n");
-        printf("    WAIT             ; Pause CPU execution until the next video frame\n");
-        printf("    JMP   __game_loop  ; Loop forever\n\n"); 
-        
-        printf(";; --- Compiled Function Segments ---\n");
-        generate_functions ($1);
-        
-        // If your compiler uses a trailing string data section handler, keep it here:
-        // emit_string_data_section();
+    statement_list {
+        generate_program($1); // This automatically orchestrates globals, functions, and layout
     }
     ;
 
