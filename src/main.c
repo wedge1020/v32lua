@@ -31,7 +31,7 @@ extern int yyparse(void);
 extern FILE* yyin;
 
 void emit_runtime_library(void) {
-    printf("\n; ==========================================\n");
+    printf("; ==========================================\n");
     printf("; --- Vircon32 Lua Compiler Runtime Lib ---\n");
     printf("; ==========================================\n");
 

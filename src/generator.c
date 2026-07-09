@@ -885,6 +885,7 @@ void  generate_program (ASTNode *head)
             emit_asm ("POP BP\n");
         }
         emit_asm ("RET\n");
+        emit_asm ("\n");
     }
 
     // 4. Generation complete. Now output the required headers to the REAL stdout
