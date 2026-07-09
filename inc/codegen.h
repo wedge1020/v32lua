@@ -135,7 +135,7 @@ struct astnode {
 };
 
 // --- Core Compiler Functions ---
-void generate_asm(ASTNode* node);
+void generate_asm(ASTNode *, int);
 
 // --- Context & Memory Management (implemented in context.c) ---
 int get_next_label(void);
