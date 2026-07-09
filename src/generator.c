@@ -524,16 +524,16 @@ void generate_asm (ASTNode *node, int dest_reg) {
         }
 
         case NODE_TABLE_CONSTRUCTOR: {
-            emit_asm ("    MOV   R%d, [0] ; Read __heap_pointer\n", dest_reg);
+            emit_asm ("    MOV   R%d, [__heap_pointer] ; Read __heap_pointer\n", dest_reg);
             int zero_reg = allocate_register ();
             emit_asm ("    MOV   R%d, 0\n", zero_reg);
             emit_asm ("    MOV   [R%d], R%d ; Initialize to nil/0\n", dest_reg, zero_reg);
             unlock_register (zero_reg);
             
             int temp_reg = allocate_register();
-            emit_asm ("    MOV   R%d, [0]\n", temp_reg);
+            emit_asm ("    MOV   R%d, [__heap_pointer]\n", temp_reg);
             emit_asm ("    IADD  R%d, 1\n", temp_reg); 
-            emit_asm ("    MOV   [0], R%d ; Advance heap pointer\n", temp_reg);
+            emit_asm ("    MOV   [__heap_pointer], R%d ; Advance heap pointer\n", temp_reg);
             unlock_register(temp_reg);
             break;
         }
@@ -684,7 +684,11 @@ void generate_functions (ASTNode *node) {
     }
 }
 
-void generate_program (ASTNode *head) {
+void  generate_program (ASTNode *head) {
+    // Define the system heap pointer address constant at the absolute top
+    emit_asm (";; --- System Constants ---\n");
+    emit_asm ("\%define __heap_pointer 0\n\n"); // Alternatively: "__heap_pointer EQU 0\n\n"
+
     emit_asm (";; --- Compiled Code Entry Vector ---\n");
     emit_asm ("    CALL  __init_globals  ; Run top-level setups first\n");
     emit_asm ("    CALL  _main           ; Then hand control to the user\n");
