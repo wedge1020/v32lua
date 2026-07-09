@@ -1,3 +1,18 @@
+#include "codegen.h"
+#include <string.h>
+#include <stdlib.h>
+
+// --- Direct RAM Allocator ---
+typedef struct GlobalVarNode {
+    char* name;
+    int ram_address;
+    int is_function;
+    struct GlobalVarNode* next;
+} GlobalVarNode;
+
+static GlobalVarNode* globals_head = NULL;
+static int next_ram_address = 1; // Address 0 is reserved for our heap_pointer
+
 void mark_global_as_function(const char* name) {
     // Ensure the variable is allocated an address first
     get_global_variable_address(name);
@@ -207,17 +222,6 @@ int current_loop(void) {
     }
     return loop_stack_head->loop_id;
 }
-
-// --- Direct RAM Allocator ---
-typedef struct GlobalVarNode {
-    char* name;
-    int ram_address;
-    int is_function;
-    struct GlobalVarNode* next;
-} GlobalVarNode;
-
-static GlobalVarNode* globals_head = NULL;
-static int next_ram_address = 1; // Address 0 is reserved for our heap_pointer
 
 int get_global_variable_address(const char* name) {
     GlobalVarNode* current = globals_head;

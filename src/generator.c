@@ -394,17 +394,17 @@ void generate_asm (ASTNode *node, int dest_reg) {
 
             int target_reg = allocate_register();
             generate_asm (node -> as.call.target, target_reg);
-            emit_asm ("    CALL  R%d\n", target_reg);
+            emit_asm ("CALL R%d\n", target_reg);
             unlock_register(target_reg);
 
-            if (arg_count > 0) emit_asm ("    ISUB  SP, %d\n", arg_count);
-            if (dest_reg != 0) emit_asm ("    MOV   R%d, R0\n", dest_reg);
+            if (arg_count > 0) emit_asm ("ISUB SP, %d\n", arg_count);
+            if (dest_reg != 0) emit_asm ("MOV R%d, R0\n", dest_reg);
             break;
         }
 
         case NODE_FUNCTION_POINTER: {
-            emit_asm ("  ; Load address of the mangled function\n");
-            emit_asm ("    MOV   R%d, __function_%s\n", dest_reg, node -> as.func_ptr.mangled_name);
+            emit_asm ("    ;; Load address of the mangled function\n");
+            emit_asm ("MOV R%d, __function_%s\n", dest_reg, node -> as.func_ptr.mangled_name);
             break;
         }
 
@@ -417,19 +417,19 @@ void generate_asm (ASTNode *node, int dest_reg) {
                 int val_reg = allocate_register();
                 generate_asm (expr, val_reg); 
                 
-                if (ret_idx == 0)      { emit_asm ("    MOV   R0, R%d\n", val_reg); }
-                else if (ret_idx == 1) { emit_asm ("    MOV   R2, R%d\n", val_reg); }
-                else if (ret_idx == 2) { emit_asm ("    MOV   R3, R%d\n", val_reg); }
+                if (ret_idx == 0)      { emit_asm ("MOV R0, R%d\n", val_reg); }
+                else if (ret_idx == 1) { emit_asm ("MOV R2, R%d\n", val_reg); }
+                else if (ret_idx == 2) { emit_asm ("MOV R3, R%d\n", val_reg); }
                 else {
                     int offset = 2 + arg_count + (ret_idx - 3);
-                    emit_asm ("    MOV   [BP + %d], R%d\n", offset, val_reg);
+                    emit_asm ("MOV [BP + %d], R%d\n", offset, val_reg);
                 }
                 unlock_register(val_reg);
                 
                 ret_idx++;
                 expr = expr -> next;
             }
-            emit_asm ("    JMP   __%s_return\n", get_current_function_name ());
+            emit_asm ("JMP __%s_return\n", get_current_function_name ());
             break;
         }
 
@@ -486,13 +486,15 @@ void generate_asm (ASTNode *node, int dest_reg) {
                     get_global_variable_address(current_target->as.id.name);
                     
                     if (target_idx < val_count) {
-                        emit_asm("MOV [var_%s], R%d\n", current_target->as.id.name, temp_regs[target_idx]);
+                        //emit_asm("MOV [var_%s], R%d\n", current_target->as.id.name, temp_regs[target_idx]);
+                        emit_asm("MOV [%s%s], R%d\n", get_global_prefix (current_target->as.id.name), current_target->as.id.name, temp_regs[target_idx]);
                     } else {
                         // Fill remaining targets with nil (0)
                         int zero_reg = allocate_register();
                         emit_asm("MOV R%d, 0\n", zero_reg);
-                        emit_asm("MOV [var_%s], R%d ; nil fallback\n", current_target->as.id.name, zero_reg);
-                        unlock_register(zero_reg);
+                        //emit_asm("MOV [var_%s], R%d ; nil fallback\n", current_target->as.id.name, zero_reg);
+                        emit_asm("MOV [%s%s], R%d\n", get_global_prefix (current_target->as.id.name), current_target->as.id.name, zero_reg);
+                        unlock_register (zero_reg);
                     }
                 }
                 target_idx++;
@@ -601,16 +603,16 @@ void generate_asm (ASTNode *node, int dest_reg) {
         }
 
         case NODE_TABLE_CONSTRUCTOR: {
-            emit_asm ("    MOV   R%d, [heap_pointer] ; Read heap_pointer\n", dest_reg);
+            emit_asm ("MOV R%d, [heap_pointer] ; Read heap_pointer\n", dest_reg);
             int zero_reg = allocate_register ();
-            emit_asm ("    MOV   R%d, 0\n", zero_reg);
-            emit_asm ("    MOV   [R%d], R%d ; Initialize to nil/0\n", dest_reg, zero_reg);
+            emit_asm ("MOV R%d, 0\n", zero_reg);
+            emit_asm ("MOV [R%d], R%d ; Initialize to nil/0\n", dest_reg, zero_reg);
             unlock_register (zero_reg);
             
             int temp_reg = allocate_register();
-            emit_asm ("    MOV   R%d, [heap_pointer]\n", temp_reg);
-            emit_asm ("    IADD  R%d, 1\n", temp_reg); 
-            emit_asm ("    MOV   [heap_pointer], R%d ; Advance heap pointer\n", temp_reg);
+            emit_asm ("MOV R%d, [heap_pointer]\n", temp_reg);
+            emit_asm ("IADD R%d, 1\n", temp_reg); 
+            emit_asm ("MOV [heap_pointer], R%d ; Advance heap pointer\n", temp_reg);
             unlock_register(temp_reg);
             break;
         }
@@ -629,8 +631,9 @@ void generate_asm (ASTNode *node, int dest_reg) {
                     int val_reg = allocate_register();
                     generate_asm(node->as.table_set.value, val_reg);
 
+                    // Convert float to int
                     emit_asm ("    ;; --- Intrinsic: Cast Lua Float to Hardware Integer ---\n");
-                    emit_asm ("CFI R%d\n", val_reg); // Convert Float to Int in-place (Single operand)
+                    emit_asm ("CFI R%d\n", val_reg);
                     emit_asm ("OUT GPU_SelectedTexture, R%d\n", val_reg);
 
                     unlock_register(val_reg);
@@ -674,8 +677,9 @@ void generate_asm (ASTNode *node, int dest_reg) {
                         emit_asm ("    ;; --- Intrinsic: Read Hardware Integer ---\n");
                         emit_asm ("IN R%d, GPU_SelectedTexture\n", dest_reg);
 
+                        // Convert integer to float
                         emit_asm ("    ;; --- Intrinsic: Cast to Lua Float ---\n");
-                        emit_asm ("CIF R%d\n", dest_reg); // Convert Integer to Float in-place (Single operand)
+                        emit_asm ("CIF R%d\n", dest_reg);
                     }
                     return; // Skip standard dynamic table lookup
                 }
@@ -688,44 +692,44 @@ void generate_asm (ASTNode *node, int dest_reg) {
             int tbl_reg = allocate_register();
             generate_asm (node -> as.table_get.table_expr, tbl_reg);
             
-            emit_asm ("    MOV   R1, R%d\n", tbl_reg);
-            emit_asm ("    MOV   R2, R%d\n", key_reg);
-            emit_asm ("    CALL  __builtin_table_get\n");
+            emit_asm ("MOV R1, R%d\n", tbl_reg);
+            emit_asm ("MOV R2, R%d\n", key_reg);
+            emit_asm ("CALL __builtin_table_get\n");
             
             unlock_register (key_reg);
             unlock_register (tbl_reg);
             
-            if (dest_reg != 0) emit_asm ("    MOV   R%d, R0\n", dest_reg);
+            if (dest_reg != 0) emit_asm ("MOV R%d, R0\n", dest_reg);
             break;
         }
 
         case NODE_IDENTIFIER: {
             if (strcmp (node -> as.id.name, "self") == 0) {
-                emit_asm ("  ; --- Loading local parameter 'self' ---\n");
-                emit_asm ("    MOV   R%d, [BP+2]\n", dest_reg); 
+                emit_asm ("    ;; --- Loading local parameter 'self' ---\n");
+                emit_asm ("MOV R%d, [BP+2]\n", dest_reg); 
             } else {
-				emit_asm("MOV R%d, [%s%s]\n", dest_reg, get_global_prefix(node->as.id.name), node->as.id.name);
+                emit_asm("MOV R%d, [%s%s]\n", dest_reg, get_global_prefix (node->as.id.name), node->as.id.name);
             }
             break;
         }
             
         case NODE_NUMBER:
-            emit_asm ("    MOV   R%d, %f\n", dest_reg, node -> as.number.val);
+            emit_asm ("MOV R%d, %f\n", dest_reg, node -> as.number.val);
             break;
             
         case NODE_ASM: {
-            emit_asm ("  ; --- Begin Inline ASM Bubble (existing register states preserved) ---\n");
+            emit_asm ("    ;; --- Begin Inline ASM Bubble (existing register states preserved) ---\n");
             get_global_variable_address ("__asm_snap_sp");
             get_global_variable_address ("__asm_snap_bp");
-            emit_asm ("    MOV   [var___asm_snap_sp], SP\n");
-            emit_asm ("    MOV   [var___asm_snap_bp], BP\n");
+            emit_asm ("MOV [var_asm_snap_sp], SP\n");
+            emit_asm ("MOV [var_asm_snap_bp], BP\n");
 
             for (int i = 0; i < NUM_GPRS; i++) {
                 if (is_register_locked (i)) {
                     char snap_name[32];
-                    sprintf (snap_name, "__asm_snap_r%d", i);
+                    sprintf (snap_name, "_asm_snap_r%d", i);
                     get_global_variable_address (snap_name);
-                    emit_asm ("    MOV   [var_%s], R%d\n", snap_name, i);
+                    emit_asm ("MOV [var_%s], R%d\n", snap_name, i);
                 }
             }
             
@@ -734,38 +738,38 @@ void generate_asm (ASTNode *node, int dest_reg) {
             for (int i = 0; i < NUM_GPRS; i++) {
                 if (is_register_locked (i)) {
                     char snap_name[32];
-                    sprintf (snap_name, "__asm_snap_r%d", i);
-                    emit_asm ("    MOV   R%d, [var_%s]\n", i, snap_name);
+                    sprintf (snap_name, "_asm_snap_r%d", i);
+                    emit_asm ("MOV R%d, [var_%s]\n", i, snap_name);
                 }
             }
 
-            emit_asm ("    MOV   BP, [var___asm_snap_bp]\n");
-            emit_asm ("    MOV   SP, [var___asm_snap_sp]\n");
-            emit_asm ("  ; --- End Inline ASM Bubble ---\n");
+            emit_asm ("MOV BP, [var_asm_snap_bp]\n");
+            emit_asm ("MOV SP, [var_asm_snap_sp]\n");
+            emit_asm ("    ;; --- End Inline ASM Bubble ---\n");
             break;
         }
 
         case NODE_RAWASM: {
-            emit_asm ("  ; --- Begin Raw ASM (Unprotected) ---\n");
+            emit_asm ("    ;; --- Begin Raw ASM (Unprotected) ---\n");
             emit_interpolated_asm (node -> as.inline_asm.code);
-            emit_asm ("  ; --- End Raw ASM ---\n");
+            emit_asm ("    ;; --- End Raw ASM ---\n");
             break;
         }
 
         case NODE_COMMENT_LINE: {
-            fprintf(out(), ";; lua comment: %s\n", node->as.string_val.value);
+            fprintf (out (), ";;@ %s\n", node->as.string_val.value);
             break;
         }
 
         case NODE_COMMENT_BLOCK: {
             fprintf(out(), ";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\n");
             fprintf(out(), ";; \n");
-            fprintf(out(), ";; lua comment: ");
+            fprintf(out(), ";;@ ");
             
             char *text = node->as.string_val.value;
             for (int i = 0; text[i] != '\0'; i++) {
                 if (text[i] == '\n') {
-                    fprintf(out(), "\n;; lua comment: ");
+                    fprintf(out(), "\n;;@ ");
                 } else if (text[i] == '\t') {
                     fprintf(out(), " ");
                 } else if (text[i] == '\r') {
@@ -809,18 +813,20 @@ void generate_functions (ASTNode *node) {
 void  generate_program (ASTNode *head)
 {
     // --- 1. PRE-PASS: Mark all variables that are functions ---
-    ASTNode* current = head;
-    while (current != NULL) {
-        if (current->type == NODE_FUNCTION_DEF) {
-            mark_global_as_function(current->as.function_def.name);
+    ASTNode *current       = head;
+    while (current        != NULL)
+    {
+        if (current->type == NODE_FUNCTION_DEF)
+        {
+            mark_global_as_function (current -> as.function_def.name);
         }
-        current = current->next;
+        current            = current -> next;
     }
     // 1. Open a temporary buffer for the generation pass
-    current_out_stream = tmpfile();
+    current_out_stream     = tmpfile ();
     if (!current_out_stream)
     {
-        fprintf(stderr, "Compiler Error: Could not create temp file for code generation.\n");
+        fprintf (stderr, "Compiler Error: Could not create temp file for code generation.\n");
         exit(1);
     }
 
@@ -857,7 +863,6 @@ void  generate_program (ASTNode *head)
     emit_asm ("HLT ; Halt CPU when main finishes\n\n");
 
     emit_asm ("\n;; --- Function Definitions ---\n");
-    ASTNode *current = head;
     while (current != NULL) {
         if (current -> type == NODE_FUNCTION_DEF) {
             generate_asm (current, 0);

@@ -44,131 +44,102 @@ void emit_runtime_library(void) {
     printf("    MOV   R1, [BP + 2] ; Source pointer\n");
     
     printf("\n__strcat_find_end:\n");
-    printf("  MOV R2, [R0]\n");
-    printf("  IEQ R2, 0\n");
-    printf("  JT R2, __strcat_copy_loop\n");
-    printf("  IADD R0, 1       ; Move to next word\n");
-    printf("  JMP __strcat_find_end\n");
+    printf("    MOV   R2, [R0]\n");
+    printf("    IEQ   R2, 0\n");
+    printf("    JT    R2, __strcat_copy_loop\n");
+    printf("    IADD  R0, 1       ; Move to next word\n");
+    printf("    JMP   __strcat_find_end\n");
     
     printf("\n__strcat_copy_loop:\n");
-    printf("  MOV R3, [R1]     ; Load character into intermediate register\n");
-    printf("  MOV [R0], R3     ; Store character into destination address\n");
-    printf("  IEQ R3, 0        ; Check for null-terminator\n");
-    printf("  JT R3, __strcat_done\n");
-    printf("  IADD R0, 1       ; Increment pointers via integer math\n");
-    printf("  IADD R1, 1\n");
-    printf("  JMP __strcat_copy_loop\n");
+    printf("    MOV   R3, [R1]     ; Load character into intermediate register\n");
+    printf("    MOV   [R0], R3     ; Store character into destination address\n");
+    printf("    IEQ   R3, 0        ; Check for null-terminator\n");
+    printf("    JT    R3, __strcat_done\n");
+    printf("    IADD  R0, 1       ; Increment pointers via integer math\n");
+    printf("    IADD  R1, 1\n");
+    printf("    JMP   __strcat_copy_loop\n");
     
     printf("\n__strcat_done:\n");
-    printf("  MOV SP, BP\n");
-    printf("  POP BP\n");
-    printf("  RET\n");
+    printf("    MOV   SP, BP\n");
+    printf("    POP   BP\n");
+    printf("    RET\n");
 
 // --- Built-in: Table Assignment (__builtin_table_set) ---
     // Stack incoming: [BP+4]=Value, [BP+3]=Key, [BP+2]=Table_Ptr
     printf("\n__builtin_table_set:\n");
-    printf("  PUSH BP\n");
-    printf("  MOV BP, SP\n");
-    printf("  MOV R0, [BP + 2] ; Table root pointer address\n");
-    printf("  MOV R1, [BP + 3] ; Key\n");
-    printf("  MOV R2, [BP + 4] ; Value\n");
+    printf("    PUSH  BP\n");
+    printf("    MOV   BP, SP\n");
+    printf("    MOV   R0, [BP + 2] ; Table root pointer address\n");
+    printf("    MOV   R1, [BP + 3] ; Key\n");
+    printf("    MOV   R2, [BP + 4] ; Value\n");
 
     printf("\n__table_set_loop:\n");
-    printf("  MOV R3, [R0]     ; Load current node pointer\n");
-    printf("  IEQ R3, 0        ; Is it null (end of list)?\n");
-    printf("  JT R3, __table_set_new\n");
+    printf("    MOV   R3, [R0]     ; Load current node pointer\n");
+    printf("    IEQ   R3, 0        ; Is it null (end of list)?\n");
+    printf("    JT    R3, __table_set_new\n");
 
-    printf("  MOV R4, [R3 + 1] ; Load Node.Key\n");
-    printf("  IEQ R4, R1       ; Does key match?\n");
-    printf("  JT R4, __table_set_update\n");
+    printf("    MOV   R4, [R3 + 1] ; Load Node.Key\n");
+    printf("    IEQ   R4, R1       ; Does key match?\n");
+    printf("    JT    R4, __table_set_update\n");
 
-    printf("  MOV R0, R3       ; Move to next node (NextPtr is at offset 0)\n");
-    printf("  JMP __table_set_loop\n");
+    printf("    MOV   R0, R3       ; Move to next node (NextPtr is at offset 0)\n");
+    printf("    JMP   __table_set_loop\n");
 
     printf("\n__table_set_update:\n");
-    printf("  MOV [R3 + 2], R2 ; Update Node.Value\n");
-    printf("  JMP __table_set_done\n");
+    printf("    MOV   [R3 + 2], R2 ; Update Node.Value\n");
+    printf("    JMP   __table_set_done\n");
 
     printf("\n__table_set_new:\n");
-    printf("  MOV R3, [0]      ; Get current heap pointer\n");
-    printf("  MOV R4, R3\n");
-    printf("  IADD R4, 3       ; Allocate 3 words (NextPtr, Key, Value)\n");
-    printf("  MOV [0], R4      ; Update heap pointer\n");
+    printf("    MOV   R3, [heap_pointer]      ; Get current heap pointer\n");
+    printf("    MOV   R4, R3\n");
+    printf("    IADD  R4, 3       ; Allocate 3 words (NextPtr, Key, Value)\n");
+    printf("    MOV   [heap_pointer], R4      ; Update heap pointer\n");
 
-    printf("  MOV  R4, 0\n"); 
-    printf("  MOV [R3 + 0], R4 ; Node.Next = null\n");
-    printf("  MOV [R3 + 1], R1 ; Node.Key = key\n");
-    printf("  MOV [R3 + 2], R2 ; Node.Value = value\n");
-    printf("  MOV [R0], R3     ; Link previous node (or root) to this new node\n");
+    printf("    MOV   R4, 0\n"); 
+    printf("    MOV   [R3 + 0], R4 ; Node.Next = null\n");
+    printf("    MOV   [R3 + 1], R1 ; Node.Key = key\n");
+    printf("    MOV   [R3 + 2], R2 ; Node.Value = value\n");
+    printf("    MOV   [R0], R3     ; Link previous node (or root) to this new node\n");
 
     printf("\n__table_set_done:\n");
-    printf("  MOV SP, BP\n");
-    printf("  POP BP\n");
-    printf("  RET\n");
-/*
-__builtin_table_get:
-  ; Inputs:
-  ;   R1 = Table Node Pointer (The head of the linked list)
-  ;   R2 = Key (The string pointer/hash we are looking for)
-  ; Output:
-  ;   R0 = The value found (or 0 if not found)
-
-  MOV R0, 0          ; Default return value to 0 (nil/null)
-  MOV R3, R1         ; R3 = Current node pointer
-
-__table_get_loop:
-  CMP R3, 0          ; Have we reached the end of the list?
-  JE __table_get_notFound
-
-  MOV R4, [R3 + 1]   ; R4 = Current node's Key
-  CMP R4, R2         ; Does it match the key we want?
-  JE __table_get_found
-
-  MOV R3, [R3 + 0]   ; Move to the next node (Node.Next)
-  JMP __table_get_loop
-
-__table_get_found:
-  MOV R0, [R3 + 2]   ; R0 = Current node's Value
-  RET
-
-__table_get_notFound:
-  RET
-*/
+    printf("    MOV   SP, BP\n");
+    printf("    POP   BP\n");
+    printf("    RET\n");
 
     // --- Built-in: Table Retrieval (__builtin_table_get) ---
     // Stack incoming: [BP+3]=Key, [BP+2]=Table_Ptr
     printf("\n__builtin_table_get:\n");
-    printf("  PUSH BP\n");
-    printf("  MOV BP, SP\n");
-    printf("  MOV R0, [BP + 2] ; Table root pointer address\n");
-    printf("  MOV R1, [BP + 3] ; Key\n");
+    printf("    PUSH  BP\n");
+    printf("    MOV   BP, SP\n");
+    printf("    MOV   R0, [BP + 2] ; Table root pointer address\n");
+    printf("    MOV   R1, [BP + 3] ; Key\n");
 
     printf("\n__table_get_loop:\n");
-    printf("  MOV R3, [R0]     ; Load current node pointer\n");
-    printf("  IEQ R3, 0        ; End of list?\n");
-    printf("  JT R3, __table_get_not_found\n");
+    printf("    MOV   R3, [R0]     ; Load current node pointer\n");
+    printf("    IEQ   R3, 0        ; End of list?\n");
+    printf("    JT    R3, __table_get_not_found\n");
 
-    printf("  MOV R4, [R3 + 1] ; Load Node.Key\n");
-    printf("  IEQ R4, R1       ; Does key match?\n");
-    printf("  JT R4, __table_get_found\n");
+    printf("    MOV   R4, [R3 + 1] ; Load Node.Key\n");
+    printf("    IEQ   R4, R1       ; Does key match?\n");
+    printf("    JT    R4, __table_get_found\n");
 
-    printf("  MOV R0, R3       ; Move to next node\n");
-    printf("  JMP __table_get_loop\n");
+    printf("    MOV   R0, R3       ; Move to next node\n");
+    printf("    JMP   __table_get_loop\n");
 
     printf("\n__table_get_found:\n");
-    printf("  MOV R0, [R3 + 2] ; Return Node.Value\n");
-    printf("  JMP __table_get_done\n");
+    printf("    MOV   R0, [R3 + 2] ; Return Node.Value\n");
+    printf("    JMP   __table_get_done\n");
 
     printf("\n__table_get_not_found:\n");
-    printf("  MOV R0, 0        ; Return nil/0 if key doesn't exist\n");
+    printf("    MOV   R0, 0        ; Return nil/0 if key doesn't exist\n");
 
     printf("\n__table_get_done:\n");
-    printf("  MOV SP, BP\n");
-    printf("  POP BP\n");
-    printf("  RET\n");
+    printf("    MOV   SP, BP\n");
+    printf("    POP   BP\n");
+    printf("    RET\n");
 }
 
-void compiler_error(ErrorType type, int line_num, const char* format, ...)
+void compiler_error (ErrorType type, int line_num, const char* format, ...)
 {
     // 1. Print the Error Type Prefix
     fprintf (stderr, "\n");
