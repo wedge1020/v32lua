@@ -98,29 +98,56 @@ SymbolNode* register_global(const char* name) {
 //
 void  get_variable_access_string (const char *name, char *output_buffer)
 {
-    SymbolNode *sym          = resolve_symbol (name);
-    if (sym                 == NULL)
-    {
-        sym                  = register_global (name); 
-    }
+    SymbolNode *sym             = resolve_symbol (name);
     
-    if (sym -> type         == SYM_LOCAL)
+    ////////////////////////////////////////////////////////////////////////////////////
+    //
+    // If not found, auto-register it as a global variable
+    //
+    if (sym                    == NULL)
     {
-        if (sym -> location <  0)
+        sym                     = register_global (name); 
+    }
+
+    ////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Check if it's a global symbol
+    //
+    if (sym -> type            == SYM_GLOBAL)
+    {
+        if (sym -> is_function == 1)
         {
-            // It's a parameter! (e.g. location -2 formats as [BP + 2])
-            sprintf (output_buffer, "[BP + %d]", -sym -> location);
+            sprintf (output_buffer, "func_%s", sym -> name);
         }
         else
         {
-            // It's a local! (e.g. location 1 formats as [BP - 1])
-            sprintf (output_buffer, "[BP - %d]", sym -> location);
+            sprintf (output_buffer, "var_%s", sym -> name);
         }
     }
+
+    ////////////////////////////////////////////////////////////////////////////////////
+    //
+    // else it is a local variable, use BP offset
+    //
     else
     {
-        sprintf (output_buffer, "[%s%s]", sym -> is_function ? "func_" : "var_",
-                                          sym -> name);
+        ////////////////////////////////////////////////////////////////////////////////
+        //
+        // It's a parameter! (e.g. location -2 formats as [BP + 2])
+        //
+        if (sym -> location    <  0)
+        {
+            sprintf (output_buffer, "[BP + %d]", -sym -> location);
+        }
+
+        ////////////////////////////////////////////////////////////////////////////////
+        //
+        // It's a local! (e.g. location 1 formats as [BP - 1])
+        //
+        else
+        {
+            sprintf (output_buffer, "[BP - %d]", sym -> location);
+        }
     }
 }
 
@@ -132,6 +159,7 @@ void  mark_global_as_function (const char *name)
         sym             = register_global (name);
     }
     sym -> is_function  = 1;
+    sym -> type         = SYM_GLOBAL;
 }
 
 void  emit_variable_map (void)

@@ -867,13 +867,14 @@ void  generate_global_setup (ASTNode *node)
         //
         // Declare and initialize variables
         //
-        ASTNode    *current      = node;
-        const char *func_name    = NULL;
+        //ASTNode    *current      = node;
+        //const char *func_name    = NULL;
 
         ////////////////////////////////////////////////////////////////////////////
         //
         // Pre-Pass: Register all functions globally ---
         //
+		/*
         while (current          != NULL)
         {
             if (current -> type == NODE_FUNCTION_DEF)
@@ -891,8 +892,9 @@ void  generate_global_setup (ASTNode *node)
                 mark_global_as_function (func_name);
             }
             current              = current->next;
-        }
+        }*/
 
+		/*
         if (node -> type  == NODE_FUNCTION_DEF)
         {
             char  var_access[256];
@@ -916,7 +918,7 @@ void  generate_global_setup (ASTNode *node)
             emit_asm ("MOV %s, R%d\n", var_access, temp_reg);
 
             unlock_register (temp_reg);
-        }
+        }*/
         
         generate_global_setup (node -> next);
     }
@@ -948,7 +950,21 @@ void  generate_program (ASTNode *head)
     int      temp_reg               = -1;  
     char     buffer[1024];
     char    *check                  = NULL;
-    
+
+    ////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Function Pre-Pass: Register all functions globally before generating ANY code
+    //
+    current                         = head;
+    while (current                 != NULL)
+    {
+        if (current -> type        == NODE_FUNCTION_DEF)
+        {
+            mark_global_as_function (current -> as.function_def.name);
+        }
+        current                     = current -> next;
+    }
+
     ////////////////////////////////////////////////////////////////////////////////////
     //
     // Initialize the global scope before compiling!

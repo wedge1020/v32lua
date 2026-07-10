@@ -36,9 +36,9 @@ typedef enum {
     NODE_IDENTIFIER,
     NODE_NUMBER,
     NODE_ASM,
-	NODE_RAWASM,
-	NODE_COMMENT_LINE,
-	NODE_COMMENT_BLOCK
+    NODE_RAWASM,
+    NODE_COMMENT_LINE,
+    NODE_COMMENT_BLOCK
 } NodeType;
 
 typedef enum {
@@ -69,13 +69,13 @@ typedef struct astnode {
         } while_loop;
 
         struct
-		{
+        {
             struct astnode *condition;
             struct astnode *if_body;
             struct astnode *else_body; // Can be NULL
         } if_stmt;
 
-		struct {
+        struct {
             char* name;
             struct astnode* params;
             struct astnode* body;

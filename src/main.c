@@ -30,7 +30,8 @@
 extern int yyparse(void);
 extern FILE* yyin;
 
-void emit_runtime_library(void) {
+void emit_runtime_library (void)
+{
     printf("; ==========================================\n");
     printf("; --- Vircon32 Lua Compiler Runtime Lib ---\n");
     printf("; ==========================================\n");
@@ -208,8 +209,11 @@ void compiler_error (ErrorType type, int line_num, const char* format, ...)
     // 4. Halt compilation
     exit (1);
 }
+
 extern int yydebug;
-int main(int argc, char** argv) {
+
+int main (int  argc, char** argv)
+{
     if (argc > 1) {
         FILE* file = fopen(argv[1], "r");
         if (!file) {
@@ -231,9 +235,5 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // Append our data sections and utility libraries safely to the end of the file
-    emit_string_data_section();
-    emit_runtime_library();
-
-    return 0;
+    return (0);
 }
