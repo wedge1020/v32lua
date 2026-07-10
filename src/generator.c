@@ -488,16 +488,16 @@ void  generate_asm (ASTNode *node, int  dest_reg)
             }
 
             case NODE_FUNCTION_CALL: {
-                if (node -> as.call.function -> type  == NODE_IDENTIFIER)
+                if (node -> as.call.target -> type  == NODE_IDENTIFIER)
                 {
-                    char *func_name  = node -> as.call.function -> as.identifier.name;
+                    char *func_name  = node -> as.call.target -> as.id.name;
                     
                     // 2. Intercept 'print'
                     if (strcmp (func_name, "print")   == 0)
                     {
                         // Generate the argument(s)
                         int  arg_reg                 = allocate_register();
-                        generate_asm (node->as.call.arguments[0], arg_reg);
+                        generate_asm (node->as.call.args_head, arg_reg);
                         
                         // Push the argument, coerce it, and print it
                         emit_asm ("PUSH R%d\n", arg_reg);
@@ -708,6 +708,9 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                         case OP_LE:  emit_asm ("FLE R%d, R%d\n", dest_reg, right_reg); break;
                         case OP_GT:  emit_asm ("FGT R%d, R%d\n", dest_reg, right_reg); break;
                         case OP_GE:  emit_asm ("FGE R%d, R%d\n", dest_reg, right_reg); break;
+						case OP_LEN: break;
+						case OP_NOT: break;
+						case OP_UNM: break;
                     }
                 }
                 unlock_register (right_reg);
@@ -717,7 +720,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
             case NODE_STRING: {
                 // Register the literal and get its ID
                 //int str_id = add_string_literal (node -> as.string_val.value);
-                int string_id = add_string_literal(node->as.string_val);
+                int string_id = add_string_literal(node->as.string_val.value);
                 
                 // Load the raw pointer into the destination register
                 emit_asm ("MOV R%d, __string_%d\n", dest_reg, string_id);
