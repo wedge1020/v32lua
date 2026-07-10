@@ -63,16 +63,24 @@ static void emit_asm(const char* format, ...) {
     char *p = current_instruction;
     while (*p == ' ' || *p == '\t') p++;
 
-    if (*p == '\0' || *p == '\r' || *p == '\n' || *p == ';' || strchr(p, ':') != NULL) {
+    // 1. Find where the first colon and semicolon are located
+    char *colon_pos = strchr(p, ':');
+    char *semi_pos  = strchr(p, ';');
+    
+    // 2. It is only a label if a colon exists AND (there is no comment OR the colon is before the comment)
+    int is_label = (colon_pos != NULL && (semi_pos == NULL || colon_pos < semi_pos));
+
+    // 3. Use our new is_label check instead of strchr
+    if (*p == '\0' || *p == '\r' || *p == '\n' || *p == ';' || is_label) {
         fprintf(out(), "%s", current_instruction);
-        if (strchr(p, ':') != NULL || *p == '\0' || *p == '\r' || *p == '\n') {
+        if (is_label || *p == '\0' || *p == '\r' || *p == '\n') {
             last_emitted_inst[0] = '\0';
             last_emitted_dest[0] = '\0';
             last_emitted_src[0] = '\0';
         }
         return;
     }
-
+    
     char inst[32] = {0};
     char operands[256] = {0};
     char comment[256] = {0};
@@ -235,6 +243,43 @@ void  generate_block (ASTNode *head)
 }
 
 static void emit_interpolated_asm (const char *raw_code) {
+    char buffer[2048] = {0}; // Temporary buffer for the interpolated string
+    int buf_idx = 0;
+    
+    const char *p = raw_code;
+    while (*p) {
+        if (*p == '{') {
+            p++; 
+            char var_name[256];
+            int i = 0;
+            while (*p && *p != '}' && i < 255) var_name[i++] = *p++;
+            var_name[i] = '\0'; 
+            if (*p == '}') p++; 
+            
+            // Format the variable and append it to our buffer
+            char formatted_var[264];
+            sprintf(formatted_var, "[var_%s]", var_name);
+            for (int j = 0; formatted_var[j] != '\0' && buf_idx < 2047; j++) {
+                buffer[buf_idx++] = formatted_var[j];
+            }
+        } else {
+            if (buf_idx < 2047) buffer[buf_idx++] = *p;
+            p++;
+        }
+    }
+    buffer[buf_idx] = '\0';
+
+    // Split the buffer by newlines and feed each line to emit_asm
+    // This gives your inline assembly the exact same formatting love as the rest!
+    char *line = strtok(buffer, "\n");
+    while (line != NULL) {
+        emit_asm("%s\n", line); 
+        line = strtok(NULL, "\n");
+    }
+}
+
+/*
+static void emit_interpolated_asm (const char *raw_code) {
     const char *p = raw_code;
     while (*p) {
         if (*p == '{') {
@@ -246,15 +291,16 @@ static void emit_interpolated_asm (const char *raw_code) {
             if (*p == '}') p++; 
             fprintf (out(), "[var_%s]", var_name);
         } else {
-            putchar (*p);
+            fputc(*p, out()); // <--- FIXED: Route character to temporary buffer
             p++;
         }
     }
-    putchar ('\n');
-    last_emitted_inst[0]  = '\0';
-    last_emitted_dest[0]  = '\0';
-    last_emitted_src[0]   = '\0';
+    fputc('\n', out()); // <--- FIXED: Route newline to temporary buffer
+    last_emitted_inst[0] = '\0';
+    last_emitted_dest[0] = '\0';
+    last_emitted_src[0] = '\0';
 }
+*/
 
 void  generate_asm (ASTNode *node, int  dest_reg)
 {
