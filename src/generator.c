@@ -863,19 +863,55 @@ void  generate_global_setup (ASTNode *node)
 {
     if (node              != NULL)
     {
+        ////////////////////////////////////////////////////////////////////////////
+        //
+        // Declare and initialize variables
+        //
+        ASTNode    *current      = node;
+        const char *func_name    = NULL;
+
+        ////////////////////////////////////////////////////////////////////////////
+        //
+        // Pre-Pass: Register all functions globally ---
+        //
+        while (current          != NULL)
+        {
+            if (current -> type == NODE_FUNCTION_DEF)
+            {
+                ////////////////////////////////////////////////////////////////////
+                //
+                // Extract the function name:
+                //
+                func_name        = current -> as.function_def.name;
+
+                ////////////////////////////////////////////////////////////////////
+                //
+                // Register it or update the existing symbol immediately
+                //
+                mark_global_as_function (func_name);
+            }
+            current              = current->next;
+        }
+
         if (node -> type  == NODE_FUNCTION_DEF)
         {
             char  var_access[256];
             int  temp_reg  = allocate_register();
 
+            ////////////////////////////////////////////////////////////////////////////
+            //
             // Register the function name in the global scope explicitly
+            //
             mark_global_as_function (node -> as.function_def.name);
 
             emit_asm ("    ;; Load address of the mangled function\n");
             emit_asm ("MOV R%d, __function_%s\n", temp_reg,
                                                   node -> as.function_def.name);
             
+            ////////////////////////////////////////////////////////////////////////////
+            //
             // Dynamically get its global access string
+            //
             get_variable_access_string (node -> as.function_def.name, var_access);
             emit_asm ("MOV %s, R%d\n", var_access, temp_reg);
 
