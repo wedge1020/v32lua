@@ -1,9 +1,12 @@
 #include "codegen.h"
-#include <string.h>
-#include <stdlib.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
-// --- Scoped Symbol Table ---
+// ============================================================================
+// --- Scoped Symbol Table (Replaces flat GlobalVarNode list) ---
+// ============================================================================
+
 typedef enum { SYM_GLOBAL, SYM_LOCAL } SymbolType;
 
 typedef struct SymbolNode {
@@ -20,10 +23,9 @@ typedef struct ScopeNode {
     struct ScopeNode* parent; // Pointer to the enclosing scope
 } ScopeNode;
 
-// State pointers
 static ScopeNode* current_scope = NULL;
 static ScopeNode* global_scope = NULL;
-static int next_ram_address = 1;
+static int next_ram_address = 1; // Address 0 is reserved for our heap_pointer
 
 void init_global_scope(void) {
     if (global_scope != NULL) return;
@@ -40,7 +42,7 @@ void push_scope(void) {
     if (current_scope != NULL) {
         new_scope->local_offset_counter = current_scope->local_offset_counter;
     } else {
-        new_scope->local_offset_counter = 1; // Start at [BP - 1]
+        new_scope->local_offset_counter = 1; // Start locals at [BP - 1]
     }
     
     current_scope = new_scope;
@@ -96,6 +98,9 @@ SymbolNode* register_local(const char* name) {
 
 // Add a global variable to the *global* (bottom-most) scope
 SymbolNode* register_global(const char* name) {
+    // Safety check - if global scope isn't initialized, do it now
+    if (global_scope == NULL) init_global_scope();
+
     SymbolNode* sym = (SymbolNode*)calloc(1, sizeof(SymbolNode));
     sym->name = strdup(name);
     sym->type = SYM_GLOBAL;
@@ -106,7 +111,7 @@ SymbolNode* register_global(const char* name) {
     return sym;
 }
 
-// This replaces `get_global_variable_address` in context.c
+// Writes the proper assembly string to access this variable into output_buffer
 void get_variable_access_string(const char* name, char* output_buffer) {
     SymbolNode* sym = resolve_symbol(name);
     
@@ -124,46 +129,32 @@ void get_variable_access_string(const char* name, char* output_buffer) {
     }
 }
 
-
-// --- Direct RAM Allocator ---
-/*typedef struct GlobalVarNode {
-    char* name;
-    int ram_address;
-    int is_function;
-    struct GlobalVarNode* next;
-} GlobalVarNode;
-
-static GlobalVarNode* globals_head = NULL;
-static int next_ram_address = 1; // Address 0 is reserved for our heap_pointer
-*/
-/*
 void mark_global_as_function(const char* name) {
-    // Ensure the variable is allocated an address first
-    get_global_variable_address(name);
+    SymbolNode* sym = resolve_symbol(name);
+    if (sym == NULL) {
+        sym = register_global(name);
+    }
+    sym->is_function = 1;
+}
+
+void emit_variable_map(void) {
+    if (global_scope == NULL) return;
     
-    GlobalVarNode* current = globals_head;
+    SymbolNode *current = global_scope->symbols;
     while (current != NULL) {
-        if (strcmp(current->name, name) == 0) {
-            current->is_function = 1;
-            return;
-        }
+        fprintf(stdout, "%%define %s%s %d\n", 
+                current->is_function ? "func_" : "var_", 
+                current->name, 
+                current->location);
         current = current->next;
     }
 }
 
-const char* get_global_prefix(const char* name) {
-    GlobalVarNode* current = globals_head;
-    while (current != NULL) {
-        if (strcmp(current->name, name) == 0) {
-            return current->is_function ? "func_" : "var_";
-        }
-        current = current->next;
-    }
-    return "var_"; // Default fallback for safety
-}
-*/
 
+// ============================================================================
 // --- Register Inventory Implementation ---
+// ============================================================================
+
 // 0 means free, 1 means currently holding data
 static int register_inventory[NUM_GPRS] = {0}; 
 
@@ -193,31 +184,27 @@ int allocate_register(void) {
             return i;
         }
     }
-	compiler_error(ERR_INTERNAL, -1, "Register inventory exhausted!");
-	return -1;
+    compiler_error(ERR_INTERNAL, -1, "Register inventory exhausted!");
+    return -1;
 }
 
+// ============================================================================
 // --- Label Generator & Function Context Stack ---
+// ============================================================================
 
-// Define the node structure for our linked list stack
 typedef struct FunctionContextNode {
     const char* name;
     int label_counter;
     struct FunctionContextNode* next;
 } FunctionContextNode;
 
-// Head pointer for the stack
 static FunctionContextNode* context_stack_head = NULL;
-
-// Fallback counter for statements outside functions
 static int global_label_counter = 0; 
 
 int get_next_label(void) {
     if (context_stack_head == NULL) {
-        // We are in the global scope
         return global_label_counter++;
     }
-    // Return and increment the counter for the current function scope
     return context_stack_head->label_counter++;
 }
 
@@ -227,11 +214,9 @@ void push_function_context(const char* name) {
         compiler_error(ERR_INTERNAL, -1, "Out of memory allocating function context for '%s'", name);
     }
     
-    // Initialize the new context
     new_node->name = name; 
-    new_node->label_counter = 0; // Reset counter for this new function
+    new_node->label_counter = 0; 
     
-    // Push it onto the top of the stack
     new_node->next = context_stack_head;
     context_stack_head = new_node;
 }
@@ -241,7 +226,6 @@ void pop_function_context(void) {
         compiler_error(ERR_INTERNAL, -1, "Function context stack underflow (tried to pop global scope)");
     }
     
-    // Pop and free the top node to prevent memory leaks
     FunctionContextNode* old_head = context_stack_head;
     context_stack_head = context_stack_head->next;
     free(old_head);
@@ -254,7 +238,10 @@ const char* get_current_function_name(void) {
     return context_stack_head->name;
 }
 
+// ============================================================================
 // --- String Literal Tracking ---
+// ============================================================================
+
 typedef struct StringLiteralNode {
     int id;
     char* value;
@@ -265,7 +252,6 @@ static StringLiteralNode* strings_head = NULL;
 static int string_counter = 0;
 
 int add_string_literal(const char* str) {
-    // Check if duplicate string already exists
     StringLiteralNode* current = strings_head;
     while (current != NULL) {
         if (strcmp(current->value, str) == 0) {
@@ -297,20 +283,20 @@ void emit_string_data_section(void) {
         for (int i = 0; current->value[i] != '\0'; i++) {
             printf("%d, ", (int)current->value[i]);
         }
-        printf("0\n"); // Null terminator word
+        printf("0\n"); 
         current = current->next;
     }
 }
 
+// ============================================================================
 // --- Loop Stack (for break statements) ---
+// ============================================================================
 
-// Define the node structure for our linked list stack
 typedef struct LoopContextNode {
     int loop_id;
     struct LoopContextNode* next;
 } LoopContextNode;
 
-// Head pointer for the loop stack
 static LoopContextNode* loop_stack_head = NULL;
 
 void push_loop(int id) {
@@ -320,8 +306,6 @@ void push_loop(int id) {
     }
     
     new_node->loop_id = id;
-    
-    // Push it onto the top of the stack
     new_node->next = loop_stack_head;
     loop_stack_head = new_node;
 }
@@ -331,7 +315,6 @@ void pop_loop(void) {
         compiler_error(ERR_INTERNAL, -1, "Loop stack underflow (No loop to pop)");
     }
     
-    // Pop and free the top node to prevent memory leaks
     LoopContextNode* old_head = loop_stack_head;
     loop_stack_head = loop_stack_head->next;
     free(old_head);
@@ -339,42 +322,37 @@ void pop_loop(void) {
 
 int current_loop(void) {
     if (loop_stack_head == NULL) {
-        return -1; // Return -1 if we are not currently inside any loop
+        return -1; 
     }
     return loop_stack_head->loop_id;
 }
-
-int get_global_variable_address(const char* name) {
-    GlobalVarNode* current = globals_head;
-    while (current != NULL) {
-        if (strcmp(current->name, name) == 0) {
-            return current->ram_address;
-        }
-        current = current->next;
-    }
-
-    // Allocate a raw RAM location to avoid Cartridge ROM write conflicts
-    GlobalVarNode* new_node = (GlobalVarNode*)malloc(sizeof(GlobalVarNode));
-    if (new_node == NULL) {
-        compiler_error(ERR_INTERNAL, -1, "Out of memory allocating global variable node");
-    }
+//
+// Add to context.c
+SymbolNode* register_parameter(const char* name, int offset) {
+    SymbolNode* sym = (SymbolNode*)calloc(1, sizeof(SymbolNode));
+    sym->name = strdup(name);
+    sym->type = SYM_LOCAL;
+    sym->location = -offset; // Store as negative so we know it's a parameter!
     
-    new_node->name = strdup(name);
-    new_node->ram_address = next_ram_address++;
-    new_node->next = globals_head;
-    globals_head = new_node;
-    
-    return new_node->ram_address;
+    sym->next = current_scope->symbols;
+    current_scope->symbols = sym;
+    return sym;
 }
 
-void emit_variable_map(void) {
-    GlobalVarNode *current = globals_head;
-    while (current != NULL) {
-        // Use get_global_prefix instead of a hardcoded "var_"
-        fprintf(stdout, "%%define %s%s %d\n", 
-                get_global_prefix(current->name), 
-                current->name, 
-                current->ram_address);
-        current = current->next;
+// Update this function in context.c to parse the negative parameter offsets
+void get_variable_access_string(const char* name, char* output_buffer) {
+    SymbolNode* sym = resolve_symbol(name);
+    if (sym == NULL) sym = register_global(name); 
+    
+    if (sym->type == SYM_LOCAL) {
+        if (sym->location < 0) {
+            // It's a parameter! (e.g. location -2 formats as [BP + 2])
+            sprintf(output_buffer, "[BP + %d]", -sym->location);
+        } else {
+            // It's a local! (e.g. location 1 formats as [BP - 1])
+            sprintf(output_buffer, "[BP - %d]", sym->location);
+        }
+    } else {
+        sprintf(output_buffer, "[%s%s]", sym->is_function ? "func_" : "var_", sym->name);
     }
 }

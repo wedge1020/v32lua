@@ -138,6 +138,7 @@ statement:
         $$ = make_node(NODE_MULTIPLE_ASSIGNMENT);
         $$->as.mult_assign.targets_head = $2;
         $$->as.mult_assign.values_head = $4;
+        $$->as.mult_assign.is_local = 1; // <--- FLIP THE FLAG
         
         // Note: When you implement true stack-based local scoping in context.c, 
         // you will want to flag these identifiers as local here.

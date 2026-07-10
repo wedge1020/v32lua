@@ -99,6 +99,7 @@ typedef struct astnode {
         struct {
             struct astnode *targets_head; // Linked list of variables to assign to
             struct astnode *values_head;  // Linked list of expressions to assign
+            int is_local; // <--- ADD THIS
         } mult_assign;
 
         struct {
@@ -159,10 +160,12 @@ void push_loop(int id);
 void pop_loop(void);
 int current_loop(void);
 
-int get_global_variable_address(const char* name);
 void emit_variable_map(void);
 
 void mark_global_as_function(const char* name);
-const char* get_global_prefix(const char* name);
+
+void init_global_scope(void);
+void get_variable_access_string(const char* name, char* output_buffer);
+SymbolNode* register_parameter(const char* name, int offset);
 
 #endif // CODEGEN_H
