@@ -1,9 +1,132 @@
 #include "codegen.h"
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
+
+// --- Scoped Symbol Table ---
+typedef enum { SYM_GLOBAL, SYM_LOCAL } SymbolType;
+
+typedef struct SymbolNode {
+    char* name;
+    SymbolType type;
+    int location;             // RAM address for globals, BP offset for locals
+    int is_function;
+    struct SymbolNode* next;
+} SymbolNode;
+
+typedef struct ScopeNode {
+    SymbolNode* symbols;      // Variables declared in this specific scope
+    int local_offset_counter; // Tracks [BP - 1], [BP - 2], etc., for this function
+    struct ScopeNode* parent; // Pointer to the enclosing scope
+} ScopeNode;
+
+// State pointers
+static ScopeNode* current_scope = NULL;
+static ScopeNode* global_scope = NULL;
+static int next_ram_address = 1;
+
+void init_global_scope(void) {
+    if (global_scope != NULL) return;
+    global_scope = (ScopeNode*)calloc(1, sizeof(ScopeNode));
+    current_scope = global_scope;
+}
+
+void push_scope(void) {
+    ScopeNode* new_scope = (ScopeNode*)calloc(1, sizeof(ScopeNode));
+    new_scope->parent = current_scope;
+    
+    // Inherit the local stack offset from the parent so variables in 
+    // nested blocks don't overwrite variables in outer blocks!
+    if (current_scope != NULL) {
+        new_scope->local_offset_counter = current_scope->local_offset_counter;
+    } else {
+        new_scope->local_offset_counter = 1; // Start at [BP - 1]
+    }
+    
+    current_scope = new_scope;
+}
+
+void pop_scope(void) {
+    if (current_scope == global_scope || current_scope == NULL) {
+        compiler_error(ERR_INTERNAL, -1, "Scope underflow: tried to pop global scope!");
+    }
+    
+    ScopeNode* old_scope = current_scope;
+    current_scope = current_scope->parent;
+    
+    // Free the symbols in the scope we are leaving
+    SymbolNode* sym = old_scope->symbols;
+    while (sym != NULL) {
+        SymbolNode* next_sym = sym->next;
+        free(sym->name);
+        free(sym);
+        sym = next_sym;
+    }
+    free(old_scope);
+}
+
+// Lookup a variable starting from the innermost scope outward
+SymbolNode* resolve_symbol(const char* name) {
+    ScopeNode* search_scope = current_scope;
+    
+    while (search_scope != NULL) {
+        SymbolNode* sym = search_scope->symbols;
+        while (sym != NULL) {
+            if (strcmp(sym->name, name) == 0) {
+                return sym; // Found it!
+            }
+            sym = sym->next;
+        }
+        search_scope = search_scope->parent; // Move down the stack
+    }
+    return NULL; // Not found anywhere
+}
+
+// Add a local variable to the *current* scope
+SymbolNode* register_local(const char* name) {
+    SymbolNode* sym = (SymbolNode*)calloc(1, sizeof(SymbolNode));
+    sym->name = strdup(name);
+    sym->type = SYM_LOCAL;
+    sym->location = current_scope->local_offset_counter++; // Allocate [BP - offset]
+    
+    sym->next = current_scope->symbols;
+    current_scope->symbols = sym;
+    return sym;
+}
+
+// Add a global variable to the *global* (bottom-most) scope
+SymbolNode* register_global(const char* name) {
+    SymbolNode* sym = (SymbolNode*)calloc(1, sizeof(SymbolNode));
+    sym->name = strdup(name);
+    sym->type = SYM_GLOBAL;
+    sym->location = next_ram_address++; // Allocate fixed RAM address
+    
+    sym->next = global_scope->symbols;
+    global_scope->symbols = sym;
+    return sym;
+}
+
+// This replaces `get_global_variable_address` in context.c
+void get_variable_access_string(const char* name, char* output_buffer) {
+    SymbolNode* sym = resolve_symbol(name);
+    
+    if (sym == NULL) {
+        // In Lua, undeclared variables implicitly become globals
+        sym = register_global(name); 
+    }
+    
+    if (sym->type == SYM_LOCAL) {
+        // Format as a stack offset: [BP - 1]
+        sprintf(output_buffer, "[BP - %d]", sym->location);
+    } else {
+        // Format as a static RAM label: [var_x]
+        sprintf(output_buffer, "[%s%s]", sym->is_function ? "func_" : "var_", sym->name);
+    }
+}
+
 
 // --- Direct RAM Allocator ---
-typedef struct GlobalVarNode {
+/*typedef struct GlobalVarNode {
     char* name;
     int ram_address;
     int is_function;
@@ -12,7 +135,8 @@ typedef struct GlobalVarNode {
 
 static GlobalVarNode* globals_head = NULL;
 static int next_ram_address = 1; // Address 0 is reserved for our heap_pointer
-
+*/
+/*
 void mark_global_as_function(const char* name) {
     // Ensure the variable is allocated an address first
     get_global_variable_address(name);
@@ -37,10 +161,7 @@ const char* get_global_prefix(const char* name) {
     }
     return "var_"; // Default fallback for safety
 }
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include "codegen.h"
+*/
 
 // --- Register Inventory Implementation ---
 // 0 means free, 1 means currently holding data
