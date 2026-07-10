@@ -193,7 +193,7 @@ static int check_needs_stack (ASTNode *node)
             if (check_needs_stack (node -> as.if_stmt.condition)) return (1);
             if (check_needs_stack (node -> as.if_stmt.if_body))   return (1);
             if (check_needs_stack (node -> as.if_stmt.else_body)) return (1);
-            fprintf (stderr, "[IF] stack check: doesn't need one\n");
+            //fprintf (stderr, "[IF] stack check: doesn't need one\n");
             break;
 
         case NODE_MULTIPLE_ASSIGNMENT: {
@@ -260,13 +260,18 @@ void  generate_asm (ASTNode *node, int  dest_reg)
 {
     if (node == NULL)
     {
-        fprintf (stderr, "[generate_asm] NULL, bailing\n");
+        //fprintf (stderr, "[generate_asm] NULL, bailing\n");
         return;
     }
 
-    fprintf (stderr, "[generate_asm] node -> type: %d\n", node -> type);
-    if (node -> next != NULL)
-    fprintf (stderr, "[generate_asm] node -> next -> type: %d\n", node -> next -> type);
+	//ASTNode *tmp  = node;
+    //fprintf (stderr, "[generate_asm] node -> type: ");
+	//while (tmp != NULL)
+//	{
+//		fprintf (stderr, "%d -> ", tmp -> type);
+//		tmp = tmp -> next;
+//	}
+ //   fprintf (stderr, "NULL\n");
 
     switch (node -> type)
     {
@@ -300,7 +305,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
         }
 
         case NODE_IF: {
-            fprintf (stderr, "[IF] Encountered an if statement!\n");
+           // fprintf (stderr, "[IF] Encountered an if statement!\n");
             int  label_id    = get_next_label ();
             const char *ctx  = get_current_function_name ();
             
@@ -344,8 +349,8 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 emit_asm ("    ;; --- Frame pointer omitted (Leaf Function Optimization) ---\n");
             }
 
-            // 2. Generate the internal body code
-            generate_asm (node->as.function_def.body, 0);
+			// 2. Generate the internal body code
+			generate_block (node -> as.function_def.body); // <--- FIXED
 
             // Emit function epilogue
             emit_asm("__%s_return:\n", func_name);

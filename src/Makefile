@@ -6,7 +6,7 @@ YACC = bison
 # --- Flags ---
 # -Wall -Wextra: Enable helpful compiler warnings
 # -g: Include debug symbols (helpful if it crashes)
-CFLAGS = -Wall -Wextra -g -I ../inc
+CFLAGS = -Wall -Wextra -g -I ../inc -DYYDEBUG=1
 
 # --- Output Executable ---
 TARGET = ../bin/v32lua
@@ -27,7 +27,7 @@ $(TARGET): $(OBJS)
 # Bison step: Generate the parser C file and the token header file
 # We use -d to ensure parser.tab.h is created for the lexer to include
 parser.tab.c parser.tab.h: parser.y
-	$(YACC) -d parser.y
+	$(YACC) -d parser.y -t
 
 # Flex step: Generate the lexer C file
 # This explicitly depends on parser.tab.h so Bison runs first

@@ -130,7 +130,6 @@ statement:
             $$ -> as.if_stmt.condition  = $2;
             $$ -> as.if_stmt.if_body    = $4;
             $$ -> as.if_stmt.else_body  = $5;
-			fprintf (stderr, "[parser] IF\n");
     }
     | function_def               { $$ = $1; }
     | return_stmt                { $$ = $1; }
@@ -215,8 +214,7 @@ assignment:
     ;
 
 function_def:
-    /*
-    TOKEN_FUNCTION TOKEN_IDENTIFIER '(' parameter_list ')' stanement_list TOKEN_END {
+    /*TOKEN_FUNCTION TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
         $$ = make_node(NODE_FUNCTION_DEF);
         $$->as.function_def.name = strdup($2);
         $$->as.function_def.params = $4;
@@ -234,7 +232,7 @@ function_def:
         ASTNode* func_ptr = make_node(NODE_FUNCTION_POINTER);
         func_ptr->as.func_ptr.mangled_name = strdup($2);
 
-        // 3. Assign the pointer to the global variable (e.g., var_add)
+        // 3. Assign the pointer to the global variable (e.g., func_add)
         ASTNode* assign = make_node(NODE_MULTIPLE_ASSIGNMENT);
         assign->as.mult_assign.targets_head = make_node_ident($2);
         assign->as.mult_assign.values_head = func_ptr;
@@ -243,8 +241,7 @@ function_def:
         func_def->next = assign;
         $$ = func_def;
     }
-    |
-    /* Table Function Desugaring: function my_table.my_func() ... end */
+    | /* Table Function Desugaring: function my_table.my_func() ... end */
     TOKEN_FUNCTION TOKEN_IDENTIFIER '.' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
         // 1. Create a unique mangled label for assembly execution flow
         char mangled_name[256];
@@ -326,8 +323,7 @@ function_call:
         node->as.call.args_head = $3;
         $$ = node;
     }
-    |
-    expr ':' TOKEN_IDENTIFIER '(' argument_list ')' {
+    | expr ':' TOKEN_IDENTIFIER '(' argument_list ')' {
         ASTNode* node = make_node(NODE_FUNCTION_CALL);
         node->as.call.target = $1;
         node->as.call.is_method_call = 1;

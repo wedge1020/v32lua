@@ -208,7 +208,7 @@ void compiler_error (ErrorType type, int line_num, const char* format, ...)
     // 4. Halt compilation
     exit (1);
 }
-
+extern int yydebug;
 int main(int argc, char** argv) {
     if (argc > 1) {
         FILE* file = fopen(argv[1], "r");
@@ -220,6 +220,10 @@ int main(int argc, char** argv) {
     } else {
         printf("; Reading from standard input (type your code and press Ctrl+D):\n");
     }
+
+    #if YYDEBUG
+    yydebug = 0;
+    #endif
 
     // Run the Parser (which loops calls to the Code Generator automatically)
     if (yyparse() != 0) {

@@ -4,12 +4,11 @@ function test_basic_if()
     x = 10
     if x > 5 then
         -- This block should execute
-       -- __asm__("write R0, 1  ; Success: basic if passed")
+        __asm__("write R0, 1  ; Success: basic if passed")
 	    y = 2
     end
 end
 
---[[
 function test_if_else()
     x = 3
     if x > 5 then
@@ -46,12 +45,12 @@ function test_nested_if()
     else
         __asm__("write R0, 99 ; Fail: outer else hit")
     end
-end--]]
+end
 
 function main()
     -- Run all conditional scenarios
     test_basic_if()
---    test_if_else()
---    test_if_elseif()
---    test_nested_if()
+    test_if_else()
+    test_if_elseif()
+    test_nested_if()
 end
