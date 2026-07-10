@@ -137,6 +137,27 @@ typedef struct astnode {
     } as;
 } ASTNode;
 
+// ============================================================================
+// --- Scoped Symbol Table (Replaces flat GlobalVarNode list) ---
+// ============================================================================
+
+typedef enum { SYM_GLOBAL, SYM_LOCAL } SymbolType;
+
+typedef struct SymbolNode {
+    char* name;
+    SymbolType type;
+    int location;             // RAM address for globals, BP offset for locals
+    int is_function;
+    struct SymbolNode* next;
+} SymbolNode;
+
+typedef struct ScopeNode {
+    SymbolNode* symbols;      // Variables declared in this specific scope
+    int local_offset_counter; // Tracks [BP - 1], [BP - 2], etc., for this function
+    struct ScopeNode* parent; // Pointer to the enclosing scope
+} ScopeNode;
+
+
 // --- Core Compiler Functions ---
 void generate_asm(ASTNode* node, int dest_reg);
 void generate_program(ASTNode* head);
@@ -164,8 +185,15 @@ void emit_variable_map(void);
 
 void mark_global_as_function(const char* name);
 
-void init_global_scope(void);
-void get_variable_access_string(const char* name, char* output_buffer);
-SymbolNode* register_parameter(const char* name, int offset);
+void  init_global_scope (void);
+void  get_variable_access_string(const char *, char *);
+
+void  push_scope (void);
+void  pop_scope (void);
+
+void emit_runtime_library (void);
+
+SymbolNode *register_parameter (const char *, int);
+SymbolNode *register_local (const char *);
 
 #endif // CODEGEN_H

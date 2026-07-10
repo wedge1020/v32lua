@@ -3,26 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-// ============================================================================
-// --- Scoped Symbol Table (Replaces flat GlobalVarNode list) ---
-// ============================================================================
-
-typedef enum { SYM_GLOBAL, SYM_LOCAL } SymbolType;
-
-typedef struct SymbolNode {
-    char* name;
-    SymbolType type;
-    int location;             // RAM address for globals, BP offset for locals
-    int is_function;
-    struct SymbolNode* next;
-} SymbolNode;
-
-typedef struct ScopeNode {
-    SymbolNode* symbols;      // Variables declared in this specific scope
-    int local_offset_counter; // Tracks [BP - 1], [BP - 2], etc., for this function
-    struct ScopeNode* parent; // Pointer to the enclosing scope
-} ScopeNode;
-
 static ScopeNode* current_scope = NULL;
 static ScopeNode* global_scope = NULL;
 static int next_ram_address = 1; // Address 0 is reserved for our heap_pointer
@@ -111,20 +91,24 @@ SymbolNode* register_global(const char* name) {
     return sym;
 }
 
-// Writes the proper assembly string to access this variable into output_buffer
+////////////////////////////////////////////////////////////////////////////////////////
+//
+// compose the variable prefix (function vs variable), since everything is
+// technically a variable in lua.
+//
 void get_variable_access_string(const char* name, char* output_buffer) {
     SymbolNode* sym = resolve_symbol(name);
-    
-    if (sym == NULL) {
-        // In Lua, undeclared variables implicitly become globals
-        sym = register_global(name); 
-    }
+    if (sym == NULL) sym = register_global(name); 
     
     if (sym->type == SYM_LOCAL) {
-        // Format as a stack offset: [BP - 1]
-        sprintf(output_buffer, "[BP - %d]", sym->location);
+        if (sym->location < 0) {
+            // It's a parameter! (e.g. location -2 formats as [BP + 2])
+            sprintf(output_buffer, "[BP + %d]", -sym->location);
+        } else {
+            // It's a local! (e.g. location 1 formats as [BP - 1])
+            sprintf(output_buffer, "[BP - %d]", sym->location);
+        }
     } else {
-        // Format as a static RAM label: [var_x]
         sprintf(output_buffer, "[%s%s]", sym->is_function ? "func_" : "var_", sym->name);
     }
 }
@@ -337,22 +321,4 @@ SymbolNode* register_parameter(const char* name, int offset) {
     sym->next = current_scope->symbols;
     current_scope->symbols = sym;
     return sym;
-}
-
-// Update this function in context.c to parse the negative parameter offsets
-void get_variable_access_string(const char* name, char* output_buffer) {
-    SymbolNode* sym = resolve_symbol(name);
-    if (sym == NULL) sym = register_global(name); 
-    
-    if (sym->type == SYM_LOCAL) {
-        if (sym->location < 0) {
-            // It's a parameter! (e.g. location -2 formats as [BP + 2])
-            sprintf(output_buffer, "[BP + %d]", -sym->location);
-        } else {
-            // It's a local! (e.g. location 1 formats as [BP - 1])
-            sprintf(output_buffer, "[BP - %d]", sym->location);
-        }
-    } else {
-        sprintf(output_buffer, "[%s%s]", sym->is_function ? "func_" : "var_", sym->name);
-    }
 }

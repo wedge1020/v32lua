@@ -38,6 +38,7 @@
 
 "while"                 { return TOKEN_WHILE;    }
 "break"                 { return TOKEN_BREAK;    }
+"do"                    { return TOKEN_DO;       }
 "if"                    { return TOKEN_IF;       }
 "elseif"                { return TOKEN_ELSEIF;   }
 "then"                  { return TOKEN_THEN;     }

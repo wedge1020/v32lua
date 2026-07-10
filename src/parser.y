@@ -37,9 +37,9 @@ char* mangle_method_name(const char* table_name, const char* method_name);
 %token TOKEN_WHILE TOKEN_BREAK TOKEN_IF TOKEN_ELSEIF TOKEN_THEN TOKEN_ELSE TOKEN_END 
 %token TOKEN_FUNCTION TOKEN_ASM TOKEN_RAWASM TOKEN_RETURN TOKEN_AND TOKEN_OR
 %token TOKEN_EQ TOKEN_NEQ TOKEN_LE TOKEN_GE TOKEN_LT TOKEN_GT TOKEN_CONCAT
-%token TOKEN_LOCAL
+%token TOKEN_LOCAL TOKEN_DO
 
-%type <ast_node> statement statement_list expr assignment function_def return_stmt
+%type <ast_node> statement statement_list expr function_def return_stmt
 %type <ast_node> table_constructor function_call else_branch
 
 /* Operator Precedence Rules (PEMDAS + Logic Core) */
@@ -122,26 +122,47 @@ argument_list:
     ;
 
 statement:
-      assignment                 { $$ = $1; }
-    | function_call              { $$ = $1; }
-    | TOKEN_WHILE expr statement_list TOKEN_END { /* your while code */ }
-    | TOKEN_BREAK                { /* your break code */ }
+      function_call              { $$ = $1; }
+    | var_list '=' expr_list {
+        $$ = make_node(NODE_MULTIPLE_ASSIGNMENT);
+        $$->as.mult_assign.targets_head = $1;
+        $$->as.mult_assign.values_head = $3;
+        $$->as.mult_assign.is_local = 0;
+    }
+    | TOKEN_LOCAL var_list '=' expr_list {
+        $$ = make_node(NODE_MULTIPLE_ASSIGNMENT);
+        $$->as.mult_assign.targets_head = $2;
+        $$->as.mult_assign.values_head = $4;
+        $$->as.mult_assign.is_local = 1;
+    }
+    /* --- Bracket-notation Table Assignment (Moved here) --- */
+    | expr '[' expr ']' '=' expr {
+        $$ = make_node(NODE_TABLE_SET);
+        $$->as.table_set.table_expr = $1;
+        $$->as.table_set.key = $3;
+        $$->as.table_set.value = $6;
+    }
+    /* --- Dot-notation Table Assignment --- */
+    | expr '.' TOKEN_IDENTIFIER '=' expr {
+        $$ = make_node(NODE_TABLE_SET);
+        $$->as.table_set.table_expr = $1;
+        $$->as.table_set.key = make_node_string($3);
+        $$->as.table_set.value = $5;
+    }
+    | TOKEN_WHILE expr TOKEN_DO statement_list TOKEN_END {
+        $$ = make_node(NODE_WHILE);
+        $$->as.while_loop.condition = $2;
+        $$->as.while_loop.body = $4;
+    }
+    // break statement grammar rule
+    | TOKEN_BREAK {
+        $$ = make_node(NODE_BREAK);        /* Standalone node containing no children */
+    }
     | TOKEN_IF expr TOKEN_THEN statement_list else_branch TOKEN_END { 
             $$                          = make_node (NODE_IF);
             $$ -> as.if_stmt.condition  = $2;
             $$ -> as.if_stmt.if_body    = $4;
             $$ -> as.if_stmt.else_body  = $5;
-    }
-    /* --- NEW: Local Variable Assignment (e.g., local x, y = 10, 20) --- */
-    | TOKEN_LOCAL var_list '=' expr_list {
-        // Option A: If you just want it to act like a normal assignment for now:
-        $$ = make_node(NODE_MULTIPLE_ASSIGNMENT);
-        $$->as.mult_assign.targets_head = $2;
-        $$->as.mult_assign.values_head = $4;
-        $$->as.mult_assign.is_local = 1; // <--- FLIP THE FLAG
-        
-        // Note: When you implement true stack-based local scoping in context.c, 
-        // you will want to flag these identifiers as local here.
     }
     /* --- NEW: Local Variable Declaration (e.g., local x, y) --- */
     | TOKEN_LOCAL var_list {
@@ -151,13 +172,19 @@ statement:
     }
     | function_def               { $$ = $1; }
     | return_stmt                { $$ = $1; }
-    | expr '.' TOKEN_IDENTIFIER '=' expr {
-        $$ = make_node(NODE_TABLE_SET);
-        $$->as.table_set.table_expr = $1;
-        $$->as.table_set.key = make_node_string($3);
-        $$->as.table_set.value = $5;
+    | TOKEN_FUNCTION TOKEN_IDENTIFIER ':' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
+        $$ = make_node(NODE_FUNCTION_DEF);
+        
+        // 1. Mangle the name (e.g., "Player_move")
+        $$->as.function_def.name = mangle_method_name($2, $4); 
+        
+        // 2. INJECT "self" as the first parameter!
+        ASTNode* self_param = make_node_ident("self");
+        self_param->next = $6; // Link it to the rest of the parameters
+        
+        $$->as.function_def.params = self_param; // Set it as the head of the list
+        $$->as.function_def.body = $8;
     }
-    | TOKEN_FUNCTION TOKEN_IDENTIFIER ':' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END { /* your table method code */ }
     | TOKEN_ASM '(' TOKEN_STRING ')' { 
         $$ = make_node(NODE_ASM);
         $$->as.inline_asm.code = $3;
@@ -215,29 +242,7 @@ expr_list:
     }
     ;
 
-/* --- ASSIGNMENT RULES --- */
-assignment:
-    var_list '=' expr_list {
-        $$ = make_node(NODE_MULTIPLE_ASSIGNMENT);
-        $$->as.mult_assign.targets_head = $1;
-        $$->as.mult_assign.values_head = $3;
-    }
-    |
-    expr '[' expr ']' '=' expr {
-        $$ = make_node(NODE_TABLE_SET);
-        $$->as.table_set.table_expr = $1;
-        $$->as.table_set.key = $3;
-        $$->as.table_set.value = $6;
-    }
-    ;
-
 function_def:
-    /*TOKEN_FUNCTION TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
-        $$ = make_node(NODE_FUNCTION_DEF);
-        $$->as.function_def.name = strdup($2);
-        $$->as.function_def.params = $4;
-        $$->as.function_def.body = $6;
-    }*/
     /* Standard Function: function my_func() ... end */
     TOKEN_FUNCTION TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
         // 1. Build the structural function definition
