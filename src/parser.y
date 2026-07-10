@@ -37,6 +37,7 @@ char* mangle_method_name(const char* table_name, const char* method_name);
 %token TOKEN_WHILE TOKEN_BREAK TOKEN_IF TOKEN_ELSEIF TOKEN_THEN TOKEN_ELSE TOKEN_END 
 %token TOKEN_FUNCTION TOKEN_ASM TOKEN_RAWASM TOKEN_RETURN TOKEN_AND TOKEN_OR
 %token TOKEN_EQ TOKEN_NEQ TOKEN_LE TOKEN_GE TOKEN_LT TOKEN_GT TOKEN_CONCAT
+%token TOKEN_LOCAL
 
 %type <ast_node> statement statement_list expr assignment function_def return_stmt
 %type <ast_node> table_constructor function_call else_branch
@@ -130,6 +131,22 @@ statement:
             $$ -> as.if_stmt.condition  = $2;
             $$ -> as.if_stmt.if_body    = $4;
             $$ -> as.if_stmt.else_body  = $5;
+    }
+    /* --- NEW: Local Variable Assignment (e.g., local x, y = 10, 20) --- */
+    | TOKEN_LOCAL var_list '=' expr_list {
+        // Option A: If you just want it to act like a normal assignment for now:
+        $$ = make_node(NODE_MULTIPLE_ASSIGNMENT);
+        $$->as.mult_assign.targets_head = $2;
+        $$->as.mult_assign.values_head = $4;
+        
+        // Note: When you implement true stack-based local scoping in context.c, 
+        // you will want to flag these identifiers as local here.
+    }
+    /* --- NEW: Local Variable Declaration (e.g., local x, y) --- */
+    | TOKEN_LOCAL var_list {
+        // If your compiler doesn't do anything with uninitialized variables yet,
+        // you can safely return NULL so it doesn't break compilation.
+        $$ = NULL; 
     }
     | function_def               { $$ = $1; }
     | return_stmt                { $$ = $1; }

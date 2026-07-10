@@ -839,15 +839,15 @@ void  generate_asm (ASTNode *node, int  dest_reg)
             
         case NODE_ASM: {
             emit_asm ("    ;; --- Begin Inline ASM Bubble (existing register states preserved) ---\n");
-            get_global_variable_address ("__asm_snap_sp");
-            get_global_variable_address ("__asm_snap_bp");
+            get_global_variable_address ("asm_snap_sp");
+            get_global_variable_address ("asm_snap_bp");
             emit_asm ("MOV [var_asm_snap_sp], SP\n");
             emit_asm ("MOV [var_asm_snap_bp], BP\n");
 
             for (int i = 0; i < NUM_GPRS; i++) {
                 if (is_register_locked (i)) {
                     char snap_name[32];
-                    sprintf (snap_name, "_asm_snap_r%d", i);
+                    sprintf (snap_name, "asm_snap_r%d", i);
                     get_global_variable_address (snap_name);
                     emit_asm ("MOV [var_%s], R%d\n", snap_name, i);
                 }
@@ -858,7 +858,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
             for (int i = 0; i < NUM_GPRS; i++) {
                 if (is_register_locked (i)) {
                     char snap_name[32];
-                    sprintf (snap_name, "_asm_snap_r%d", i);
+                    sprintf (snap_name, "asm_snap_r%d", i);
                     emit_asm ("MOV R%d, [var_%s]\n", i, snap_name);
                 }
             }

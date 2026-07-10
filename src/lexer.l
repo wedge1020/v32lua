@@ -43,6 +43,7 @@
 "then"                  { return TOKEN_THEN;     }
 "else"                  { return TOKEN_ELSE;     }
 "end"                   { return TOKEN_END;      }
+"local"                 { return TOKEN_LOCAL;    }
 "function"              { return TOKEN_FUNCTION; }
 "return"                { return TOKEN_RETURN;   }
 "and"                   { return TOKEN_AND;      }
