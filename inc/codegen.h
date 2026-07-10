@@ -1,15 +1,18 @@
 #ifndef CODEGEN_H
 #define CODEGEN_H
 
+////////////////////////////////////////////////////////////////////////////////////////
+//
 // --- Register Inventory ---
 // Vircon32 has R0-R15, but R14 is BP and R15 is SP. 
 // We will track general purpose registers R0 through R13.
+//
 #define NUM_GPRS 14 
 
-void lock_register(int reg);
-void unlock_register(int reg);
-int is_register_locked(int reg);
-int allocate_register(void); 
+void  lock_register (int);
+void  unlock_register (int);
+int   is_register_locked (int);
+int   allocate_register (void); 
 
 // --- Enums ---
 typedef enum {
@@ -35,6 +38,7 @@ typedef enum {
     NODE_TABLE_GET,
     NODE_IDENTIFIER,
     NODE_NUMBER,
+    NODE_UNARY,
     NODE_ASM,
     NODE_RAWASM,
     NODE_COMMENT_LINE,
@@ -47,7 +51,10 @@ typedef enum {
     OP_LT,
     OP_GT,
     OP_LE,
-    OP_GE
+    OP_GE,
+    OP_LEN,
+    OP_NOT,
+    OP_UNM
 } Operator;
 
 typedef enum {
@@ -107,6 +114,11 @@ typedef struct astnode {
             struct astnode *right;
             Operator operator;
         } binary;
+
+        struct {
+            struct astnode *operand;
+            Operator operator;
+        } unary;
 
         struct {
             char* value;
@@ -171,11 +183,20 @@ int get_next_label(void);
 int add_string_literal(const char* str);
 void emit_string_data_section(void);
 
-void push_function_context(const char* name);
-void pop_function_context(void);
-const char* get_current_function_name(void);
+void push_function_context (const char* name);
+void pop_function_context (void);
+const char* get_current_function_name (void);
 
+////////////////////////////////////////////////////////////////////////////////////////
+//
+// AST support functions (ast.c)
+//
+ASTNode *make_node_unary (Operator, ASTNode *);
 ASTNode *make_node_binary (NodeType, ASTNode *, ASTNode *);
+ASTNode *make_node_table_constructor (void);
+ASTNode *make_node_table_get (ASTNode *, ASTNode *);
+ASTNode *make_node_table_set (ASTNode *, ASTNode *, ASTNode *);
+
 
 void push_loop(int id);
 void pop_loop(void);

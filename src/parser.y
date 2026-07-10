@@ -37,7 +37,7 @@ char* mangle_method_name(const char* table_name, const char* method_name);
 %token TOKEN_WHILE TOKEN_BREAK TOKEN_IF TOKEN_ELSEIF TOKEN_THEN TOKEN_ELSE TOKEN_END 
 %token TOKEN_FUNCTION TOKEN_ASM TOKEN_RAWASM TOKEN_RETURN TOKEN_AND TOKEN_OR
 %token TOKEN_EQ TOKEN_NEQ TOKEN_LE TOKEN_GE TOKEN_LT TOKEN_GT TOKEN_CONCAT
-%token TOKEN_LOCAL TOKEN_DO
+%token TOKEN_LOCAL TOKEN_DO TOKEN_NOT TOKEN_LEN UNARY_MINUS
 
 %type <ast_node> statement statement_list expr function_def return_stmt
 %type <ast_node> table_constructor function_call else_branch
@@ -49,6 +49,7 @@ char* mangle_method_name(const char* table_name, const char* method_name);
 %right TOKEN_CONCAT
 %left '+' '-'
 %left '*' '/'
+%right TOKEN_NOT TOKEN_LEN UNARY_MINUS
 %left '['
 %left '.'
 %left ':'
@@ -135,19 +136,15 @@ statement:
         $$->as.mult_assign.values_head = $4;
         $$->as.mult_assign.is_local = 1;
     }
-    /* --- Bracket-notation Table Assignment (Moved here) --- */
-    | expr '[' expr ']' '=' expr {
-        $$ = make_node(NODE_TABLE_SET);
-        $$->as.table_set.table_expr = $1;
-        $$->as.table_set.key = $3;
-        $$->as.table_set.value = $6;
+    | expr '[' expr ']' '=' expr
+    { 
+        // $1 = table, $3 = key, $6 = value being assigned
+        $$ = make_node_table_set ($1, $3, $6); 
     }
-    /* --- Dot-notation Table Assignment --- */
-    | expr '.' TOKEN_IDENTIFIER '=' expr {
-        $$ = make_node(NODE_TABLE_SET);
-        $$->as.table_set.table_expr = $1;
-        $$->as.table_set.key = make_node_string($3);
-        $$->as.table_set.value = $5;
+    | expr '.' TOKEN_IDENTIFIER '=' expr
+    {
+        ASTNode *string_key  = make_node_string ($3);
+        $$                   = make_node_table_set ($1, string_key, $5);
     }
     | TOKEN_WHILE expr TOKEN_DO statement_list TOKEN_END {
         $$ = make_node(NODE_WHILE);
@@ -315,10 +312,11 @@ expr:
         $$->as.table_get.table_expr = $1;
         $$->as.table_get.key = $3;
     }
-    | expr '+' expr { $$ = make_node_binary(NODE_ADD, $1, $3); }
-    | expr '-' expr { $$ = make_node_binary(NODE_SUB, $1, $3); }
-    | expr '*' expr { $$ = make_node_binary(NODE_MUL, $1, $3); }
-    | expr '/' expr { $$ = make_node_binary(NODE_DIV, $1, $3); }
+    | expr '+' expr  { $$  = make_node_binary (NODE_ADD, $1, $3); }
+    | expr '-' expr  { $$  = make_node_binary (NODE_SUB, $1, $3); }
+    | expr '*' expr  { $$  = make_node_binary (NODE_MUL, $1, $3); }
+    | expr '/' expr  { $$  = make_node_binary (NODE_DIV, $1, $3); }
+    | TOKEN_LEN expr { $$  = make_node_unary  (OP_LEN,   $2);     }
     | expr TOKEN_EQ expr      { $$ = make_node(NODE_RELATIONAL); $$->as.binary.operator = OP_EQ;  $$->as.binary.left = $1; $$->as.binary.right = $3; }
     | expr TOKEN_NEQ expr     { $$ = make_node(NODE_RELATIONAL); $$->as.binary.operator = OP_NEQ; $$->as.binary.left = $1; $$->as.binary.right = $3; }
     | expr TOKEN_LT expr      { $$ = make_node(NODE_RELATIONAL); $$->as.binary.operator = OP_LT;  $$->as.binary.left = $1; $$->as.binary.right = $3; }
@@ -328,14 +326,17 @@ expr:
     | expr TOKEN_AND expr     { $$ = make_node(NODE_AND);        $$->as.binary.left = $1;     $$->as.binary.right = $3; }
     | expr TOKEN_OR expr      { $$ = make_node(NODE_OR);         $$->as.binary.left = $1;     $$->as.binary.right = $3; }
     | expr TOKEN_CONCAT expr  { $$ = make_node(NODE_CONCAT);     $$->as.binary.left = $1;     $$->as.binary.right = $3; }
-    | expr '.' TOKEN_IDENTIFIER {
-        ASTNode* node = make_node(NODE_TABLE_GET);
-        node->as.table_get.table_expr = $1;
-        // Turn the identifier string into a constant string node for the key
-        node->as.table_get.key = make_node_string($3);
-        $$ = node;
+    | expr '.' TOKEN_IDENTIFIER 
+    {
+        // Convert the raw identifier text into a proper String AST Node
+        ASTNode *string_key  = make_node_string ($3); 
+        $$                   = make_node_table_get ($1, string_key);
     }
     | function_call { $$ = $1; }
+    | '{' '}' 
+    { 
+        $$ = make_node_table_constructor ();
+    }
     ;
 
 function_call:

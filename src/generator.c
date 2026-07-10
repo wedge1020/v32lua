@@ -415,6 +415,27 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 break;
             }
 
+            case NODE_UNARY: {
+                // Evaluate the operand into dest_reg
+                generate_asm(node->as.unary.operand, dest_reg);
+                
+                if (node->as.unary.operator == OP_LEN) {
+                    // Push the operand to the stack
+                    emit_asm ("PUSH R%d\n", dest_reg);
+                    
+                    // Call the built-in
+                    emit_asm ("CALL __builtin_len\n");
+                    
+                    // Clean up the stack
+                    emit_asm ("ISUB SP, 1\n");
+                    
+                    // Move the returned length into the destination register
+                    emit_asm ("MOV R%d, R0\n", dest_reg);
+                }
+                // ... handle other unary operators like OP_MINUS (-) or OP_NOT (not)
+                break;
+            }
+
             case NODE_MULTIPLE_ASSIGNMENT: {
                 ASTNode *curr_tgt         = node -> as.mult_assign.targets_head;
                 ASTNode *curr_val         = node -> as.mult_assign.values_head;
@@ -467,10 +488,30 @@ void  generate_asm (ASTNode *node, int  dest_reg)
             }
 
             case NODE_FUNCTION_CALL: {
-                // 1. HARDWARE INTRINSIC INTERCEPT
-                char target_path[256] = {0};
-                if (resolve_static_path(node->as.call.target, target_path)) {
-                    if (strcmp(target_path, "ioports.gpu.clear") == 0) {
+                if (node -> as.call.function -> type  == NODE_IDENTIFIER)
+                {
+                    char *func_name  = node -> as.call.function -> as.identifier.name;
+                    
+                    // 2. Intercept 'print'
+                    if (strcmp (func_name, "print")   == 0)
+                    {
+                        // Generate the argument(s)
+                        int  arg_reg                 = allocate_register();
+                        generate_asm (node->as.call.arguments[0], arg_reg);
+                        
+                        // Push the argument, coerce it, and print it
+                        emit_asm ("PUSH R%d\n", arg_reg);
+                        emit_asm ("CALL __builtin_tostring\n"); // Coerce to string
+                        emit_asm ("MOV  [SP], R0\n");           // Replace arg with coerced string
+                        emit_asm ("CALL __builtin_print\n");    // Print it
+                        emit_asm ("ISUB SP, 1\n");              // Clean up stack
+                        
+                        unlock_register (arg_reg);
+                        break; // Skip normal function call logic!
+                    }
+                    // 1. HARDWARE INTRINSIC INTERCEPT
+                    else if (strcmp (func_name, "ioports.gpu.clear") == 0)
+                    {
                         emit_asm("    ;; --- Intrinsic: ioports.gpu.clear() ---\n");
                         ASTNode *arg = node->as.call.args_head;
                     
@@ -637,24 +678,52 @@ void  generate_asm (ASTNode *node, int  dest_reg)
             }
 
             case NODE_RELATIONAL: {
+                // Evaluate left and right operands
                 generate_asm (node -> as.binary.left, dest_reg);
                 int right_reg = allocate_register ();
                 generate_asm (node -> as.binary.right, right_reg);
-                switch (node -> as.binary.operator) {
-                    case OP_EQ:  emit_asm ("FEQ R%d, R%d\n", dest_reg, right_reg); break;
-                    case OP_NEQ: emit_asm ("FNE R%d, R%d\n", dest_reg, right_reg); break;
-                    case OP_LT:  emit_asm ("FLT R%d, R%d\n", dest_reg, right_reg); break;
-                    case OP_LE:  emit_asm ("FLE R%d, R%d\n", dest_reg, right_reg); break;
-                    case OP_GT:  emit_asm ("FGT R%d, R%d\n", dest_reg, right_reg); break;
-                    case OP_GE:  emit_asm ("FGE R%d, R%d\n", dest_reg, right_reg); break;
+                
+                if (node -> as.binary.operator == OP_EQ || node -> as.binary.operator == OP_NEQ) {
+                    // Push arguments for the built-in call
+                    emit_asm ("PUSH R%d\n", dest_reg);
+                    emit_asm ("PUSH R%d\n", right_reg);
+                    emit_asm ("CALL __builtin_eq\n");
+                    emit_asm ("ISUB SP, 2\n"); // Clean up arguments
+                    
+                    // If it's Not Equal (~=), invert the 0 or 1 result
+                    if (node -> as.binary.operator == OP_NEQ) {
+                        emit_asm ("MOV R%d, R0\n", dest_reg);
+                        emit_asm ("IEQ R%d, 0 ; Invert to true if it was false\n", dest_reg);
+                    } else {
+                        emit_asm ("MOV R%d, R0\n", dest_reg);
+                    }
+                }
+                else
+                {
+                    // Handle <, >, <=, >= standard float instructions here...
+                    switch (node -> as.binary.operator) {
+                        case OP_EQ:  emit_asm ("FEQ R%d, R%d\n", dest_reg, right_reg); break;
+                        case OP_NEQ: emit_asm ("FNE R%d, R%d\n", dest_reg, right_reg); break;
+                        case OP_LT:  emit_asm ("FLT R%d, R%d\n", dest_reg, right_reg); break;
+                        case OP_LE:  emit_asm ("FLE R%d, R%d\n", dest_reg, right_reg); break;
+                        case OP_GT:  emit_asm ("FGT R%d, R%d\n", dest_reg, right_reg); break;
+                        case OP_GE:  emit_asm ("FGE R%d, R%d\n", dest_reg, right_reg); break;
+                    }
                 }
                 unlock_register (right_reg);
                 break;
             }
 
             case NODE_STRING: {
-                int str_id = add_string_literal (node -> as.string_val.value);
-                emit_asm ("MOV R%d, __string_%d\n", dest_reg, str_id);
+                // Register the literal and get its ID
+                //int str_id = add_string_literal (node -> as.string_val.value);
+                int string_id = add_string_literal(node->as.string_val);
+                
+                // Load the raw pointer into the destination register
+                emit_asm ("MOV R%d, __string_%d\n", dest_reg, string_id);
+                
+                // Apply the NaN-box String Tag (Base NaN + Bit 22)
+                emit_asm ("OR R%d, 0x7FC00000 ; Box as String\n", dest_reg);
                 break;
             }
 
@@ -677,17 +746,13 @@ void  generate_asm (ASTNode *node, int  dest_reg)
             }
 
             case NODE_TABLE_CONSTRUCTOR: {
-                emit_asm ("MOV R%d, [heap_pointer] ; Read heap_pointer\n", dest_reg);
-                int zero_reg = allocate_register ();
-                emit_asm ("MOV R%d, 0\n", zero_reg);
-                emit_asm ("MOV [R%d], R%d ; Initialize to nil/0\n", dest_reg, zero_reg);
-                unlock_register (zero_reg);
+                // Call the built-in to allocate a new table
+                emit_asm ("CALL __builtin_table_new\n");
+                // Move the returned tagged pointer into the destination register
+                emit_asm ("MOV R%d, R0\n", dest_reg);
                 
-                int temp_reg = allocate_register();
-                emit_asm ("MOV R%d, [heap_pointer]\n", temp_reg);
-                emit_asm ("IADD R%d, 1\n", temp_reg); 
-                emit_asm ("MOV [heap_pointer], R%d ; Advance heap pointer\n", temp_reg);
-                unlock_register(temp_reg);
+                // (If you want to support {1, 2, 3} later, you would loop through 
+                // the node's children here and call __builtin_table_set for each one)
                 break;
             }
 
@@ -715,24 +780,27 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     }
                 }
 
-                // 2. STANDARD TABLE SET (Fallback)
-                int val_reg = allocate_register();
-                generate_asm (node -> as.table_set.value, val_reg);
-                emit_asm ("PUSH R%d\n", val_reg);
-                unlock_register(val_reg);
-            
+                int table_reg = allocate_register();
                 int key_reg = allocate_register();
-                generate_asm (node -> as.table_set.key, key_reg);
-                emit_asm ("PUSH R%d\n", key_reg);
+                int val_reg = allocate_register();
+
+                // 1. Evaluate table, key, and value
+                generate_asm(node->as.table_set.table_expr, table_reg);
+                generate_asm(node->as.table_set.key, key_reg);
+                generate_asm(node->as.table_set.value, val_reg);
+
+                // 2. Push arguments (Reverse order: Table, Key, Value)
+                emit_asm("    PUSH R%d\n", table_reg);
+                emit_asm("    PUSH R%d\n", key_reg);
+                emit_asm("    PUSH R%d\n", val_reg);
+
+                // 3. Call the built-in and clean up
+                emit_asm("    CALL __builtin_table_set\n");
+                emit_asm("    ISUB SP, 3\n");
+
+                unlock_register(table_reg);
                 unlock_register(key_reg);
-            
-                int tbl_reg = allocate_register();
-                generate_asm (node -> as.table_set.table_expr, tbl_reg);
-                emit_asm ("PUSH R%d\n", tbl_reg);
-                unlock_register(tbl_reg);
-            
-                emit_asm ("CALL __builtin_table_set\n");
-                emit_asm ("ISUB SP, 3\n");
+                unlock_register(val_reg);
                 break;
             }
 
@@ -759,21 +827,26 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     }
                 }
 
-                // 2. STANDARD TABLE GET (Fallback)
-                int key_reg = allocate_register ();
-                generate_asm (node -> as.table_get.key, key_reg);
+                int table_reg = allocate_register();
+                int key_reg = allocate_register();
 
-                int tbl_reg = allocate_register();
-                generate_asm (node -> as.table_get.table_expr, tbl_reg);
-            
-                emit_asm ("MOV R1, R%d\n", tbl_reg);
-                emit_asm ("MOV R2, R%d\n", key_reg);
-                emit_asm ("CALL __builtin_table_get\n");
-                
-                unlock_register (key_reg);
-                unlock_register (tbl_reg);
-            
-                if (dest_reg != 0) emit_asm ("MOV R%d, R0\n", dest_reg);
+                // 1. Evaluate the table and the key
+                generate_asm(node->as.table_get.table_expr, table_reg);
+                generate_asm(node->as.table_get.key, key_reg);
+
+                // 2. Push arguments (Reverse order: Table, then Key)
+                emit_asm("    PUSH R%d\n", table_reg);
+                emit_asm("    PUSH R%d\n", key_reg);
+
+                // 3. Call the built-in and clean up
+                emit_asm("    CALL __builtin_table_get\n");
+                emit_asm("    ISUB SP, 2\n");
+
+                // 4. Move result to destination register
+                emit_asm("    MOV R%d, R0\n", dest_reg);
+
+                unlock_register(table_reg);
+                unlock_register(key_reg);
                 break;
             }
 
@@ -781,7 +854,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 emit_asm ("MOV R%d, %f\n", dest_reg, node -> as.number.val);
                 break;
 
-case NODE_ASM: {
+            case NODE_ASM: {
                 emit_asm ("    ;; --- Begin Inline ASM Bubble (existing register states preserved) ---\n");
                 
                 // Get the formatted string for SP and BP snapshots
@@ -874,7 +947,7 @@ void  generate_global_setup (ASTNode *node)
         //
         // Pre-Pass: Register all functions globally ---
         //
-		/*
+        /*
         while (current          != NULL)
         {
             if (current -> type == NODE_FUNCTION_DEF)
@@ -894,7 +967,7 @@ void  generate_global_setup (ASTNode *node)
             current              = current->next;
         }*/
 
-		/*
+        /*
         if (node -> type  == NODE_FUNCTION_DEF)
         {
             char  var_access[256];

@@ -3,6 +3,39 @@
 #include "parser.tab.h"  // Generated automatically by Bison
 #include <string.h>
 #include <stdlib.h>
+
+char *process_string_literal (const char *text, int  len)
+{
+    // Allocate space. The processed string will never be longer 
+    // than the raw string minus the two quotes.
+    char *processed  = (char *) malloc (len - 1); 
+    int   i          = 1; // Start at 1 to skip the opening quote
+    int   j          = 0;
+    
+    while (i < len - 1) { // Stop before the closing quote
+        if (text[i] == '\\' && i + 1 < len - 1) {
+            i++; // Skip the backslash
+            switch (text[i]) {
+                case 'n': processed[j++] = '\n'; break;
+                case 't': processed[j++] = '\t'; break;
+                case 'r': processed[j++] = '\r'; break;
+                case '\\': processed[j++] = '\\'; break;
+                case '"':  processed[j++] = '"'; break;
+                // Add more cases here if you want to support \a, \b, or \0
+                default: 
+                    // Unrecognized escape sequence, just keep the character
+                    processed[j++] = text[i]; 
+                    break;
+            }
+        } else {
+            // Normal character
+            processed[j++] = text[i];
+        }
+        i++;
+    }
+    processed[j] = '\0'; // Ensure it is null-terminated for the C-side
+    return processed;
+}
 %}
 
 %option noyywrap
@@ -56,6 +89,7 @@
 ">="                    { return TOKEN_GE;       }
 "<"                     { return TOKEN_LT;       }
 ">"                     { return TOKEN_GT;       }
+"#"                     { return TOKEN_LEN;      }
 ".."                    { return TOKEN_CONCAT;   }
 "__asm__"               { return TOKEN_ASM;      }
 "__rawasm__"            { return TOKEN_RAWASM;   }
@@ -74,21 +108,19 @@
 "."                     { return '.'; }
 ":"                     { return ':'; }
 
-[a-zA-Z_][a-zA-Z0-9_]* { 
-                            yylval.string_val = strdup(yytext); 
-                            return TOKEN_IDENTIFIER; 
+[a-zA-Z_][a-zA-Z0-9_]*  { 
+                            yylval.string_val  = strdup (yytext); 
+                            return (TOKEN_IDENTIFIER); 
                         }
 
 [0-9]+(\.[0-9]+)?       { 
-                            yylval.number_val = atof(yytext); 
-                            return TOKEN_NUMBER; 
+                            yylval.number_val  = atof (yytext); 
+                            return (TOKEN_NUMBER); 
                         }
 
-\"(\\.|[^"\\])*\"       {
-                            // Strip quotes before saving string contents
-                            int len = strlen(yytext);
-                            yylval.string_val = strndup(yytext + 1, len - 2);
-                            return TOKEN_STRING;
+\"(\\.|[^"\\])*\"       { 
+                            yylval.string_val  = process_string_literal (yytext, yyleng); 
+                            return (TOKEN_STRING);
                         }
 
 .  { compiler_error(ERR_LEXICAL, yylineno, "Unexpected character '%s'", yytext); }

@@ -114,6 +114,118 @@ thing that is hooked up).
 Absolutely no IOPort stuff has yet  been implemented (although I am eager
 to explore the implementation).
 
+### operational features
+
+At this  point, the following lua  functionality should be online  in the
+compiler:
+
+  * functions
+    * declarations (parameterless, parametered)
+    * calls (including return values)
+  * variables (of which functions are technically a type of in lua)
+    * declarations, initializations, manipulations
+      * basic math operations should be available
+    * `local` keyword is available, and the compiler understands
+      local vs global scope (global is the default, as per lua)
+    * floats most tested, strings coming online (not fully complete)
+  * if statements and their variants
+    * if
+    * if else
+    * if elseif
+    * if elseif else
+    * although, may only currently work for floats
+  * while loops
+    * may only work for floats at present
+  * tables
+    * initialization, construction
+    * floats, functions, even possibly strings
+    * accessing members via `.`, `:`, and `[`/`]` notations
+  * comments
+    * `--` standard one-line lua comment
+    * `--[[` through `--]]` standard multi-line lua comment
+    * `--@` transpositional single comment (pass comment through to assembly output)
+    * `--@[[` through `--]]` transpositional multi-line comment
+  * inline assembly (two variants):
+    * `__asm__("newline-delimited list of instructions")`
+      * this is a "safe mode" or "bubble" inline assembly, where the full register array
+        is preserved, then restored on exit.
+    * `__rawasm__("newline-delimited list of instructions")`
+      * this is a pure in-line assembly, nothing backed up, you have full control
+      * this is similar to the Vircon32 C compiler inline assembly`
+    * both should support lua variable referencing via `{`/`}`
+      * although, still needs to be tested
+  * `print()` built-in function
+    * basic output
+    * buffers up to 16 lines to display on the screen
+    * still needs work (does not currently display)
+  * IOPorts and related built-in functions / tables:
+    * ioports.gpu.texture - treat as a variable you can read and write to, will transact GPU_SelectedTexture
+      * tested and works
+    * ioports.gpu.clear() - pass in a color to clear the screen (or empty will use current GPU_ClearColor)
+
+## NaN-boxing scheme
+
+I found this fascinating: apparently  there's a bithack involving various
+bit patterns  of float  "NaN"s which  we can take  advantage of  to store
+other important data. In this case: data type information.
+
+When writing the assembly, the use of these base bitmasks to assemble and
+disassemble values using `AND` and `OR` instructions:
+
+| Base NaN Mask | 0x7F800000 | Exponent all 1s, everything else 0 |
+| String Tag Mask | 0x00400000 | Sets Bit 22 |
+| Function Tag Mask | 0x80000000 | Sets Bit 31 |
+| Special Tag Mask | 0x80400000 | Sets Bit 31 and Bit 22 |
+| Payload Extraction Mask | 0x003FFFFF | Isolates the 22-bit pointer |
+
+### "NaN-Boxing" (The High-Performance Way)
+
+This is a  famous trick used by heavily optimized  dynamic languages like
+JavaScript  (SpiderMonkey) and  Lua (LuaJIT).  It exploits  the IEEE  754
+32-bit floating-point format.
+
+A  standard float  uses a  sign  bit, 8  exponent bits,  and 23  fraction
+(mantissa) bits.
+
+If the exponent bits are all 1s, the hardware considers it "Not a Number"
+(NaN).
+
+Because there are  millions of possible bit combinations  that equal NaN,
+we can hide  our Type Tags and  our Memory Pointers inside  the 23 unused
+fraction bits of a NaN value.
+
+How it changes the compiler:
+
+Variables remain exactly  1 word wide, meaning the [BP  - offset] logic,
+register allocator, and global RAM mapping stay completely intact.
+
+Whenever  a string  pointer is  loaded,  bitwise instructions  to OR  the
+pointer  are emitted  with a  specific NaN  bitmask (e.g.,  `0x7F800000 |
+(TAG_STRING << 20) | Pointer`).
+
+To check a type, use bitwise AND masks to extract the tag.
+
+The 4MW NaN-Box Layout
+
+In  a standard  32-bit IEEE  754 float,  to trigger  a NaN  state, the  8
+exponent bits (bits 30–23) must be  all 1s. That leaves us with exactly
+24 bits to play with:
+
+| Bit 31 | The Sign bit |
+| Bits 22–0 | The 23 mantissa (fraction) bits |
+
+For the Vircon32 environment 22 bits  are needed to cover the 4MW pointer
+payload (Bits  21–0), leaving exactly 2  bits for our Type  Tag (Bit 31
+and Bit 22).  Two bits give exactly 4 distinct  Boxed Types, which covers
+the dynamic types Lua needs perfectly:
+
+| Tag Layout (Bit 31, Bit 22) |    Type | Payload (Bits 21-0) |
+| 0, 0 | Table    | 22-bit RAM Pointer |
+| 0, 1 | String   | 22-bit RAM Pointer |
+| 1, 0 | Function | 22-bit RAM Pointer / Code Address |
+| 1, 1 | Special  |  0 = Nil, 1 = False, 2 = True |
+
+
 ### IOPorts in lua: an idea
 
 I  think  what  I might  want  to  do  is  to create  (on  initialization
