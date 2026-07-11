@@ -48,7 +48,7 @@ static int resolve_static_path(ASTNode* node, char* path_buffer) {
     return 0;
 }
 
-static void emit_asm(const char* format, ...) {
+void emit_asm(const char* format, ...) {
     char current_instruction[256];
     va_list args;
     

@@ -13,7 +13,7 @@ TARGET = ../bin/v32lua
 
 # --- Object Files ---
 # These are the compiled binary chunks that get linked together at the end.
-OBJS = parser.tab.o lex.yy.o main.o context.o generator.o ast.o
+OBJS = parser.tab.o lex.yy.o main.o context.o generator.o ast.o logic.o
 
 # --- Build Rules ---
 
