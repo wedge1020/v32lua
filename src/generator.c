@@ -1158,7 +1158,9 @@ void  generate_program (ASTNode *head)
     emit_asm ("RET\n\n");
 
     fprintf (stdout, ";; --- System Constants ---\n");
-    fprintf (stdout, "%%define heap_pointer 0\n");
+    fprintf (stdout, "%%define term_ypos    0\n");
+    fprintf (stdout, "%%define term_history 1\n");
+    fprintf (stdout, "%%define heap_pointer 18\n");
 
     fprintf (stdout, "\n;; --- Global Variable RAM Map ---\n");
     emit_variable_map ();

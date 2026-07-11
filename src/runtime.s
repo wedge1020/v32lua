@@ -1,7 +1,3 @@
-%define term_ypos 0
-%define term_history 1
-%define heap_pointer 18
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; Vircon32 NaN-Boxed Routines for Lua Runtime Environment (runtime.s)
