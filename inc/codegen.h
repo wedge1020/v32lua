@@ -220,7 +220,7 @@ SymbolNode *register_local (const char *);
 // Emits Vircon32 assembly to jump to target_label if R0 is Nil or False.
 // Uses scratch register R6 to prevent destructive comparison bugs!
 //
-void emit_falsy_jump(const char* target_label);
-
+void emit_truthy_jump(int reg, const char* target_label);
+void emit_falsy_jump(int reg, const char* target_label);
 
 #endif // CODEGEN_H

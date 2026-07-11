@@ -284,25 +284,24 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 int  cond_reg    = allocate_register ();
                 int  label_id    = get_next_label ();
                 const char *ctx  = get_current_function_name ();
+                char end_label[128];
+                snprintf(end_label, sizeof(end_label), "__%s_while_end_%d", ctx, label_id);
 
                 push_loop (label_id);
                 emit_asm ("__%s_while_start_%d:\n", ctx, label_id);
                 
                 generate_asm (node -> as.while_loop.condition, cond_reg);
                 
-                emit_asm ("JF R%d, __%s_while_end_%d\n", cond_reg, ctx, label_id);
+                // AUDITED: Replaced hardware JF with NaN-box falsy check!
+                emit_falsy_jump (cond_reg, end_label);
                 unlock_register (cond_reg);
                 
-                ////////////////////////////////////////////////////////////////////////
-                //
-                // Push a local scope for the while loop block!
-                //
                 push_scope (); 
                 generate_block (node -> as.while_loop.body);
                 pop_scope ();
                 
                 emit_asm ("JMP __%s_while_start_%d\n", ctx, label_id);
-                emit_asm ("__%s_while_end_%d:\n", ctx, label_id);
+                emit_asm ("%s:\n", end_label);
                 pop_loop ();
                 break;
             }
@@ -323,34 +322,30 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 int         cond_reg  = allocate_register ();
                 int         label_id  = get_next_label ();
                 const char *ctx       = get_current_function_name ();
+                char        else_label[128], end_label[128];
+                snprintf(else_label, sizeof(else_label), "__%s_else_%d", ctx, label_id);
+                snprintf(end_label, sizeof(end_label), "__%s_end_if_%d", ctx, label_id);
                 
                 generate_asm (node -> as.if_stmt.condition, cond_reg);
                 
-                emit_asm("JF R%d, __%s_else_%d\n", cond_reg, ctx, label_id);
+                // AUDITED: Jump to else/end if the condition is Nil or False!
+                emit_falsy_jump (cond_reg, else_label);
                 unlock_register (cond_reg);
                 
-                ////////////////////////////////////////////////////////////////////////
-                //
-                // Push local scope for IF body
-                //
                 push_scope ();
                 generate_block (node -> as.if_stmt.if_body);
                 pop_scope ();
                 
-                emit_asm ("JMP __%s_end_if_%d\n", ctx, label_id);
-                emit_asm ("__%s_else_%d:\n", ctx, label_id);
+                emit_asm ("JMP %s\n", end_label);
+                emit_asm ("%s:\n", else_label);
             
                 if (node -> as.if_stmt.else_body)
                 {
-                    ////////////////////////////////////////////////////////////////////
-                    //
-                    // Push local scope for ELSE body
-                    //
                     push_scope ();
                     generate_block (node -> as.if_stmt.else_body);
                     pop_scope ();
                 }
-                emit_asm ("__%s_end_if_%d:\n", ctx, label_id);
+                emit_asm ("%s:\n", end_label);
                 break;
             }
 
@@ -432,19 +427,35 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     // Move the returned length into the destination register
                     emit_asm ("MOV R%d, R0\n", dest_reg);
                 }
-				else if (node->as.unary.operator == OP_NOT) {
-                    emit_asm ("PUSH R%d\n", dest_reg);
-                    emit_asm ("CALL __builtin_not\n");
-                    emit_asm ("ISUB SP, 1\n");
-                    emit_asm ("MOV R%d, R0\n", dest_reg);
+                else if (node->as.unary.operator == OP_NOT) {
+                    int label_id = get_next_label();
+                    char to_true_label[64], end_label[64];
+                    snprintf(to_true_label, sizeof(to_true_label), "__not_true_%d", label_id);
+                    snprintf(end_label, sizeof(end_label), "__not_end_%d", label_id);
+
+                    // 1. Check if Nil or False using scratch register R6
+                    emit_asm ("MOV R6, R%d\n", dest_reg);
+                    emit_asm ("IEQ R6, 0xFFC00000 ; Is Nil?\n");
+                    emit_asm ("JT  R6, %s\n", to_true_label);
+                    emit_asm ("MOV R6, R%d\n", dest_reg);
+                    emit_asm ("IEQ R6, 0xFFC00001 ; Is False?\n");
+                    emit_asm ("JT  R6, %s\n", to_true_label);
+
+                    // 2. If truthy, return VAL_FALSE (0xFFC00001)
+                    emit_asm ("MOV R%d, 0xFFC00001 ; Return False\n", dest_reg);
+                    emit_asm ("JMP %s\n", end_label);
+
+                    // 3. If falsy, return VAL_TRUE (0xFFC00002)
+                    emit_asm ("%s:\n", to_true_label);
+                    emit_asm ("MOV R%d, 0xFFC00002 ; Return True\n", dest_reg);
+                    emit_asm ("%s:\n", end_label);
                 }
-				else if (node->as.unary.operator == OP_UNM) {
+                else if (node->as.unary.operator == OP_UNM) {
                     emit_asm ("PUSH R%d\n", dest_reg);
                     emit_asm ("CALL __builtin_unm\n");
                     emit_asm ("ISUB SP, 1\n");
                     emit_asm ("MOV R%d, R0\n", dest_reg);
                 }
-                // ... handle other unary operators like OP_MINUS (-) or OP_NOT (not)
                 break;
             }
 
@@ -596,6 +607,9 @@ void  generate_asm (ASTNode *node, int  dest_reg)
 
                 int target_reg = allocate_register();
                 generate_asm (node -> as.call.target, target_reg);
+                
+                // AUDITED: Strip the 0xFF800000 NaN tag before jumping!
+                emit_asm ("AND R%d, 0x003FFFFF ; Unbox code pointer\n", target_reg);
                 emit_asm ("CALL R%d\n", target_reg);
                 unlock_register(target_reg);
 
@@ -605,8 +619,10 @@ void  generate_asm (ASTNode *node, int  dest_reg)
             }
 
             case NODE_FUNCTION_POINTER: {
-                emit_asm ("    ;; Load address of the mangled function\n");
+                emit_asm ("    ;; Load and box address of the mangled function\n");
                 emit_asm ("MOV R%d, __function_%s\n", dest_reg, node -> as.func_ptr.mangled_name);
+                // AUDITED: Apply Function NaN tag (Bit 31=1, Bit 22=0)
+                emit_asm ("OR R%d, 0xFF800000 ; Box as Function\n", dest_reg);
                 break;
             }
 
@@ -673,59 +689,71 @@ void  generate_asm (ASTNode *node, int  dest_reg)
 
             case NODE_AND: {
                 int label_id = get_next_label ();
+                char end_label[128];
+                snprintf(end_label, sizeof(end_label), "__short_and_%d", label_id);
+
+                // 1. Evaluate Left Operand into dest_reg
                 generate_asm (node -> as.binary.left, dest_reg);
-                emit_asm ("JF R%d, __short_and_%d\n", dest_reg, label_id);
+                
+                // AUDITED: If Left is Nil or False, short-circuit immediately!
+                // The falsy value remains preserved in dest_reg as the return value.
+                emit_falsy_jump (dest_reg, end_label);
+                
+                // 2. Otherwise, evaluate Right Operand into dest_reg
                 generate_asm (node -> as.binary.right, dest_reg);
-                emit_asm ("__short_and_%d:\n", label_id);
+                emit_asm ("%s:\n", end_label);
                 break;
             }
 
             case NODE_OR: {
                 int label_id = get_next_label ();
+                char end_label[128];
+                snprintf(end_label, sizeof(end_label), "__short_or_%d", label_id);
+
+                // 1. Evaluate Left Operand into dest_reg
                 generate_asm (node -> as.binary.left, dest_reg);
-                emit_asm ("JT R%d, __short_or_%d\n", dest_reg, label_id);
+                
+                // AUDITED: If Left is TRUTHY (not Nil/False), short-circuit immediately!
+                // The truthy value remains preserved in dest_reg as the return value.
+                emit_truthy_jump (dest_reg, end_label);
+                
+                // 2. Otherwise, evaluate Right Operand into dest_reg
                 generate_asm (node -> as.binary.right, dest_reg);
-                emit_asm ("__short_or_%d:\n", label_id);
+                emit_asm ("%s:\n", end_label);
                 break;
             }
 
             case NODE_RELATIONAL: {
-                // Evaluate left and right operands
                 generate_asm (node -> as.binary.left, dest_reg);
                 int right_reg = allocate_register ();
                 generate_asm (node -> as.binary.right, right_reg);
                 
                 if (node -> as.binary.operator == OP_EQ || node -> as.binary.operator == OP_NEQ) {
-                    // Push arguments for the built-in call
                     emit_asm ("PUSH R%d\n", dest_reg);
                     emit_asm ("PUSH R%d\n", right_reg);
                     emit_asm ("CALL __builtin_eq\n");
-                    emit_asm ("ISUB SP, 2\n"); // Clean up arguments
+                    emit_asm ("ISUB SP, 2\n");
                     
-                    // If it's Not Equal (~=), invert the 0 or 1 result
                     if (node -> as.binary.operator == OP_NEQ) {
                         emit_asm ("MOV R%d, R0\n", dest_reg);
                         emit_asm ("IEQ R%d, 0 ; Invert to true if it was false\n", dest_reg);
                     } else {
                         emit_asm ("MOV R%d, R0\n", dest_reg);
                     }
+                    // Box the 0/1 result from equality checking into a NaN boolean!
+                    emit_asm ("IADD R%d, 0xFFC00001 ; Box as Lua Boolean (False/True)\n", dest_reg);
                 }
                 else
                 {
-                    // Handle <, >, <=, >= standard float instructions here...
                     switch (node -> as.binary.operator) {
-                        case OP_EQ:  emit_asm ("FEQ R%d, R%d\n", dest_reg, right_reg); break;
-                        case OP_NEQ: emit_asm ("FNE R%d, R%d\n", dest_reg, right_reg); break;
                         case OP_LT:  emit_asm ("FLT R%d, R%d\n", dest_reg, right_reg); break;
                         case OP_LE:  emit_asm ("FLE R%d, R%d\n", dest_reg, right_reg); break;
                         case OP_GT:  emit_asm ("FGT R%d, R%d\n", dest_reg, right_reg); break;
                         case OP_GE:  emit_asm ("FGE R%d, R%d\n", dest_reg, right_reg); break;
-                        case OP_LEN:
-                        case OP_NOT:
-                        case OP_UNM:
-						default:
-							break;
+                        default: break;
                     }
+                    // AUDITED: Box raw 0/1 hardware comparison result into 0xFFC00001/0xFFC00002!
+                    emit_asm ("IADD R%d, 0xFFC00001 ; Box as Lua Boolean (False/True)\n", dest_reg);
                 }
                 unlock_register (right_reg);
                 break;

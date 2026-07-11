@@ -594,3 +594,71 @@ __builtin_unm:
     MOV   SP, BP
     POP   BP
     RET
+
+;; ============================================================================
+;; Universal Equality (==): Returns raw integer 1 (true) or 0 (false) in R0
+;; Stack incoming: [BP+3] = Left_Val, [BP+2] = Right_Val
+;; ============================================================================
+__builtin_eq:
+    PUSH BP
+    MOV  BP, SP
+
+    MOV  R1, [BP+3]          ; R1 = Left Value
+    MOV  R2, [BP+2]          ; R2 = Right Value
+
+    ;; --- FAST-PATH 1: Exact Bitwise Equality ---
+    ;; Handles identical Floats, Booleans, Nils, and identical heap pointers in O(1)!
+    MOV  R3, R1
+    IEQ  R3, R2              ; Destructive comparison: Does R1 == R2?
+    JT   R3, __eq_true       ; If bit-patterns match exactly, they are equal!
+
+    ;; --- FAST-PATH 2: Check if Tags Match ---
+    ;; If values aren't identical, they can ONLY be equal if they are Strings
+    ;; stored at different heap addresses. First, verify both have the same Tag!
+    MOV  R3, R1
+    AND  R3, 0xFFC00000      ; Isolate Left Tag in R3
+    MOV  R4, R2
+    AND  R4, 0xFFC00000      ; Isolate Right Tag in R4
+
+    IEQ  R3, R4              ; Do the tags match?
+    JF   R3, __eq_false      ; If tags differ, types differ -> return false!
+
+    ;; --- FAST-PATH 3: Are they Strings? ---
+    ;; We know R3 holds the common Tag. Is it the String Tag (0x7FC00000)?
+    IEQ  R3, 0x7FC00000
+    JF   R3, __eq_false      ; If not strings (e.g., two distinct tables), return false!
+
+    ;; --- FALLBACK: Deep String Comparison (strcmp) ---
+    ;; Both are strings with different pointers. We must scan character by character!
+    AND  R1, 0x003FFFFF      ; Unbox Left string pointer -> R1
+    AND  R2, 0x003FFFFF      ; Unbox Right string pointer -> R2
+
+__eq_strcmp_loop:
+    MOV  R3, [R1]            ; Load character word from Left string -> R3
+    MOV  R4, [R2]            ; Load character word from Right string -> R4
+
+    ;; Check if characters are different
+    MOV  R5, R3
+    IEQ  R5, R4              ; Does Left char == Right char?
+    JF   R5, __eq_false      ; If characters differ, strings are not equal!
+
+    ;; We know characters match. Did we reach the null terminator (0)?
+    IEQ  R3, 0               ; Is Left char == 0?
+    JT   R3, __eq_true       ; If we hit null terminator while identical -> strings match!
+
+    ;; Advance pointers to next character word in memory
+    IADD R1, 1
+    IADD R2, 1
+    JMP  __eq_strcmp_loop
+
+__eq_true:
+    MOV  R0, 1               ; Return raw integer 1 (True)
+    JMP  __eq_done
+
+__eq_false:
+    MOV  R0, 0               ; Return raw integer 0 (False)
+
+__eq_done:
+    MOV  SP, BP
+    POP  BP
+    RET
