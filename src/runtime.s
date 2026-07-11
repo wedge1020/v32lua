@@ -1,19 +1,6 @@
-%define heap_pointer 0
-
-;; these items are all needed for assembly
-
-;; call global register registry for these
-%define term_ypos 1
-%define term_history 2
-
-;; missing subroutines??
-__builtin_ftoa:
-__error_attempt_to_get_length:
-__const_str_nil:
-__const_str_false:
-__const_str_true:
-__format_table_address:
-__format_function_address:
+%define term_ypos 0
+%define term_history 1
+%define heap_pointer 18
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -93,7 +80,7 @@ __builtin_table_new:
     JT   R0, __oom_handler 
     
     ;; 2. Initialize table header in data memory (Stripped redundant +0 offset) 
-	MOV  R1, 0
+    MOV  R1, 0
     MOV  [R0], R1            ; flags / metatable pointer = nil 
     MOV  [R0+1], R1          ; array part length = 0 
     MOV  [R0+2], R1          ; array part pointer = null 
@@ -440,7 +427,7 @@ __term_redraw_loop:
     MOV  R3, [term_ypos] 
     IGE  R1, R3 
     JT   R1, __term_redraw_done ; If Index >= term_ypos, we are done 
-	MOV  R6, 0
+    MOV  R6, 0
 
     ;; 4. Calculate Y Pixel Position (Index * 20 pixels per line) 
     MOV  R4, R1 
@@ -569,6 +556,11 @@ __builtin_len:
     POP  BP
     JMP  __error_attempt_to_get_length 
     
+__error_attempt_to_get_length:
+    ;; Fatal Runtime Error: Attempted to get length of an unsupported type
+    HLT                      ; Halt CPU to preserve register state for debugging
+    JMP __error_attempt_to_get_length
+
 __len_string:
     AND  R1, 0x003FFFFF      ; Unbox string pointer to read header 
     MOV  R0, [R1]            ; String struct stores length in word 0 (Stripped +0 offset)
@@ -635,27 +627,126 @@ __tostring_nil:
     MOV  R0, __const_str_nil ; Load address of static "nil" string 
     OR   R0, 0x7FC00000      ; Box as String 
     JMP  __tostring_done
+
 __tostring_false:
     MOV  R0, __const_str_false ; Load address of static "false" string 
     OR   R0, 0x7FC00000      ; Box as String 
     JMP  __tostring_done
+
 __tostring_true:
     MOV  R0, __const_str_true ; Load address of static "true" string 
     OR   R0, 0x7FC00000      ; Box as String 
     JMP  __tostring_done
+
 __tostring_passthrough:
     MOV  R0, R1              ; Already a string! Return as-is. 
     JMP  __tostring_done
+
 __tostring_table:
     MOV  SP, BP
     POP  BP
     JMP  __format_table_address 
+
 __tostring_function:
     MOV  SP, BP
     POP  BP
     JMP  __format_function_address 
     
 __tostring_done:
+    MOV  SP, BP
+    POP  BP
+    RET
+
+__format_table_address:
+    PUSH BP
+    MOV  BP, SP
+
+    MOV  R0, __const_str_table
+    OR   R0, 0x7FC00000      ; Box raw pointer as a valid Lua String
+
+    MOV  SP, BP
+    POP  BP
+    RET
+
+__format_function_address:
+    PUSH BP
+    MOV  BP, SP
+
+    MOV  R0, __const_str_function
+    OR   R0, 0x7FC00000      ; Box raw pointer as a valid Lua String
+
+    MOV  SP, BP
+    POP  BP
+    RET
+
+;; -------------------------------------------------------------------------------------
+;; Built-in: Float to ASCII (Whole Integer Fast-Path)
+;; Incoming Stack: [BP+2] = Raw IEEE Float
+;; Returns: R0 = Raw Heap Pointer to null-terminated ASCII string (Unboxed)
+;; -------------------------------------------------------------------------------------
+__builtin_ftoa:
+    PUSH BP
+    MOV  BP, SP
+    
+    MOV  R1, [BP+2]          ; R1 = Float value
+    CFI  R1                  ; Convert Float to Integer (in-place)
+    
+    ;; Allocate a 16-word character buffer on the heap for the string
+    MOV  R0, 16
+    PUSH R0
+    CALL __malloc            ; R0 = Base address of new string buffer
+    ISUB SP, 1
+    
+    MOV  R2, R0              ; R2 = Start of buffer
+    MOV  R3, R0              ; R3 = End of string pointer (will advance)
+    
+    ;; Handle zero explicitly
+    INE  R1, 0
+    JT   R1, __ftoa_extract_loop
+    MOV  R4, '0'
+    MOV  [R3], R4
+    IADD R3, 1
+    JMP  __ftoa_terminate
+
+__ftoa_extract_loop:
+    IEQ  R1, 0               ; If quotient is 0, we are done extracting digits
+    JT   R1, __ftoa_reverse_init
+    
+    MOV  R4, R1              ; R4 = Current number
+    IMOD R4, 10              ; R4 = Remainder (Digit 0-9)
+    IADD R4, '0'             ; Convert integer digit to ASCII character word
+    MOV  [R3], R4            ; Store character in buffer (in reverse order!)
+    IADD R3, 1               ; Advance buffer pointer
+    
+    IDIV R1, 10              ; Divide number by 10 for next iteration
+    JMP  __ftoa_extract_loop
+
+;; Digits were extracted backwards (e.g., 123 stored as '3','2','1'). Reverse them!
+__ftoa_reverse_init:
+    MOV  R4, R3
+    ISUB R4, 1               ; R4 = Right pointer (last character)
+    MOV  R5, R2              ; R5 = Left pointer (first character)
+
+__ftoa_reverse_loop:
+    IGE  R5, R4              ; If Left >= Right, string is reversed
+    JT   R5, __ftoa_terminate
+    
+    ;; Swap characters at [R5] and [R4]
+    MOV  R6, [R5]
+    MOV  R7, [R4]
+    MOV  [R5], R7
+    MOV  [R4], R6
+    
+    IADD R5, 1               ; Move Left pointer inward
+    ISUB R4, 1               ; Move Right pointer inward
+    JMP  __ftoa_reverse_loop
+
+__ftoa_terminate:
+    MOV  R6, 0
+    MOV  [R3], R6            ; Write null-terminator word at the end of string
+    
+    ;; Note: R0 still holds the raw heap base pointer from __malloc. 
+    ;; __builtin_tostring will apply the 0x7FC00000 String tag to R0!
     MOV  SP, BP
     POP  BP
     RET
@@ -729,3 +820,22 @@ __bios_clear_screen:
     MOV  SP, BP 
     POP  BP 
     RET 
+
+;; =====================================================================================
+;; SECTION 6: STATIC DATA & STRING CONSTANTS
+;; =====================================================================================
+
+__const_str_nil:
+    string "nil"
+
+__const_str_false:
+	string "false"
+
+__const_str_true:
+	string "true"
+
+__const_str_table:
+	string "table"
+
+__const_str_function:
+	string "function"
