@@ -1,11 +1,26 @@
 %define heap_pointer 0
+
+;; these items are all needed for assembly
+
+;; call global register registry for these
+%define term_ypos 1
+%define term_history 2
+
+;; missing subroutines??
+__builtin_ftoa:
+__error_attempt_to_get_length:
+__const_str_nil:
+__const_str_false:
+__const_str_true:
+__format_table_address:
+__format_function_address:
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; Vircon32 NaN-Boxed Routines for Lua Runtime Environment (runtime.s)
 ;; Audited & Consolidated Architecture
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 
 ;; =====================================================================================
 ;; SECTION 1: MEMORY MANAGEMENT & ERROR HANDLING
@@ -78,10 +93,11 @@ __builtin_table_new:
     JT   R0, __oom_handler 
     
     ;; 2. Initialize table header in data memory (Stripped redundant +0 offset) 
-    MOV  [R0], 0             ; flags / metatable pointer = nil 
-    MOV  [R0+1], 0           ; array part length = 0 
-    MOV  [R0+2], 0           ; array part pointer = null 
-    MOV  [R0+3], 0           ; hash part pointer = null 
+	MOV  R1, 0
+    MOV  [R0], R1            ; flags / metatable pointer = nil 
+    MOV  [R0+1], R1          ; array part length = 0 
+    MOV  [R0+2], R1          ; array part pointer = null 
+    MOV  [R0+3], R1          ; hash part pointer = null 
     
     ;; 3. AUDITED: Box the raw data heap address as a Lua Table! 
     OR   R0, 0x7F800000 
@@ -346,6 +362,11 @@ __strcat_finish:
 __builtin_print:
     PUSH BP 
     MOV  BP, SP 
+
+    ;; Initialize GPU Texture/Region state (back up existing, set to BIOS)
+    IN   R5, GPU_SelectedTexture ; save current texture 
+    IN   R6, GPU_SelectedRegion  ; save current region 
+    OUT  GPU_SelectedTexture, -1 ; set BIOS texture 
     
     ;; 1. Get String and Unbox 
     MOV  R1, [BP+2]          ; R1 = Tagged String 
@@ -391,6 +412,10 @@ __print_insert:
 
     ;; 6. Trigger Screen Redraw 
     CALL __term_redraw 
+
+    ;; Restore previous texture and region 
+    OUT  GPU_SelectedTexture, R5 ; restore previous texture 
+    OUT  GPU_SelectedRegion, R6  ; restore previous region 
     
     MOV  SP, BP 
     POP  BP 
@@ -415,6 +440,7 @@ __term_redraw_loop:
     MOV  R3, [term_ypos] 
     IGE  R1, R3 
     JT   R1, __term_redraw_done ; If Index >= term_ypos, we are done 
+	MOV  R6, 0
 
     ;; 4. Calculate Y Pixel Position (Index * 20 pixels per line) 
     MOV  R4, R1 
@@ -426,7 +452,7 @@ __term_redraw_loop:
     ;; 6. Draw the String via BIOS 
     PUSH R5                  ; Push String Pointer 
     PUSH R4                  ; Push Y Position 
-    PUSH 0                   ; Push X Position (0 margin) 
+    PUSH R6                  ; Push X Position (position of 0) 
     CALL __bios_print_text   ; Draw the string to the GPU 
     ISUB SP, 3               ; Clean up arguments 
 
@@ -436,6 +462,7 @@ __term_redraw_loop:
     JMP  __term_redraw_loop 
 
 __term_redraw_done:
+
     MOV  SP, BP 
     POP  BP 
     RET 
@@ -663,11 +690,6 @@ __bios_print_text:
     PUSH BP 
     MOV  BP, SP 
 
-    ;; Initialize GPU Texture/Region state 
-    IN   R5, GPU_SelectedTexture ; save current texture 
-    IN   R6, GPU_SelectedRegion  ; save current region 
-    OUT  GPU_SelectedTexture, -1 ; set BIOS texture 
-
     ;; Load Parameters from Stack 
     MOV  R1, [BP+2]          ; R1 = X Pixel Coordinate (Integer) 
     MOV  R2, [BP+3]          ; R2 = Y Pixel Coordinate (Integer) 
@@ -690,9 +712,6 @@ __bios_print_loop:
     JMP  __bios_print_loop 
 
 __bios_print_done:
-    ;; Restore previous texture and region 
-    OUT  GPU_SelectedTexture, R5 ; restore previous texture 
-    OUT  GPU_SelectedRegion, R6  ; restore previous region 
 
     MOV  SP, BP 
     POP  BP 
