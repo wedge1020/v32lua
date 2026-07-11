@@ -224,4 +224,6 @@ void emit_asm (const char* format, ...);
 void emit_truthy_jump(int reg, const char* target_label);
 void emit_falsy_jump(int reg, const char* target_label);
 
+int get_next_label(void);
+
 #endif // CODEGEN_H

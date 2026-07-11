@@ -1,6 +1,9 @@
+#include <stdio.h>
+#include "codegen.h"
+
 // Emits Vircon32 assembly to jump to target_label if reg is TRUTHY!
 // (i.e., NOT Nil and NOT False). Uses scratch register R6.
-static void emit_truthy_jump(int reg, const char* target_label) {
+void emit_truthy_jump(int reg, const char* target_label) {
     int check_id = get_next_label();
     char eval_right_label[128];
     snprintf(eval_right_label, sizeof(eval_right_label), "__truthy_fail_%d", check_id);
@@ -22,7 +25,7 @@ static void emit_truthy_jump(int reg, const char* target_label) {
 }
 // Emits Vircon32 assembly to jump to target_label if reg holds Nil or False.
 // Uses scratch register R6 to prevent destructive comparison bugs!
-static void emit_falsy_jump(int reg, const char* target_label) {
+void emit_falsy_jump(int reg, const char* target_label) {
     // 1. Test against canonical Nil (0xFFC00000)
     emit_asm("MOV R6, R%d ; Copy condition to scratch register R6\n", reg);
     emit_asm("IEQ R6, 0xFFC00000 ; Destructive test: Is it Nil?\n");
