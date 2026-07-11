@@ -432,6 +432,18 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     // Move the returned length into the destination register
                     emit_asm ("MOV R%d, R0\n", dest_reg);
                 }
+				else if (node->as.unary.operator == OP_NOT) {
+                    emit_asm ("PUSH R%d\n", dest_reg);
+                    emit_asm ("CALL __builtin_not\n");
+                    emit_asm ("ISUB SP, 1\n");
+                    emit_asm ("MOV R%d, R0\n", dest_reg);
+                }
+				else if (node->as.unary.operator == OP_UNM) {
+                    emit_asm ("PUSH R%d\n", dest_reg);
+                    emit_asm ("CALL __builtin_unm\n");
+                    emit_asm ("ISUB SP, 1\n");
+                    emit_asm ("MOV R%d, R0\n", dest_reg);
+                }
                 // ... handle other unary operators like OP_MINUS (-) or OP_NOT (not)
                 break;
             }
@@ -708,9 +720,11 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                         case OP_LE:  emit_asm ("FLE R%d, R%d\n", dest_reg, right_reg); break;
                         case OP_GT:  emit_asm ("FGT R%d, R%d\n", dest_reg, right_reg); break;
                         case OP_GE:  emit_asm ("FGE R%d, R%d\n", dest_reg, right_reg); break;
-						case OP_LEN: break;
-						case OP_NOT: break;
-						case OP_UNM: break;
+                        case OP_LEN:
+                        case OP_NOT:
+                        case OP_UNM:
+						default:
+							break;
                     }
                 }
                 unlock_register (right_reg);

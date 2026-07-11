@@ -702,6 +702,59 @@ void emit_runtime_library (void)
     // 4. Apply the NaN-Box Table Tag
     printf("    OR    R0, 0x7F800000\n");
     printf("    RET\n");
+
+// --- Built-in: Logical NOT (not x) ---
+    // Stack incoming: [BP+2] = Tagged Value
+    // Returns: R0 = Tagged Boolean (0x80400002 for true, 0x80400001 for false)
+    printf("\n__builtin_not:\n");
+    printf("    PUSH  BP\n");
+    printf("    MOV   BP, SP\n");
+
+    // 1. Load the incoming value
+    printf("    MOV   R1, [BP + 2]   ; R1 = Value to evaluate\n");
+
+    // 2. Check if it is Nil (0x80400000)
+    printf("    MOV   R2, 0x80400000 ; Special Tag: Nil\n");
+    printf("    IEQ   R1, R2\n");
+    printf("    JT    R1, __not_return_true ; If Nil, 'not nil' is true!\n");
+
+    // 3. Check if it is False (0x80400001)
+    printf("    MOV   R2, 0x80400001 ; Special Tag: False\n");
+    printf("    IEQ   R1, R2\n");
+    printf("    JT    R1, __not_return_true ; If False, 'not false' is true!\n");
+
+    // 4. Otherwise, it is Truthy! Return False.
+    printf("\n__not_return_false:\n");
+    printf("    MOV   R0, 0x80400001 ; Return Boxed False\n");
+    printf("    JMP   __not_done\n");
+
+    // 5. Return True.
+    printf("\n__not_return_true:\n");
+    printf("    MOV   R0, 0x80400002 ; Return Boxed True\n");
+
+    printf("\n__not_done:\n");
+    printf("    MOV   SP, BP\n");
+    printf("    POP   BP\n");
+    printf("    RET\n");
+
+// --- Built-in: Unary Minus (-x) ---
+    // Stack incoming: [BP+2] = Tagged Value (Expected Float)
+    // Returns: R0 = Negated Float
+    printf("\n__builtin_unm:\n");
+    printf("    PUSH  BP\n");
+    printf("    MOV   BP, SP\n");
+
+    // 1. Load the incoming value
+    printf("    MOV   R1, [BP + 2]   ; R1 = Value to negate\n");
+
+    // 2. Flip the IEEE-754 sign bit (Bit 31)
+    printf("    XOR   R1, 0x80000000 ; Instantly changes positive <-> negative\n");
+
+    // 3. Move to return register and exit
+    printf("    MOV   R0, R1\n");
+    printf("    MOV   SP, BP\n");
+    printf("    POP   BP\n");
+    printf("    RET\n");
 }
 
 void compiler_error (ErrorType type, int line_num, const char* format, ...)

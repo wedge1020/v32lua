@@ -25,6 +25,8 @@ char* mangle_method_name(const char* table_name, const char* method_name);
     ASTNode* ast_node;
 }
 
+%expect 2
+
 /* --- AST Node Types --- */
 %type <ast_node> parameter_list
 %type <ast_node> argument_list
@@ -39,8 +41,9 @@ char* mangle_method_name(const char* table_name, const char* method_name);
 %token TOKEN_EQ TOKEN_NEQ TOKEN_LE TOKEN_GE TOKEN_LT TOKEN_GT TOKEN_CONCAT
 %token TOKEN_LOCAL TOKEN_DO TOKEN_NOT TOKEN_LEN UNARY_MINUS
 
-%type <ast_node> statement statement_list expr function_def return_stmt
-%type <ast_node> table_constructor function_call else_branch
+%type <ast_node> statement statement_list stat_list expr function_def return_stmt
+%type <ast_node> table_constructor function_call else_branch prefix_expr
+%type <ast_node> last_statement
 
 /* Operator Precedence Rules (PEMDAS + Logic Core) */
 %left TOKEN_OR
@@ -64,22 +67,34 @@ program:
     ;
 
 statement_list:
-    statement { $$                  = $1; }
-    | statement_list statement
-    {
-        if ($1                     == NULL)
-        { 
-            $$                      = $2; 
-        }
-        else
-        {
-            ASTNode *current        = $1;
-            while (current -> next != NULL)
-            {
-                current             = current -> next;
+      stat_list { $$ = $1; }
+    | stat_list last_statement {
+        if ($1 == NULL) { 
+            $$ = $2; 
+        } else {
+            ASTNode *current = $1;
+            while (current->next != NULL) {
+                current = current->next;
             }
-            current -> next         = $2; // Link the IF statement to the end
-            $$                      = $1;
+            current->next = $2;
+            $$ = $1;
+        }
+    }
+    | last_statement { $$ = $1; }
+    ;
+
+stat_list:
+      statement { $$ = $1; }
+    | stat_list statement {
+        if ($1 == NULL) { 
+            $$ = $2; 
+        } else {
+            ASTNode *current = $1;
+            while (current->next != NULL) {
+                current = current->next;
+            }
+            current->next = $2;
+            $$ = $1;
         }
     }
     ;
@@ -136,12 +151,12 @@ statement:
         $$->as.mult_assign.values_head = $4;
         $$->as.mult_assign.is_local = 1;
     }
-    | expr '[' expr ']' '=' expr
+    | prefix_expr '[' expr ']' '=' expr
     { 
         // $1 = table, $3 = key, $6 = value being assigned
         $$ = make_node_table_set ($1, $3, $6); 
     }
-    | expr '.' TOKEN_IDENTIFIER '=' expr
+    | prefix_expr '.' TOKEN_IDENTIFIER '=' expr
     {
         ASTNode *string_key  = make_node_string ($3);
         $$                   = make_node_table_set ($1, string_key, $5);
@@ -150,10 +165,6 @@ statement:
         $$ = make_node(NODE_WHILE);
         $$->as.while_loop.condition = $2;
         $$->as.while_loop.body = $4;
-    }
-    // break statement grammar rule
-    | TOKEN_BREAK {
-        $$ = make_node(NODE_BREAK);        /* Standalone node containing no children */
     }
     | TOKEN_IF expr TOKEN_THEN statement_list else_branch TOKEN_END { 
             $$                          = make_node (NODE_IF);
@@ -168,7 +179,6 @@ statement:
         $$ = NULL; 
     }
     | function_def               { $$ = $1; }
-    | return_stmt                { $$ = $1; }
     | TOKEN_FUNCTION TOKEN_IDENTIFIER ':' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
         $$ = make_node(NODE_FUNCTION_DEF);
         
@@ -198,6 +208,11 @@ statement:
         $$ = make_node(NODE_COMMENT_BLOCK);
         $$->as.string_val.value = $1;
     }
+    ;
+
+last_statement:
+      return_stmt { $$ = $1; }
+    | TOKEN_BREAK { $$ = make_node(NODE_BREAK); }
     ;
 
 else_branch:
@@ -299,24 +314,44 @@ return_stmt:
     }
     ;
 
+prefix_expr:
+    TOKEN_IDENTIFIER { 
+        $$ = make_node_ident($1); 
+    }
+    | function_call { 
+        $$ = $1; 
+    }
+    | '(' expr ')' { 
+        $$ = $2; 
+    }
+    | prefix_expr '[' expr ']' {
+        $$ = make_node(NODE_TABLE_GET);
+        $$->as.table_get.table_expr = $1;
+        $$->as.table_get.key = $3;
+    }
+    | prefix_expr '.' TOKEN_IDENTIFIER {
+        ASTNode *string_key = make_node_string($3);
+        $$ = make_node(NODE_TABLE_GET);
+        $$->as.table_get.table_expr = $1;
+        $$->as.table_get.key = string_key;
+    }
+    ;
+
 expr:
     TOKEN_NUMBER {
         $$ = make_node(NODE_NUMBER);
         $$->as.number.val = $1;
     }
-    | TOKEN_IDENTIFIER { $$ = make_node_ident($1); }
-    | TOKEN_STRING     { $$ = make_node_string($1); }
+    | TOKEN_STRING      { $$ = make_node_string($1); }
     | table_constructor { $$ = $1; }
-    | expr '[' expr ']' {
-        $$ = make_node(NODE_TABLE_GET);
-        $$->as.table_get.table_expr = $1;
-        $$->as.table_get.key = $3;
-    }
-    | expr '+' expr  { $$  = make_node_binary (NODE_ADD, $1, $3); }
-    | expr '-' expr  { $$  = make_node_binary (NODE_SUB, $1, $3); }
-    | expr '*' expr  { $$  = make_node_binary (NODE_MUL, $1, $3); }
-    | expr '/' expr  { $$  = make_node_binary (NODE_DIV, $1, $3); }
-    | TOKEN_LEN expr { $$  = make_node_unary  (OP_LEN,   $2);     }
+    | prefix_expr       { $$ = $1; }  /* <-- REPLACES IDENTS, PARENS, TABLE GETS, & CALLS! */
+    | expr '+' expr     { $$ = make_node_binary (NODE_ADD, $1, $3); }
+    | expr '-' expr     { $$ = make_node_binary (NODE_SUB, $1, $3); }
+    | expr '*' expr     { $$ = make_node_binary (NODE_MUL, $1, $3); }
+    | expr '/' expr     { $$ = make_node_binary (NODE_DIV, $1, $3); }
+    | TOKEN_LEN expr    { $$ = make_node_unary  (OP_LEN,   $2);     }
+    | '-' expr %prec UNARY_MINUS { $$ = make_node_unary (OP_UNM, $2); }
+    | TOKEN_NOT expr             { $$ = make_node_unary (OP_NOT, $2); }
     | expr TOKEN_EQ expr      { $$ = make_node(NODE_RELATIONAL); $$->as.binary.operator = OP_EQ;  $$->as.binary.left = $1; $$->as.binary.right = $3; }
     | expr TOKEN_NEQ expr     { $$ = make_node(NODE_RELATIONAL); $$->as.binary.operator = OP_NEQ; $$->as.binary.left = $1; $$->as.binary.right = $3; }
     | expr TOKEN_LT expr      { $$ = make_node(NODE_RELATIONAL); $$->as.binary.operator = OP_LT;  $$->as.binary.left = $1; $$->as.binary.right = $3; }
@@ -326,17 +361,6 @@ expr:
     | expr TOKEN_AND expr     { $$ = make_node(NODE_AND);        $$->as.binary.left = $1;     $$->as.binary.right = $3; }
     | expr TOKEN_OR expr      { $$ = make_node(NODE_OR);         $$->as.binary.left = $1;     $$->as.binary.right = $3; }
     | expr TOKEN_CONCAT expr  { $$ = make_node(NODE_CONCAT);     $$->as.binary.left = $1;     $$->as.binary.right = $3; }
-    | expr '.' TOKEN_IDENTIFIER 
-    {
-        // Convert the raw identifier text into a proper String AST Node
-        ASTNode *string_key  = make_node_string ($3); 
-        $$                   = make_node_table_get ($1, string_key);
-    }
-    | function_call { $$ = $1; }
-    | '{' '}' 
-    { 
-        $$ = make_node_table_constructor ();
-    }
     ;
 
 function_call:
@@ -347,7 +371,19 @@ function_call:
         node->as.call.args_head = $3;
         $$ = node;
     }
-    | expr ':' TOKEN_IDENTIFIER '(' argument_list ')' {
+    | prefix_expr '.' TOKEN_IDENTIFIER '(' argument_list ')' {
+        ASTNode* node = make_node(NODE_FUNCTION_CALL);
+        node->as.call.is_method_call = 0;
+        
+        // Dynamically look up the function inside the table
+        ASTNode* dynamic_lookup = make_node(NODE_TABLE_GET);
+        dynamic_lookup->as.table_get.table_expr = $1;
+        dynamic_lookup->as.table_get.key = make_node_string($3);
+        node->as.call.target = dynamic_lookup;
+        node->as.call.args_head = $5;
+        $$ = node;
+    }
+    | prefix_expr ':' TOKEN_IDENTIFIER '(' argument_list ')' {
         ASTNode* node = make_node(NODE_FUNCTION_CALL);
         node->as.call.target = $1;
         node->as.call.is_method_call = 1;
