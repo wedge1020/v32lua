@@ -12,6 +12,36 @@ ASTNode *make_node_unary (Operator  op, ASTNode *operand)
     return node;
 }
 
+void  generate_binary_op (ASTNode* node)
+{
+    if (node->op == OP_CONCAT) {
+        // --- Step 1: Evaluate Left Operand ---
+        // Generates assembly for the left child and leaves result in R0
+        generate_expression(node->left);
+        
+        // Push left operand to stack (Sits at SP+1 relative to call)
+        emit_instruction("PUSH  R0             ; Save left string operand");
+
+        // --- Step 2: Evaluate Right Operand ---
+        // Generates assembly for the right child and leaves result in R0
+        generate_expression(node->right);
+        
+        // Push right operand to stack (Sits at SP+0 relative to call)
+        emit_instruction("PUSH  R0             ; Save right string operand");
+
+        // --- Step 3: Invoke Built-in ---
+        emit_instruction("CALL  __builtin_strcat ; Execute NaN-boxed string concatenation");
+
+        // --- Step 4: Stack Cleanup ---
+        // Pop the 2 incoming arguments off the stack. 
+        // The newly allocated tagged string pointer is safely residing in R0!
+        emit_instruction("ISUB  SP, 2          ; Pop concatenation arguments");
+        return;
+    }
+    
+    // ... handle other binary operators (+, -, *, /) ...
+}
+
 ASTNode *make_node_binary (NodeType  type, ASTNode *left, ASTNode *right)
 {
     // 1. Allocate memory for the new node
