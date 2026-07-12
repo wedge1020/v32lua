@@ -19,3 +19,8 @@ install:
 # We explicitly depend on the compiler binary ('src/compiler') being built first!
 tests: bin/v32lua
 	$(MAKE) -C testing
+
+# Checkmassembler outputs
+# We explicitly depend on the compiler binary ('src/compiler') being built first!
+asmcheck: bin/v32lua
+	$(MAKE) -C testing asmcheck
