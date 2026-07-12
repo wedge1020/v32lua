@@ -385,19 +385,50 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                         break; // Skip normal function call logic!
                     }
                     // 1. HARDWARE INTRINSIC INTERCEPT
+                    else if (strcmp (func_name, "ioports.gpu.draw") == 0)
+                    {
+                        emit_asm("    ;; --- Intrinsic: ioports.gpu.draw() ---\n");
+                        ASTNode *arg = node -> as.call.args_head;
+                    
+                        if (arg != NULL)
+                        {
+                            if (arg -> type == NODE_STRING)
+                            {
+                                const char *drawtype  = arg -> as.string_val.value;
+                                if (strcasecmp (drawtype, "zoom") == 0)
+                                    emit_asm ("OUT GPU_Command, GPUCommand_DrawRegionZoomed\n");
+                                elif (strcasecmp (drawtype, "rotate") == 0)
+                                    emit_asm ("OUT GPU_Command, GPUCommand_DrawRegionRotated\n");
+                                elif (strcasecmp (drawtype, "rotozoom") == 0)
+                                    emit_asm ("OUT GPU_Command, GPUCommand_DrawRegionRotozoomed\n");
+                                else // anything else just default to drawing regular
+                                    emit_asm ("OUT GPU_Command, GPUCommand_DrawRegion\n");
+                            }
+                        }
+                        else
+                        {
+                            emit_asm ("OUT GPU_Command, GPUCommand_DrawRegion\n");
+                        }
+
+                        if (dest_reg != 0)
+                        {
+                            emit_asm ("MOV R%d, 0 ; return nil\n", dest_reg);
+                        }
+                        return;
+                    }
                     else if (strcmp (func_name, "ioports.gpu.clear") == 0)
                     {
                         emit_asm("    ;; --- Intrinsic: ioports.gpu.clear() ---\n");
-                        ASTNode *arg = node->as.call.args_head;
+                        ASTNode *arg = node -> as.call.args_head;
                     
                         if (arg != NULL) {
                             int color_reg = allocate_register();
-                            if (arg->type == NODE_STRING) {
+                            if (arg -> type == NODE_STRING) {
                                 const char *color_name = arg->as.string_val.value;
                                 unsigned int color_hex = 0x000000FF; // Default (Opaque Black)
                                 int is_preset = 1;
                             
-                                if (strcmp(color_name, "black") == 0)
+                                if (strcmp (color_name, "black") == 0)
                                       color_hex = 0x000000FF; 
                                 else if (strcmp(color_name, "white") == 0)
                                        color_hex = 0xFFFFFFFF;
@@ -423,12 +454,10 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                             unlock_register (color_reg);
                         }
                     
-                        int cmd_reg = allocate_register ();
-                        emit_asm("MOV R%d, 1 ; GPU Command Code for Clear Screen\n", cmd_reg);
-                        emit_asm("OUT GPU_Command, R%d\n", cmd_reg);
-                        unlock_register (cmd_reg);
+                        emit_asm ("OUT GPU_Command, GPUCommand_ClearScreen\n", cmd_reg);
                         
-                        if (dest_reg != 0) {
+                        if (dest_reg != 0)
+                        {
                             emit_asm ("MOV R%d, 0 ; return nil\n", dest_reg);
                         }
                         return; // Terminate early
@@ -663,16 +692,124 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     char full_path[512];
                     sprintf(full_path, "%s.%s", base_path, node->as.table_set.key->as.string_val.value);
 
-                    if (strcmp(full_path, "ioports.gpu.texture") == 0) {
+                    if (strcasecmp (full_path, "ioports.gpu.texture") == 0) {
                         int val_reg = allocate_register();
-                        generate_asm(node->as.table_set.value, val_reg);
+                        generate_asm (node -> as.table_set.value, val_reg);
 
                         // Convert float to int
                         emit_asm ("    ;; --- Intrinsic: Cast Lua Float to Hardware Integer ---\n");
                         emit_asm ("CFI R%d\n", val_reg);
                         emit_asm ("OUT GPU_SelectedTexture, R%d\n", val_reg);
 
-                        unlock_register(val_reg);
+                        unlock_register (val_reg);
+                        return; // Skip standard dynamic table assignment
+                    }
+                    else if (strcasecmp (full_path, "ioports.gpu.region") == 0) {
+                        int val_reg = allocate_register();
+                        generate_asm (node -> as.table_set.value, val_reg);
+
+                        // Convert float to int
+                        emit_asm ("    ;; --- Intrinsic: Cast Lua Float to Hardware Integer ---\n");
+                        emit_asm ("CFI R%d\n", val_reg);
+                        emit_asm ("OUT GPU_SelectedRegion, R%d\n", val_reg);
+
+                        unlock_register (val_reg);
+                        return; // Skip standard dynamic table assignment
+                    }
+                    else if (strcasecmp (full_path, "ioports.gpu.x") == 0) {
+                        int val_reg = allocate_register();
+                        generate_asm (node -> as.table_set.value, val_reg);
+
+                        // Convert float to int
+                        emit_asm ("    ;; --- Intrinsic: Cast Lua Float to Hardware Integer ---\n");
+                        emit_asm ("CFI R%d\n", val_reg);
+                        emit_asm ("OUT GPU_DrawingPointX, R%d\n", val_reg);
+
+                        unlock_register (val_reg);
+                        return; // Skip standard dynamic table assignment
+                    }
+                    else if (strcasecmp (full_path, "ioports.gpu.y") == 0) {
+                        int val_reg = allocate_register();
+                        generate_asm (node -> as.table_set.value, val_reg);
+
+                        // Convert float to int
+                        emit_asm ("    ;; --- Intrinsic: Cast Lua Float to Hardware Integer ---\n");
+                        emit_asm ("CFI R%d\n", val_reg);
+                        emit_asm ("OUT GPU_DrawingPointY, R%d\n", val_reg);
+
+                        unlock_register (val_reg);
+                        return; // Skip standard dynamic table assignment
+                    }
+                    else if (strcasecmp (full_path, "ioports.gpu.minX") == 0) {
+                        int val_reg = allocate_register();
+                        generate_asm (node -> as.table_set.value, val_reg);
+
+                        // Convert float to int
+                        emit_asm ("    ;; --- Intrinsic: Cast Lua Float to Hardware Integer ---\n");
+                        emit_asm ("CFI R%d\n", val_reg);
+                        emit_asm ("OUT GPU_RegionMinX, R%d\n", val_reg);
+
+                        unlock_register (val_reg);
+                        return; // Skip standard dynamic table assignment
+                    }
+                    else if (strcasecmp (full_path, "ioports.gpu.minY") == 0) {
+                        int val_reg = allocate_register();
+                        generate_asm (node -> as.table_set.value, val_reg);
+
+                        // Convert float to int
+                        emit_asm ("    ;; --- Intrinsic: Cast Lua Float to Hardware Integer ---\n");
+                        emit_asm ("CFI R%d\n", val_reg);
+                        emit_asm ("OUT GPU_RegionMinY, R%d\n", val_reg);
+
+                        unlock_register (val_reg);
+                        return; // Skip standard dynamic table assignment
+                    }
+                    else if (strcasecmp (full_path, "ioports.gpu.maxX") == 0) {
+                        int val_reg = allocate_register();
+                        generate_asm (node -> as.table_set.value, val_reg);
+
+                        // Convert float to int
+                        emit_asm ("    ;; --- Intrinsic: Cast Lua Float to Hardware Integer ---\n");
+                        emit_asm ("CFI R%d\n", val_reg);
+                        emit_asm ("OUT GPU_RegionMaxX, R%d\n", val_reg);
+
+                        unlock_register (val_reg);
+                        return; // Skip standard dynamic table assignment
+                    }
+                    else if (strcasecmp (full_path, "ioports.gpu.maxY") == 0) {
+                        int val_reg = allocate_register();
+                        generate_asm (node -> as.table_set.value, val_reg);
+
+                        // Convert float to int
+                        emit_asm ("    ;; --- Intrinsic: Cast Lua Float to Hardware Integer ---\n");
+                        emit_asm ("CFI R%d\n", val_reg);
+                        emit_asm ("OUT GPU_RegionMaxY, R%d\n", val_reg);
+
+                        unlock_register (val_reg);
+                        return; // Skip standard dynamic table assignment
+                    }
+                    else if (strcasecmp (full_path, "ioports.gpu.hotX") == 0) {
+                        int val_reg = allocate_register();
+                        generate_asm (node -> as.table_set.value, val_reg);
+
+                        // Convert float to int
+                        emit_asm ("    ;; --- Intrinsic: Cast Lua Float to Hardware Integer ---\n");
+                        emit_asm ("CFI R%d\n", val_reg);
+                        emit_asm ("OUT GPU_RegionHotSpotX, R%d\n", val_reg);
+
+                        unlock_register (val_reg);
+                        return; // Skip standard dynamic table assignment
+                    }
+                    else if (strcasecmp (full_path, "ioports.gpu.hotY") == 0) {
+                        int val_reg = allocate_register();
+                        generate_asm (node -> as.table_set.value, val_reg);
+
+                        // Convert float to int
+                        emit_asm ("    ;; --- Intrinsic: Cast Lua Float to Hardware Integer ---\n");
+                        emit_asm ("CFI R%d\n", val_reg);
+                        emit_asm ("OUT GPU_RegionHotSpotY, R%d\n", val_reg);
+
+                        unlock_register (val_reg);
                         return; // Skip standard dynamic table assignment
                     }
                 }
@@ -711,10 +848,109 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     char full_path[512];
                     sprintf(full_path, "%s.%s", base_path, node->as.table_get.key->as.string_val.value);
                 
-                    if (strcmp(full_path, "ioports.gpu.texture") == 0) {
+                    if (strcasecmp (full_path, "ioports.gpu.texture") == 0) {
                         if (dest_reg != 0) {
                             emit_asm ("    ;; --- Intrinsic: Read Hardware Integer ---\n");
                             emit_asm ("IN R%d, GPU_SelectedTexture\n", dest_reg);
+
+                            // Convert integer to float
+                            emit_asm ("    ;; --- Intrinsic: Cast to Lua Float ---\n");
+                            emit_asm ("CIF R%d\n", dest_reg);
+                        }
+                        return; // Skip standard dynamic table lookup
+                    }
+                    else if (strcasecmp (full_path, "ioports.gpu.region") == 0) {
+                        if (dest_reg != 0) {
+                            emit_asm ("    ;; --- Intrinsic: Read Hardware Integer ---\n");
+                            emit_asm ("IN R%d, GPU_SelectedRegion\n", dest_reg);
+
+                            // Convert integer to float
+                            emit_asm ("    ;; --- Intrinsic: Cast to Lua Float ---\n");
+                            emit_asm ("CIF R%d\n", dest_reg);
+                        }
+                        return; // Skip standard dynamic table lookup
+                    }
+                    else if (strcasecmp (full_path, "ioports.gpu.x") == 0) {
+                        if (dest_reg != 0) {
+                            emit_asm ("    ;; --- Intrinsic: Read Hardware Integer ---\n");
+                            emit_asm ("IN R%d, GPU_DrawingPointX\n", dest_reg);
+
+                            // Convert integer to float
+                            emit_asm ("    ;; --- Intrinsic: Cast to Lua Float ---\n");
+                            emit_asm ("CIF R%d\n", dest_reg);
+                        }
+                        return; // Skip standard dynamic table lookup
+                    }
+                    else if (strcasecmp (full_path, "ioports.gpu.y") == 0) {
+                        if (dest_reg != 0) {
+                            emit_asm ("    ;; --- Intrinsic: Read Hardware Integer ---\n");
+                            emit_asm ("IN R%d, GPU_DrawingPointY\n", dest_reg);
+
+                            // Convert integer to float
+                            emit_asm ("    ;; --- Intrinsic: Cast to Lua Float ---\n");
+                            emit_asm ("CIF R%d\n", dest_reg);
+                        }
+                        return; // Skip standard dynamic table lookup
+                    }
+                    else if (strcasecmp (full_path, "ioports.gpu.minx") == 0) {
+                        if (dest_reg != 0) {
+                            emit_asm ("    ;; --- Intrinsic: Read Hardware Integer ---\n");
+                            emit_asm ("IN R%d, GPU_RegionMinX\n", dest_reg);
+
+                            // Convert integer to float
+                            emit_asm ("    ;; --- Intrinsic: Cast to Lua Float ---\n");
+                            emit_asm ("CIF R%d\n", dest_reg);
+                        }
+                        return; // Skip standard dynamic table lookup
+                    }
+                    else if (strcasecmp (full_path, "ioports.gpu.miny") == 0) {
+                        if (dest_reg != 0) {
+                            emit_asm ("    ;; --- Intrinsic: Read Hardware Integer ---\n");
+                            emit_asm ("IN R%d, GPU_RegionMinY\n", dest_reg);
+
+                            // Convert integer to float
+                            emit_asm ("    ;; --- Intrinsic: Cast to Lua Float ---\n");
+                            emit_asm ("CIF R%d\n", dest_reg);
+                        }
+                        return; // Skip standard dynamic table lookup
+                    }
+                    else if (strcasecmp (full_path, "ioports.gpu.maxx") == 0) {
+                        if (dest_reg != 0) {
+                            emit_asm ("    ;; --- Intrinsic: Read Hardware Integer ---\n");
+                            emit_asm ("IN R%d, GPU_RegionMaxX\n", dest_reg);
+
+                            // Convert integer to float
+                            emit_asm ("    ;; --- Intrinsic: Cast to Lua Float ---\n");
+                            emit_asm ("CIF R%d\n", dest_reg);
+                        }
+                        return; // Skip standard dynamic table lookup
+                    }
+                    else if (strcasecmp (full_path, "ioports.gpu.miny") == 0) {
+                        if (dest_reg != 0) {
+                            emit_asm ("    ;; --- Intrinsic: Read Hardware Integer ---\n");
+                            emit_asm ("IN R%d, GPU_RegionMaxY\n", dest_reg);
+
+                            // Convert integer to float
+                            emit_asm ("    ;; --- Intrinsic: Cast to Lua Float ---\n");
+                            emit_asm ("CIF R%d\n", dest_reg);
+                        }
+                        return; // Skip standard dynamic table lookup
+                    }
+                    else if (strcasecmp (full_path, "ioports.gpu.hotx") == 0) {
+                        if (dest_reg != 0) {
+                            emit_asm ("    ;; --- Intrinsic: Read Hardware Integer ---\n");
+                            emit_asm ("IN R%d, GPU_RegionHotSpotX\n", dest_reg);
+
+                            // Convert integer to float
+                            emit_asm ("    ;; --- Intrinsic: Cast to Lua Float ---\n");
+                            emit_asm ("CIF R%d\n", dest_reg);
+                        }
+                        return; // Skip standard dynamic table lookup
+                    }
+                    else if (strcasecmp (full_path, "ioports.gpu.hoty") == 0) {
+                        if (dest_reg != 0) {
+                            emit_asm ("    ;; --- Intrinsic: Read Hardware Integer ---\n");
+                            emit_asm ("IN R%d, GPU_HotSpotY\n", dest_reg);
 
                             // Convert integer to float
                             emit_asm ("    ;; --- Intrinsic: Cast to Lua Float ---\n");
