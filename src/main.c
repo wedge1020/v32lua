@@ -30,46 +30,52 @@
 extern int yyparse(void);
 extern FILE* yyin;
 
+// Declare the external symbol created by runtime_embed.S
+extern const char runtime_asm_start[];
+
 void  emit_runtime_library (void)
 {
-	////////////////////////////////////////////////////////////////////////////////////
-	//
-    // Open the external assembly runtime library
-	//
-    FILE *f  = fopen ("runtime.s", "r");
-    if (f   == NULL)
-	{
-        fprintf (stderr, "Compiler Linker Error: Standalone runtime library 'runtime.s' not found.\n");
-        fprintf (stderr, "Ensure 'runtime.s' is in your current working directory.\n");
-        exit (1);
+    emit_asm("\n;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;");
+    emit_asm(";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\n");
+    emit_asm(";;\n");
+    emit_asm(";; Lua assembly support Runtime Library Subroutines\n");
+    emit_asm(";;\n");
+    emit_asm(";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;");
+    emit_asm(";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\n");
+    emit_asm("\n");
+
+    // Point our cursor to the start of the embedded Vircon32 assembly
+    const char* cursor = runtime_asm_start;
+    char line[1024];
+
+    // Read until we hit the null terminator we appended in .S
+    while (*cursor != '\0')
+    {
+        int i = 0;
+        
+        // Extract a single line up to the newline character or buffer capacity
+        while (*cursor != '\0' && *cursor != '\n' && i < (int)sizeof(line) - 2)
+        {
+            line[i++] = *cursor++;
+        }
+        
+        // Preserve the newline character if present
+        if (*cursor == '\n')
+        {
+            line[i++] = *cursor++;
+        }
+        
+        line[i] = '\0';
+        
+        // Pass the line through your special formatting function
+        emit_asm("%s", line);
     }
 
-	emit_asm ("\n;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;");
-	emit_asm (";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\n");
-    emit_asm (";;\n");
-    emit_asm (";; Lua assembly support Runtime Library Subroutines\n");
-    emit_asm (";;\n");
-	emit_asm (";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;");
-	emit_asm (";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\n");
-    emit_asm ("\n");
-
-    char  line[1024];
-    while (fgets (line, sizeof (line), f) != NULL)
-	{
-		////////////////////////////////////////////////////////////////////////////////
-		//
-        // We pass 'line' as an argument to a pure "%s" format string.
-        // This safely protects against %define or %constants in your assembly!
-		//
-        emit_asm ("%s", line);
-    }
-
-    emit_asm ("\n;;\n");
-    emit_asm (";; End of Runtime Library\n");
-    emit_asm (";;\n");
-	emit_asm (";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;");
-	emit_asm (";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\n");
-    fclose (f);
+    emit_asm("\n;;\n");
+    emit_asm(";; End of Runtime Library\n");
+    emit_asm(";;\n");
+    emit_asm(";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;");
+    emit_asm(";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\n");
 }
 
 void compiler_error (ErrorType type, int line_num, const char* format, ...)
