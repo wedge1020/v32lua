@@ -12,7 +12,7 @@ TARGET = ../bin/v32lua
 
 # --- Object Files ---
 # Add runtime_embed.o to your object list
-OBJS = parser.tab.o lex.yy.o main.o context.o generator.o ast.o runtime_embed.o
+OBJS = parser.tab.o lex.yy.o main.o context.o generator.o ast.o logic.o runtime_embed.o
 
 # --- Build Rules ---
 all: $(TARGET)
@@ -31,8 +31,9 @@ lex.yy.c: lexer.l parser.tab.h
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Rule for Assembly files (handles our .incbin wrapper)
+# Rule for Assembly files (instructs assembler to disable executable stack requirement)
 %.o: %.S
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -Wa,--noexecstack -c $< -o $@
 
 clean:
 	rm -f $(TARGET) $(OBJS) parser.tab.c parser.tab.h lex.yy.c
