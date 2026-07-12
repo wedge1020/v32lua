@@ -397,9 +397,9 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                                 const char *drawtype  = arg -> as.string_val.value;
                                 if (strcasecmp (drawtype, "zoom") == 0)
                                     emit_asm ("OUT GPU_Command, GPUCommand_DrawRegionZoomed\n");
-                                elif (strcasecmp (drawtype, "rotate") == 0)
+								else if (strcasecmp (drawtype, "rotate") == 0)
                                     emit_asm ("OUT GPU_Command, GPUCommand_DrawRegionRotated\n");
-                                elif (strcasecmp (drawtype, "rotozoom") == 0)
+								else if (strcasecmp (drawtype, "rotozoom") == 0)
                                     emit_asm ("OUT GPU_Command, GPUCommand_DrawRegionRotozoomed\n");
                                 else // anything else just default to drawing regular
                                     emit_asm ("OUT GPU_Command, GPUCommand_DrawRegion\n");
@@ -454,7 +454,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                             unlock_register (color_reg);
                         }
                     
-                        emit_asm ("OUT GPU_Command, GPUCommand_ClearScreen\n", cmd_reg);
+                        emit_asm ("OUT GPU_Command, GPUCommand_ClearScreen\n");
                         
                         if (dest_reg != 0)
                         {
@@ -687,13 +687,21 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 
                 // 1. HARDWARE INTRINSIC CHECK
                 if (resolve_static_path(node->as.table_set.table_expr, base_path) && 
-                    node->as.table_set.key->type == NODE_STRING) {
+                    node -> as.table_set.key->type == NODE_STRING) {
                     
                     char full_path[512];
-                    sprintf(full_path, "%s.%s", base_path, node->as.table_set.key->as.string_val.value);
+                    sprintf(full_path, "%s.%s", base_path, node -> as.table_set.key -> as.string_val.value);
 
                     if (strcasecmp (full_path, "ioports.gpu.texture") == 0) {
                         int val_reg = allocate_register();
+						/*
+						if (node -> == NODE_STRING)
+						{
+                                const char *drawtype  = arg -> as.string_val.value;
+                                if (strcasecmp (drawtype, "zoom") == 0)
+                                    emit_asm ("OUT GPU_Command, GPUCommand_DrawRegionZoomed\n");
+								else if (strcasecmp (drawtype, "rotate") == 0)
+								*/
                         generate_asm (node -> as.table_set.value, val_reg);
 
                         // Convert float to int
