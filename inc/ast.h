@@ -112,6 +112,7 @@ typedef struct astnode {
 extern char cart_version[64];
 extern char cart_title[128];
 extern CARTresource *textures_head;
+extern CARTresource *sounds_head;
 extern int next_texture_id;
 
 ////////////////////////////////////////////////////////////////////////////////////////

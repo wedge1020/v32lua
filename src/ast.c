@@ -1,10 +1,11 @@
 #include "v32lua.h"
 
 // Global state for XML generation
-char cart_version[64] = "1.0";
-char cart_title[128]  = "Vircon32 Program";
-CARTresource* textures_head = NULL;
-int next_texture_id = 0;
+char cart_version[64]        = "1.0";
+char cart_title[128]         = "Vircon32 Program";
+CARTresource* textures_head  = NULL;
+CARTresource* sounds_head    = NULL;
+int next_texture_id          = 0;
 
 ASTNode *make_node (NodeType type)
 {

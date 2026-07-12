@@ -36,8 +36,22 @@ extern int string_counter;
 
 extern ScopeNode *current_scope;
 extern ScopeNode *global_scope;
-extern int next_ram_address; // Address 0 is reserved for our heap_pointer
+extern int        next_ram_address;
   
-int  get_next_label (void);
+int         get_next_label             (void);
+void        init_global_scope          (void);
+int         add_string_literal         (const char *);
+SymbolNode *register_local             (const char *);
+SymbolNode *register_parameter         (const char *, int);
+void        mark_global_as_function    (const char *);
+const char *get_current_function_name  (void);
+void        get_variable_access_string (const char *, char *);
+void        push_function_context      (const char *);
+void        pop_function_context       (void);
+void        pop_scope                  (void);
+void        push_scope                 (void);
+void        push_loop                  (int);
+void        pop_loop                   (void);
+int         current_loop               (void);
 
 #endif

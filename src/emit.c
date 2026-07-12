@@ -149,51 +149,100 @@ void  emit_interpolated_asm (const char *raw_code)
 void  emit_cart_xml (const char *input_filename)
 {
     // 1. Allocate enough memory for the filename plus ".xml" and the null terminator
-    size_t len = strlen(input_filename);
-    char* xml_filename = (char*)malloc(len + 5); 
-    if (!xml_filename) {
-        fprintf(stderr, "Compiler Error: Memory allocation failed for XML filename.\n");
-        return;
+    size_t  len           = strlen (input_filename);
+    char   *xml_filename  = (char *) malloc (len + 5); 
+    char   *vbin_path     = (char *) malloc (len + 6); 
+    char   *last_dot      = NULL;
+
+    if (xml_filename     == NULL)
+    {
+        fprintf (stderr, "Compiler Error: Memory allocation failed for XML filename.\n");
+        exit (2);
+    }
+
+    if (vbin_path        == NULL)
+    {
+        fprintf (stderr, "Compiler Error: Memory allocation failed for VBIN filename.\n");
+        exit (3);
     }
 
     // 2. Copy the input filename (e.g., "example.lua")
-    strcpy(xml_filename, input_filename);
+    strcpy (vbin_path,    input_filename);
+    last_dot              = strrchr (vbin_path, '.');
+    if (last_dot         != NULL)
+    {
+        // Overwrite from the dot onward: "example.lua" -> "example.xml"
+        strcpy (last_dot, ".vbin");
+    }
+    else
+    {
+        // If no extension was found (e.g., "example"), just append ".xml"
+        strcat (vbin_path, ".xml");
+    }
 
     // 3. Find the last dot to locate the file extension
-    char* last_dot = strrchr(xml_filename, '.');
-    if (last_dot != NULL) {
+    strcpy (xml_filename, input_filename);
+    last_dot              = strrchr (xml_filename, '.');
+    if (last_dot         != NULL)
+    {
         // Overwrite from the dot onward: "example.lua" -> "example.xml"
-        strcpy(last_dot, ".xml");
-    } else {
+        strcpy (last_dot, ".xml");
+    }
+    else
+    {
         // If no extension was found (e.g., "example"), just append ".xml"
-        strcat(xml_filename, ".xml");
+        strcat (xml_filename, ".xml");
     }
 
     // 4. Open the newly named XML file for writing
-    FILE* xml = fopen(xml_filename, "w");
-    if (!xml) {
-        fprintf(stderr, "Compiler Error: Could not create XML cart file '%s'.\n", xml_filename);
-        free(xml_filename);
-        return;
+    FILE *xml          = fopen (xml_filename, "w");
+    if (xml           == NULL)
+    {
+        fprintf (stderr, "Compiler Error: Could not create XML cart file '%s'.\n", xml_filename);
+        free (xml_filename);
+        exit (4);
     }
 
     // 5. Emit the Vircon32 XML configuration
-    fprintf(xml, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-    fprintf(xml, "<cartridge version=\"%s\">\n", cart_version);
-    fprintf(xml, "  <title>%s</title>\n", cart_title);
+    fprintf (xml, "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\" ?>\n");
+    fprintf (xml, "<rom-definition version=\"1.0\">\n");
+    fprintf (xml, "    <rom type=\"cartridge\" title=\"%s\" version=\"%s\" />\n", cart_title, cart_version);
+    fprintf (xml, "<binary path=\"%s\" />\n", vbin_path);
     
     if (textures_head != NULL) {
-        fprintf(xml, "  <textures>\n");
+        fprintf(xml, "<textures>\n");
         CARTresource* curr = textures_head;
         while (curr != NULL) {
             fprintf(xml, "    <texture id=\"%d\" path=\"%s\" /> <!-- %s -->\n", 
                     curr->id, curr->filename, curr->var_name);
             curr = curr->next;
         }
-        fprintf(xml, "  </textures>\n");
+        fprintf(xml, "</textures>\n");
+    }
+    else
+    {
+        fprintf (xml, "<textures />\n");
     }
     
-    fprintf(xml, "</cartridge>\n");
+    if (sounds_head        != NULL)
+    {
+        fprintf (xml, "<sounds>\n");
+        CARTresource *curr  = sounds_head;
+        while (curr        != NULL)
+        {
+            fprintf (xml, "    <sound id=\"%d\" path=\"%s\" /> <!-- %s -->\n",
+                     curr -> id, curr -> filename, curr -> var_name);
+            curr            = curr -> next;
+        }
+        fprintf (xml, "</sounds>\n");
+    }
+    else
+    {
+        fprintf (xml, "<sounds />\n");
+    }
+
+    fprintf(xml, "</rom-definition>\n");
+
     fclose(xml);
 
     printf("; Successfully generated Vircon32 cart config: %s\n", xml_filename);

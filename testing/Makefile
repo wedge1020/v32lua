@@ -33,4 +33,4 @@ asmcheck: $(ASM_OUTS)
 
 # Clean target drops all generated assembly and binary test files
 clean:
-	rm -f *.asm *.vbin
+	rm -f *.asm *.vbin *.xml *.v32
