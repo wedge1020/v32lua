@@ -1,22 +1,18 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdarg.h>
-#include "codegen.h"
+#include "v32lua.h"
 
 // --- Output Routing ---
-static FILE* current_out_stream = NULL;
+FILE* current_out_stream = NULL;
 
-static FILE* out() {
+FILE* out() {
     return current_out_stream ? current_out_stream : stdout;
 }
 
 // --- Columnar & Peephole Optimizer State ---
-static char last_emitted_inst[32]   = "";
-static char last_emitted_dest[128] = "";
-static char last_emitted_src[128]  = "";
+char last_emitted_inst[32]   = "";
+char last_emitted_dest[128] = "";
+char last_emitted_src[128]  = "";
 
-static void trim_spaces(char *str) {
+void trim_spaces(char *str) {
     int len = strlen(str);
     while (len > 0 && (str[len-1] == ' ' || str[len-1] == '\t' || str[len-1] == '\r' || str[len-1] == '\n')) {
         str[len-1] = '\0';
@@ -29,7 +25,7 @@ static void trim_spaces(char *str) {
 
 // Recursively flattens an AST chain like table_get(table_get("ioports", "gpu"), "clear")
 // into a flat C string "ioports.gpu.clear". Returns 1 if successful, 0 if dynamic.
-static int resolve_static_path(ASTNode* node, char* path_buffer) {
+int resolve_static_path(ASTNode* node, char* path_buffer) {
     if (!node) return 0;
 
     if (node->type == NODE_IDENTIFIER) {
@@ -48,115 +44,7 @@ static int resolve_static_path(ASTNode* node, char* path_buffer) {
     return 0;
 }
 
-void emit_asm(const char* format, ...) {
-    char current_instruction[256];
-    va_list args;
-    
-    va_start(args, format);
-    vsprintf(current_instruction, format, args);
-    va_end(args);
-
-    char *p = current_instruction;
-    while (*p == ' ' || *p == '\t') p++;
-
-    // 1. Find where the first colon and semicolon are located
-    char *colon_pos = strchr(p, ':');
-    char *semi_pos  = strchr(p, ';');
-    
-    // 2. It is only a label if a colon exists AND (there is no comment OR the colon is before the comment)
-    int is_label = (colon_pos != NULL && (semi_pos == NULL || colon_pos < semi_pos));
-
-    // 3. Use our new is_label check instead of strchr
-    if (*p == '\0' || *p == '\r' || *p == '\n' || *p == ';' || is_label) {
-        fprintf(out(), "%s", current_instruction);
-        if (is_label || *p == '\0' || *p == '\r' || *p == '\n') {
-            last_emitted_inst[0] = '\0';
-            last_emitted_dest[0] = '\0';
-            last_emitted_src[0] = '\0';
-        }
-        return;
-    }
-    
-    char inst[32] = {0};
-    char operands[256] = {0};
-    char comment[256] = {0};
-
-    int inst_len = 0;
-    while (*p && *p != ' ' && *p != '\t' && *p != '\r' && *p != '\n' && *p != ';') {
-        if (inst_len < 31) inst[inst_len++] = *p;
-        p++;
-    }
-    inst[inst_len] = '\0';
-
-    while (*p == ' ' || *p == '\t') p++;
-
-    int op_len = 0;
-    while (*p && *p != ';' && *p != '\r' && *p != '\n') {
-        if (op_len < 255) operands[op_len++] = *p;
-        p++;
-    }
-    operands[op_len] = '\0';
-    trim_spaces(operands);
-
-    if (*p == ';') {
-        p++;
-        while (*p == ' ' || *p == '\t') p++; 
-        int c_len = 0;
-        while (*p && *p != '\r' && *p != '\n') {
-            if (c_len < 255) comment[c_len++] = *p;
-            p++;
-        }
-        comment[c_len] = '\0';
-        trim_spaces(comment);
-    }
-
-    if (strcmp(inst, "MOV") == 0) {
-        char dest[128] = {0}, src[128] = {0};
-        if (sscanf(operands, "%[^,], %[^\n]", dest, src) == 2) {
-            trim_spaces(dest);
-            trim_spaces(src);
-
-            if (strcmp(dest, src) == 0) {
-                fprintf(out(), "    ;; Peephole optimized out: %s %s\n", inst, operands);
-                return;
-            }
-
-            if (strcmp(last_emitted_inst, "MOV") == 0) {
-                if (strcmp(dest, last_emitted_src) == 0 && strcmp(src, last_emitted_dest) == 0) {
-                    fprintf(out(), "    ;; Peephole optimized out: %s %s\n", inst, operands);
-                    return;
-                }
-            }
-        }
-    }
-
-    if (strlen(comment) > 0) {
-        if (strlen(operands) > 0) fprintf(out(), "    %-5s %-30s ; %s\n", inst, operands, comment);
-        else fprintf(out(), "    %-5s %-30s ; %s\n", inst, "", comment);
-    } else {
-        if (strlen(operands) > 0) fprintf(out(), "    %-5s %s\n", inst, operands);
-        else fprintf(out(), "    %-5s\n", inst);
-    }
-
-    strcpy(last_emitted_inst, inst);
-    if (strcmp(inst, "MOV") == 0) {
-        char dest[128] = {0}, src[128] = {0};
-        if (sscanf(operands, "%[^,], %[^\n]", dest, src) == 2) {
-            trim_spaces(dest);
-            trim_spaces(src);
-            strcpy(last_emitted_dest, dest);
-            strcpy(last_emitted_src, src);
-        } else {
-            last_emitted_dest[0] = '\0';
-            last_emitted_src[0] = '\0';
-        }
-    } else {
-        last_emitted_dest[0] = '\0';
-        last_emitted_src[0] = '\0';
-    }
-}
-
-static int check_needs_stack (ASTNode *node)
+int check_needs_stack (ASTNode *node)
 {
     if (node  == NULL)
     {
@@ -235,42 +123,6 @@ void  generate_block (ASTNode *head)
         generate_asm (current, temp_reg);
         unlock_register (temp_reg);
         current        = current -> next; // Move to the next sibling statement
-    }
-}
-
-static void emit_interpolated_asm (const char *raw_code) {
-    char buffer[2048] = {0}; // Temporary buffer for the interpolated string
-    int buf_idx = 0;
-    
-    const char *p = raw_code;
-    while (*p) {
-        if (*p == '{') {
-            p++; 
-            char var_name[256];
-            int i = 0;
-            while (*p && *p != '}' && i < 255) var_name[i++] = *p++;
-            var_name[i] = '\0'; 
-            if (*p == '}') p++; 
-            
-            // Format the variable and append it to our buffer
-            char formatted_var[264];
-            sprintf(formatted_var, "[var_%s]", var_name);
-            for (int j = 0; formatted_var[j] != '\0' && buf_idx < 2047; j++) {
-                buffer[buf_idx++] = formatted_var[j];
-            }
-        } else {
-            if (buf_idx < 2047) buffer[buf_idx++] = *p;
-            p++;
-        }
-    }
-    buffer[buf_idx] = '\0';
-
-    // Split the buffer by newlines and feed each line to emit_asm
-    // This gives your inline assembly the exact same formatting love as the rest!
-    char *line = strtok(buffer, "\n");
-    while (line != NULL) {
-        emit_asm("%s\n", line); 
-        line = strtok(NULL, "\n");
     }
 }
 
@@ -973,6 +825,29 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 fprintf(out(), "\n;; \n");
                 break;
             }
+
+            case NODE_CART_HINT: {
+                // Only indexed resources (textures/audio) generate runtime Lua variables
+                if ((node -> as.cart_hint.resource_id != -1) &&
+                    (node -> as.cart_hint.name        != NULL))
+                {
+                    char  var_access[256];
+
+                    ////////////////////////////////////////////////////////////////////
+                    //
+                    // Automatically register provided name as a global variable
+                    //
+                    get_variable_access_string (node -> as.cart_hint.name, var_access);
+                    
+                    emit_asm ("    ;; Texture: Initialize '%s' to resource ID %d\n", 
+                             node -> as.cart_hint.name,
+                             node -> as.cart_hint.resource_id);
+                    emit_asm ("MOV %s, %d\n", var_access,
+                              node -> as.cart_hint.resource_id);
+                }
+                break;
+            }
+
         }
     }
 }

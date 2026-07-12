@@ -1,6 +1,83 @@
-#include <stdlib.h>
-#include <stdio.h>
-#include "codegen.h"
+#include "v32lua.h"
+
+// Global state for XML generation
+char cart_version[64] = "1.0";
+char cart_title[128]  = "Vircon32 Program";
+CARTresource* textures_head = NULL;
+int next_texture_id = 0;
+
+ASTNode *make_node (NodeType type)
+{
+    ASTNode* n = (ASTNode*)calloc(1, sizeof(ASTNode));
+    n->type = type;
+    n->next = NULL;
+    return n;
+}
+
+ASTNode *make_node_ident (const char* name)
+{
+    ASTNode* node = make_node(NODE_IDENTIFIER);
+    // Use strdup to ensure the AST owns the memory for the string,
+    // protecting it from being overwritten by the lexer's buffer.
+    node->as.id.name = strdup(name);
+
+    return node;
+}
+
+ASTNode *make_node_string (const char* str_value)
+{
+    ASTNode* node = make_node(NODE_STRING);
+    // strdup protects the string from being overwritten by the lexer
+    node->as.string_val.value = strdup(str_value);
+    return node;
+}
+ASTNode *make_node_cart_hint (const char *raw_hint)
+{
+    ASTNode* node = make_node(NODE_CART_HINT);
+    
+    char action[64] = {0};
+    char param1[128] = {0};
+    char param2[256] = {0};
+
+    // Parse commands like: texture background "filename.png"
+    int tokens = sscanf(raw_hint, "%63s %127s \"%255[^\"]\"", action, param1, param2);
+    
+    node->as.cart_hint.action = strdup(action);
+    node->as.cart_hint.resource_id = -1;
+
+    if (strcmp(action, "version") == 0 && tokens >= 2) {
+        // e.g., --#version 1.1
+        strncpy(cart_version, param1, sizeof(cart_version) - 1);
+        node->as.cart_hint.value = strdup(param1);
+    } 
+    else if (strcmp(action, "title") == 0) {
+        // e.g., --#title "My Awesome Game"
+        char title_buf[128] = {0};
+        if (sscanf(raw_hint, "%*s \"%127[^\"]\"", title_buf) == 1) {
+            strncpy(cart_title, title_buf, sizeof(cart_title) - 1);
+            node->as.cart_hint.value = strdup(title_buf);
+        }
+    }
+    else if (strcmp(action, "texture") == 0 && tokens == 3) {
+        // e.g., --#texture background "filename.png"
+        int assigned_id = next_texture_id++;
+        
+        node->as.cart_hint.name = strdup(param1);        // Variable name: background
+        node->as.cart_hint.value = strdup(param2);       // Filename: filename.png
+        node->as.cart_hint.resource_id = assigned_id;    // ID: 0, 1, 2...
+
+        // Register in our XML linked list
+        CARTresource* res = (CARTresource*)malloc(sizeof(CARTresource));
+        res->id = assigned_id;
+        res->var_name = strdup(param1);
+        res->filename = strdup(param2);
+        res->next = textures_head;
+        textures_head = res;
+    }
+
+    return node;
+}
+
 
 ASTNode *make_node_unary (Operator  op, ASTNode *operand)
 {

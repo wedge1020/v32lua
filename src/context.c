@@ -1,11 +1,8 @@
-#include "codegen.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include "v32lua.h"
 
-static ScopeNode* current_scope = NULL;
-static ScopeNode* global_scope = NULL;
-static int next_ram_address = 1; // Address 0 is reserved for our heap_pointer
+ScopeNode* current_scope = NULL;
+ScopeNode* global_scope = NULL;
+int next_ram_address = 1; // Address 0 is reserved for our heap_pointer
 
 void init_global_scope(void) {
     if (global_scope != NULL) return;
@@ -162,59 +159,6 @@ void  mark_global_as_function (const char *name)
     sym -> type         = SYM_GLOBAL;
 }
 
-void  emit_variable_map (void)
-{
-    if (global_scope    == NULL) return;
-    
-    SymbolNode *current  = global_scope -> symbols;
-    while (current      != NULL)
-    {
-        fprintf (stdout, "%%define %s%s %d\n", 
-                 current -> is_function ? "func_" : "var_", 
-                 current -> name, 
-                 current -> location);
-        current          = current -> next;
-    }
-}
-
-
-// ============================================================================
-// --- Register Inventory Implementation ---
-// ============================================================================
-
-// 0 means free, 1 means currently holding data
-static int register_inventory[NUM_GPRS] = {0}; 
-
-void lock_register(int reg) {
-    if (reg >= 0 && reg < NUM_GPRS) {
-        register_inventory[reg] = 1;
-    }
-}
-
-void unlock_register(int reg) {
-    if (reg >= 0 && reg < NUM_GPRS) {
-        register_inventory[reg] = 0;
-    }
-}
-
-int is_register_locked(int reg) {
-    if (reg >= 0 && reg < NUM_GPRS) {
-        return register_inventory[reg];
-    }
-    return 0;
-}
-
-int allocate_register(void) {
-    for (int i = 0; i < NUM_GPRS; i++) {
-        if (!register_inventory[i]) {
-            register_inventory[i] = 1;
-            return i;
-        }
-    }
-    compiler_error(ERR_INTERNAL, -1, "Register inventory exhausted!");
-    return -1;
-}
-
 // ============================================================================
 // --- Label Generator & Function Context Stack ---
 // ============================================================================
@@ -265,18 +209,8 @@ const char* get_current_function_name(void) {
     return context_stack_head->name;
 }
 
-// ============================================================================
-// --- String Literal Tracking ---
-// ============================================================================
-
-typedef struct StringLiteralNode {
-    int id;
-    char* value;
-    struct StringLiteralNode* next;
-} StringLiteralNode;
-
-static StringLiteralNode* strings_head = NULL;
-static int string_counter = 0;
+StringLiteralNode* strings_head = NULL;
+int string_counter = 0;
 
 int add_string_literal(const char* str) {
     StringLiteralNode* current = strings_head;
@@ -297,22 +231,6 @@ int add_string_literal(const char* str) {
     new_node->next = strings_head;
     strings_head = new_node;
     return new_node->id;
-}
-
-void emit_string_data_section(void) {
-    if (strings_head == NULL) return;
-    
-    printf("\n; --- String Literal Allocations ---\n");
-    StringLiteralNode* current = strings_head;
-    while (current != NULL) {
-        printf("__string_%d:\n", current->id);
-        printf("  integer ");
-        for (int i = 0; current->value[i] != '\0'; i++) {
-            printf("%d, ", (int)current->value[i]);
-        }
-        printf("0\n"); 
-        current = current->next;
-    }
 }
 
 // ============================================================================

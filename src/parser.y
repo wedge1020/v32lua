@@ -1,28 +1,21 @@
 %{
-#include "codegen.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+
+#include "v32lua.h"
 
 extern int yylineno;
 extern FILE* yyin;
-extern int yylex(void);
-void yyerror(const char *s);
+extern int yylex (void);
+void yyerror (const char *s);
 
-// Inline helper functions for memory allocation during AST compilation
-ASTNode* make_node(NodeType type);
-ASTNode* make_node_ident (const char*);
-ASTNode* make_node_string(const char*);
-
-void emit_runtime_library(void);
 // Add your new helper prototype here:
-char* mangle_method_name(const char* table_name, const char* method_name);
+char *mangle_method_name (const char *table_name, const char *method_name);
+
 %}
 
 %union {
-    double number_val;
-    char* string_val;
-    ASTNode* ast_node;
+    double   number_val;
+    char    *string_val;
+    ASTNode *ast_node;
 }
 
 %expect 2
@@ -36,6 +29,8 @@ char* mangle_method_name(const char* table_name, const char* method_name);
 %token <number_val> TOKEN_NUMBER
 %token <string_val> TOKEN_IDENTIFIER TOKEN_STRING
 %token <string_val> TOKEN_COMMENT_LINE TOKEN_COMMENT_BLOCK
+%token <string_val> TOKEN_CART_HINT
+
 %token TOKEN_WHILE TOKEN_BREAK TOKEN_IF TOKEN_ELSEIF TOKEN_THEN TOKEN_ELSE TOKEN_END 
 %token TOKEN_FUNCTION TOKEN_ASM TOKEN_RAWASM TOKEN_RETURN TOKEN_AND TOKEN_OR
 %token TOKEN_EQ TOKEN_NEQ TOKEN_LE TOKEN_GE TOKEN_LT TOKEN_GT TOKEN_CONCAT
@@ -207,6 +202,9 @@ statement:
     | TOKEN_COMMENT_BLOCK {
         $$ = make_node(NODE_COMMENT_BLOCK);
         $$->as.string_val.value = $1;
+    }
+    | TOKEN_CART_HINT {
+        $$ = make_node_cart_hint($1);
     }
     ;
 
@@ -407,29 +405,6 @@ table_constructor:
 
 void yyerror(const char *s) {
     compiler_error(ERR_SYNTAX, yylineno, "%s", s);
-}
-
-ASTNode* make_node(NodeType type) {
-    ASTNode* n = (ASTNode*)calloc(1, sizeof(ASTNode));
-    n->type = type;
-    n->next = NULL;
-    return n;
-}
-
-ASTNode* make_node_ident (const char* name) {
-    ASTNode* node = make_node(NODE_IDENTIFIER);
-    // Use strdup to ensure the AST owns the memory for the string,
-    // protecting it from being overwritten by the lexer's buffer.
-    node->as.id.name = strdup(name);
-
-    return node;
-}
-
-ASTNode* make_node_string(const char* str_value) {
-    ASTNode* node = make_node(NODE_STRING);
-    // strdup protects the string from being overwritten by the lexer
-    node->as.string_val.value = strdup(str_value);
-    return node;
 }
 
 char* mangle_method_name(const char* table_name, const char* method_name) {

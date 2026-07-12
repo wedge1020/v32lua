@@ -12,7 +12,7 @@ TARGET = ../bin/v32lua
 
 # --- Object Files ---
 # Add runtime_embed.o to your object list
-OBJS = parser.tab.o lex.yy.o main.o context.o generator.o ast.o logic.o runtime_embed.o
+OBJS = lex.yy.o main.o context.o generator.o ast.o emit.o internals.o register.o runtime_embed.o parser.tab.o
 
 # --- Build Rules ---
 all: $(TARGET)

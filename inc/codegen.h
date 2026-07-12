@@ -202,7 +202,6 @@ void push_loop(int id);
 void pop_loop(void);
 int current_loop(void);
 
-void emit_variable_map(void);
 
 void mark_global_as_function(const char* name);
 
@@ -212,7 +211,6 @@ void  get_variable_access_string(const char *, char *);
 void  push_scope (void);
 void  pop_scope (void);
 
-void emit_runtime_library (void);
 
 SymbolNode *register_parameter (const char *, int);
 SymbolNode *register_local (const char *);
@@ -220,6 +218,9 @@ SymbolNode *register_local (const char *);
 // Emits Vircon32 assembly to jump to target_label if R0 is Nil or False.
 // Uses scratch register R6 to prevent destructive comparison bugs!
 //
+void emit_string_data_section(void);
+void emit_variable_map(void);
+void emit_runtime_library (void);
 void emit_asm (const char* format, ...);
 void emit_truthy_jump(int reg, const char* target_label);
 void emit_falsy_jump(int reg, const char* target_label);

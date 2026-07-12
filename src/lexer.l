@@ -1,8 +1,6 @@
 %{
-#include "codegen.h"
+#include "v32lua.h"
 #include "parser.tab.h"  // Generated automatically by Bison
-#include <string.h>
-#include <stdlib.h>
 
 char *process_string_literal (const char *text, int  len)
 {
@@ -34,7 +32,7 @@ char *process_string_literal (const char *text, int  len)
         i++;
     }
     processed[j] = '\0'; // Ensure it is null-terminated for the C-side
-    return processed;
+    return (processed);
 }
 %}
 
@@ -65,9 +63,15 @@ char *process_string_literal (const char *text, int  len)
     return TOKEN_COMMENT_LINE;
 }
 
+	/* Cartridge Building Hint: --# ... */
+"--#".* { 
+    // Strip the leading "--#" (3 chars) and pass the trimmed payload
+    yylval.string_val  = strdup (yytext + 3);
+    return (TOKEN_CART_HINT);
+}
+
     /* 4. Standard Single-Line Comment: Matches '--' with text, or a bare '--' */
 "--".* { /* Skip standard single-line comments safely */ }
-    /* 1. Transposed Multiline Comment: --@[[ ... ]] */
 
 "while"                 { return TOKEN_WHILE;    }
 "break"                 { return TOKEN_BREAK;    }
