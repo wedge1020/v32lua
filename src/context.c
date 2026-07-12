@@ -117,11 +117,11 @@ void  get_variable_access_string (const char *name, char *output_buffer)
     {
         if (sym -> is_function == 1)
         {
-            sprintf (output_buffer, "func_%s", sym -> name);
+            sprintf (output_buffer, "[func_%s]", sym -> name);
         }
         else
         {
-            sprintf (output_buffer, "var_%s", sym -> name);
+            sprintf (output_buffer, "[var_%s]", sym -> name);
         }
     }
 
