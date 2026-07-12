@@ -1,5 +1,9 @@
 /* runtime_embed.S */
+#ifdef __APPLE__
+.const
+#else
 .section .rodata
+#endif
 
 /* Handle Apple/macOS symbol naming conventions automatically */
 #ifdef __APPLE__
