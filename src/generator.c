@@ -1064,7 +1064,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     } else if (text[i] == '\r') {
                         ; // Skip carriage returns
                     } else {
-                        putchar(text[i]);
+						fputc (text[i], out ());
                     }
                 }
                 fprintf(out(), "\n;; \n");
