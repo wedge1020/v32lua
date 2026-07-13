@@ -2,6 +2,9 @@
 
 #include "v32lua.h"
 
+// Define the global AST root variable here
+ASTNode* root_node = NULL;
+
 extern int yylineno;
 extern FILE* yyin;
 extern int yylex (void);
@@ -57,7 +60,7 @@ char *mangle_method_name (const char *table_name, const char *method_name);
 program:
     statement_list
     {
-        generate_program($1); // This automatically orchestrates globals, functions, and layout
+        root_node = $1; // Captures the entire AST root for main.c to use later
     }
     ;
 

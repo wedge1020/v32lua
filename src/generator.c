@@ -1,10 +1,34 @@
 #include "v32lua.h"
 
-// --- Output Routing ---
-FILE* current_out_stream = NULL;
+// Private to this module; cannot be accidentally modified by other files
+static FILE *active_out_stream = NULL;
 
-FILE* out() {
-    return current_out_stream ? current_out_stream : stdout;
+/* Sets the target stream for compilation output */
+void  set_output_stream (FILE* stream)
+{
+    active_out_stream  = stream;
+}
+
+/* Returns the current output stream, safely falling back to stdout if none is set */
+FILE *out (void)
+{
+    if (active_out_stream == NULL)
+	{
+        // Safe fallback: allows debug runs without -o to still print to the console
+        return (stdout);
+    }
+    return (active_out_stream);
+}
+
+/* Closes the stream if open and resets the internal pointer */
+void  close_output_stream (void)
+{
+    if ((active_out_stream != NULL) &&
+		(active_out_stream != stdout))
+   	{
+        fclose (active_out_stream);
+        active_out_stream   = NULL;
+    }
 }
 
 // --- Columnar & Peephole Optimizer State ---
@@ -718,7 +742,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     } else if (text[i] == '\r') {
                         ; // Skip carriage returns
                     } else {
-						fputc (text[i], out ());
+                        fputc (text[i], out ());
                     }
                 }
                 fprintf(out(), "\n;; \n");
@@ -831,48 +855,29 @@ void  generate_functions (ASTNode *node)
     }
 }
 
-void  generate_program (ASTNode *head)
+void generate_program (ASTNode *head)
 {
-    ////////////////////////////////////////////////////////////////////////////////////
-    //
-    // Declare and initialize variables
-    //
-    ASTNode *current                = NULL;
-    int      globals_need_stack     = 0;
-    int      temp_reg               = -1;  
+    ASTNode *current            = NULL;
+    int      globals_need_stack = 0;
+    int      temp_reg           = -1;  
     char     buffer[1024];
-    char    *check                  = NULL;
+    char    *check              = NULL;
 
-    ////////////////////////////////////////////////////////////////////////////////////
-    //
-    // Function Pre-Pass: Register all functions globally before generating ANY code
-    //
-    current                         = head;
-    while (current                 != NULL)
-    {
-        if (current -> type        == NODE_FUNCTION_DEF)
-        {
-            mark_global_as_function (current -> as.function_def.name);
-        }
-        current                     = current -> next;
-    }
-
-    ////////////////////////////////////////////////////////////////////////////////////
-    //
-    // Initialize the global scope before compiling!
-    //
     init_global_scope (); 
 
-    ////////////////////////////////////////////////////////////////////////////////////
-    //
-    // buffered output routing
-    //
-    current_out_stream              = tmpfile();
-    if (current_out_stream         == NULL)
+    // 1. Open temp file for the assembly code instructions
+    FILE *temp_asm_stream = tmpfile();
+    if (temp_asm_stream == NULL)
     {
-        fprintf (stderr, "Compiler Error: Failed to create temporary file for code generation.\n");
+        fprintf (stderr, "Compiler Error: Failed to create temporary file.\n");
         exit (1);
     }
+
+    // 2. Remember the actual destination stream (e.g., the .vbin/.asm file or stdout)
+    FILE *final_out_stream = out();
+
+    // 3. REDIRECT OUTPUT TO TEMP FILE FOR CODE GENERATION
+    set_output_stream(temp_asm_stream);
     
     emit_asm (";; --- Compiled Code Entry Vector ---\n");
     emit_asm ("CALL __init_globals  ; Run top-level setups first\n");
@@ -880,80 +885,67 @@ void  generate_program (ASTNode *head)
     emit_asm ("HLT                  ; Halt CPU when main finishes\n");
 
     emit_asm ("\n;; --- Function Definitions ---\n");
-    current                         = head;
-    while (current                 != NULL)
+    current = head;
+    while (current != NULL)
     {
-        if (current -> type        == NODE_FUNCTION_DEF)
-        {
+        if (current->type == NODE_FUNCTION_DEF) {
             generate_asm (current, 0);
+        } else if (check_needs_stack (current)) {
+            globals_need_stack = 1;
         }
-        else
-        {
-            if (check_needs_stack (current))
-            {
-                globals_need_stack  = 1;
-            }
-        }
-        current                     = current -> next;
+        current = current->next;
     }
 
     emit_asm ("\n;; --- Global Initialization Vector ---\n");
     emit_asm ("__init_globals:\n");
-    
-    if (globals_need_stack         == 1)
-    {
+    if (globals_need_stack == 1) {
         emit_asm ("PUSH BP\n");
         emit_asm ("MOV BP, SP\n");
-    }
-    else
-    {
+    } else {
         emit_asm ("    ;; OPTIMIZATION: frame pointer omitted (Leaf Function)\n");
     }
 
     generate_global_setup (head);
 
-    current                         = head;
-    while (current                 != NULL)
+    current = head;
+    while (current != NULL)
     {
-        if (current -> type        != NODE_FUNCTION_DEF)
-        {
-            temp_reg                = allocate_register ();
-            generate_asm (current, temp_reg);
+        if (current->type != NODE_FUNCTION_DEF) {
+            temp_reg = allocate_register ();
+            generate_asm (current, temp_reg); // <-- var_ symbols discovered here!
             unlock_register (temp_reg);
         }
-        current                     = current -> next;
+        current = current->next;
     }
 
-    if (globals_need_stack)
-    {
+    if (globals_need_stack) {
         emit_asm ("MOV SP, BP\n");
         emit_asm ("POP BP\n");
     }
     emit_asm ("RET\n\n");
 
-    fprintf (stdout, ";; --- System Constants ---\n");
-    fprintf (stdout, "%%define term_ypos    0\n");
-    fprintf (stdout, "%%define term_history 1\n");
-    fprintf (stdout, "%%define heap_pointer 18\n");
+    // 4. CODE GEN COMPLETE. SWITCH BACK TO FINAL DESTINATION STREAM
+    set_output_stream(final_out_stream);
 
-    fprintf (stdout, "\n;; --- Global Variable RAM Map ---\n");
-    emit_variable_map ();
-    fprintf (stdout, "\n");
+    // 5. Emit headers and the NOW-COMPLETE variable map!
+    fprintf (out(), ";; --- System Constants ---\n");
+    fprintf (out(), "%%define term_ypos    0\n");
+    fprintf (out(), "%%define term_history 1\n");
+    fprintf (out(), "%%define heap_pointer 18\n");
 
-    rewind (current_out_stream);
-    check                           = fgets (buffer,
-                                             sizeof (buffer),
-                                             current_out_stream);
-    while (check                   != NULL)
+    fprintf (out(), "\n;; --- Global Variable RAM Map ---\n");
+    emit_variable_map (); // Both func_ AND var_ will now print correctly!
+    fprintf (out(), "\n");
+
+    // 6. Dump the buffered assembly instructions underneath the map
+    rewind (temp_asm_stream);
+    while ((check = fgets (buffer, sizeof (buffer), temp_asm_stream)) != NULL)
     {
-        fputs (buffer, stdout);
-        check                       = fgets (buffer,
-                                             sizeof (buffer),
-                                             current_out_stream);
+        fputs (buffer, out());
     }
-    fclose (current_out_stream);
-    current_out_stream              = NULL;
+    fclose (temp_asm_stream);
 
+    // 7. Append trailing sections
     emit_runtime_library ();
     emit_string_data_section ();
 }

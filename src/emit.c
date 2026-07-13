@@ -146,7 +146,7 @@ void  emit_interpolated_asm (const char *raw_code)
     }
 }
 
-void  emit_cart_xml (const char *input_filename)
+void  emit_cart_xml (const char *input_filename, int  verbose)
 {
     // 1. Allocate enough memory for the filename plus ".xml" and the null terminator
     size_t  len           = strlen (input_filename);
@@ -177,7 +177,7 @@ void  emit_cart_xml (const char *input_filename)
     else
     {
         // If no extension was found (e.g., "example"), just append ".xml"
-        strcat (vbin_path, ".xml");
+        strcat (vbin_path, ".vbin");
     }
 
     // 3. Find the last dot to locate the file extension
@@ -243,12 +243,19 @@ void  emit_cart_xml (const char *input_filename)
 
     fprintf(xml, "</rom-definition>\n");
 
-    fclose(xml);
+    fclose (xml);
 
-    printf("; Successfully generated Vircon32 cart config: %s\n", xml_filename);
-    
-    // 6. Clean up allocated memory
-    free(xml_filename);
+    // Remove direct stdout printing; rely on main.c stage reporting
+    if (verbose)
+    {
+        ;
+        // Optional debug detail if desired:
+        // printf("; Generated Vircon32 cart config: %s\n", xml_filename);
+        //printf("; Successfully generated Vircon32 cart config: %s\n", xml_filename);
+    }
+
+    free (xml_filename);
+    free (vbin_path);
 }
 
 // Emits Vircon32 assembly to jump to target_label if reg is TRUTHY!
@@ -292,32 +299,77 @@ void  emit_falsy_jump (int  reg, const char *target_label)
 
 void  emit_variable_map (void)
 {
-    if (global_scope    == NULL) return;
-    
-    SymbolNode *current  = global_scope -> symbols;
-    while (current      != NULL)
-    {
-        fprintf (stdout, "%%define %s%s %d\n", 
-                 current -> is_function ? "func_" : "var_", 
-                 current -> name, 
-                 current -> location);
-        current          = current -> next;
-    }
+    if (global_scope        != NULL)
+	{
+		SymbolNode *current  = global_scope -> symbols;
+		while (current      != NULL)
+		{
+			fprintf (out(), "%%define %s%s %d\n", 
+					        current -> is_function ? "func_" : "var_", 
+				       	    current -> name, 
+					        current -> location);
+			current          = current -> next;
+		}
+	}
 }
 
 void  emit_string_data_section (void)
 {
-    if (strings_head == NULL) return;
-    
-    printf("\n; --- String Literal Allocations ---\n");
-    StringLiteralNode* current = strings_head;
-    while (current != NULL) {
-        printf("__string_%d:\n", current->id);
-        printf("  integer ");
-        for (int i = 0; current->value[i] != '\0'; i++) {
-            printf("%d, ", (int)current->value[i]);
+    if (strings_head               != NULL)
+    {
+        fprintf (out(), "\n; --- String Literal Allocations ---\n");
+        StringLiteralNode *current  = strings_head;
+        while (current             != NULL)
+        {
+            fprintf (out(), "__string_%d:\n", current -> id);
+            fprintf (out(), "    string \"%s\"\n\n", current -> value);
+            current                 = current -> next;
         }
-        printf("0\n"); 
-        current = current->next;
     }
 }
+
+void  emit_runtime_library (void)
+{
+    emit_asm("\n;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;");
+    emit_asm(";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\n");
+    emit_asm(";;\n");
+    emit_asm(";; Lua assembly support Runtime Library Subroutines\n");
+    emit_asm(";;\n");
+    emit_asm(";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;");
+    emit_asm(";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\n");
+    emit_asm("\n");
+
+    // Point our cursor to the start of the embedded Vircon32 assembly
+    const char* cursor = runtime_asm_start;
+    char line[1024];
+
+    // Read until we hit the null terminator we appended in .S
+    while (*cursor != '\0')
+    {
+        int i = 0;
+        
+        // Extract a single line up to the newline character or buffer capacity
+        while (*cursor != '\0' && *cursor != '\n' && i < (int)sizeof(line) - 2)
+        {
+            line[i++] = *cursor++;
+        }
+        
+        // Preserve the newline character if present
+        if (*cursor == '\n')
+        {
+            line[i++] = *cursor++;
+        }
+        
+        line[i] = '\0';
+        
+        // Pass the line through your special formatting function
+        emit_asm("%s", line);
+    }
+
+    emit_asm("\n;;\n");
+    emit_asm(";; End of Runtime Library\n");
+    emit_asm(";;\n");
+    emit_asm(";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;");
+    emit_asm(";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\n");
+}
+

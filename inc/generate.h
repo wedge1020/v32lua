@@ -1,12 +1,13 @@
 #ifndef __GENERATE_H
 #define __GENERATE_H
 
-extern FILE *current_out_stream;
-extern FILE *out();
 extern char  last_emitted_inst[32];
 extern char  last_emitted_dest[128];
 extern char  last_emitted_src[128];
 
+FILE *out (void);
+void  set_output_stream(FILE* stream);
+void  close_output_stream(void);
 void  trim_spaces (char *);
 int   resolve_static_path (ASTNode *, char *);
 int   check_needs_stack (ASTNode *);
