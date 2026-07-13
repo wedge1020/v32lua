@@ -35,7 +35,38 @@ lex.yy.c: lexer.l parser.tab.h
 %.o: %.S
 	$(CC) $(CFLAGS) -Wa,--noexecstack -c $< -o $@
 
-clean:
-	rm -f $(TARGET) $(OBJS) parser.tab.c parser.tab.h lex.yy.c
+# --- Monolithic Source Generation Rule ---
+monofile:
+	@rm -f ../monofile.c
+	@echo "/* ========================================================================== */" >> ../monofile.c
+	@echo "/*                   MONOLITHIC SOURCE: HEADERS & SOURCE                      */" >> ../monofile.c
+	@echo "/* ========================================================================== */" >> ../monofile.c
+	@echo "" >> ../monofile.c
+	@for file in ../inc/*.h; do \
+		if [ -f "$$file" ]; then \
+			echo "/* -------------------------------------------------------------------------- */" >> ../monofile.c; \
+			echo "/* HEADER FILE: $$file */" >> ../monofile.c; \
+			echo "/* -------------------------------------------------------------------------- */" >> ../monofile.c; \
+			cat "$$file" >> ../monofile.c; \
+			echo "" >> ../monofile.c; \
+			echo "/* -------------------------------------------------------------------------- */" >> ../monofile.c; \
+			echo "" >> ../monofile.c; \
+		fi; \
+	done
+	@for file in *.c; do \
+		if [ -f "$$file" ]; then \
+			echo "/* -------------------------------------------------------------------------- */" >> ../monofile.c; \
+			echo "/* SOURCE FILE: $$file */" >> ../monofile.c; \
+			echo "/* -------------------------------------------------------------------------- */" >> ../monofile.c; \
+			cat "$$file" >> ../monofile.c; \
+			echo "" >> ../monofile.c; \
+			echo "/* -------------------------------------------------------------------------- */" >> ../monofile.c; \
+			echo "" >> ../monofile.c; \
+		fi; \
+	done
+	@echo "Successfully generated consolidated file: ../monofile.c"
 
-.PHONY: all clean
+clean:
+	rm -f $(TARGET) $(OBJS) parser.tab.c parser.tab.h lex.yy.c ../monofile.c
+
+.PHONY: all clean monorule

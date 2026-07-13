@@ -24,3 +24,6 @@ tests: bin/v32lua
 # We explicitly depend on the compiler binary ('src/compiler') being built first!
 asmcheck: bin/v32lua
 	$(MAKE) -C testing asmcheck
+
+monofile:
+	$(MAKE) -C src monofile
