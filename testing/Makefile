@@ -31,6 +31,39 @@ asmcheck: $(ASM_OUTS)
 		fi; \
 	done
 
+# --- Monolithic Source Generation Rule ---
+monofiles:
+	@rm -f ../monofile_luatests.txt
+	@echo "-- ==========================================================================" >> ../monofile_luatests.txt
+	@echo "--              MONOLITHIC SOURCE: TESTS & PROBUCED ASSEMBLY                 " >> ../monofile_luatests.txt
+	@echo "-- ==========================================================================" >> ../monofile_luatests.txt
+	@echo "" >> ../monofile_luatests.txt
+	@for file in *.lua; do \
+		if [ -f "$$file" ]; then \
+			echo "-- --------------------------------------------------------------------------" >> ../monofile_luatests.txt; \
+			echo "-- TEST FILE: $$file" >> ../monofile_luatests.txt; \
+			echo "-- --------------------------------------------------------------------------" >> ../monofile_luatests.txt; \
+			cat "$$file" >> ../monofile_luatests.txt; \
+			echo "" >> ../monofile_luatests.txt; \
+			echo "-- --------------------------------------------------------------------------" >> ../monofile_luatests.txt; \
+			echo "" >> ../monofile_luatests.txt; \
+		fi; \
+	done
+	@echo "Successfully generated consolidated file: ../monofile_luatests.txt"
+	@echo "" >> ../monofile_assembly.txt
+	@for file in *.asm; do \
+		if [ -f "$$file" ]; then \
+			echo "-- --------------------------------------------------------------------------" >> ../monofile_assembly.txt; \
+			echo "-- PRODUCED ASSEMBLY FILE: $$file" >> ../monofile_assembly.txt; \
+			echo "-- --------------------------------------------------------------------------" >> ../monofile_assembly.txt; \
+			cat "$$file" >> ../monofile_assembly.txt; \
+			echo "" >> ../monofile_assembly.txt; \
+			echo "-- --------------------------------------------------------------------------" >> ../monofile_assembly.txt; \
+			echo "" >> ../monofile_assembly.txt; \
+		fi; \
+	done
+	@echo "Successfully generated consolidated file: ../monofile_assembly.txt"
+
 # Clean target drops all generated assembly and binary test files
 clean:
-	rm -f *.asm *.vbin *.xml *.v32
+	rm -f *.asm *.vbin *.xml *.v32 ../monofile_luatests.txt ../monofile_assembly.txt

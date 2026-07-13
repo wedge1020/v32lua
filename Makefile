@@ -25,5 +25,6 @@ tests: bin/v32lua
 asmcheck: bin/v32lua
 	$(MAKE) -C testing asmcheck
 
-monofile:
+monofiles:
 	$(MAKE) -C src monofile
+	$(MAKE) -C testing monofiles
