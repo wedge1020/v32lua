@@ -10,6 +10,7 @@
 #include "emit.h"
 #include "ast.h"
 #include "context.h"
+#include "intrinsics.h"
 #include "generate.h"
 #include "internals.h"
 #include "register.h"
