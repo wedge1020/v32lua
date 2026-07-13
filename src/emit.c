@@ -1,5 +1,43 @@
 #include "v32lua.h"
 
+void emit_asm (const char *format, ...)
+{
+    va_list args;
+    char buffer[2048];
+
+    va_start (args, format);
+    vsnprintf (buffer, sizeof(buffer), format, args);
+    va_end (args);
+
+    // Write the actual assembly to the active output stream
+    fputs (buffer, out());
+
+    // If debug tracking is running, intercept and calculate lines
+    if (g_debug_mode && temp_debug_stream != NULL && out() != stdout)
+    {
+        char *ptr = buffer;
+        while (*ptr)
+        {
+            if (*ptr == '\n')
+            {
+                // Only log lines that correspond to parsed Lua nodes (ignores boilerplate vectors)
+                if (g_current_lua_line > 0)
+                {
+                    if (strlen(g_current_label) > 0) {
+                        fprintf(temp_debug_stream, "%d,%d,%s\n", g_temp_asm_line, g_current_lua_line, g_current_label);
+                        g_current_label[0] = '\0'; // Consume the label so it only applies to this line
+                    } else {
+                        fprintf(temp_debug_stream, "%d,%d\n", g_temp_asm_line, g_current_lua_line);
+                    }
+                }
+                g_temp_asm_line++;
+            }
+            ptr++;
+        }
+    }
+}
+
+/*
 void  emit_asm (const char *format, ...)
 {
     char current_instruction[256];
@@ -107,7 +145,7 @@ void  emit_asm (const char *format, ...)
         last_emitted_dest[0] = '\0';
         last_emitted_src[0] = '\0';
     }
-}
+}*/
 
 void  emit_interpolated_asm (const char *raw_code)
 {
@@ -297,20 +335,23 @@ void  emit_falsy_jump (int  reg, const char *target_label)
     emit_asm("JT R6, %s ; If False (falsy), jump to target\n", target_label);
 }
 
-void  emit_variable_map (void)
+int  emit_variable_map (void)
 {
+    int  lines_printed       = 0;
     if (global_scope        != NULL)
-	{
-		SymbolNode *current  = global_scope -> symbols;
-		while (current      != NULL)
-		{
-			fprintf (out(), "%%define %s%s %d\n", 
-					        current -> is_function ? "func_" : "var_", 
-				       	    current -> name, 
-					        current -> location);
-			current          = current -> next;
-		}
-	}
+    {
+        SymbolNode *current  = global_scope -> symbols;
+        while (current      != NULL)
+        {
+            fprintf (out(), "%%define %s%s %d\n", 
+                            current -> is_function ? "func_" : "var_", 
+                               current -> name, 
+                            current -> location);
+            lines_printed    = lines_printed + 1;
+            current          = current -> next;
+        }
+    }
+    return (lines_printed);
 }
 
 void  emit_string_data_section (void)

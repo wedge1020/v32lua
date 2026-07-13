@@ -154,6 +154,11 @@ void  generate_asm (ASTNode *node, int  dest_reg)
 {
     if (node                    != NULL)
     {
+		// Automatically synchronize the tracker with the current AST element's source line
+		if (g_debug_mode) {
+			g_current_lua_line = node->line_number; // Assumes your parser sets node->line_number
+		}
+
         switch (node -> type)
         {
             case NODE_WHILE: {
@@ -228,6 +233,12 @@ void  generate_asm (ASTNode *node, int  dest_reg)
             case NODE_FUNCTION_DEF: {
                 const char *func_name  = node -> as.function_def.name;
                 push_function_context (func_name);
+
+				if (g_debug_mode)
+				{
+					// Register the label so emit_asm catches it on the very next line write
+					snprintf (g_current_label, sizeof (g_current_label), "func_%s", node -> string_value);
+				}
 
                 ////////////////////////////////////////////////////////////////////////
                 //
@@ -854,6 +865,122 @@ void  generate_functions (ASTNode *node)
         node                       = node -> next;
     }
 }
+
+// <----
+void generate_program (ASTNode *head)
+{
+    ASTNode *current            = NULL;
+    int      globals_need_stack = 0;
+    int      temp_reg           = -1;  
+    char     buffer[1024];
+    char    *check              = NULL;
+    int final_line_offset = 0; 
+
+    init_global_scope (); 
+
+    FILE *temp_asm_stream = tmpfile();
+    if (g_debug_mode) {
+        temp_debug_stream = tmpfile();
+        g_temp_asm_line = 1;
+        g_current_label[0] = '\0';
+    }
+
+    FILE *final_out_stream = out();
+    set_output_stream(temp_asm_stream);
+    
+    // --- (AST Traversal & Code Generation occurs here) ---
+    // ... all your emit_asm calls execute and populate both temp streams ...
+    emit_asm (";; --- Compiled Code Entry Vector ---\n");
+    emit_asm ("CALL __init_globals  ; Run top-level setups first\n");
+    emit_asm ("CALL __function_main ; Then hand control to the user\n");
+    emit_asm ("HLT                  ; Halt CPU when main finishes\n");
+
+    emit_asm ("\n;; --- Function Definitions ---\n");
+    current = head;
+    while (current != NULL)
+    {
+        if (current->type == NODE_FUNCTION_DEF) {
+            generate_asm (current, 0);
+        } else if (check_needs_stack (current)) {
+            globals_need_stack = 1;
+        }
+        current = current->next;
+    }
+
+    emit_asm ("\n;; --- Global Initialization Vector ---\n");
+    emit_asm ("__init_globals:\n");
+    if (globals_need_stack == 1) {
+        emit_asm ("PUSH BP\n");
+        emit_asm ("MOV BP, SP\n");
+    } else {
+        emit_asm ("    ;; OPTIMIZATION: frame pointer omitted (Leaf Function)\n");
+    }
+
+    // Restore output back to your final target file
+    set_output_stream(final_out_stream);
+
+    // Write Headers and meticulously calculate the exact offset
+    fprintf (out(), ";; --- System Constants ---\n"); final_line_offset++;
+    fprintf (out(), "%%define term_ypos    0\n");      final_line_offset++;
+    fprintf (out(), "%%define term_history 1\n");      final_line_offset++;
+    fprintf (out(), "%%define heap_pointer 18\n");     final_line_offset++;
+
+    fprintf (out(), "\n;; --- Global Variable RAM Map ---\n"); final_line_offset += 2;
+    
+    // Factor in the dynamic size of your variables
+    final_line_offset += emit_variable_map();
+    fprintf (out(), "\n"); final_line_offset++;
+
+    // Dump your buffered assembly code to the final file
+    rewind (temp_asm_stream);
+    while ((check = fgets (buffer, sizeof (buffer), temp_asm_stream)) != NULL) {
+        fputs (buffer, out());
+    }
+    fclose (temp_asm_stream);
+
+    // Write out trailing runtime items
+    emit_runtime_library ();
+    emit_string_data_section ();
+
+    // --- GENERATE DEBUG FILE ---
+    if (g_debug_mode && temp_debug_stream != NULL)
+    {
+        char debug_filename[1024];
+        snprintf(debug_filename, sizeof(debug_filename), "%s.debug", g_asm_filename);
+        
+        FILE *debug_file = fopen(debug_filename, "w");
+        if (debug_file != NULL)
+        {
+            rewind(temp_debug_stream);
+            char dbg_buffer[512];
+            
+            while (fgets(dbg_buffer, sizeof(dbg_buffer), temp_debug_stream) != NULL)
+            {
+                int rel_line = 0;
+                int lua_line = 0;
+                char label[256] = "";
+                
+                int items = sscanf(dbg_buffer, "%d,%d,%255s", &rel_line, &lua_line, label);
+                if (items >= 2)
+                {
+                    // Scale the relative assembly line using our calculated header offset
+                    int actual_asm_line = final_line_offset + rel_line;
+                    
+                    if (items == 3) {
+                        label[strcspn(label, "\r\n")] = 0; // Guard against loose carriage returns
+                        fprintf(debug_file, "%s,%d,%s,%d,%s\n", g_asm_filename, actual_asm_line, g_lua_filename, lua_line, label);
+                    } else {
+                        fprintf(debug_file, "%s,%d,%s,%d\n", g_asm_filename, actual_asm_line, g_lua_filename, lua_line);
+                    }
+                }
+            }
+            fclose(debug_file);
+        }
+        fclose(temp_debug_stream);
+        temp_debug_stream = NULL; 
+    }
+}
+// <----
 
 void generate_program (ASTNode *head)
 {
