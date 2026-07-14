@@ -1,5 +1,7 @@
 # v32lua: Vircon32 Lua Compiler
 
+[Spanish version / en español](README.es.md)
+
 **Target Architecture:** Vircon32 Fantasy Console (32-bit)
 
 **Implementation Language:** C (Flex/Bison + Custom Semantic Emitter)
