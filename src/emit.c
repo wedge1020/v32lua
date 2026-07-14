@@ -369,15 +369,15 @@ void  emit_cart_xml (const char *input_filename, int  verbose)
     // 5. Emit the Vircon32 XML configuration
     fprintf (xml, "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\" ?>\n");
     fprintf (xml, "<rom-definition version=\"1.0\">\n");
-    fprintf (xml, "    <rom type=\"cartridge\" title=\"%s\" version=\"%s\" />\n", cart_title, cart_version);
+    fprintf (xml, "    <rom type=\"cartridge\" title=\"%s\" version=%s />\n", cart_title, cart_version);
     fprintf (xml, "<binary path=\"%s\" />\n", vbin_path);
     
     if (textures_head != NULL) {
         fprintf(xml, "<textures>\n");
         CARTresource* curr = textures_head;
         while (curr != NULL) {
-            fprintf(xml, "    <texture id=\"%d\" path=\"%s\" /> <!-- %s -->\n", 
-                    curr->id, curr->filename, curr->var_name);
+            fprintf(xml, "    <texture path=\"%s\" /> <!-- %s -->\n", 
+                    curr->filename, curr->var_name);
             curr = curr->next;
         }
         fprintf(xml, "</textures>\n");

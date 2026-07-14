@@ -25,7 +25,7 @@ local SPR_HARPOON   = 0
 --@ ============================================================================
 
 -- Configures GPU Region 0 on the fly and renders a 32x32 sprite tile
-local function draw_sprite(tx, ty, screen_x, screen_y)
+function draw_sprite(tx, ty, screen_x, screen_y)
     ioports.gpu.texture = 0
     ioports.gpu.region  = 0
     ioports.gpu.minX    = tx
@@ -87,7 +87,7 @@ end
 
 function Player:update()
     if self.is_pumping == 1 then
-        return
+        return nil
     end
 
     -- Poll Vircon32 Gamepad 0 discrete inputs
@@ -153,7 +153,7 @@ end
 
 function Harpoon:fire(px, py, pdir)
     if self.active == 1 or self.cooldown > 0 then
-        return
+        return nil
     end
     
     self.active = 1
@@ -179,7 +179,7 @@ function Harpoon:update(enemies, enemy_count)
     end
 
     if self.active == 0 then
-        return
+        return nil
     end
 
     -- Check collision against enemies
@@ -238,7 +238,7 @@ end
 
 function Enemy:update()
     if self.alive == 0 or self.inflation > 0 then
-        return
+        return nil
     end
 
     -- Basic AI: Patrol horizontal tunnels or enter Ghost Mode to pass dirt
@@ -282,7 +282,7 @@ end
 
 function Enemy:draw()
     if self.alive == 0 then
-        return
+        return nil
     end
 
     if self.inflation > 0 then
