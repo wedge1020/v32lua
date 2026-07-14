@@ -22,7 +22,7 @@ void  set_output_stream (FILE* stream)
 FILE *out (void)
 {
     if (active_out_stream == NULL)
-	{
+    {
         // Safe fallback: allows debug runs without -o to still print to the console
         return (stdout);
     }
@@ -33,8 +33,8 @@ FILE *out (void)
 void  close_output_stream (void)
 {
     if ((active_out_stream != NULL) &&
-		(active_out_stream != stdout))
-   	{
+        (active_out_stream != stdout))
+       {
         fclose (active_out_stream);
         active_out_stream   = NULL;
     }
@@ -163,10 +163,10 @@ void  generate_asm (ASTNode *node, int  dest_reg)
 {
     if (node                    != NULL)
     {
-		// Automatically synchronize the tracker with the current AST element's source line
-		if (g_debug_mode) {
-			g_current_lua_line = node->line_number; // Assumes your parser sets node->line_number
-		}
+        // Automatically synchronize the tracker with the current AST element's source line
+        if (g_debug_mode) {
+            g_current_lua_line = node->line_number; // Assumes your parser sets node->line_number
+        }
 
         switch (node -> type)
         {
@@ -243,11 +243,11 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 const char *func_name  = node -> as.function_def.name;
                 push_function_context (func_name);
 
-				if (g_debug_mode)
-				{
-					// Register the label so emit_asm catches it on the very next line write
-					snprintf (g_current_label, sizeof (g_current_label), "func_%s", func_name);
-				}
+                if (g_debug_mode)
+                {
+                    // Register the label so emit_asm catches it on the very next line write
+                    snprintf (g_current_label, sizeof (g_current_label), "func_%s", func_name);
+                }
 
                 ////////////////////////////////////////////////////////////////////////
                 //
@@ -323,31 +323,31 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     // Move the returned length into the destination register
                     emit_asm ("MOV R%d, R0\n", dest_reg);
 
-				}
-				else if (node->as.unary.operator == OP_NOT) {
-					int label_id = get_next_label();
-					const char *ctx = get_current_function_name(); // Fetch context
-					char to_true_label[128], end_label[128];
-					snprintf(to_true_label, sizeof(to_true_label), "__%s_not_true_%d", ctx, label_id); // Prefix added
-					snprintf(end_label, sizeof(end_label), "__%s_not_end_%d", ctx, label_id);         // Prefix added
+                }
+                else if (node->as.unary.operator == OP_NOT) {
+                    int label_id = get_next_label();
+                    const char *ctx = get_current_function_name(); // Fetch context
+                    char to_true_label[128], end_label[128];
+                    snprintf(to_true_label, sizeof(to_true_label), "__%s_not_true_%d", ctx, label_id); // Prefix added
+                    snprintf(end_label, sizeof(end_label), "__%s_not_end_%d", ctx, label_id);         // Prefix added
 
-					// 1. Check if Nil or False using scratch register R6
-					emit_asm("MOV R6, R%d\n", dest_reg);
-					emit_asm("IEQ R6, 0xFFC00000 ; Is Nil?\n");
-					emit_asm("JT  R6, %s\n", to_true_label);
-					emit_asm("MOV R6, R%d\n", dest_reg);
-					emit_asm("IEQ R6, 0xFFC00001 ; Is False?\n");
-					emit_asm("JT  R6, %s\n", to_true_label);
+                    // 1. Check if Nil or False using scratch register R6
+                    emit_asm("MOV R6, R%d\n", dest_reg);
+                    emit_asm("IEQ R6, 0xFFC00000 ; Is Nil?\n");
+                    emit_asm("JT  R6, %s\n", to_true_label);
+                    emit_asm("MOV R6, R%d\n", dest_reg);
+                    emit_asm("IEQ R6, 0xFFC00001 ; Is False?\n");
+                    emit_asm("JT  R6, %s\n", to_true_label);
 
-					// 2. If truthy, return VAL_FALSE (0xFFC00001)
-					emit_asm("MOV R%d, 0xFFC00001 ; Return False\n", dest_reg);
-					emit_asm("JMP %s\n", end_label);
+                    // 2. If truthy, return VAL_FALSE (0xFFC00001)
+                    emit_asm("MOV R%d, 0xFFC00001 ; Return False\n", dest_reg);
+                    emit_asm("JMP %s\n", end_label);
 
-					// 3. If falsy, return VAL_TRUE (0xFFC00002)
-					emit_asm("%s:\n", to_true_label);
-					emit_asm("MOV R%d, 0xFFC00002 ; Return True\n", dest_reg);
-					emit_asm("%s:\n", end_label);
-				}
+                    // 3. If falsy, return VAL_TRUE (0xFFC00002)
+                    emit_asm("%s:\n", to_true_label);
+                    emit_asm("MOV R%d, 0xFFC00002 ; Return True\n", dest_reg);
+                    emit_asm("%s:\n", end_label);
+                }
                 else if (node->as.unary.operator == OP_UNM) {
                     emit_asm ("PUSH R%d\n", dest_reg);
                     emit_asm ("CALL __builtin_unm\n");
@@ -519,38 +519,38 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 break;
             }
 
-			case NODE_AND: {
-				int label_id = get_next_label();
-				const char *ctx = get_current_function_name(); // Fetch context
-				char end_label[128];
-				snprintf(end_label, sizeof(end_label), "__%s_short_and_%d", ctx, label_id); // Prefix added
+            case NODE_AND: {
+                int label_id = get_next_label();
+                const char *ctx = get_current_function_name(); // Fetch context
+                char end_label[128];
+                snprintf(end_label, sizeof(end_label), "__%s_short_and_%d", ctx, label_id); // Prefix added
 
-				// 1. Evaluate Left Operand into dest_reg
-				generate_asm(node->as.binary.left, dest_reg);
-				
-				emit_falsy_jump(dest_reg, end_label);
-				
-				// 2. Otherwise, evaluate Right Operand into dest_reg
-				generate_asm(node->as.binary.right, dest_reg);    emit_asm("%s:\n", end_label);
-				break;
-			}
+                // 1. Evaluate Left Operand into dest_reg
+                generate_asm(node->as.binary.left, dest_reg);
+                
+                emit_falsy_jump(dest_reg, end_label);
+                
+                // 2. Otherwise, evaluate Right Operand into dest_reg
+                generate_asm(node->as.binary.right, dest_reg);    emit_asm("%s:\n", end_label);
+                break;
+            }
 
-			case NODE_OR: {
-				int label_id = get_next_label();
-				const char *ctx = get_current_function_name(); // Fetch context
-				char end_label[128];
-				snprintf(end_label, sizeof(end_label), "__%s_short_or_%d", ctx, label_id); // Prefix added
+            case NODE_OR: {
+                int label_id = get_next_label();
+                const char *ctx = get_current_function_name(); // Fetch context
+                char end_label[128];
+                snprintf(end_label, sizeof(end_label), "__%s_short_or_%d", ctx, label_id); // Prefix added
 
-				// 1. Evaluate Left Operand into dest_reg
-				generate_asm(node->as.binary.left, dest_reg);
-				
-				emit_truthy_jump(dest_reg, end_label);
-				
-				// 2. Otherwise, evaluate Right Operand into dest_reg
-				generate_asm(node->as.binary.right, dest_reg);
-				emit_asm("%s:\n", end_label);
-				break;
-			}
+                // 1. Evaluate Left Operand into dest_reg
+                generate_asm(node->as.binary.left, dest_reg);
+                
+                emit_truthy_jump(dest_reg, end_label);
+                
+                // 2. Otherwise, evaluate Right Operand into dest_reg
+                generate_asm(node->as.binary.right, dest_reg);
+                emit_asm("%s:\n", end_label);
+                break;
+            }
 
             case NODE_RELATIONAL: {
                 generate_asm (node -> as.binary.left, dest_reg);
@@ -794,69 +794,53 @@ void  generate_asm (ASTNode *node, int  dest_reg)
     }
 }
 
-void  generate_global_setup (ASTNode *node)
+void generate_global_setup (ASTNode *node, int globals_need_stack)
 {
-    if (node              != NULL)
-    {
-        ////////////////////////////////////////////////////////////////////////////
-        //
-        // Declare and initialize variables
-        //
-        //ASTNode    *current      = node;
-        //const char *func_name    = NULL;
+    // 1. Emit the section header and entry label
+    emit_asm ("\n; --- Global Variable & Runtime Initialization ---\n");
+    emit_asm ("__init_globals:\n");
 
-        ////////////////////////////////////////////////////////////////////////////
-        //
-        // Pre-Pass: Register all functions globally ---
-        //
-        /*
-        while (current          != NULL)
-        {
-            if (current -> type == NODE_FUNCTION_DEF)
-            {
-                ////////////////////////////////////////////////////////////////////
-                //
-                // Extract the function name:
-                //
-                func_name        = current -> as.function_def.name;
-
-                ////////////////////////////////////////////////////////////////////
-                //
-                // Register it or update the existing symbol immediately
-                //
-                mark_global_as_function (func_name);
-            }
-            current              = current->next;
-        }*/
-
-        /*
-        if (node -> type  == NODE_FUNCTION_DEF)
-        {
-            char  var_access[256];
-            int  temp_reg  = allocate_register();
-
-            ////////////////////////////////////////////////////////////////////////////
-            //
-            // Register the function name in the global scope explicitly
-            //
-            mark_global_as_function (node -> as.function_def.name);
-
-            emit_asm ("    ;; Load address of the mangled function\n");
-            emit_asm ("MOV R%d, __function_%s\n", temp_reg,
-                                                  node -> as.function_def.name);
-            
-            ////////////////////////////////////////////////////////////////////////////
-            //
-            // Dynamically get its global access string
-            //
-            get_variable_access_string (node -> as.function_def.name, var_access);
-            emit_asm ("MOV %s, R%d\n", var_access, temp_reg);
-
-            unlock_register (temp_reg);
-        }*/
-        
-        generate_global_setup (node -> next);
+    if (globals_need_stack == 1) {
+        emit_asm ("PUSH BP\n");
+        emit_asm ("MOV BP, SP\n");
+    } else {
+        emit_asm ("    ;; OPTIMIZATION: frame pointer omitted (Leaf Function)\n");
     }
+
+    if (node != NULL)
+    {
+        ASTNode *current = node;
+
+        while (current != NULL)
+        {
+            // 2. Filter out function definitions!
+            // We only want top-level statements, assignments, and hints here.
+            if (current->type != NODE_FUNCTION_DEF)
+            {
+                // Allocate a temporary register from your inventory
+                int temp_reg = allocate_register ();
+
+                // Compile the top-level instruction (e.g., binding function pointers,
+                // initializing variables, setting up cart hint resource IDs)
+                generate_asm (current, temp_reg);
+
+                // Return the register to the pool
+                unlock_register (temp_reg);
+            }
+
+            // Move to the next statement in the AST chain
+            current = current->next;
+        }
+    }
+
+    // 3. CRITICAL: Clean up the stack frame if one was created!
+    if (globals_need_stack == 1) {
+        emit_asm ("MOV SP, BP\n");
+        emit_asm ("POP BP\n");
+    }
+
+    // 4. Emit RET to prevent falling through into __malloc or the runtime library
+    emit_asm ("RET\n");
 }
 
 void  generate_functions (ASTNode *node)
@@ -874,12 +858,10 @@ void  generate_functions (ASTNode *node)
     }
 }
 
-// <----
 void generate_program (ASTNode *head)
 {
     ASTNode *current            = NULL;
     int      globals_need_stack = 0;
-    //int      temp_reg           = -1;  
     char     buffer[1024];
     char    *check              = NULL;
     int final_line_offset = 0; 
@@ -915,6 +897,7 @@ void generate_program (ASTNode *head)
         current = current->next;
     }
 
+    /*
     emit_asm ("\n;; --- Global Initialization Vector ---\n");
     emit_asm ("__init_globals:\n");
     if (globals_need_stack == 1) {
@@ -923,6 +906,8 @@ void generate_program (ASTNode *head)
     } else {
         emit_asm ("    ;; OPTIMIZATION: frame pointer omitted (Leaf Function)\n");
     }
+    */
+    generate_global_setup (head, globals_need_stack);
 
     // Restore output back to your final target file
     set_output_stream(final_out_stream);
@@ -994,136 +979,4 @@ void generate_program (ASTNode *head)
         fclose(temp_debug_stream);
         temp_debug_stream = NULL; 
     }
-    // --- GENERATE DEBUG FILE ---
-	/*
-    if (g_debug_mode && temp_debug_stream != NULL)
-    {
-        char debug_filename[1024];
-        snprintf(debug_filename, sizeof(debug_filename), "%s.debug", g_asm_filename);
-        
-        FILE *debug_file = fopen(debug_filename, "w");
-        if (debug_file != NULL)
-        {
-            rewind(temp_debug_stream);
-            char dbg_buffer[512];
-            
-            while (fgets(dbg_buffer, sizeof(dbg_buffer), temp_debug_stream) != NULL)
-            {
-                int rel_line = 0;
-                int lua_line = 0;
-                char label[256] = "";
-                
-                int items = sscanf(dbg_buffer, "%d,%d,%255s", &rel_line, &lua_line, label);
-                if (items >= 2)
-                {
-                    // Scale the relative assembly line using our calculated header offset
-                    int actual_asm_line = final_line_offset + rel_line;
-                    
-                    if (items == 3) {
-                        label[strcspn(label, "\r\n")] = 0; // Guard against loose carriage returns
-                        fprintf(debug_file, "%s,%d,%s,%d,%s\n", g_asm_filename, actual_asm_line, g_lua_filename, lua_line, label);
-                    } else {
-                        fprintf(debug_file, "%s,%d,%s,%d\n", g_asm_filename, actual_asm_line, g_lua_filename, lua_line);
-                    }
-                }
-            }
-            fclose(debug_file);
-        }
-        fclose(temp_debug_stream);
-        temp_debug_stream = NULL; 
-    }*/
 }
-// <----
-/*
-void generate_program (ASTNode *head)
-{
-    ASTNode *current            = NULL;
-    int      globals_need_stack = 0;
-    int      temp_reg           = -1;  
-    char     buffer[1024];
-    char    *check              = NULL;
-
-    init_global_scope (); 
-
-    // 1. Open temp file for the assembly code instructions
-    FILE *temp_asm_stream = tmpfile();
-    if (temp_asm_stream == NULL)
-    {
-        fprintf (stderr, "Compiler Error: Failed to create temporary file.\n");
-        exit (1);
-    }
-
-    // 2. Remember the actual destination stream (e.g., the .vbin/.asm file or stdout)
-    FILE *final_out_stream = out();
-
-    // 3. REDIRECT OUTPUT TO TEMP FILE FOR CODE GENERATION
-    set_output_stream(temp_asm_stream);
-    
-    emit_asm (";; --- Compiled Code Entry Vector ---\n");
-    emit_asm ("CALL __init_globals  ; Run top-level setups first\n");
-    emit_asm ("CALL __function_main ; Then hand control to the user\n");
-    emit_asm ("HLT                  ; Halt CPU when main finishes\n");
-
-    emit_asm ("\n;; --- Function Definitions ---\n");
-    current = head;
-    while (current != NULL)
-    {
-        if (current->type == NODE_FUNCTION_DEF) {
-            generate_asm (current, 0);
-        } else if (check_needs_stack (current)) {
-            globals_need_stack = 1;
-        }
-        current = current->next;
-    }
-
-    emit_asm ("\n;; --- Global Initialization Vector ---\n");
-    emit_asm ("__init_globals:\n");
-    if (globals_need_stack == 1) {
-        emit_asm ("PUSH BP\n");
-        emit_asm ("MOV BP, SP\n");
-    } else {
-        emit_asm ("    ;; OPTIMIZATION: frame pointer omitted (Leaf Function)\n");
-    }
-
-    generate_global_setup (head);
-
-    current = head;
-    while (current != NULL)
-    {
-        if (current->type != NODE_FUNCTION_DEF) {
-            temp_reg = allocate_register ();
-            generate_asm (current, temp_reg); // <-- var_ symbols discovered here!
-            unlock_register (temp_reg);
-        }
-        current = current->next;
-    }
-
-    if (globals_need_stack) {
-        emit_asm ("MOV SP, BP\n");
-        emit_asm ("POP BP\n");
-    }
-    emit_asm ("RET\n\n");
-
-    // 4. CODE GEN COMPLETE. SWITCH BACK TO FINAL DESTINATION STREAM
-    set_output_stream(final_out_stream);
-
-    // 5. Emit headers and the NOW-COMPLETE variable map!
-    fprintf (out(), ";; --- System Constants ---\n");
-    fprintf (out(), "%%define heap_pointer 0\n");
-
-    fprintf (out(), "\n;; --- Global Variable RAM Map ---\n");
-    emit_variable_map (); // Both func_ AND var_ will now print correctly!
-    fprintf (out(), "\n");
-
-    // 6. Dump the buffered assembly instructions underneath the map
-    rewind (temp_asm_stream);
-    while ((check = fgets (buffer, sizeof (buffer), temp_asm_stream)) != NULL)
-    {
-        fputs (buffer, out());
-    }
-    fclose (temp_asm_stream);
-
-    // 7. Append trailing sections
-    emit_runtime_library ();
-    emit_string_data_section ();
-}*/
