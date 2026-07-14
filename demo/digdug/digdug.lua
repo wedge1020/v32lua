@@ -1,4 +1,4 @@
---#title "Dig Dug - v32lua Tech Demo"
+--#title "Dig Dug"
 --#version "1.0"
 --#texture tileset "digdug_sprites.png"
 

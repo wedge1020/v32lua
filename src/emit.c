@@ -315,6 +315,7 @@ void  emit_cart_xml (const char *input_filename, int  verbose)
     size_t  len           = strlen (input_filename);
     char   *xml_filename  = (char *) malloc (len + 5); 
     char   *vbin_path     = (char *) malloc (len + 6); 
+	char   *resource      = NULL;
     char   *last_dot      = NULL;
 
     if (xml_filename     == NULL)
@@ -376,9 +377,28 @@ void  emit_cart_xml (const char *input_filename, int  verbose)
         fprintf(xml, "<textures>\n");
         CARTresource* curr = textures_head;
         while (curr != NULL) {
+
+			len           = strlen (curr -> filename);
+			resource      = (char *) malloc (sizeof (char) * (len + 6));
+			last_dot      = NULL;
+
+			strcpy (resource,    curr -> filename);
+			last_dot              = strrchr (resource, '.');
+			if (last_dot         != NULL)
+			{
+				// Overwrite from the dot onward: "example.lua" -> "example.xml"
+				strcpy (last_dot, ".vtex");
+			}
+			else
+			{
+				// If no extension was found (e.g., "example"), just append ".xml"
+				strcat (resource, ".vtex");
+			}
             fprintf(xml, "    <texture path=\"%s\" /> <!-- %s -->\n", 
-                    curr->filename, curr->var_name);
+                    resource, curr -> var_name);
             curr = curr->next;
+			free (resource);
+			resource      = NULL;
         }
         fprintf(xml, "</textures>\n");
     }
