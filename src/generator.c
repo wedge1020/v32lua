@@ -951,7 +951,54 @@ void generate_program (ASTNode *head)
     emit_runtime_library ();
     emit_string_data_section ();
 
+// --- GENERATE DEBUG FILE ---
+    if (g_debug_mode && temp_debug_stream != NULL)
+    {
+        char debug_filename[1024];
+        snprintf(debug_filename, sizeof(debug_filename), "%s.debug", g_asm_filename);
+        
+        FILE *debug_file = fopen(debug_filename, "w");
+        if (debug_file != NULL)
+        {
+            rewind(temp_debug_stream);
+            char dbg_buffer[512];
+            
+            // --- ADD TRACKER HERE ---
+            int last_seen_lua_line = -1; 
+            
+            while (fgets(dbg_buffer, sizeof(dbg_buffer), temp_debug_stream) != NULL)
+            {
+                int rel_line = 0;
+                int lua_line = 0;
+                char label[256] = "";
+                
+                int items = sscanf(dbg_buffer, "%d,%d,%255s", &rel_line, &lua_line, label);
+                if (items >= 2)
+                {
+                    // --- ONLY PROCESS IF THE LUA LINE HAS CHANGED ---
+                    if (lua_line != last_seen_lua_line)
+                    {
+                        last_seen_lua_line = lua_line; // Update the tracker
+                        
+                        // Scale the relative assembly line using our calculated header offset
+                        int actual_asm_line = final_line_offset + rel_line;
+                        
+                        if (items == 3) {
+                            label[strcspn(label, "\r\n")] = 0; // Guard against loose carriage returns
+                            fprintf(debug_file, "%s,%d,%s,%d,%s\n", g_asm_filename, actual_asm_line, g_lua_filename, lua_line, label);
+                        } else {
+                            fprintf(debug_file, "%s,%d,%s,%d\n", g_asm_filename, actual_asm_line, g_lua_filename, lua_line);
+                        }
+                    }
+                }
+            }
+            fclose(debug_file);
+        }
+        fclose(temp_debug_stream);
+        temp_debug_stream = NULL; 
+    }
     // --- GENERATE DEBUG FILE ---
+	/*
     if (g_debug_mode && temp_debug_stream != NULL)
     {
         char debug_filename[1024];
@@ -987,7 +1034,7 @@ void generate_program (ASTNode *head)
         }
         fclose(temp_debug_stream);
         temp_debug_stream = NULL; 
-    }
+    }*/
 }
 // <----
 /*

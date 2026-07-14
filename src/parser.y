@@ -41,7 +41,7 @@ char *mangle_method_name (const char *table_name, const char *method_name);
 
 %type <ast_node> statement statement_list stat_list expr function_def return_stmt
 %type <ast_node> table_constructor function_call else_branch prefix_expr
-%type <ast_node> last_statement
+%type <ast_node> last_statement func_start while_start if_start
 
 /* Operator Precedence Rules (PEMDAS + Logic Core) */
 %left TOKEN_OR
@@ -135,6 +135,19 @@ argument_list:
     }
     ;
 
+/* --- Helper Rules to Capture Opening Line Numbers --- */
+func_start:
+    TOKEN_FUNCTION { $$ = make_node(NODE_FUNCTION_DEF); }
+    ;
+
+while_start:
+    TOKEN_WHILE    { $$ = make_node(NODE_WHILE); }
+    ;
+
+if_start:
+    TOKEN_IF       { $$ = make_node(NODE_IF); }
+    ;
+
 statement:
       function_call              { $$ = $1; }
     | var_list '=' expr_list {
@@ -159,13 +172,13 @@ statement:
         ASTNode *string_key  = make_node_string ($3);
         $$                   = make_node_table_set ($1, string_key, $5);
     }
-    | TOKEN_WHILE expr TOKEN_DO statement_list TOKEN_END {
-        $$ = make_node(NODE_WHILE);
+    | while_start expr TOKEN_DO statement_list TOKEN_END {
+        $$ = $1;
         $$->as.while_loop.condition = $2;
         $$->as.while_loop.body = $4;
     }
-    | TOKEN_IF expr TOKEN_THEN statement_list else_branch TOKEN_END { 
-            $$                          = make_node (NODE_IF);
+    | if_start expr TOKEN_THEN statement_list else_branch TOKEN_END { 
+            $$                          = $1;
             $$ -> as.if_stmt.condition  = $2;
             $$ -> as.if_stmt.if_body    = $4;
             $$ -> as.if_stmt.else_body  = $5;
@@ -177,8 +190,8 @@ statement:
         $$ = NULL; 
     }
     | function_def               { $$ = $1; }
-    | TOKEN_FUNCTION TOKEN_IDENTIFIER ':' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
-        $$ = make_node(NODE_FUNCTION_DEF);
+    | func_start TOKEN_IDENTIFIER ':' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
+        $$ = $1;
         
         // 1. Mangle the name (e.g., "Player_move")
         $$->as.function_def.name = mangle_method_name($2, $4); 
@@ -257,9 +270,9 @@ expr_list:
 
 function_def:
     /* Standard Function: function my_func() ... end */
-    TOKEN_FUNCTION TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
-        // 1. Build the structural function definition
-        ASTNode* func_def = make_node(NODE_FUNCTION_DEF);
+    func_start TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
+        // 1. Build the structural function definition using pre-allocated node
+        ASTNode* func_def = $1;
         func_def->as.function_def.name = strdup($2);
         func_def->as.function_def.params = $4;
         func_def->as.function_def.body = $6;
@@ -278,13 +291,13 @@ function_def:
         $$ = func_def;
     }
     | /* Table Function Desugaring: function my_table.my_func() ... end */
-    TOKEN_FUNCTION TOKEN_IDENTIFIER '.' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
+    func_start TOKEN_IDENTIFIER '.' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
         // 1. Create a unique mangled label for assembly execution flow
         char mangled_name[256];
         snprintf(mangled_name, sizeof(mangled_name), "%s_%s", $2, $4);
 
-        // 2. Build the structural function definition body
-        ASTNode* func_def = make_node(NODE_FUNCTION_DEF);
+        // 2. Build the structural function definition body using pre-allocated node
+        ASTNode* func_def = $1;
         func_def->as.function_def.name = strdup(mangled_name);
         func_def->as.function_def.body = $8;
 
