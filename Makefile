@@ -10,6 +10,7 @@ all:
 clean:
 	$(MAKE) -C src clean
 	$(MAKE) -C testing clean
+	$(MAKE) -C demo clean
 
 # Pass the install target down to the src directory
 install:
@@ -24,6 +25,9 @@ tests: bin/v32lua
 # We explicitly depend on the compiler binary ('src/compiler') being built first!
 asmcheck: bin/v32lua
 	$(MAKE) -C testing asmcheck
+
+demos: bin/v32lua
+	$(MAKE) -C demo
 
 monofiles:
 	$(MAKE) -C src monofile
