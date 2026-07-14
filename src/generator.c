@@ -800,13 +800,6 @@ void generate_global_setup (ASTNode *node, int globals_need_stack)
     emit_asm ("\n; --- Global Variable & Runtime Initialization ---\n");
     emit_asm ("__init_globals:\n");
 
-    if (globals_need_stack == 1) {
-        emit_asm ("PUSH BP\n");
-        emit_asm ("MOV BP, SP\n");
-    } else {
-        emit_asm ("    ;; OPTIMIZATION: frame pointer omitted (Leaf Function)\n");
-    }
-
     if (node != NULL)
     {
         ASTNode *current = node;
@@ -815,7 +808,7 @@ void generate_global_setup (ASTNode *node, int globals_need_stack)
         {
             // 2. Filter out function definitions!
             // We only want top-level statements, assignments, and hints here.
-            if (current->type != NODE_FUNCTION_DEF)
+            if (current -> type != NODE_FUNCTION_DEF)
             {
                 // Allocate a temporary register from your inventory
                 int temp_reg = allocate_register ();
@@ -829,14 +822,8 @@ void generate_global_setup (ASTNode *node, int globals_need_stack)
             }
 
             // Move to the next statement in the AST chain
-            current = current->next;
+            current = current -> next;
         }
-    }
-
-    // 3. CRITICAL: Clean up the stack frame if one was created!
-    if (globals_need_stack == 1) {
-        emit_asm ("MOV SP, BP\n");
-        emit_asm ("POP BP\n");
     }
 
     // 4. Emit RET to prevent falling through into __malloc or the runtime library
@@ -897,26 +884,16 @@ void generate_program (ASTNode *head)
         current = current->next;
     }
 
-    /*
-    emit_asm ("\n;; --- Global Initialization Vector ---\n");
-    emit_asm ("__init_globals:\n");
-    if (globals_need_stack == 1) {
-        emit_asm ("PUSH BP\n");
-        emit_asm ("MOV BP, SP\n");
-    } else {
-        emit_asm ("    ;; OPTIMIZATION: frame pointer omitted (Leaf Function)\n");
-    }
-    */
     generate_global_setup (head, globals_need_stack);
 
     // Restore output back to your final target file
     set_output_stream(final_out_stream);
 
     // Write Headers and meticulously calculate the exact offset
-    fprintf (out(), ";; --- System Constants ---\n"); final_line_offset++;
-    fprintf (out(), "%%define heap_pointer 0\n");     final_line_offset++;
+    //fprintf (out(), ";; --- System Constants ---\n"); final_line_offset++;
+    //fprintf (out(), "%%define heap_pointer 0\n");     final_line_offset++;
 
-    fprintf (out(), "\n;; --- Global Variable RAM Map ---\n"); final_line_offset += 2;
+    fprintf (out(), ";; --- Global Variable RAM Map ---\n"); final_line_offset += 2;
     
     // Factor in the dynamic size of your variables
     final_line_offset += emit_variable_map();

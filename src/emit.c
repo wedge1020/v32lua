@@ -123,155 +123,6 @@ void emit_asm(const char *format, ...) {
     }
 }
 
-/*
-void emit_asm (const char *format, ...)
-{
-    va_list args;
-    char buffer[2048];
-
-    va_start (args, format);
-    vsnprintf (buffer, sizeof(buffer), format, args);
-    va_end (args);
-
-    // Write the actual assembly to the active output stream
-    fputs (buffer, out());
-
-    // If debug tracking is running, intercept and calculate lines
-    if (g_debug_mode && temp_debug_stream != NULL && out() != stdout)
-    {
-        char *ptr = buffer;
-        while (*ptr)
-        {
-            if (*ptr == '\n')
-            {
-                // Only log lines that correspond to parsed Lua nodes (ignores boilerplate vectors)
-                if (g_current_lua_line > 0)
-                {
-                    if (strlen(g_current_label) > 0) {
-                        fprintf(temp_debug_stream, "%d,%d,%s\n", g_temp_asm_line, g_current_lua_line, g_current_label);
-                        g_current_label[0] = '\0'; // Consume the label so it only applies to this line
-                    } else {
-                        fprintf(temp_debug_stream, "%d,%d\n", g_temp_asm_line, g_current_lua_line);
-                    }
-                }
-                g_temp_asm_line++;
-            }
-            ptr++;
-        }
-    }
-}
-*/
-
-/*
-void  emit_asm (const char *format, ...)
-{
-    char current_instruction[256];
-    va_list args;
-    
-    va_start(args, format);
-    vsprintf(current_instruction, format, args);
-    va_end(args);
-
-    char *p = current_instruction;
-    while (*p == ' ' || *p == '\t') p++;
-
-    // 1. Find where the first colon and semicolon are located
-    char *colon_pos = strchr(p, ':');
-    char *semi_pos  = strchr(p, ';');
-    
-    // 2. It is only a label if a colon exists AND (there is no comment OR the colon is before the comment)
-    int is_label = (colon_pos != NULL && (semi_pos == NULL || colon_pos < semi_pos));
-
-    // 3. Use our new is_label check instead of strchr
-    if (*p == '\0' || *p == '\r' || *p == '\n' || *p == ';' || is_label) {
-        fprintf(out(), "%s", current_instruction);
-        if (is_label || *p == '\0' || *p == '\r' || *p == '\n') {
-            last_emitted_inst[0] = '\0';
-            last_emitted_dest[0] = '\0';
-            last_emitted_src[0] = '\0';
-        }
-        return;
-    }
-    
-    char inst[32] = {0};
-    char operands[256] = {0};
-    char comment[256] = {0};
-
-    int inst_len = 0;
-    while (*p && *p != ' ' && *p != '\t' && *p != '\r' && *p != '\n' && *p != ';') {
-        if (inst_len < 31) inst[inst_len++] = *p;
-        p++;
-    }
-    inst[inst_len] = '\0';
-
-    while (*p == ' ' || *p == '\t') p++;
-
-    int op_len = 0;
-    while (*p && *p != ';' && *p != '\r' && *p != '\n') {
-        if (op_len < 255) operands[op_len++] = *p;
-        p++;
-    }
-    operands[op_len] = '\0';
-    trim_spaces(operands);
-
-    if (*p == ';') {
-        p++;
-        while (*p == ' ' || *p == '\t') p++; 
-        int c_len = 0;
-        while (*p && *p != '\r' && *p != '\n') {
-            if (c_len < 255) comment[c_len++] = *p;
-            p++;
-        }
-        comment[c_len] = '\0';
-        trim_spaces(comment);
-    }
-
-    if (strcmp(inst, "MOV") == 0) {
-        char dest[128] = {0}, src[128] = {0};
-        if (sscanf(operands, "%[^,], %[^\n]", dest, src) == 2) {
-            trim_spaces(dest);
-            trim_spaces(src);
-
-            if (strcmp(dest, src) == 0) {
-                fprintf(out(), "    ;; Peephole optimized out: %s %s\n", inst, operands);
-                return;
-            }
-
-            if (strcmp(last_emitted_inst, "MOV") == 0) {
-                if (strcmp(dest, last_emitted_src) == 0 && strcmp(src, last_emitted_dest) == 0) {
-                    fprintf(out(), "    ;; Peephole optimized out: %s %s\n", inst, operands);
-                    return;
-                }
-            }
-        }
-    }
-
-    if (strlen(comment) > 0) {
-        if (strlen(operands) > 0) fprintf(out(), "    %-5s %-30s ; %s\n", inst, operands, comment);
-        else fprintf(out(), "    %-5s %-30s ; %s\n", inst, "", comment);
-    } else {
-        if (strlen(operands) > 0) fprintf(out(), "    %-5s %s\n", inst, operands);
-        else fprintf(out(), "    %-5s\n", inst);
-    }
-
-    strcpy(last_emitted_inst, inst);
-    if (strcmp(inst, "MOV") == 0) {
-        char dest[128] = {0}, src[128] = {0};
-        if (sscanf(operands, "%[^,], %[^\n]", dest, src) == 2) {
-            trim_spaces(dest);
-            trim_spaces(src);
-            strcpy(last_emitted_dest, dest);
-            strcpy(last_emitted_src, src);
-        } else {
-            last_emitted_dest[0] = '\0';
-            last_emitted_src[0] = '\0';
-        }
-    } else {
-        last_emitted_dest[0] = '\0';
-        last_emitted_src[0] = '\0';
-    }
-}*/
-
 void  emit_interpolated_asm (const char *raw_code)
 {
     char buffer[2048] = {0}; // Temporary buffer for the interpolated string
@@ -315,7 +166,7 @@ void  emit_cart_xml (const char *input_filename, int  verbose)
     size_t  len           = strlen (input_filename);
     char   *xml_filename  = (char *) malloc (len + 5); 
     char   *vbin_path     = (char *) malloc (len + 6); 
-	char   *resource      = NULL;
+    char   *resource      = NULL;
     char   *last_dot      = NULL;
 
     if (xml_filename     == NULL)
@@ -378,27 +229,27 @@ void  emit_cart_xml (const char *input_filename, int  verbose)
         CARTresource* curr = textures_head;
         while (curr != NULL) {
 
-			len           = strlen (curr -> filename);
-			resource      = (char *) malloc (sizeof (char) * (len + 6));
-			last_dot      = NULL;
+            len           = strlen (curr -> filename);
+            resource      = (char *) malloc (sizeof (char) * (len + 6));
+            last_dot      = NULL;
 
-			strcpy (resource,    curr -> filename);
-			last_dot              = strrchr (resource, '.');
-			if (last_dot         != NULL)
-			{
-				// Overwrite from the dot onward: "example.lua" -> "example.xml"
-				strcpy (last_dot, ".vtex");
-			}
-			else
-			{
-				// If no extension was found (e.g., "example"), just append ".xml"
-				strcat (resource, ".vtex");
-			}
+            strcpy (resource,    curr -> filename);
+            last_dot              = strrchr (resource, '.');
+            if (last_dot         != NULL)
+            {
+                // Overwrite from the dot onward: "example.lua" -> "example.xml"
+                strcpy (last_dot, ".vtex");
+            }
+            else
+            {
+                // If no extension was found (e.g., "example"), just append ".xml"
+                strcat (resource, ".vtex");
+            }
             fprintf(xml, "    <texture path=\"%s\" /> <!-- %s -->\n", 
                     resource, curr -> var_name);
             curr = curr->next;
-			free (resource);
-			resource      = NULL;
+            free (resource);
+            resource      = NULL;
         }
         fprintf(xml, "</textures>\n");
     }
@@ -484,6 +335,7 @@ void  emit_falsy_jump (int  reg, const char *target_label)
 int  emit_variable_map (void)
 {
     int  lines_printed       = 0;
+    int  location            = -1;
     if (global_scope        != NULL)
     {
         SymbolNode *current  = global_scope -> symbols;
@@ -491,11 +343,17 @@ int  emit_variable_map (void)
         {
             fprintf (out(), "%%define %s%s %d\n", 
                             current -> is_function ? "func_" : "var_", 
-                               current -> name, 
+                            current -> name, 
                             current -> location);
             lines_printed    = lines_printed + 1;
+            if (location    <  current -> location)
+            {
+                location         = current -> location;
+            }
             current          = current -> next;
         }
+        location             = location + 1;
+        fprintf (out(), "%%define heap_pointer %d\n", location);
     }
     return (lines_printed);
 }

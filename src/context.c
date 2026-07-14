@@ -2,7 +2,7 @@
 
 ScopeNode* current_scope = NULL;
 ScopeNode* global_scope = NULL;
-int next_ram_address = 1; // Address 0 is reserved for our heap_pointer
+int next_ram_address = 0; // Address 0 is reserved for our heap_pointer
 
 void init_global_scope(void) {
     if (global_scope != NULL) return;
