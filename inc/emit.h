@@ -12,5 +12,6 @@ void  emit_runtime_library (void);
 void  emit_asm (const char *, ...);
 void  emit_truthy_jump (int, const char *);
 void  emit_falsy_jump (int, const char *);
+void  emit_get_gamepad_inputs_intrinsic (int);
 
 #endif

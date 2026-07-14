@@ -7,8 +7,8 @@
 typedef struct {
     const char *lua_path;
     const char *asm_port;
-	int         mode;     // PORT_READ, PORT_WRIT
-	int         type;
+    int         mode;     // PORT_READ, PORT_WRIT
+    int         type;
 } IOPortMap;
 
 static const IOPortMap ioports[] = {
@@ -124,6 +124,17 @@ static void emit_gpu_clear_intrinsic(ASTNode *node, int dest_reg) {
 // --- Public Interceptor Implementations ---
 // ============================================================================
 
+// variables that are backed by functions
+int try_emit_action_intrinsic (const char *action, int  dest_reg)
+{
+    if (strcmp (action, "ioports.inp.inputs") == 0) {
+        emit_get_gamepad_inputs_intrinsic (dest_reg);
+        return (1);
+    }
+
+    return (0);
+}
+
 int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     char func_name[256] = {0};
     if (!resolve_static_path(node->as.call.target, func_name)) {
@@ -163,22 +174,22 @@ int try_emit_table_set_intrinsic(ASTNode *node) {
     // Clean table lookup replaces all your repetitive strcmp blocks!
     for (int i = 0; ioports[i].lua_path != NULL; i++) {
         if (strcmp(full_path, ioports[i].lua_path) == 0) {
-			if ((ioports[i].mode & IOPORT_WRITE) != IOPORT_WRITE)
-				compiler_error (ERR_SEMANTIC, yylineno, "%s: port cannot be written to", full_path);
+            if ((ioports[i].mode & IOPORT_WRITE) != IOPORT_WRITE)
+                compiler_error (ERR_SEMANTIC, yylineno, "%s: port cannot be written to", full_path);
 
             int val_reg = allocate_register();
             generate_asm(node->as.table_set.value, val_reg);
 
-			if ((ioports[i].type & IOPORT_TYPE_INTEGER) == IOPORT_TYPE_INTEGER)
-			{
-				emit_asm("    ;; --- Intrinsic: Cast Lua Float to Hardware Integer ---\n");
-				emit_asm("    CFI R%d\n", val_reg);
-			}
-			else if ((ioports[i].type & IOPORT_TYPE_BOOLEAN) == IOPORT_TYPE_BOOLEAN)
-			{
-				emit_asm("    ;; --- Intrinsic: Cast Lua Float to Hardware Boolean ---\n");
-				emit_asm("    CFB R%d\n", val_reg);
-			}
+            if ((ioports[i].type & IOPORT_TYPE_INTEGER) == IOPORT_TYPE_INTEGER)
+            {
+                emit_asm("    ;; --- Intrinsic: Cast Lua Float to Hardware Integer ---\n");
+                emit_asm("    CFI R%d\n", val_reg);
+            }
+            else if ((ioports[i].type & IOPORT_TYPE_BOOLEAN) == IOPORT_TYPE_BOOLEAN)
+            {
+                emit_asm("    ;; --- Intrinsic: Cast Lua Float to Hardware Boolean ---\n");
+                emit_asm("    CFB R%d\n", val_reg);
+            }
 
             emit_asm("    OUT %s, R%d\n", ioports[i].asm_port, val_reg);
 
@@ -200,13 +211,33 @@ int try_emit_table_get_intrinsic(ASTNode *node, int dest_reg) {
     char full_path[512];
     snprintf(full_path, sizeof(full_path), "%s.%s", base_path, node->as.table_get.key->as.string_val.value);
 
-    for (int i = 0; ioports[i].lua_path != NULL; i++) {
-        if (strcmp(full_path, ioports[i].lua_path) == 0) {
-            if (dest_reg != 0) {
+    for (int i = 0; ioports[i].lua_path != NULL; i++)
+    {
+        if (strcmp(full_path, ioports[i].lua_path) == 0)
+        {
+            if ((ioports[i].mode & IOPORT_READ) != IOPORT_READ)
+            {
+                compiler_error (ERR_SEMANTIC, yylineno, "%s: port cannot be read from", full_path);
+            }
+
+            if ((ioports[i].mode & IOPORT_ACTION) != IOPORT_ACTION)
+            {
+                try_emit_action_intrinsic (ioports[i].asm_port, dest_reg);
+            }
+            else if (dest_reg != 0)
+            {
                 emit_asm("    ;; --- Intrinsic: Read Hardware Integer ---\n");
-                emit_asm("    IN R%d, %s\n", dest_reg, ioports[i].asm_port);
-                emit_asm("    ;; --- Intrinsic: Cast to Lua Float ---\n");
-                emit_asm("    CIF R%d\n", dest_reg);
+                emit_asm("IN R%d, %s\n", dest_reg, ioports[i].asm_port);
+                if ((ioports[i].type & IOPORT_TYPE_INTEGER) == IOPORT_TYPE_INTEGER)
+                {
+                    emit_asm("    ;; --- Intrinsic: Cast to Lua Float ---\n");
+                    emit_asm("CIF R%d\n", dest_reg);
+                }
+                else if ((ioports[i].type & IOPORT_TYPE_BOOLEAN) == IOPORT_TYPE_BOOLEAN)
+                {
+                    emit_asm("    ;; --- Intrinsic: Cast to Lua Float ---\n");
+                    emit_asm("CIF R%d\n", dest_reg);
+                }
             }
             return 1;
         }
