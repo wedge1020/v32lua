@@ -26,16 +26,16 @@ static const IOPortMap ioports[] = {
     { "ioports.inp.status",  "INP_GamepadConnected", IOPORT_READ, IOPORT_TYPE_INTEGER },
     { "ioports.inp.inputs",  "custom", IOPORT_READ, IOPORT_TYPE_INTEGER   },
     { "ioports.inp.left",    "INP_GamepadLeft", IOPORT_READ, IOPORT_TYPE_INTEGER   },
-    { "ioports.inp.right",    "INP_GamepadRight", IOPORT_READ, IOPORT_TYPE_INTEGER   },
-    { "ioports.inp.up",    "INP_GamepadUp", IOPORT_READ, IOPORT_TYPE_INTEGER   },
+    { "ioports.inp.right",   "INP_GamepadRight", IOPORT_READ, IOPORT_TYPE_INTEGER   },
+    { "ioports.inp.up",      "INP_GamepadUp", IOPORT_READ, IOPORT_TYPE_INTEGER   },
     { "ioports.inp.down",    "INP_GamepadDown", IOPORT_READ, IOPORT_TYPE_INTEGER   },
-    { "ioports.inp.start",    "INP_GamepadButtonStart", IOPORT_READ, IOPORT_TYPE_INTEGER   },
-    { "ioports.inp.A",    "INP_GamepadButtonA", IOPORT_READ, IOPORT_TYPE_INTEGER   },
-    { "ioports.inp.B",    "INP_GamepadButtonB", IOPORT_READ, IOPORT_TYPE_INTEGER   },
-    { "ioports.inp.X",    "INP_GamepadButtonX", IOPORT_READ, IOPORT_TYPE_INTEGER   },
-    { "ioports.inp.Y",    "INP_GamepadButtonY", IOPORT_READ, IOPORT_TYPE_INTEGER   },
-    { "ioports.inp.L",    "INP_GamepadButtonL", IOPORT_READ, IOPORT_TYPE_INTEGER   },
-    { "ioports.inp.R",    "INP_GamepadButtonR", IOPORT_READ, IOPORT_TYPE_INTEGER   },
+    { "ioports.inp.start",   "INP_GamepadButtonStart", IOPORT_READ, IOPORT_TYPE_INTEGER   },
+    { "ioports.inp.A",       "INP_GamepadButtonA",     IOPORT_READ, IOPORT_TYPE_INTEGER   },
+    { "ioports.inp.B",       "INP_GamepadButtonB",     IOPORT_READ, IOPORT_TYPE_INTEGER   },
+    { "ioports.inp.X",       "INP_GamepadButtonX",     IOPORT_READ, IOPORT_TYPE_INTEGER   },
+    { "ioports.inp.Y",       "INP_GamepadButtonY",     IOPORT_READ, IOPORT_TYPE_INTEGER   },
+    { "ioports.inp.L",       "INP_GamepadButtonL",     IOPORT_READ, IOPORT_TYPE_INTEGER   },
+    { "ioports.inp.R",       "INP_GamepadButtonR",     IOPORT_READ, IOPORT_TYPE_INTEGER   },
     { NULL, NULL, 0, 0 } // Sentinel
 };
 
@@ -220,7 +220,7 @@ int try_emit_table_get_intrinsic(ASTNode *node, int dest_reg) {
                 compiler_error (ERR_SEMANTIC, yylineno, "%s: port cannot be read from", full_path);
             }
 
-            if ((ioports[i].mode & IOPORT_ACTION) != IOPORT_ACTION)
+            if ((ioports[i].mode & IOPORT_ACTION) == IOPORT_ACTION)
             {
                 try_emit_action_intrinsic (ioports[i].asm_port, dest_reg);
             }
