@@ -423,11 +423,12 @@ void  emit_cart_xml (const char *input_filename, int  verbose)
 
 // Emits Vircon32 assembly to jump to target_label if reg is TRUTHY!
 // (i.e., NOT Nil and NOT False). Uses scratch register R6.
-void  emit_truthy_jump (int  reg, const char *target_label)
+void emit_truthy_jump(int reg, const char *target_label)
 {
     int check_id = get_next_label();
+    const char *ctx = get_current_function_name(); // Fetch context
     char eval_right_label[128];
-    snprintf(eval_right_label, sizeof(eval_right_label), "__truthy_fail_%d", check_id);
+    snprintf(eval_right_label, sizeof(eval_right_label), "__%s_truthy_fail_%d", ctx, check_id); // Prefix added
 
     // 1. If it IS Nil, it's not truthy -> jump to evaluate right operand
     emit_asm("MOV R6, R%d ; Copy to scratch register R6\n", reg);

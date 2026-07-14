@@ -301,79 +301,82 @@ end
 --@ MAIN EXECUTION LOOP
 --@ ============================================================================
 
-Game:init()
-Player:init(10, 4)
-Harpoon:init()
+function main()
 
--- Instantiate enemy pool using while loop (no for-loops in v32lua!)
-local enemies = {}
-local ENEMY_COUNT = 3
-local i = 0
-while i < ENEMY_COUNT do
-    enemies[i] = {}
-    -- Set prototype methods manually to simulate class instance
-    enemies[i].init   = Enemy.init
-    enemies[i].update = Enemy.update
-    enemies[i].draw   = Enemy.draw
-    
-    enemies[i]:init(4 + (i * 5), 3 + (i * 2))
-    i = i + 1
-end
+	Game:init()
+	Player:init(10, 4)
+	Harpoon:init()
 
--- Main Hardware Frame Loop
-while 1 == 1 do
-    -- 1. Hardware Screen Clear Intrinsic
-    ioports.gpu.clear("black")
-    
-    if Game.lives > 0 then
-        -- 2. Update Game Entities
-        Player:update()
-        Harpoon:update(enemies, ENEMY_COUNT)
-        
-        local e_idx = 0
-        while e_idx < ENEMY_COUNT do
-            enemies[e_idx]:update()
-            e_idx = e_idx + 1
-        end
-    end
+	-- Instantiate enemy pool using while loop (no for-loops in v32lua!)
+	local enemies = {}
+	local ENEMY_COUNT = 3
+	local i = 0
+	while i < ENEMY_COUNT do
+		enemies[i] = {}
+		-- Set prototype methods manually to simulate class instance
+		enemies[i].init   = Enemy.init
+		enemies[i].update = Enemy.update
+		enemies[i].draw   = Enemy.draw
+		
+		enemies[i]:init(4 + (i * 5), 3 + (i * 2))
+		i = i + 1
+	end
 
-    -- 3. Render Underground Map Grid
-    local r = 0
-    while r < MAP_ROWS do
-        local c = 0
-        while c < MAP_COLS do
-            local tile_type = Game.map[r][c]
-            local screen_x = c * TILE_SIZE
-            local screen_y = (r * TILE_SIZE) + HUD_OFFSET_Y
+	-- Main Hardware Frame Loop
+	while 1 == 1 do
+		-- 1. Hardware Screen Clear Intrinsic
+		ioports.gpu.clear("black")
+		
+		if Game.lives > 0 then
+			-- 2. Update Game Entities
+			Player:update()
+			Harpoon:update(enemies, ENEMY_COUNT)
+			
+			local e_idx = 0
+			while e_idx < ENEMY_COUNT do
+				enemies[e_idx]:update()
+				e_idx = e_idx + 1
+			end
+		end
+
+		-- 3. Render Underground Map Grid
+		local r = 0
+		while r < MAP_ROWS do
+			local c = 0
+			while c < MAP_COLS do
+				local tile_type = Game.map[r][c]
+				local screen_x = c * TILE_SIZE
+				local screen_y = (r * TILE_SIZE) + HUD_OFFSET_Y
             
-            if tile_type == 1 then
-                draw_sprite(SPR_DIRT, 0, screen_x, screen_y)
-            elseif tile_type == 2 then
-                draw_sprite(SPR_SKY, 0, screen_x, screen_y)
-            end
-            c = c + 1
-        end
-        r = r + 1
-    end
+				if tile_type == 1 then
+					draw_sprite(SPR_DIRT, 0, screen_x, screen_y)
+				elseif tile_type == 2 then
+					draw_sprite(SPR_SKY, 0, screen_x, screen_y)
+				end
+				c = c + 1
+			end
+			r = r + 1
+		end
 
-    -- 4. Render Entities
-    local d_idx = 0
-    while d_idx < ENEMY_COUNT do
-        enemies[d_idx]:draw()
-        d_idx = d_idx + 1
-    end
+		-- 4. Render Entities
+		local d_idx = 0
+		while d_idx < ENEMY_COUNT do
+			enemies[d_idx]:draw()
+			d_idx = d_idx + 1
+		end
     
-    Player:draw()
-    Harpoon:draw()
+		Player:draw()
+		Harpoon:draw()
 
-    -- 5. Render HUD UI using NaN-boxed string concatenation & print intrinsic
-    print(16, 10, "SCORE: " .. Game.score)
-    print(520, 10, "LIVES: " .. Game.lives)
+		-- 5. Render HUD UI using NaN-boxed string concatenation & print intrinsic
+		print(16, 10, "SCORE: " .. Game.score)
+		print(520, 10, "LIVES: " .. Game.lives)
     
-    if Game.lives <= 0 then
-        print(260, 180, "GAME OVER")
-    end
+		if Game.lives <= 0 then
+			print(260, 180, "GAME OVER")
+		end
+	end
 
     -- 6. Hardware Vsync Wait Intrinsic (Injects Vircon32 WAIT instruction)
-    __asm__("WAIT")
+ --   __asm__("WAIT")
 end

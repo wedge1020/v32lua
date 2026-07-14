@@ -322,30 +322,32 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     
                     // Move the returned length into the destination register
                     emit_asm ("MOV R%d, R0\n", dest_reg);
-                }
-                else if (node->as.unary.operator == OP_NOT) {
-                    int label_id = get_next_label();
-                    char to_true_label[64], end_label[64];
-                    snprintf(to_true_label, sizeof(to_true_label), "__not_true_%d", label_id);
-                    snprintf(end_label, sizeof(end_label), "__not_end_%d", label_id);
 
-                    // 1. Check if Nil or False using scratch register R6
-                    emit_asm ("MOV R6, R%d\n", dest_reg);
-                    emit_asm ("IEQ R6, 0xFFC00000 ; Is Nil?\n");
-                    emit_asm ("JT  R6, %s\n", to_true_label);
-                    emit_asm ("MOV R6, R%d\n", dest_reg);
-                    emit_asm ("IEQ R6, 0xFFC00001 ; Is False?\n");
-                    emit_asm ("JT  R6, %s\n", to_true_label);
+				}
+				else if (node->as.unary.operator == OP_NOT) {
+					int label_id = get_next_label();
+					const char *ctx = get_current_function_name(); // Fetch context
+					char to_true_label[128], end_label[128];
+					snprintf(to_true_label, sizeof(to_true_label), "__%s_not_true_%d", ctx, label_id); // Prefix added
+					snprintf(end_label, sizeof(end_label), "__%s_not_end_%d", ctx, label_id);         // Prefix added
 
-                    // 2. If truthy, return VAL_FALSE (0xFFC00001)
-                    emit_asm ("MOV R%d, 0xFFC00001 ; Return False\n", dest_reg);
-                    emit_asm ("JMP %s\n", end_label);
+					// 1. Check if Nil or False using scratch register R6
+					emit_asm("MOV R6, R%d\n", dest_reg);
+					emit_asm("IEQ R6, 0xFFC00000 ; Is Nil?\n");
+					emit_asm("JT  R6, %s\n", to_true_label);
+					emit_asm("MOV R6, R%d\n", dest_reg);
+					emit_asm("IEQ R6, 0xFFC00001 ; Is False?\n");
+					emit_asm("JT  R6, %s\n", to_true_label);
 
-                    // 3. If falsy, return VAL_TRUE (0xFFC00002)
-                    emit_asm ("%s:\n", to_true_label);
-                    emit_asm ("MOV R%d, 0xFFC00002 ; Return True\n", dest_reg);
-                    emit_asm ("%s:\n", end_label);
-                }
+					// 2. If truthy, return VAL_FALSE (0xFFC00001)
+					emit_asm("MOV R%d, 0xFFC00001 ; Return False\n", dest_reg);
+					emit_asm("JMP %s\n", end_label);
+
+					// 3. If falsy, return VAL_TRUE (0xFFC00002)
+					emit_asm("%s:\n", to_true_label);
+					emit_asm("MOV R%d, 0xFFC00002 ; Return True\n", dest_reg);
+					emit_asm("%s:\n", end_label);
+				}
                 else if (node->as.unary.operator == OP_UNM) {
                     emit_asm ("PUSH R%d\n", dest_reg);
                     emit_asm ("CALL __builtin_unm\n");
@@ -517,41 +519,38 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 break;
             }
 
-            case NODE_AND: {
-                int label_id = get_next_label ();
-                char end_label[128];
-                snprintf(end_label, sizeof(end_label), "__short_and_%d", label_id);
+			case NODE_AND: {
+				int label_id = get_next_label();
+				const char *ctx = get_current_function_name(); // Fetch context
+				char end_label[128];
+				snprintf(end_label, sizeof(end_label), "__%s_short_and_%d", ctx, label_id); // Prefix added
 
-                // 1. Evaluate Left Operand into dest_reg
-                generate_asm (node -> as.binary.left, dest_reg);
-                
-                // AUDITED: If Left is Nil or False, short-circuit immediately!
-                // The falsy value remains preserved in dest_reg as the return value.
-                emit_falsy_jump (dest_reg, end_label);
-                
-                // 2. Otherwise, evaluate Right Operand into dest_reg
-                generate_asm (node -> as.binary.right, dest_reg);
-                emit_asm ("%s:\n", end_label);
-                break;
-            }
+				// 1. Evaluate Left Operand into dest_reg
+				generate_asm(node->as.binary.left, dest_reg);
+				
+				emit_falsy_jump(dest_reg, end_label);
+				
+				// 2. Otherwise, evaluate Right Operand into dest_reg
+				generate_asm(node->as.binary.right, dest_reg);    emit_asm("%s:\n", end_label);
+				break;
+			}
 
-            case NODE_OR: {
-                int label_id = get_next_label ();
-                char end_label[128];
-                snprintf(end_label, sizeof(end_label), "__short_or_%d", label_id);
+			case NODE_OR: {
+				int label_id = get_next_label();
+				const char *ctx = get_current_function_name(); // Fetch context
+				char end_label[128];
+				snprintf(end_label, sizeof(end_label), "__%s_short_or_%d", ctx, label_id); // Prefix added
 
-                // 1. Evaluate Left Operand into dest_reg
-                generate_asm (node -> as.binary.left, dest_reg);
-                
-                // AUDITED: If Left is TRUTHY (not Nil/False), short-circuit immediately!
-                // The truthy value remains preserved in dest_reg as the return value.
-                emit_truthy_jump (dest_reg, end_label);
-                
-                // 2. Otherwise, evaluate Right Operand into dest_reg
-                generate_asm (node -> as.binary.right, dest_reg);
-                emit_asm ("%s:\n", end_label);
-                break;
-            }
+				// 1. Evaluate Left Operand into dest_reg
+				generate_asm(node->as.binary.left, dest_reg);
+				
+				emit_truthy_jump(dest_reg, end_label);
+				
+				// 2. Otherwise, evaluate Right Operand into dest_reg
+				generate_asm(node->as.binary.right, dest_reg);
+				emit_asm("%s:\n", end_label);
+				break;
+			}
 
             case NODE_RELATIONAL: {
                 generate_asm (node -> as.binary.left, dest_reg);
