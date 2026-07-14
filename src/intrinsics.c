@@ -7,21 +7,42 @@
 typedef struct {
     const char *lua_path;
     const char *asm_port;
-} GPUPortMap;
+	int         mode;     // PORT_READ, PORT_WRIT
+	int         type;
+} IOPortMap;
 
-static const GPUPortMap gpu_ports[] = {
-    { "ioports.gpu.texture", "GPU_SelectedTexture" },
-    { "ioports.gpu.region",  "GPU_SelectedRegion"  },
-    { "ioports.gpu.x",       "GPU_DrawingPointX"   },
-    { "ioports.gpu.y",       "GPU_DrawingPointY"   },
-    { "ioports.gpu.minX",    "GPU_RegionMinX"      },
-    { "ioports.gpu.minY",    "GPU_RegionMinY"      },
-    { "ioports.gpu.maxX",    "GPU_RegionMaxX"      },
-    { "ioports.gpu.maxY",    "GPU_RegionMaxY"      },
-    { "ioports.gpu.hotX",    "GPU_RegionHotSpotX"  },
-    { "ioports.gpu.hotY",    "GPU_RegionHotSpotY"  },
-    { NULL, NULL } // Sentinel
+static const IOPortMap ioports[] = {
+    { "ioports.gpu.texture", "GPU_SelectedTexture", IOPORT_READ | IOPORT_WRITE, IOPORT_TYPE_INTEGER },
+    { "ioports.gpu.region",  "GPU_SelectedRegion", IOPORT_READ | IOPORT_WRITE, IOPORT_TYPE_INTEGER  },
+    { "ioports.gpu.x",       "GPU_DrawingPointX", IOPORT_READ | IOPORT_WRITE, IOPORT_TYPE_INTEGER   },
+    { "ioports.gpu.y",       "GPU_DrawingPointY", IOPORT_READ | IOPORT_WRITE, IOPORT_TYPE_INTEGER   },
+    { "ioports.gpu.minX",    "GPU_RegionMinX", IOPORT_READ | IOPORT_WRITE, IOPORT_TYPE_INTEGER      },
+    { "ioports.gpu.minY",    "GPU_RegionMinY", IOPORT_READ | IOPORT_WRITE, IOPORT_TYPE_INTEGER      },
+    { "ioports.gpu.maxX",    "GPU_RegionMaxX", IOPORT_READ | IOPORT_WRITE, IOPORT_TYPE_INTEGER      },
+    { "ioports.gpu.maxY",    "GPU_RegionMaxY", IOPORT_READ | IOPORT_WRITE, IOPORT_TYPE_INTEGER      },
+    { "ioports.gpu.hotX",    "GPU_RegionHotSpotX", IOPORT_READ | IOPORT_WRITE, IOPORT_TYPE_INTEGER  },
+    { "ioports.gpu.hotY",    "GPU_RegionHotSpotY", IOPORT_READ | IOPORT_WRITE, IOPORT_TYPE_INTEGER  },
+    { "ioports.inp.gamepad", "INP_SelectedGamepad", IOPORT_READ | IOPORT_WRITE, IOPORT_TYPE_INTEGER },
+    { "ioports.inp.status",  "INP_GamepadConnected", IOPORT_READ, IOPORT_TYPE_INTEGER },
+    { "ioports.inp.inputs",  "custom", IOPORT_READ, IOPORT_TYPE_INTEGER   },
+    { "ioports.inp.left",    "INP_GamepadLeft", IOPORT_READ, IOPORT_TYPE_INTEGER   },
+    { "ioports.inp.right",    "INP_GamepadRight", IOPORT_READ, IOPORT_TYPE_INTEGER   },
+    { "ioports.inp.up",    "INP_GamepadUp", IOPORT_READ, IOPORT_TYPE_INTEGER   },
+    { "ioports.inp.down",    "INP_GamepadDown", IOPORT_READ, IOPORT_TYPE_INTEGER   },
+    { "ioports.inp.start",    "INP_GamepadButtonStart", IOPORT_READ, IOPORT_TYPE_INTEGER   },
+    { "ioports.inp.A",    "INP_GamepadButtonA", IOPORT_READ, IOPORT_TYPE_INTEGER   },
+    { "ioports.inp.B",    "INP_GamepadButtonB", IOPORT_READ, IOPORT_TYPE_INTEGER   },
+    { "ioports.inp.X",    "INP_GamepadButtonX", IOPORT_READ, IOPORT_TYPE_INTEGER   },
+    { "ioports.inp.Y",    "INP_GamepadButtonY", IOPORT_READ, IOPORT_TYPE_INTEGER   },
+    { "ioports.inp.L",    "INP_GamepadButtonL", IOPORT_READ, IOPORT_TYPE_INTEGER   },
+    { "ioports.inp.R",    "INP_GamepadButtonR", IOPORT_READ, IOPORT_TYPE_INTEGER   },
+    { NULL, NULL, 0, 0 } // Sentinel
 };
+
+static void  emit_system_halt_intrinsic ()
+{
+    emit_asm ("HLT\n");
+}
 
 // ============================================================================
 // --- Static Helper Functions for Complex Calls ---
@@ -118,7 +139,11 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         return 1;
     }
     if (strcmp(func_name, "ioports.gpu.clear") == 0) {
-        emit_gpu_clear_intrinsic(node, dest_reg);
+        emit_gpu_clear_intrinsic (node, dest_reg);
+        return 1;
+    }
+    if (strcmp(func_name, "system.halt") == 0) {
+        emit_system_halt_intrinsic ();
         return 1;
     }
 
@@ -136,14 +161,26 @@ int try_emit_table_set_intrinsic(ASTNode *node) {
     snprintf(full_path, sizeof(full_path), "%s.%s", base_path, node->as.table_set.key->as.string_val.value);
 
     // Clean table lookup replaces all your repetitive strcmp blocks!
-    for (int i = 0; gpu_ports[i].lua_path != NULL; i++) {
-        if (strcmp(full_path, gpu_ports[i].lua_path) == 0) {
+    for (int i = 0; ioports[i].lua_path != NULL; i++) {
+        if (strcmp(full_path, ioports[i].lua_path) == 0) {
+			if ((ioports[i].mode & IOPORT_WRITE) != IOPORT_WRITE)
+				compiler_error (ERR_SEMANTIC, yylineno, "%s: port cannot be written to", full_path);
+
             int val_reg = allocate_register();
             generate_asm(node->as.table_set.value, val_reg);
 
-            emit_asm("    ;; --- Intrinsic: Cast Lua Float to Hardware Integer ---\n");
-            emit_asm("    CFI R%d\n", val_reg);
-            emit_asm("    OUT %s, R%d\n", gpu_ports[i].asm_port, val_reg);
+			if ((ioports[i].type & IOPORT_TYPE_INTEGER) == IOPORT_TYPE_INTEGER)
+			{
+				emit_asm("    ;; --- Intrinsic: Cast Lua Float to Hardware Integer ---\n");
+				emit_asm("    CFI R%d\n", val_reg);
+			}
+			else if ((ioports[i].type & IOPORT_TYPE_BOOLEAN) == IOPORT_TYPE_BOOLEAN)
+			{
+				emit_asm("    ;; --- Intrinsic: Cast Lua Float to Hardware Boolean ---\n");
+				emit_asm("    CFB R%d\n", val_reg);
+			}
+
+            emit_asm("    OUT %s, R%d\n", ioports[i].asm_port, val_reg);
 
             unlock_register(val_reg);
             return 1;
@@ -163,11 +200,11 @@ int try_emit_table_get_intrinsic(ASTNode *node, int dest_reg) {
     char full_path[512];
     snprintf(full_path, sizeof(full_path), "%s.%s", base_path, node->as.table_get.key->as.string_val.value);
 
-    for (int i = 0; gpu_ports[i].lua_path != NULL; i++) {
-        if (strcmp(full_path, gpu_ports[i].lua_path) == 0) {
+    for (int i = 0; ioports[i].lua_path != NULL; i++) {
+        if (strcmp(full_path, ioports[i].lua_path) == 0) {
             if (dest_reg != 0) {
                 emit_asm("    ;; --- Intrinsic: Read Hardware Integer ---\n");
-                emit_asm("    IN R%d, %s\n", dest_reg, gpu_ports[i].asm_port);
+                emit_asm("    IN R%d, %s\n", dest_reg, ioports[i].asm_port);
                 emit_asm("    ;; --- Intrinsic: Cast to Lua Float ---\n");
                 emit_asm("    CIF R%d\n", dest_reg);
             }
