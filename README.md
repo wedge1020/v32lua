@@ -6,11 +6,19 @@
 
 ---
 
-## 1. Executive Overview & Architecture
+## 1. Overview & Architecture
 
-`v32lua` is an optimizing compiler written in C that translates dynamically typed Lua source code directly into static Vircon32 assembly language (`.asm`) and automatically generates cartridge configuration XML (`.xml`) for the Vircon32 emulator and hardware.
+`v32lua`  is  an  optimizing  compiler   written  in  C  that  translates
+dynamically typed Lua source code  directly into static Vircon32 assembly
+language (`.asm`) and automatically generates cartridge configuration XML
+(`.xml`) for the Vircon32 emulator and hardware.
 
-Unlike traditional Lua implementations that rely on bytecode interpretation and a heavy runtime virtual machine, `v32lua` is a **true ahead-of-time (AOT) compiler**. It emits lean, native Vircon32 instructions, leveraging a custom **NaN-boxing** type system, automatic stack-frame optimization, and zero-overhead **compiler intrinsics** that map Lua table accesses directly to Vircon32 memory-mapped I/O registers.
+Unlike   traditional   Lua   implementations  that   rely   on   bytecode
+interpretation  and  a  heavy  runtime virtual  machine,  `v32lua`  is  a
+**true  ahead-of-time (AOT)  compiler**. It  emits lean,  native Vircon32
+instructions, leveraging  a custom **NaN-boxing** type  system, automatic
+stack-frame optimization, and  zero-overhead **compiler intrinsics** that
+map Lua table accesses directly to Vircon32 memory-mapped I/O registers.
 
 ```
 +------------------+     +-------------------+     +------------------+
@@ -92,9 +100,10 @@ make
 | Target | Description | Core Actions & Dependencies |
 | --- | --- | --- |
 | **`all`** | **Default Target.** Builds the main compiler executable.  | Invokes the compilation process natively inside the `src/` subdirectory.  |
-| **`clean`** | Standard workspace cleanup utility.  | Recursively wipes intermediate build artifacts out of `src/` and removes generated assembly files from `testing/`.  |
+| **`clean`** | Standard workspace cleanup utility.  | Recursively wipes intermediate build artifacts out of `src/` and removes generated files from `testing/` and `demos/`.  |
 | **`install`** | Installs the compiler binary onto the host system.  | Passes the target down to the `src/` directory's localized installation scripts.  |
 | **`tests`** | Executes the automated compilation testing suite.  | Explicitly depends on the compiler binary (`bin/v32lua`) being built first, then triggers the test routines inside `testing/`.  |
+| **`demos`** | Builds the collection of available demos.  | Explicitly depends on the compiler binary (`bin/v32lua`) being built first, then builds each demo under `demos/`.  |
 | **`asmcheck`** | Validates assembly correctness.  | Requires `bin/v32lua` to be present, then processes assembly validations via the `testing/` suite.  |
 | **`monofiles`** | Builds streamlined monolithic file variants.  | Runs the `monofile` creation workflow sequentially inside both `src/` and `testing/`.  |
 
@@ -166,29 +175,37 @@ __function_my_func:
     MOV  SP, BP
     POP  BP
     RET
-
 ```
 
 * **Local Variables:** Addressed at negative offsets relative to the base pointer: `[BP - 1]`, `[BP - 2]`, etc.
 
 * **Function Parameters:** Pushed by the caller prior to invocation and addressed at positive offsets: `[BP + 2]`, `[BP + 3]`, etc.
 
-**Optimization:** Before emitting prologue instructions, `v32lua` runs an AST analysis pass (`check_needs_stack`). If a function is a **Leaf Function** (it does not call other functions, declare stack-spilling locals, or perform complex table allocations), the frame pointer setup (`PUSH BP; MOV BP, SP`) is completely omitted, saving 4 clock cycles and 2 stack slots per call.
+**Optimization:** Before emitting prologue instructions, `v32lua` runs an
+AST  analysis  pass (`check_needs_stack`).  If  a  function is  a  **Leaf
+Function**  (it does  not  call other  functions, declare  stack-spilling
+locals, or  perform complex table  allocations), the frame  pointer setup
+(`PUSH BP; MOV BP, SP`) is  completely omitted, saving 4 clock cycles and
+2 stack slots per call.
 
 ---
 
 ## 6. The NaN-Boxing Type System
 
-To support Lua's dynamic typing on a 32-bit hardware architecture without the overhead of heap-allocated type wrappers or multi-word tagged unions, `v32lua` implements an IEEE 754 **NaN-Boxing** type representation.
+To support Lua's dynamic typing on a 32-bit hardware architecture without
+the overhead of heap-allocated type wrappers or multi-word tagged unions,
+`v32lua` implements an IEEE 754 **NaN-Boxing** type representation.
 
-In IEEE 754 single-precision floating-point, any 32-bit word with all 8 exponent bits set (`0xFF`) and a non-zero mantissa represents Not-a-Number (NaN). This leaves 23 bits of payload space inside the NaN space to encode type tags, pointers, and special constants.
+In  IEEE  754  single-precision  floating-point,  any  32-bit  word  with
+all  8 exponent  bits set  (`0xFF`)  and a  non-zero mantissa  represents
+Not-a-Number (NaN). This  leaves 23 bits of payload space  inside the NaN
+space to encode type tags, pointers, and special constants.
 
 ### Bit-Level Representation Map
 
 ```
   31                                  0
   [s | e e e e e e e e | m m m m m ... ]
-
 ```
 
 | Type / Value | Hexadecimal Mask | Encoding Details |
@@ -214,7 +231,10 @@ In IEEE 754 single-precision floating-point, any 32-bit word with all 8 exponent
 
 ### Truthy & Falsy Short-Circuit Evaluation
 
-In Lua, only `nil` and `false` evaluate to false in conditional expressions; every other value (including `0` and empty strings) is **truthy**. `v32lua` implements this via two high-speed assembly emission primitives:
+In  Lua,  only  `nil`  and  `false`  evaluate  to  false  in  conditional
+expressions;  every other  value  (including `0`  and  empty strings)  is
+**truthy**. `v32lua` implements this via two high-speed assembly emission
+primitives:
 
 * **`emit_falsy_jump(reg, label)`**: Tests if `reg` matches `0xFFC00000` (Nil) or `0xFFC00001` (False). If either matches, execution jumps to target label.
 
@@ -223,7 +243,9 @@ In Lua, only `nil` and `false` evaluate to false in conditional expressions; eve
 
 
 
-When logical operators (`and`, `or`) are evaluated, the evaluated result is left intact in the destination register, preserving Lua's idiom of returning the actual operand value rather than a strict boolean.
+When logical operators (`and`, `or`)  are evaluated, the evaluated result
+is left  intact in  the destination register,  preserving Lua's  idiom of
+returning the actual operand value rather than a strict boolean.
 
 ---
 
@@ -235,10 +257,7 @@ When logical operators (`and`, `or`) are evaluated, the evaluated result is left
 
 * **Global Variables:** Automatically registered in RAM (starting at address `1`, as address `0` is reserved for the heap pointer) and accessed via symbols (`[var_name]`, `[func_name]`).
 
-
 * **Local Variables:** Declared with the `local` keyword. Scoped lexically to the enclosing block (`do ... end`, function bodies, loops, or conditionals) and mapped to stack offsets (`[BP - offset]`). Shadowing outer variables is fully supported.
-
-
 
 ### Multiple Assignment
 
@@ -256,72 +275,69 @@ x, y = y, x -- Synthesizes temporary register chains to safely swap values
 
 * **Method Definition Desugaring:** Defining a function on a table automatically generates a mangled label and links the function pointer property:
 
-
 ```lua
 function Player.move(dx, dy) ... end
 -- Desugars to: Player["move"] = __function_Player_move
-
 ```
 
-
 * **Method Call Desugaring (`:` operator):** Using the colon operator automatically evaluates the table expression and injects it as an implicit `self` parameter:
-
 
 ```lua
 Player:move(5, -2)
 -- Desugars to: Player.move(Player, 5, -2)
-
 ```
-
-
 
 ### Control Flow
 
 * **Loops:** `while <cond> do ... end` statements supported with full block scoping.
 
-
 * **Loop Control:** `break` statements jump immediately to the end label of the current innermost loop (tracked via an internal compilation loop stack).
 
-
 * **Conditionals:** `if <cond> then ... elseif <cond> then ... else ... end` structures with short-circuit branching.
-
-
 
 ### Operators & Expressions
 
 * **Arithmetic:** `+`, `-`, `*`, `/` (mapped to Vircon32 floating-point hardware instructions `FADD`, `FSUB`, `FMUL`, `FDIV`), and unary minus (`-` via `__builtin_unm`).
 
-
 * **Relational:** `==`, `~=` (via `__builtin_eq` with NaN unboxing), `<`, `>`, `<=`, `>=` (via hardware `FLT`, `FLE`, `FGT`, `FGE`).
-
 
 * **Logical:** `and`, `or`, `not` (with short-circuit evaluation).
 
-
 * **String Concatenation:** `..` operator automatically pushes operands and invokes the runtime subroutine `__builtin_strcat`.
-
 
 * **Length Operator:** `#` operator invokes `__builtin_len` to resolve string or table lengths.
 
-
-
 ### Functions & Multi-Value Returns
 
-Functions can return multiple values simultaneously. The calling convention optimizes the first three returned expressions by placing them directly into registers `R0`, `R2`, and `R3`. Any additional return values (4th and beyond) are spilled directly onto the caller's stack frame at `[BP + 2 + arg_count + offset]`.
+Functions  can   return  multiple  values  simultaneously.   The  calling
+convention optimizes the first three returned expressions by placing them
+directly  into registers  `R0`,  `R2`, and  `R3`.  Any additional  return
+values  (4th and  beyond) are  spilled directly  onto the  caller's stack
+frame at `[BP + 2 + arg_count + offset]`.
 
 ### String Literal Pooling
 
-All string literals declared in source code (e.g., `"GAME OVER"`) are collected during compilation, deduplicated, and emitted into a dedicated data section at the end of the ROM (`__string_0: string "GAME OVER"`), preventing redundant ROM consumption.
+All string  literals declared  in source code  (e.g., `"GAME  OVER"`) are
+collected during compilation, deduplicated,  and emitted into a dedicated
+data section  at the end of  the ROM (`__string_0: string  "GAME OVER"`),
+preventing redundant ROM consumption.
 
 ---
 
 ## 8. Hardware I/O & Compiler Intrinsics
 
-One of the most powerful features of `v32lua` is its **static intrinsic interception engine**. When the compiler encounters table accesses or function calls matching specific system paths (e.g., `ioports.gpu.clear()`), it **bypasses dynamic table lookups entirely** and emits direct Vircon32 hardware I/O instructions (`IN`, `OUT`).
+One  of  the   most  powerful  features  of  `v32lua`   is  its  **static
+intrinsic  interception  engine**.  When the  compiler  encounters  table
+accesses  or  function  calls   matching  specific  system  paths  (e.g.,
+`ioports.gpu.clear()`),  it **bypasses  dynamic table  lookups entirely**
+and emits direct Vircon32 hardware I/O instructions (`IN`, `OUT`).
 
 ### Automatic Type Casting Across I/O Boundaries
 
-Because Lua variables are stored as NaN-boxed IEEE 754 floats while Vircon32 hardware ports expect 32-bit integers or booleans, `v32lua` automatically injects hardware conversion instructions during port reads and writes:
+Because  Lua variables  are stored  as  NaN-boxed IEEE  754 floats  while
+Vircon32  hardware ports  expect  32-bit integers  or booleans,  `v32lua`
+automatically injects hardware conversion  instructions during port reads
+and writes:
 
 * **`CFI` (Cast Float to Integer):** Emitted automatically when writing numeric values to integer GPU/Input ports.
 
@@ -330,8 +346,6 @@ Because Lua variables are stored as NaN-boxed IEEE 754 floats while Vircon32 har
 
 
 * **`CIF` (Cast Integer to Float):** Emitted immediately after executing an `IN` instruction from integer hardware ports, ensuring the value is immediately usable as a Lua number.
-
-
 
 ---
 
@@ -421,7 +435,7 @@ Because Lua variables are stored as NaN-boxed IEEE 754 floats while Vircon32 har
 | **`ioports.inp.R`** | `INP_GamepadButtonR` | Read Only | Right Shoulder Bumper state (`1` pressed, `0` released).
 
  |
-| **`ioports.inp.inputs`** | *Custom Action Subroutine* | Read Only | **Collation Intrinsic:** Executes a rapid multi-port polling sequence across all 11 gamepad buttons/axes, shifting and combining their boolean states into a single 32-bit integer bitmask before casting to float (`CIF`). Highly efficient for 1-cycle button state snapshots!
+| **`ioports.inp.inputs`** | *Custom Action Subroutine* | Read Only | **Collation Intrinsic:** Executes a rapid multi-port polling sequence across all 11 gamepad buttons/axes, shifting and combining their boolean states into a single 32-bit integer bitmask before casting to float (`CIF`). Highly efficient for button state snapshots!
 
  |
 
@@ -518,3 +532,24 @@ while true do
     system.halt()
 end
 ```
+
+---
+
+## 11. Compiler quirks and assumptions
+
+While `v32lua` attempts  to be a functional lua compiler,  it by no means
+is  a full-to-specifications  implementation  of the  language. For  one,
+there's no bytecode virtual machine, nor interpreter.
+
+Further, there are some explicit  deviations to a standard implementation
+of the language to better suit the freestandingenvironment of Vircon32:
+
+  * `print()` requires, as its first two parameters, the `x` and `y` position on the screen.
+  * standalone `return` statements do not work (will generate a syntax error). Give it something (`nil`, 0, etc.) to make it happy.
+  * program execution starts in a required `main()` function. Not having a `main()` will lead to an error. Further, `main()` will automatically issue a `WAIT` before calling itself again, making it your natural game loop location. This is intended to be similar to other fantasy consoles (like the `TIC()` function in TIC-80 which is similarly required).
+
+Clearly,  this effort  is focused  on making  a tool  for development  on
+Vircon32, and not to be  some fully-compliant lua implementation. Efforts
+will  be made  to come  an  close as  is possible  and feasible,  without
+sacrificing significant performance  or veering away from  being the tool
+it is intended to be.
