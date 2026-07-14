@@ -11,34 +11,15 @@ it  to  Vircon32 assembly,  to  be  inserted  into the  typical  Vircon32
 cartridge-building pipeline  (just swapping out  the C compiler  for this
 lua compiler).
 
-NOTE: In  this project  I am  also actively making  use of  AI (currently
-Google's Gemini  (Thinking and Pro- Flash  doesn't seem up to  the task),
-available via  its search  engine and  gemini interfaces).  I'm basically
-making queries and  then going on deep  dives with it. This  is partly to
-acclimate myself with AI output patterns.
-
-I can't  say I'm too  surprised, beyond the  fact that since  I attempted
-some efforts  over the past few  years, at least at  present, Google's AI
-seems  to be  maintaining context  for me  a heck  of a  lot better  than
-AI's  I've interacted  with  in the  past. That  is  allowing for  longer
-interactions, where it remembers my constraints over time.
-
-It has certainly hallucinated, a  ton. While it demonstrates an awareness
-of Vircon32 and  its ecosystem, it also liberally  dishes out assumptions
-that just  aren't true (it  has called the  Vircon32 assembler by  half a
-dozen different  names since starting,  for instance), and while  it gets
-many assembly instructions correct, it also catastrophically falls short,
-especially in  relation to  comparisons. Since  I know  Vircon32 assembly
-rather well, that isn't a problem: I didn't want AI to write the assembly
-for me anyway, just help me bounce some ideas to code off it with respect
-to compiler logic.
-
 I chose lua as a target for my compiler efforts (in this iteration) for a
 couple reasons:
 
   - generally perceived as a lower-cost-of-entry language, making it more
     accessible to a broader audience
   - my experiences on TIC80 using lua seems like a neat parallel to draw
+  - perhaps it is just a coincidence, but many other fantasy consoles use
+    lua as their main coding language, so perhaps this will contribute to
+    Vircon32's accessibility by the broader fantasy console audience
 
 As I occasionally find myself doing Computer Science outreach events, and
 during such I  end up using TIC80  to walk a group through  a quick demo,
@@ -50,18 +31,25 @@ just how much more the AI has hallucinated than I realized.
 This has been a very rewarding, fun, and insightful experience. I've been
 wanting to attempt my own compiler (but TIME!); it is great to see all my
 reading paying off. I am also impressed  that I've been able to work with
-AI to actually produce something functional. I do feel that I have to say
-that I  did not write this  compiler: AI did. I  was more a senior  dev /
-manager, letting AI do all the  running around and grunt-work. I even let
-it  propose  and present  ideas  to  me that  I  signed  off on  or  gave
-direction. A different role than I  usually have played in my development
-efforts.
+AI to actually produce something functional so quickly.
 
-Simultaneously, I  also don't feel  as if I've  NOT been involved  or NOT
-engaged with the creation of this compiler. Perhaps that is adding to the
-inspiration: development  is happening, I'm  just not on  the groundlevel
-curating all the foundational details as I usually do. That is different,
-unfamiliar, but also not unwelcome.
+I  do feel  that I  have to  say that  I did  not exclusively  write this
+compiler:  AI use  was extensive.  I  was more  a senior  dev /  manager,
+letting  AI do  all the  running  around and  grunt-work. I  even let  it
+propose and present ideas to me that I signed off on or gave direction. A
+different role  than I usually have  played in my development  efforts. I
+certainly have been in and out of the code, implementing various features
+and edge cases  that I didn't want  to bother having AI  refactor code on
+and potentially drop  context and break what previously  worked (that did
+happen on more than  one occasion). But I must say I  am impressed that I
+was able  to use this  new tool to accomplish  a task within  a timeframe
+previously unthoughtof.
+
+Simultaneously,  I  also don't  feel  as  if  I've  NOT been  heavily  or
+centrally involved  or NOT  engaged with the  creation of  this compiler.
+Perhaps that is adding to  the inspiration: development is happening, I'm
+just not  on the groundlevel curating  all the foundational details  as I
+usually do. That is different, unfamiliar, but also not unwelcome.
 
 Interested in seeing this journey continue.
 
@@ -86,19 +74,21 @@ The usual `make clean` is also available.
 Compiled binary  will be stored  in the `bin/`  directory at the  base of
 this repository.
 
+There are various testing programs available, run `make tests` to compile
+them (with the lua compiler!)
+
+An extra check: "will it actually  assemble?" can be performed by running
+`make asmcheck`.
+
 ## lua compiler
 
 I  am pleased  to report  that  some good  progress has  been made.  This
-endeavour  seems to  work better  as  a partnership.  The AI  can NOT  be
-trusted  to manage  things  on its  own, yet,  when  given direction  and
-preference, seems  to be  handle task  to task  well. Over  time, context
-slips a bit  and it tries to rename  things on me, so one has  to stay on
-top of that.
+endeavour  seems to  work better  as a  partnership with  AI rather  than
+viewing it merely as a tool.
 
-But:  I  have a  working  program.  It takes  lua  source  and spits  out
-increasingly  capable  Vircon32 assembly  on  the  other side,  including
-Vircon32  assembly  that the  official  assembler  can assemble  to  VBIN
-format!
+I have a working program. It  takes lua source and spits out increasingly
+capable Vircon32 assembly on the  other side, including Vircon32 assembly
+that the official assembler can assemble to VBIN format!
 
 Currently  working  on  many   language  basics:  declaring  and  setting
 variables,  dealing  with  global  vs local  (lookup  and  whatnot).  The
@@ -107,12 +97,16 @@ Quite impressively, I  not only got `lua` tables going,  but seem to have
 functions  as a  first class  citizen, allowing  some manner  of OOP-like
 transactions to happen (I basically have function pointers).
 
-There are many things still missing.  Just today I realized I hadn't even
-gotten around  to basic  arithmetic ('+'  now works, but  it is  the only
-thing that is hooked up).
+There are many things still missing. Probably even many basic things (for
+loops are  not yet  implemented, for  instance). At  this point  in time,
+consider this a  technical demo. Functional within the  domain of support
+that  exists. I  certainly have  targeted features  that should  enable a
+simple pong-like or snake-like game to be possible.
 
-Absolutely no IOPort stuff has yet  been implemented (although I am eager
-to explore the implementation).
+A nice feature  I quite enjoy is  how I integrated the  IOPorts into lua,
+via  function  and variable  intrinsics.  You  have this  namespace  with
+various values  hanging off of it.  The compiler checks for  these values
+and drops in the corresponding assembly language.
 
 ### operational features
 
@@ -145,6 +139,9 @@ compiler:
     * `--[[` through `--]]` standard multi-line lua comment
     * `--@` transpositional single comment (pass comment through to assembly output)
     * `--@[[` through `--]]` transpositional multi-line comment
+  * CART hints (compiler will produce an XML file)
+    * `--#title "V32 CART TITLE"`
+    * `--#texture background background.png`
   * inline assembly (two variants):
     * `__asm__("newline-delimited list of instructions")`
       * this is a "safe mode" or "bubble" inline assembly, where the full register array
@@ -155,13 +152,13 @@ compiler:
     * both should support lua variable referencing via `{`/`}`
       * although, still needs to be tested
   * `print()` built-in function
+    * takes x and y value as first two arguments
     * basic output
-    * buffers up to 16 lines to display on the screen
-    * still needs work (does not currently display)
   * IOPorts and related built-in functions / tables:
     * ioports.gpu.texture - treat as a variable you can read and write to, will transact GPU_SelectedTexture
       * tested and works
     * ioports.gpu.clear() - pass in a color to clear the screen (or empty will use current GPU_ClearColor)
+    * the full gamut of INP ports, and additional GPU ports to basically allow for sprites and screen drawing
 
 ## NaN-boxing scheme
 
@@ -224,28 +221,6 @@ the dynamic types Lua needs perfectly:
 | 0, 1 | String   | 22-bit RAM Pointer |
 | 1, 0 | Function | 22-bit RAM Pointer / Code Address |
 | 1, 1 | Special  |  0 = Nil, 1 = False, 2 = True |
-
-
-### IOPorts in lua: an idea
-
-I  think  what  I might  want  to  do  is  to create  (on  initialization
-bootstrap- external of any user-supplied  code), a lua table that creates
-an  IOPort structure,  with the  necessary fiddling  to make  the various
-`IN`s and `OUT`s happen.
-
-I am envisioning either:
-
-  * ioports base table
-    * tim, rng, gpu, spu, inp, car, and mem sub-table
-      * variables and functions within each
-
-or:
-
-  * drop the `ioports` base table
-
-So,     potentially:     `ioports.gpu.xpos`    or     `gpu.xpos`     (for
-`GPU_DrawingPointX`), which  can be read or  written to in the  usual lua
-manners.
 
 ### main() function
 
