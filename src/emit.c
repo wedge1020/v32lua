@@ -1,5 +1,129 @@
 #include "v32lua.h"
 
+#include <stdarg.h>
+#include <string.h>
+#include <ctype.h>
+
+void emit_asm(const char *format, ...) {
+    char raw_buf[1024];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(raw_buf, sizeof(raw_buf), format, args);
+    va_end(args);
+
+    // 1. Strip trailing newlines/carriage returns for safe parsing
+    size_t len = strlen(raw_buf);
+    while (len > 0 && (raw_buf[len - 1] == '\n' || raw_buf[len - 1] == '\r')) {
+        raw_buf[--len] = '\0';
+    }
+
+    // Handle pure empty lines safely without disturbing debug track counts
+    if (len == 0) {
+        fprintf(out(), "\n");
+        return;
+    }
+
+    // 2. PARTITIONING: Isolate the first semicolon to isolate Code from Comments
+    char *comment_ptr = strchr(raw_buf, ';');
+    char code_buf[1024] = {0};
+
+    if (comment_ptr != NULL) {
+        size_t code_len = comment_ptr - raw_buf;
+        strncpy(code_buf, raw_buf, code_len);
+        code_buf[code_len] = '\0';
+    } else {
+        strcpy(code_buf, raw_buf);
+    }
+
+    // Trim whitespace borders from the code space
+    char *code_end = code_buf + strlen(code_buf);
+    while (code_end > code_buf && isspace((unsigned char)*(code_end - 1))) {
+        *(--code_end) = '\0';
+    }
+    char *code_start = code_buf;
+    while (*code_start && isspace((unsigned char)*code_start)) {
+        code_start++;
+    }
+
+    // Flag used to signal if this line updates our debug instruction mapping
+    bool record_instruction = false;
+
+    // --- CASE A: Pure Comment Line ---
+    if (*code_start == '\0' && comment_ptr != NULL) {
+        // Print the comment exactly as written, preserving manual layout
+        fprintf(out(), "%s\n", raw_buf);
+    }
+    // --- CASE B: Assembly Label ---
+    // Colon immunity achieved: we only scan the isolated code string code_start!
+    else if (strchr(code_start, ':') != NULL) {
+        record_instruction = true;
+        if (comment_ptr != NULL) {
+            fprintf(out(), "%-16s %s\n", code_start, comment_ptr);
+        } else {
+            fprintf(out(), "%s\n", code_start);
+        }
+    }
+    // --- CASE C: Standard Instruction ---
+    else {
+        record_instruction = true;
+        char *opcode = code_start;
+        char *operands = NULL;
+        char *first_space = strpbrk(opcode, " \t");
+
+        if (first_space != NULL) {
+            *first_space = '\0'; // Terminate opcode string token
+            operands = first_space + 1;
+            while (*operands && isspace((unsigned char)*operands)) {
+                operands++; // Advance to the start of the operands
+            }
+        }
+
+        // Apply auto-formatting: 4-space indent, 5-char left-aligned opcode width
+        fprintf(out(), "    %-5s", opcode);
+
+        if (operands != NULL && *operands != '\0') {
+            fprintf(out(), " %s", operands);
+        }
+
+        // Append manual comment while accurately evaluating manual pre-padding
+        if (comment_ptr != NULL) {
+            size_t raw_comment_offset = comment_ptr - raw_buf;
+            size_t code_length = (operands ? (operands - code_buf) + strlen(operands) : strlen(opcode));
+
+            int spaces_to_pad = (int)(raw_comment_offset - code_length);
+            if (spaces_to_pad < 1) spaces_to_pad = 1;
+
+            for (int i = 0; i < spaces_to_pad; i++) {
+                fputc(' ', out());
+            }
+            fprintf(out(), "%s", comment_ptr);
+        }
+        fprintf(out(), "\n");
+    }
+
+    // =========================================================================
+    // SECTION 2: INTEGRATED DEBUG REGISTRATION HOOK
+    // =========================================================================
+    // Only instructions and labels count towards our active program sequence line calculations.
+    if (g_debug_mode && record_instruction && temp_debug_stream != NULL)
+    {
+        if (g_current_label[0] != '\0')
+        {
+            // Log entry point step-vector with its functional label context
+            fprintf(temp_debug_stream, "%d,%d,%s\n", g_temp_asm_line, g_current_lua_line, g_current_label);
+            g_current_label[0] = '\0'; // Reset label cache once committed
+        }
+        else
+        {
+            // Log regular operational line steps
+            fprintf(temp_debug_stream, "%d,%d\n", g_temp_asm_line, g_current_lua_line);
+        }
+
+        g_temp_asm_line++; // Move tracking position down by one assembly entry
+    }
+}
+
+/*
 void emit_asm (const char *format, ...)
 {
     va_list args;
@@ -36,6 +160,7 @@ void emit_asm (const char *format, ...)
         }
     }
 }
+*/
 
 /*
 void  emit_asm (const char *format, ...)
