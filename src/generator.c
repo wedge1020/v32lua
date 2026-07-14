@@ -930,9 +930,7 @@ void generate_program (ASTNode *head)
 
     // Write Headers and meticulously calculate the exact offset
     fprintf (out(), ";; --- System Constants ---\n"); final_line_offset++;
-    fprintf (out(), "%%define term_ypos    0\n");      final_line_offset++;
-    fprintf (out(), "%%define term_history 1\n");      final_line_offset++;
-    fprintf (out(), "%%define heap_pointer 18\n");     final_line_offset++;
+    fprintf (out(), "%%define heap_pointer 0\n");     final_line_offset++;
 
     fprintf (out(), "\n;; --- Global Variable RAM Map ---\n"); final_line_offset += 2;
     
@@ -1112,9 +1110,7 @@ void generate_program (ASTNode *head)
 
     // 5. Emit headers and the NOW-COMPLETE variable map!
     fprintf (out(), ";; --- System Constants ---\n");
-    fprintf (out(), "%%define term_ypos    0\n");
-    fprintf (out(), "%%define term_history 1\n");
-    fprintf (out(), "%%define heap_pointer 18\n");
+    fprintf (out(), "%%define heap_pointer 0\n");
 
     fprintf (out(), "\n;; --- Global Variable RAM Map ---\n");
     emit_variable_map (); // Both func_ AND var_ will now print correctly!

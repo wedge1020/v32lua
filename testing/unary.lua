@@ -3,38 +3,63 @@
 -- =========================================================
 
 function main()
-	print("--- 1. UNARY MINUS (-) ---")
-	local x = 42
-	local y = -x
-	print(y)             -- Expected: -42 (Variable negation)
-	print(-0)            -- Expected: 0 or -0 (IEEE 754 sign flip test)
-	print(-(-987))       -- Expected: 987 (Double negation)
-	print(-(10 + 15))    -- Expected: -25 (Expression negation)
+	local y = 0
+	print(0, y, "--- 1. UNARY MINUS (-) ---")
+	y = y + 20
+	local a = 42
+	local b = -x
+	print(0, y, b)             -- Expected: -42 (Variable negation)
+	y = y + 20
+	print(0, y, -0)            -- Expected: 0 or -0 (IEEE 754 sign flip test)
+	y = y + 20
+	print(0, y, -(-987))       -- Expected: 987 (Double negation)
+	y = y + 20
+	print(0, y, -(10 + 15))    -- Expected: -25 (Expression negation)
+	y = y + 20
 
-	print("--- 2. LOGICAL NOT (not) ---")
+	print(0, y, "--- 2. LOGICAL NOT (not) ---")
+	y = y + 20
 	-- In Lua, ONLY false and nil are falsy! Everything else is truthy.
-	print(not false)     -- Expected: true
-	print(not nil)       -- Expected: true
-	print(not not false) -- Expected: false (Double not)
+	print(0, y, not false)     -- Expected: true
+	y = y + 20
+	print(0, y, not nil)       -- Expected: true
+	y = y + 20
+	print(0, y, not not false) -- Expected: false (Double not)
+	y = y + 20
 
-	print("--- 3. TRUTHINESS EDGE CASES ---")
+	print(0, y, "--- 3. TRUTHINESS EDGE CASES ---")
+	y = y + 20
 	-- Testing that numbers and strings are evaluated as truthy
-	print(not true)      -- Expected: false
-	print(not 0)         -- Expected: false (0 is truthy in Lua!)
-	print(not -1)        -- Expected: false
-	print(not "hello")   -- Expected: false (Strings are truthy!)
+	print(0, y, not true)      -- Expected: false
+	y = y + 20
+	print(0, y, not 0)         -- Expected: false (0 is truthy in Lua!)
+	y = y + 20
+	print(0, y, not -1)        -- Expected: false
+	y = y + 20
+	print(0, y, not "hello")   -- Expected: false (Strings are truthy!)
+	y = y + 20
 
-	print("--- 4. LENGTH OPERATOR (#) ---")
+	y = 0
+	print(320, y, "--- 4. LENGTH OPERATOR (#) ---")
+	y = y + 20
 	local str = "Vircon32"
-	print(#str)          -- Expected: 8
-	print(#"")           -- Expected: 0 (Empty string literal)
-	print(#("Super" .. "CPU")) -- Expected: 8 (If concat is enabled, otherwise test variable)
+	print(320, y, #str)          -- Expected: 8
+	y = y + 20
+	print(320, y, #"")           -- Expected: 0 (Empty string literal)
+	y = y + 20
+	print(320, y, #("Super" .. "CPU")) -- Expected: 8 (If concat is enabled, otherwise test variable)
+	y = y + 20
 
-	print("--- 5. COMBINED UNARY LOGIC ---")
+	print(320, y, "--- 5. COMBINED UNARY LOGIC ---")
+	y = y + 20
 	-- Combining them into complex expressions
 	local val = -50
-	print(not (val == -50)) -- Expected: false
-	print(-( #str ))        -- Expected: -8 (Negating a length result)
+	print(320, y, not (val == -50)) -- Expected: false
+	y = y + 20
+	print(320, y, -( #str ))        -- Expected: -8 (Negating a length result)
+	y = y + 20
 
-	print("--- UNARY TESTS COMPLETE ---")
+	print(320, y, "--- UNARY TESTS COMPLETE ---")
+
+	system.halt()
 end

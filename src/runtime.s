@@ -342,114 +342,40 @@ __strcat_finish:
 ;; Built-in: Print to Terminal 
 ;; Incoming Stack: [BP+2] = Tagged String Pointer 
 ;; -------------------------------------------------------------------------------------
+;; -------------------------------------------------------------------------------------
+;; Built-in: Direct Print to Screen at Coordinate (x, y)
+;; Incoming Stack: [BP+4] = X Coordinate, [BP+3] = Y Coordinate, [BP+2] = Tagged String
+;; -------------------------------------------------------------------------------------
 __builtin_print:
     PUSH BP 
     MOV  BP, SP 
 
-    ;; Initialize GPU Texture/Region state (back up existing, set to BIOS)
-    IN   R5, GPU_SelectedTexture ; save current texture 
-    IN   R6, GPU_SelectedRegion  ; save current region 
-    OUT  GPU_SelectedTexture, -1 ; set BIOS texture 
+    ;; 1. Initialize GPU Texture/Region state (back up existing, set to BIOS)
+    IN   R5, GPU_SelectedTexture ; save current texture
+    IN   R6, GPU_SelectedRegion  ; save current region
+    OUT  GPU_SelectedTexture, -1 ; set BIOS font texture
     
-    ;; 1. Get String and Unbox 
-    MOV  R1, [BP+2]          ; R1 = Tagged String 
-    AND  R1, 0x003FFFFF      ; UNBOX: Get raw pointer 
+    ;; 2. Load Parameters and Unbox String
+    MOV  R1, [BP+4]          ; R1 = X Pixel Coordinate (Integer)
+    MOV  R2, [BP+3]          ; R2 = Y Pixel Coordinate (Integer)
+    MOV  R3, [BP+2]          ; R3 = Tagged String Pointer
+    AND  R3, 0x003FFFFF      ; UNBOX: Isolate 22-bit raw heap pointer
     
-    ;; 2. Check Cursor Y 
-    MOV  R2, [term_ypos] 
-    ILT  R2, 16 
-    JT   R2, __print_append  ; If < 16, just append 
+    ;; 3. Pass Arguments and Draw via BIOS Text Routine
+    ;; __bios_print_text expects: [BP+4]=String, [BP+3]=Y, [BP+2]=X
+    PUSH R3                  ; Push Unboxed Raw String Pointer
+    PUSH R2                  ; Push Y Coordinate
+    PUSH R1                  ; Push X Coordinate[cite: 11]
+    CALL __bios_print_text   ; Draw the string directly to the GPU screen[cite: 11]
+    ISUB SP, 3               ; Clean up arguments from stack[cite: 11]
 
-    ;; 3. Scroll History (Shift Array Up: drop index 0 and move 1-15 up) 
-__print_scroll:
-    MOV  R3, term_history 
-    MOV  R4, term_history 
-    IADD R4, 1               ; R4 points to index 1 
-    MOV  R5, 15              ; Loop 15 times 
-    
-__print_scroll_loop:
-    MOV  R6, [R4]            ; Read from N+1 
-    MOV  [R3], R6            ; Write to N 
-    IADD R3, 1 
-    IADD R4, 1 
-    ISUB R5, 1 
-    IGT  R5, 0 
-    JT   R5, __print_scroll_loop 
-    
-    ;; Set Y index to 15 to overwrite the bottom line 
-    MOV  R2, 15 
-    JMP  __print_insert 
-
-    ;; 4. Append to History 
-__print_append:
-    MOV  R3, R2              ; Store old Y to R3 
-    IADD R2, 1 
-    MOV  [term_ypos], R2     ; Increment Y pos 
-    MOV  R2, R3              ; Restore index for insertion 
-
-    ;; 5. Insert New String Pointer 
-__print_insert:
-    MOV  R3, term_history 
-    IADD R3, R2              ; term_history + current_y 
-    MOV  [R3], R1            ; Save raw string pointer to history 
-
-    ;; 6. Trigger Screen Redraw 
-    CALL __term_redraw 
-
-    ;; Restore previous texture and region 
-    OUT  GPU_SelectedTexture, R5 ; restore previous texture 
-    OUT  GPU_SelectedRegion, R6  ; restore previous region 
+    ;; 4. Restore previous GPU texture and region[cite: 11]
+    OUT  GPU_SelectedTexture, R5 ; restore previous texture[cite: 11]
+    OUT  GPU_SelectedRegion, R6  ; restore previous region[cite: 11]
     
     MOV  SP, BP 
     POP  BP 
-    RET 
-
-;; -------------------------------------------------------------------------------------
-;; Built-in: Redraw Terminal (Clears screen and redraws strings in term_history) 
-;; -------------------------------------------------------------------------------------
-__term_redraw:
-    PUSH BP 
-    MOV  BP, SP 
-
-    ;; 1. Clear the screen via BIOS 
-    CALL __bios_clear_screen 
-
-    ;; 2. Initialize Loop Variables 
-    MOV  R1, 0               ; R1 = Current Y Index (0 to 15) 
-    MOV  R2, term_history    ; R2 = Pointer to history array 
-
-    ;; 3. The Rendering Loop Boundary Check 
-__term_redraw_loop:
-    MOV  R3, [term_ypos] 
-    IGE  R1, R3 
-    JT   R1, __term_redraw_done ; If Index >= term_ypos, we are done 
-    MOV  R6, 0
-
-    ;; 4. Calculate Y Pixel Position (Index * 20 pixels per line) 
-    MOV  R4, R1 
-    IMUL R4, 20              ; R4 = Y Pixel Coordinate 
-
-    ;; 5. Get the String Pointer for this Line 
-    MOV  R5, [R2]            ; R5 = Raw String Pointer 
-
-    ;; 6. Draw the String via BIOS 
-    PUSH R5                  ; Push String Pointer 
-    PUSH R4                  ; Push Y Position 
-    PUSH R6                  ; Push X Position (position of 0) 
-    CALL __bios_print_text   ; Draw the string to the GPU 
-    ISUB SP, 3               ; Clean up arguments 
-
-    ;; 7. Advance to Next Line 
-    IADD R1, 1               ; Increment Y Index 
-    IADD R2, 1               ; Advance history pointer 
-    JMP  __term_redraw_loop 
-
-__term_redraw_done:
-
-    MOV  SP, BP 
-    POP  BP 
-    RET 
-
+    RET
 
 ;; =====================================================================================
 ;; SECTION 4: CORE OPERATORS & TYPE UTILITIES
@@ -764,7 +690,6 @@ __builtin_unm:
     POP  BP 
     RET 
 
-
 ;; =====================================================================================
 ;; SECTION 5: BIOS & HARDWARE SUPPORT ROUTINES
 ;; =====================================================================================
@@ -778,41 +703,28 @@ __bios_print_text:
     MOV  BP, SP 
 
     ;; Load Parameters from Stack 
-    MOV  R1, [BP+2]          ; R1 = X Pixel Coordinate (Integer) 
-    MOV  R2, [BP+3]          ; R2 = Y Pixel Coordinate (Integer) 
-    MOV  R3, [BP+4]          ; R3 = Raw Heap Offset to ASCII String (Unboxed) 
+    MOV  R1, [BP+2]              ; R1 = X Pixel Coordinate (Integer) 
+    MOV  R2, [BP+3]              ; R2 = Y Pixel Coordinate (Integer) 
+    MOV  R3, [BP+4]              ; R3 = Raw Heap Offset to ASCII String (Unboxed) 
 
 __bios_print_loop:
-    MOV  R4, [R3]            ; Read character from string memory 
-    IEQ  R4, 0               ; Check for null terminator 
+    MOV  R4, [R3]                ; Read character from string memory 
+    OUT  GPU_SelectedRegion, R4  ; set character to display 
+    IEQ  R4, 0                   ; Check for null terminator 
     JT   R4, __bios_print_done 
 
     ;; Display character to screen 
-    OUT  GPU_SelectedRegion, R3  ; set character to display 
     OUT  GPU_DrawingPointX, R1   ; display at X 
     OUT  GPU_DrawingPointY, R2   ; display at Y 
     OUT  GPU_Command, GPUCommand_DrawRegion ; display to screen 
     
     ;; Advance to next character and increment X coordinate 
-    IADD R3, 1               ; Next char word in memory 
-    IADD R1, 10              ; Advance X by font width (e.g., 10 pixels) 
+    IADD R3, 1                   ; Next char word in memory 
+    IADD R1, 10                  ; Advance X by font width (e.g., 10 pixels) 
     JMP  __bios_print_loop 
 
 __bios_print_done:
 
-    MOV  SP, BP 
-    POP  BP 
-    RET 
-
-;; -------------------------------------------------------------------------------------
-;; __bios_clear_screen: Clears the GPU display screen 
-;; -------------------------------------------------------------------------------------
-__bios_clear_screen:
-    PUSH BP 
-    MOV  BP, SP 
-
-    OUT  GPU_Command, GPUCommand_ClearScreen 
-    
     MOV  SP, BP 
     POP  BP 
     RET 

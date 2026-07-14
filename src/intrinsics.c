@@ -48,17 +48,56 @@ static void  emit_system_halt_intrinsic ()
 // --- Static Helper Functions for Complex Calls ---
 // ============================================================================
 
-static void emit_print_intrinsic(ASTNode *node) {
-    int arg_reg = allocate_register();
-    generate_asm(node->as.call.args_head, arg_reg);
-    
-    emit_asm("    PUSH R%d\n", arg_reg);
-    emit_asm("    CALL __builtin_tostring\n"); // Coerce to string
-    emit_asm("    MOV  [SP], R0\n");           // Replace arg with coerced string
-    emit_asm("    CALL __builtin_print\n");    // Print it
-    emit_asm("    ISUB SP, 1\n");              // Clean up stack
-    
-    unlock_register(arg_reg);
+static void  emit_print_intrinsic (ASTNode *node)
+{
+    // 1. Extract the 3 positional arguments from the argument linked list
+    ASTNode *arg_x   = node->as.call.args_head;
+    ASTNode *arg_y   = (arg_x != NULL) ? arg_x->next : NULL;
+    ASTNode *arg_val = (arg_y != NULL) ? arg_y->next : NULL;
+
+    // Basic semantic validation to protect against malformed user scripts
+    if (arg_x == NULL || arg_y == NULL || arg_val == NULL) {
+        compiler_error(ERR_SEMANTIC, node->line_number, 
+                       "print() intrinsic requires 3 arguments: print(x, y, value)");
+    }
+
+    // 2. Allocate registers and evaluate each argument expression
+    int reg_x = allocate_register();
+    generate_asm(arg_x, reg_x);
+
+    int reg_y = allocate_register();
+    generate_asm(arg_y, reg_y);
+
+    int reg_val = allocate_register();
+    generate_asm(arg_val, reg_val);
+
+    emit_asm("    ;; --- Intrinsic: print(x, y, value) ---\n");
+
+    // 3. Convert text coordinates from Lua Floats to Hardware Integers
+    // Because all numbers in your compiler are floats, we must cast 
+    // screen spaces using the Vircon32 'CFI' (Cast Float to Integer) instruction.
+    emit_asm("    CFI R%d ; Convert X to hardware integer\n", reg_x);
+    emit_asm("    CFI R%d ; Convert Y to hardware integer\n", reg_y);
+
+    // 4. Push arguments to the stack (Left-to-Right layout)
+    emit_asm("    PUSH R%d ; Push X coordinate\n", reg_x);
+    emit_asm("    PUSH R%d ; Push Y coordinate\n", reg_y);
+    emit_asm("    PUSH R%d ; Push raw value to convert\n", reg_val);
+
+    // 5. Coerce the value to a string pointer
+    // Because value was pushed last, it is safely resting on top of the stack [SP].
+    // __builtin_tostring will process it and return the string address in R0.
+    emit_asm("    CALL __builtin_tostring\n"); 
+    emit_asm("    MOV  [SP], R0 ; Overwrite raw value with the string pointer\n");
+
+    // 6. Fire the printing routine and tear down the stack frame
+    emit_asm("    CALL __builtin_print\n");    
+    emit_asm("    ISUB SP, 3 ; Clean up x, y, and string from the stack\n");
+
+    // 7. Unlock registers back to the compiler pool
+    unlock_register(reg_val);
+    unlock_register(reg_y);
+    unlock_register(reg_x);
 }
 
 static void emit_gpu_draw_intrinsic(ASTNode *node, int dest_reg) {
