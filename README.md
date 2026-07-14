@@ -1,6 +1,6 @@
 # v32lua: Vircon32 Lua Compiler
 
-[Spanish version / en español](README.es.md)
+[Spanish version / en español](README.es.md) | [Dutch version / Nederlandse versie](README.nl.md)
 
 **Target Architecture:** Vircon32 Fantasy Console (32-bit)
 

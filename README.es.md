@@ -1,6 +1,6 @@
 # v32lua: Compilador de Lua para Vircon32
 
-[English version / Versión en inglés](README.md)
+[English version / Versión en inglés](README.md) | [Dutch version / versión neerlandesa](README.nl.md)
 
 **Arquitectura Objetivo:** Consola de Fantasía Vircon32 (32 bits)
 
