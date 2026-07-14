@@ -7,7 +7,7 @@ extern const char runtime_asm_start[];
 void  emit_cart_xml (const char *, int);
 void  emit_interpolated_asm (const char *);
 void  emit_string_data_section (void);
-void  emit_variable_map (void);
+int   emit_variable_map (void);
 void  emit_runtime_library (void);
 void  emit_asm (const char *, ...);
 void  emit_truthy_jump (int, const char *);

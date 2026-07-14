@@ -6,15 +6,15 @@ extern char  last_emitted_dest[128];
 extern char  last_emitted_src[128];
 
 // Debug flags set by your main argument parser (e.g., main.c)
-int         g_debug_mode   = 0;    // Set to 1 if -g is passed
-const char *g_asm_filename = NULL; // Pointer to output filename (e.g., "main.asm")
-const char *g_lua_filename = NULL; // Pointer to input filename (e.g., "main.lua")
+extern bool  g_debug_mode;    // Set to 1 if -g is passed
+extern const char *g_asm_filename; // Pointer to output filename (e.g., "main.asm")
+extern const char *g_lua_filename; // Pointer to input filename (e.g., "main.lua")
 
 // State tracking variables used during AST code generation
-int   g_temp_asm_line    = 1;  // Tracks current relative line inside the temp buffer
-int   g_current_lua_line = 0;  // Tracks active source line being evaluated
-char  g_current_label[256] = ""; // Captures a label for the current line
-FILE *temp_debug_stream  = NULL; // Temporary buffer for tracking debug lines
+extern int   g_temp_asm_line;  // Tracks current relative line inside the temp buffer
+extern int   g_current_lua_line;  // Tracks active source line being evaluated
+extern char  g_current_label[256]; // Captures a label for the current line
+extern FILE *temp_debug_stream; // Temporary buffer for tracking debug lines
 
 FILE *out (void);
 void  set_output_stream(FILE* stream);

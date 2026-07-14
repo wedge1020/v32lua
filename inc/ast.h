@@ -20,6 +20,7 @@ struct cart_resource
 //
 typedef struct astnode {
     NodeType type;
+	int  line_number;
     struct astnode* next; // Sibling pointer for statements in a block
 
     union {
@@ -114,6 +115,7 @@ extern char cart_title[128];
 extern CARTresource *textures_head;
 extern CARTresource *sounds_head;
 extern int next_texture_id;
+extern int yylineno;
 
 ////////////////////////////////////////////////////////////////////////////////////////
 //

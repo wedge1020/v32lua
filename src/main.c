@@ -28,25 +28,32 @@ extern ASTNode *root_node; // Ensure your bison grammar exports the root AST nod
 extern FILE *yyin;
 extern int yydebug;
 
+static void  print_version (const char *prog_name)
+{
+    fprintf (stdout, "%s %s\n", prog_name, VERSION);
+    fprintf (stdout, "Lua Compiler for Vircon32 (v32lua) by %s\n", AUTHOR);
+    fprintf (stdout, "  github: %s\n", URL);
+}
+
 static void  print_usage (const char *prog_name)
 {
-    fprintf (stdout, "v32lua Lua Compiler for Vircon32 (v32lua)\n");
+    fprintf (stdout, "Lua Compiler for Vircon32 (%s)\n", prog_name);
     fprintf (stdout, "USAGE: %s [options] file\n", prog_name);
     fprintf (stdout, "Options:\n");
     fprintf (stdout, "  --help       Displays this information\n");
     fprintf (stdout, "  --version    Displays compiler version\n");
-    fprintf (stdout, "  --debugmode  Creates files with results of internal stages\n");
+    //fprintf (stdout, "  --debugmode  Creates files with results of internal stages\n");
     fprintf (stdout, "  -o <file>    Output file, default name is the same as input\n");
     //fprintf (stdout, "  -b           Compiles the program as a BIOS\n");
     fprintf (stdout, "  -v           Displays additional information (verbose)\n");
     fprintf (stdout, "  -g           Outputs an additional file with debug info\n");
-    fprintf (stdout, "  -w           Inhibit all warnings\n");
-    fprintf (stdout, "  -Wall        Enable all warnings\n");
+    //fprintf (stdout, "  -w           Inhibit all warnings\n");
+    //fprintf (stdout, "  -Wall        Enable all warnings\n");
 }
 
 static void log_stage(int stage_num, const char* stage_name, int verbose) {
     if (verbose)
-	{
+    {
         fprintf (stdout, "stage %d: running %s\n", stage_num, stage_name);
     }
 }
@@ -65,8 +72,13 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
             strncpy(output_filename, argv[++i], sizeof(output_filename) - 1);
+        } else if (strcmp(argv[i], "-g") == 0) {
+            g_debug_mode = true;
         } else if (strcmp(argv[i], "--verbose") == 0 || strcmp(argv[i], "-v") == 0) {
             verbose = 1;
+        } else if (strcmp(argv[i], "--version") == 0) {
+            print_version(argv[0]);
+            return 0;
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             print_usage(argv[0]);
             return 0;
@@ -93,6 +105,9 @@ int main(int argc, char** argv) {
             strcat(output_filename, ".asm");
         }
     }
+
+    g_lua_filename = input_filename;
+    g_asm_filename = output_filename;
 
     // --- Stage 1: Lexer Setup ---
     log_stage(1, "lexer", verbose);

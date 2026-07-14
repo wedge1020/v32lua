@@ -46,11 +46,11 @@ static void emit_gpu_draw_intrinsic(ASTNode *node, int dest_reg) {
 
     if (arg != NULL && arg->type == NODE_STRING) {
         const char *drawtype = arg->as.string_val.value;
-        if (strcasecmp(drawtype, "zoom") == 0)
+        if (strcmp(drawtype, "zoom") == 0)
             emit_asm("    OUT GPU_Command, GPUCommand_DrawRegionZoomed\n");
-        else if (strcasecmp(drawtype, "rotate") == 0)
+        else if (strcmp(drawtype, "rotate") == 0)
             emit_asm("    OUT GPU_Command, GPUCommand_DrawRegionRotated\n");
-        else if (strcasecmp(drawtype, "rotozoom") == 0)
+        else if (strcmp(drawtype, "rotozoom") == 0)
             emit_asm("    OUT GPU_Command, GPUCommand_DrawRegionRotozoomed\n");
         else
             emit_asm("    OUT GPU_Command, GPUCommand_DrawRegion\n");
@@ -135,9 +135,9 @@ int try_emit_table_set_intrinsic(ASTNode *node) {
     char full_path[512];
     snprintf(full_path, sizeof(full_path), "%s.%s", base_path, node->as.table_set.key->as.string_val.value);
 
-    // Clean table lookup replaces all your repetitive strcasecmp blocks!
+    // Clean table lookup replaces all your repetitive strcmp blocks!
     for (int i = 0; gpu_ports[i].lua_path != NULL; i++) {
-        if (strcasecmp(full_path, gpu_ports[i].lua_path) == 0) {
+        if (strcmp(full_path, gpu_ports[i].lua_path) == 0) {
             int val_reg = allocate_register();
             generate_asm(node->as.table_set.value, val_reg);
 
@@ -164,7 +164,7 @@ int try_emit_table_get_intrinsic(ASTNode *node, int dest_reg) {
     snprintf(full_path, sizeof(full_path), "%s.%s", base_path, node->as.table_get.key->as.string_val.value);
 
     for (int i = 0; gpu_ports[i].lua_path != NULL; i++) {
-        if (strcasecmp(full_path, gpu_ports[i].lua_path) == 0) {
+        if (strcmp(full_path, gpu_ports[i].lua_path) == 0) {
             if (dest_reg != 0) {
                 emit_asm("    ;; --- Intrinsic: Read Hardware Integer ---\n");
                 emit_asm("    IN R%d, %s\n", dest_reg, gpu_ports[i].asm_port);

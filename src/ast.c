@@ -12,6 +12,7 @@ ASTNode *make_node (NodeType type)
     ASTNode* n = (ASTNode*)calloc(1, sizeof(ASTNode));
     n->type = type;
     n->next = NULL;
+	n->line_number = yylineno;
     return n;
 }
 

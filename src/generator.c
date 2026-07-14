@@ -1,5 +1,14 @@
 #include "v32lua.h"
 
+// Allocate storage for the global variables exactly once
+bool g_debug_mode = false;
+const char *g_asm_filename = NULL;
+const char *g_lua_filename = NULL;
+int g_temp_asm_line        = 0;      // Adjust buffer size to match your project's original size
+int g_current_lua_line = 0;
+char g_current_label[256];      // Adjust buffer size to match your project's original size
+FILE *temp_debug_stream = NULL;
+
 // Private to this module; cannot be accidentally modified by other files
 static FILE *active_out_stream = NULL;
 
@@ -237,7 +246,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
 				if (g_debug_mode)
 				{
 					// Register the label so emit_asm catches it on the very next line write
-					snprintf (g_current_label, sizeof (g_current_label), "func_%s", node -> string_value);
+					snprintf (g_current_label, sizeof (g_current_label), "func_%s", func_name);
 				}
 
                 ////////////////////////////////////////////////////////////////////////
@@ -871,7 +880,7 @@ void generate_program (ASTNode *head)
 {
     ASTNode *current            = NULL;
     int      globals_need_stack = 0;
-    int      temp_reg           = -1;  
+    //int      temp_reg           = -1;  
     char     buffer[1024];
     char    *check              = NULL;
     int final_line_offset = 0; 
@@ -981,7 +990,7 @@ void generate_program (ASTNode *head)
     }
 }
 // <----
-
+/*
 void generate_program (ASTNode *head)
 {
     ASTNode *current            = NULL;
@@ -1075,4 +1084,4 @@ void generate_program (ASTNode *head)
     // 7. Append trailing sections
     emit_runtime_library ();
     emit_string_data_section ();
-}
+}*/
