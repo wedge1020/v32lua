@@ -794,7 +794,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
     }
 }
 
-void generate_global_setup (ASTNode *node, int globals_need_stack)
+void generate_global_setup (ASTNode *node)
 {
     // 1. Emit the section header and entry label
     emit_asm ("\n; --- Global Variable & Runtime Initialization ---\n");
@@ -884,7 +884,7 @@ void generate_program (ASTNode *head)
         current = current->next;
     }
 
-    generate_global_setup (head, globals_need_stack);
+    generate_global_setup (head);
 
     // Restore output back to your final target file
     set_output_stream(final_out_stream);

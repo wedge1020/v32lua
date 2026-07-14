@@ -24,7 +24,7 @@ int   resolve_static_path (ASTNode *, char *);
 int   check_needs_stack (ASTNode *);
 void  generate_block (ASTNode *);
 void  generate_asm (ASTNode *, int);
-void  generate_global_setup (ASTNode *, int);
+void  generate_global_setup (ASTNode *);
 void  generate_functions (ASTNode *);
 void  generate_program (ASTNode *);
 
