@@ -885,7 +885,10 @@ void generate_program (ASTNode *head)
     // ... all your emit_asm calls execute and populate both temp streams ...
     emit_asm (";; --- Compiled Code Entry Vector ---\n");
     emit_asm ("CALL __init_globals  ; Run top-level setups first\n");
+    emit_asm ("__start:\n");
     emit_asm ("CALL __function_main ; Then hand control to the user\n");
+    emit_asm ("WAIT\n");
+    emit_asm ("JMP __start\n");
     emit_asm ("HLT                  ; Halt CPU when main finishes\n");
 
     emit_asm ("\n;; --- Function Definitions ---\n");

@@ -1,4 +1,5 @@
 function main()
+	gpu.clear(black)
 	left = ioports.inp.left
 	if (left >  0) then
 		print (0, 0, "up   ")

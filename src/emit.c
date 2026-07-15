@@ -218,10 +218,15 @@ void  emit_cart_xml (const char *input_filename, int  verbose)
         exit (4);
     }
 
+	if (cart_version[0] == 34) // if cart_version is enclosed in quotes
+	{
+		; //replace cart_version, scooping out contents
+	}
+
     // 5. Emit the Vircon32 XML configuration
     fprintf (xml, "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\" ?>\n");
     fprintf (xml, "<rom-definition version=\"1.0\">\n");
-    fprintf (xml, "    <rom type=\"cartridge\" title=\"%s\" version=%s />\n", cart_title, cart_version);
+    fprintf (xml, "    <rom type=\"cartridge\" title=\"%s\" version=\"%s\" />\n", cart_title, cart_version);
     fprintf (xml, "<binary path=\"%s\" />\n", vbin_path);
     
     if (textures_head != NULL) {
