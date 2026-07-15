@@ -17,6 +17,7 @@ typedef struct SymbolNode {
 
 typedef struct ScopeNode {
     SymbolNode* symbols;      // Variables declared in this specific scope
+    SymbolNode* last;         // last symbol in list
     int local_offset_counter; // Tracks [BP - 1], [BP - 2], etc., for this function
     struct ScopeNode* parent; // Pointer to the enclosing scope
 } ScopeNode;

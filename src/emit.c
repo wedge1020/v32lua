@@ -335,7 +335,6 @@ void  emit_falsy_jump (int  reg, const char *target_label)
 int   emit_variable_map (void)
 {
     int  lines_printed       = 2;
-    fprintf(out(), ";; --- Memory Map ---\n");
     fprintf(out(), "%%define heap_pointer 0\n");
     
     SymbolNode *curr = global_scope ? global_scope->symbols : NULL;

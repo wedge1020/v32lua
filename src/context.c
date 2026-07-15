@@ -70,8 +70,15 @@ SymbolNode* register_local(const char* name) {
     sym->type = SYM_LOCAL;
     sym->location = current_scope->local_offset_counter++; // Allocate [BP - offset]
     
-    sym->next = current_scope->symbols;
-    current_scope->symbols = sym;
+	if (current_scope -> last == NULL)
+	{
+	    current_scope -> symbols  = sym;
+	}
+	else
+	{
+		current_scope -> last -> next  = sym;
+	}
+	current_scope -> last = sym;
     return sym;
 }
 
@@ -87,8 +94,17 @@ SymbolNode* register_global (const char *name)
     sym->is_function = 0;
 
     if (global_scope == NULL) init_global_scope();
-    sym->next = global_scope->symbols;
-    global_scope->symbols = sym;
+	if (global_scope -> last == NULL)
+	{
+		global_scope -> symbols  = sym;
+	}
+	else
+	{
+		global_scope -> last -> next  = sym;
+	}
+	global_scope -> last  = sym;
+    //sym->next = global_scope->symbols;
+    //global_scope->symbols = sym;
     
     return sym;
 }
