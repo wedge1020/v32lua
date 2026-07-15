@@ -12,32 +12,72 @@ typedef struct {
 } IOPortMap;
 
 static const IOPortMap ioports[] = {
-    { "ioports.gpu.texture", "GPU_SelectedTexture", IOPORT_READ | IOPORT_WRITE, IOPORT_TYPE_INTEGER },
-    { "ioports.gpu.region",  "GPU_SelectedRegion", IOPORT_READ | IOPORT_WRITE, IOPORT_TYPE_INTEGER  },
-    { "ioports.gpu.x",       "GPU_DrawingPointX", IOPORT_READ | IOPORT_WRITE, IOPORT_TYPE_INTEGER   },
-    { "ioports.gpu.y",       "GPU_DrawingPointY", IOPORT_READ | IOPORT_WRITE, IOPORT_TYPE_INTEGER   },
-    { "ioports.gpu.minX",    "GPU_RegionMinX", IOPORT_READ | IOPORT_WRITE, IOPORT_TYPE_INTEGER      },
-    { "ioports.gpu.minY",    "GPU_RegionMinY", IOPORT_READ | IOPORT_WRITE, IOPORT_TYPE_INTEGER      },
-    { "ioports.gpu.maxX",    "GPU_RegionMaxX", IOPORT_READ | IOPORT_WRITE, IOPORT_TYPE_INTEGER      },
-    { "ioports.gpu.maxY",    "GPU_RegionMaxY", IOPORT_READ | IOPORT_WRITE, IOPORT_TYPE_INTEGER      },
-    { "ioports.gpu.hotX",    "GPU_RegionHotSpotX", IOPORT_READ | IOPORT_WRITE, IOPORT_TYPE_INTEGER  },
-    { "ioports.gpu.hotY",    "GPU_RegionHotSpotY", IOPORT_READ | IOPORT_WRITE, IOPORT_TYPE_INTEGER  },
-    { "ioports.inp.gamepad", "INP_SelectedGamepad", IOPORT_READ | IOPORT_WRITE, IOPORT_TYPE_INTEGER },
-    { "ioports.inp.status",  "INP_GamepadConnected", IOPORT_READ, IOPORT_TYPE_INTEGER },
-    { "ioports.inp.inputs",  "custom", IOPORT_READ, IOPORT_TYPE_INTEGER   },
-    { "ioports.inp.left",    "INP_GamepadLeft", IOPORT_READ, IOPORT_TYPE_INTEGER   },
-    { "ioports.inp.right",   "INP_GamepadRight", IOPORT_READ, IOPORT_TYPE_INTEGER   },
-    { "ioports.inp.up",      "INP_GamepadUp", IOPORT_READ, IOPORT_TYPE_INTEGER   },
-    { "ioports.inp.down",    "INP_GamepadDown", IOPORT_READ, IOPORT_TYPE_INTEGER   },
-    { "ioports.inp.start",   "INP_GamepadButtonStart", IOPORT_READ, IOPORT_TYPE_INTEGER   },
-    { "ioports.inp.A",       "INP_GamepadButtonA",     IOPORT_READ, IOPORT_TYPE_INTEGER   },
-    { "ioports.inp.B",       "INP_GamepadButtonB",     IOPORT_READ, IOPORT_TYPE_INTEGER   },
-    { "ioports.inp.X",       "INP_GamepadButtonX",     IOPORT_READ, IOPORT_TYPE_INTEGER   },
-    { "ioports.inp.Y",       "INP_GamepadButtonY",     IOPORT_READ, IOPORT_TYPE_INTEGER   },
-    { "ioports.inp.L",       "INP_GamepadButtonL",     IOPORT_READ, IOPORT_TYPE_INTEGER   },
-    { "ioports.inp.R",       "INP_GamepadButtonR",     IOPORT_READ, IOPORT_TYPE_INTEGER   },
+    { "ioports.tim.date",      "TIM_CurrentDate",          IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "system.date",           "TIM_CurrentDate",          IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "ioports.tim.time",      "TIM_CurrentTime",          IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "system.time",           "TIM_CurrentTime",          IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "ioports.time.frames",   "TIM_FrameCounter",         IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "system.frames",         "TIM_FrameCounter",         IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "ioports.time.cycles",   "TIM_CycleCounter",         IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "system.cycles",         "TIM_CycleCounter",         IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "ioports.rng.value",     "RNG_CurrentValue",         IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "ioports.rng.seed",      "RNG_CurrentValue",         IOPORT_WRITE,                IOPORT_TYPE_INTEGER },
+    { "ioports.gpu.pixels",    "GPU_RemainingPixels",      IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "ioports.gpu.bgcolor",   "GPU_ClearColor",           IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
+    { "ioports.gpu.multcolor", "GPU_MultiplyColor",        IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
+    { "ioports.gpu.blending",  "GPU_ActiveBlending",       IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
+    { "ioports.gpu.texture",   "GPU_SelectedTexture",      IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
+    { "ioports.gpu.region",    "GPU_SelectedRegion",       IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
+    { "ioports.gpu.x",         "GPU_DrawingPointX",        IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
+    { "ioports.gpu.y",         "GPU_DrawingPointY",        IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
+    { "ioports.gpu.scalex",    "GPU_DrawingScaleX",        IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_FLOAT   },
+    { "ioports.gpu.scaley",    "GPU_DrawingScaleY",        IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_FLOAT   },
+    { "ioports.gpu.angle",     "GPU_DrawingAngle",         IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_FLOAT   },
+    { "ioports.gpu.minX",      "GPU_RegionMinX",           IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
+    { "ioports.gpu.minY",      "GPU_RegionMinY",           IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
+    { "ioports.gpu.maxX",      "GPU_RegionMaxX",           IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
+    { "ioports.gpu.maxY",      "GPU_RegionMaxY",           IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
+    { "ioports.gpu.hotX",      "GPU_RegionHotSpotX",       IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
+    { "ioports.gpu.hotY",      "GPU_RegionHotSpotY",       IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
+    { "ioports.spu.volume",    "SPU_GlobalVolume",         IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_FLOAT   },
+    { "ioports.spu.sound",     "SPU_SelectedSound",        IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
+    { "ioports.spu.channel",   "SPU_SelectedChannel",      IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
+    { "ioports.spu.length",    "SPU_SoundLength",          IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "ioports.spu.soundloop", "SPU_SoundPlayWithLoop",    IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_BOOLEAN },
+    { "ioports.spu.loopstart", "SPU_SoundLoopStart",       IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
+    { "ioports.spu.loopend",   "SPU_SoundLoopEnd",         IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
+    { "ioports.spu.state",     "SPU_ChannelState",         IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "ioports.spu.chansound", "SPU_ChannelAssignedSound", IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
+    { "ioports.spu.chansound", "SPU_ChannelVolume",        IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_FLOAT   },
+    { "ioports.spu.chanspeed", "SPU_ChannelSpeed",         IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_FLOAT   },
+    { "ioports.spu.chanloop",  "SPU_ChannelLoopEnabled",   IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_BOOLEAN },
+    { "ioports.spu.chanpos",   "SPU_ChannelPosition",      IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_FLOAT   },
+    { "ioports.inp.gamepad",   "INP_SelectedGamepad",      IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
+    { "ioports.inp.status",    "INP_GamepadConnected",     IOPORT_READ,                 IOPORT_TYPE_BOOLEAN },
+    { "ioports.inp.inputs",    "custom",                   IOPORT_READ | IOPORT_ACTION, IOPORT_TYPE_INTEGER },
+    { "ioports.inp.left",      "INP_GamepadLeft",          IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "ioports.inp.right",     "INP_GamepadRight",         IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "ioports.inp.up",        "INP_GamepadUp",            IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "ioports.inp.down",      "INP_GamepadDown",          IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "ioports.inp.start",     "INP_GamepadButtonStart",   IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "ioports.inp.A",         "INP_GamepadButtonA",       IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "ioports.inp.B",         "INP_GamepadButtonB",       IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "ioports.inp.X",         "INP_GamepadButtonX",       IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "ioports.inp.Y",         "INP_GamepadButtonY",       IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "ioports.inp.L",         "INP_GamepadButtonL",       IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "ioports.inp.R",         "INP_GamepadButtonR",       IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "ioports.car.connect",   "CAR_Connected",            IOPORT_READ,                 IOPORT_TYPE_BOOLEAN },
+    { "ioports.car.romsize",   "CAR_ProgramROMSize",       IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "ioports.car.numvtex",   "CAR_NumberOfTextures",     IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "ioports.car.numvsnd",   "CAR_NumberOfSounds",       IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "ioports.mem.connec",    "MEM_Connected",            IOPORT_READ,                 IOPORT_TYPE_BOOLEAN },
     { NULL, NULL, 0, 0 } // Sentinel
 };
+
+static void  emit_system_wait_intrinsic ()
+{
+    emit_asm ("WAIT\n");
+}
 
 static void  emit_system_halt_intrinsic ()
 {
@@ -71,28 +111,28 @@ static void  emit_print_intrinsic (ASTNode *node)
     int reg_val = allocate_register();
     generate_asm(arg_val, reg_val);
 
-    emit_asm("    ;; --- Intrinsic: print(x, y, value) ---\n");
+    emit_asm ("    ;; --- Intrinsic: print(x, y, value) ---\n");
 
     // 3. Convert text coordinates from Lua Floats to Hardware Integers
     // Because all numbers in your compiler are floats, we must cast 
     // screen spaces using the Vircon32 'CFI' (Cast Float to Integer) instruction.
-    emit_asm("    CFI R%d ; Convert X to hardware integer\n", reg_x);
-    emit_asm("    CFI R%d ; Convert Y to hardware integer\n", reg_y);
+    emit_asm ("    CFI R%d ; Convert X to hardware integer\n", reg_x);
+    emit_asm ("    CFI R%d ; Convert Y to hardware integer\n", reg_y);
 
     // 4. Push arguments to the stack (Left-to-Right layout)
-    emit_asm("    PUSH R%d ; Push X coordinate\n", reg_x);
-    emit_asm("    PUSH R%d ; Push Y coordinate\n", reg_y);
-    emit_asm("    PUSH R%d ; Push raw value to convert\n", reg_val);
+    emit_asm ("    PUSH R%d ; Push X coordinate\n", reg_x);
+    emit_asm ("    PUSH R%d ; Push Y coordinate\n", reg_y);
+    emit_asm ("    PUSH R%d ; Push raw value to convert\n", reg_val);
 
     // 5. Coerce the value to a string pointer
     // Because value was pushed last, it is safely resting on top of the stack [SP].
     // __builtin_tostring will process it and return the string address in R0.
-    emit_asm("    CALL __builtin_tostring\n"); 
-    emit_asm("    MOV  [SP], R0 ; Overwrite raw value with the string pointer\n");
+    emit_asm ("    CALL __builtin_tostring\n"); 
+    emit_asm ("    MOV  [SP], R0 ; Overwrite raw value with the string pointer\n");
 
     // 6. Fire the printing routine and tear down the stack frame
-    emit_asm("    CALL __builtin_print\n");    
-    emit_asm("    ISUB SP, 3 ; Clean up x, y, and string from the stack\n");
+    emit_asm ("    CALL __builtin_print\n");    
+    emit_asm ("    ISUB SP, 3 ; Clean up x, y, and string from the stack\n");
 
     // 7. Unlock registers back to the compiler pool
     unlock_register(reg_val);
@@ -100,31 +140,91 @@ static void  emit_print_intrinsic (ASTNode *node)
     unlock_register(reg_x);
 }
 
-static void emit_gpu_draw_intrinsic(ASTNode *node, int dest_reg) {
-    emit_asm("    ;; --- Intrinsic: ioports.gpu.draw() ---\n");
-    ASTNode *arg = node->as.call.args_head;
+static void emit_gpu_blending_intrinsic (ASTNode *node, int  dest_reg)
+{
+    emit_asm ("    ;; --- Intrinsic: ioports.gpu.blending() ---\n");
+    ASTNode *arg = node -> as.call.args_head;
 
-    if (arg != NULL && arg->type == NODE_STRING) {
-        const char *drawtype = arg->as.string_val.value;
-        if (strcmp(drawtype, "zoom") == 0)
-            emit_asm("    OUT GPU_Command, GPUCommand_DrawRegionZoomed\n");
-        else if (strcmp(drawtype, "rotate") == 0)
-            emit_asm("    OUT GPU_Command, GPUCommand_DrawRegionRotated\n");
-        else if (strcmp(drawtype, "rotozoom") == 0)
-            emit_asm("    OUT GPU_Command, GPUCommand_DrawRegionRotozoomed\n");
+    if (arg != NULL && arg -> type == NODE_STRING)
+    {
+        const char *blendmode = arg -> as.string_val.value;
+        if (strcmp (blendmode, "alpha") == 0)
+            emit_asm ("OUT GPU_ActiveBlending, GPUBlendingMode_Alpha\n");
+        else if (strcmp (blendmode, "add") == 0)
+            emit_asm ("OUT GPU_ActiveBlending, GPUBlendingMode_Add\n");
+        else if (strcmp (blendmode, "subtract") == 0)
+            emit_asm ("OUT GPU_ActiveBlending, GPUBlendingMode_Subtract\n");
         else
-            emit_asm("    OUT GPU_Command, GPUCommand_DrawRegion\n");
-    } else {
-        emit_asm("    OUT GPU_Command, GPUCommand_DrawRegion\n");
+            compiler_error (ERR_SEMANTIC, yylineno, "%s: invalid blending mode '%s'", "ioports.gpu.blending()", blendmode);
+    }
+    else
+    {
+        compiler_error (ERR_SEMANTIC, yylineno, "%s: invalid blending mode", "ioports.gpu.blending()");
     }
 
     if (dest_reg != 0) {
-        emit_asm("    MOV R%d, 0 ; return nil\n", dest_reg);
+        emit_asm ("    MOV R%d, 0 ; return nil\n", dest_reg);
+    }
+}
+
+static void emit_gpu_draw_intrinsic (ASTNode *node, int  dest_reg)
+{
+    emit_asm ("    ;; --- Intrinsic: ioports.gpu.draw() ---\n");
+    ASTNode *arg = node->as.call.args_head;
+
+    if (arg != NULL && arg -> type == NODE_STRING) {
+        const char *drawtype = arg->as.string_val.value;
+        if (strcmp(drawtype, "zoom") == 0)
+            emit_asm ("    OUT GPU_Command, GPUCommand_DrawRegionZoomed\n");
+        else if (strcmp(drawtype, "rotate") == 0)
+            emit_asm ("    OUT GPU_Command, GPUCommand_DrawRegionRotated\n");
+        else if (strcmp(drawtype, "rotozoom") == 0)
+            emit_asm ("    OUT GPU_Command, GPUCommand_DrawRegionRotozoomed\n");
+        else
+            emit_asm ("    OUT GPU_Command, GPUCommand_DrawRegion\n");
+    } else {
+        emit_asm ("    OUT GPU_Command, GPUCommand_DrawRegion\n");
+    }
+
+    if (dest_reg != 0) {
+        emit_asm ("    MOV R%d, 0 ; return nil\n", dest_reg);
+    }
+}
+
+static void emit_spu_cmd_intrinsic (ASTNode *node, int  dest_reg)
+{
+    emit_asm ("    ;; --- Intrinsic: ioports.spu.command() ---\n");
+    ASTNode *arg  = node -> as.call.args_head;
+
+    if (arg != NULL && arg -> type == NODE_STRING) {
+        const char *spucmd = arg -> as.string_val.value;
+        if (strcmp(spucmd, "play") == 0)
+            emit_asm ("OUT SPU_Command, SPUCommand_PlaySelectedChannel\n");
+        else if (strcmp(spucmd, "pause") == 0)
+            emit_asm ("OUT SPU_Command, SPUCommand_PauseSelectedChannel\n");
+        else if (strcmp(spucmd, "stop") == 0)
+            emit_asm ("OUT SPU_Command, SPUCommand_StopSelectedChannel\n");
+        else if (strcmp(spucmd, "pauseall") == 0)
+            emit_asm ("OUT SPU_Command, SPUCommand_PauseAllChannels\n");
+        else if (strcmp(spucmd, "resumeall") == 0)
+            emit_asm ("OUT SPU_Command, SPUCommand_ResumeAllChannels\n");
+        else if (strcmp(spucmd, "stopall") == 0)
+            emit_asm ("OUT SPU_Command, SPUCommand_StopAllChannels\n");
+        else
+            compiler_error (ERR_SEMANTIC, yylineno, "%s: invalid SPU command '%s'", "ioports.spu.command()", spucmd);
+    }
+    else
+    {
+        compiler_error (ERR_SEMANTIC, yylineno, "%s: invalid SPU command", "ioports.spu.command()");
+    }
+
+    if (dest_reg != 0) {
+        emit_asm ("    MOV R%d, 0 ; return nil\n", dest_reg);
     }
 }
 
 static void emit_gpu_clear_intrinsic(ASTNode *node, int dest_reg) {
-    emit_asm("    ;; --- Intrinsic: ioports.gpu.clear() ---\n");
+    emit_asm ("    ;; --- Intrinsic: ioports.gpu.clear() ---\n");
     ASTNode *arg = node->as.call.args_head;
 
     if (arg != NULL) {
@@ -142,20 +242,20 @@ static void emit_gpu_clear_intrinsic(ASTNode *node, int dest_reg) {
             else is_preset = 0; 
             
             if (is_preset) {
-                emit_asm("    MOV R%d, %u ; Preset color '%s'\n", color_reg, color_hex, color_name);
+                emit_asm ("    MOV R%d, %u ; Preset color '%s'\n", color_reg, color_hex, color_name);
             } else {
                 generate_asm(arg, color_reg);
             }
         } else {
             generate_asm(arg, color_reg);
         }
-        emit_asm("    OUT GPU_ClearColor, R%d\n", color_reg);
+        emit_asm ("    OUT GPU_ClearColor, R%d\n", color_reg);
         unlock_register(color_reg);
     }
 
-    emit_asm("    OUT GPU_Command, GPUCommand_ClearScreen\n");
+    emit_asm ("    OUT GPU_Command, GPUCommand_ClearScreen\n");
     if (dest_reg != 0) {
-        emit_asm("    MOV R%d, 0 ; return nil\n", dest_reg);
+        emit_asm ("    MOV R%d, 0 ; return nil\n", dest_reg);
     }
 }
 
@@ -174,37 +274,61 @@ int try_emit_action_intrinsic (const char *action, int  dest_reg)
     return (0);
 }
 
-int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
-    char func_name[256] = {0};
-    if (!resolve_static_path(node->as.call.target, func_name)) {
-        return 0; // Dynamic call, not an intrinsic
+int   try_emit_call_intrinsic (ASTNode *node, int  dest_reg)
+{
+    char  func_name[256] = {0};
+    if (!resolve_static_path (node -> as.call.target, func_name))
+    {
+        return (0); // Dynamic call, not an intrinsic
     }
 
-    if (strcmp(func_name, "print") == 0) {
-        emit_print_intrinsic(node);
-        return 1;
+    if (strcmp (func_name, "print")             == 0)
+    {
+        emit_print_intrinsic (node);
+        return (1);
     }
-    if (strcmp(func_name, "ioports.gpu.draw") == 0) {
-        emit_gpu_draw_intrinsic(node, dest_reg);
-        return 1;
+    if (strcmp (func_name, "ioports.gpu.draw")  == 0)
+    {
+        emit_gpu_draw_intrinsic (node, dest_reg);
+        return (1);
     }
-    if (strcmp(func_name, "ioports.gpu.clear") == 0) {
+    if (strcmp (func_name, "ioports.gpu.blending")  == 0)
+    {
+        emit_gpu_blending_intrinsic (node, dest_reg);
+        return (1);
+    }
+    if (strcmp (func_name, "ioports.gpu.clear") == 0)
+    {
         emit_gpu_clear_intrinsic (node, dest_reg);
-        return 1;
+        return (1);
     }
-    if (strcmp(func_name, "system.halt") == 0) {
+    if (strcmp (func_name, "ioports.spu.command")  == 0)
+    {
+        emit_spu_cmd_intrinsic (node, dest_reg);
+        return (1);
+    }
+    if (strcmp (func_name, "system.halt")       == 0)
+    {
         emit_system_halt_intrinsic ();
-        return 1;
+        return (1);
+    }
+    if ((strcmp (func_name, "system.wait")      == 0) ||
+        (strcmp (func_name, "ioports.gpu.sync") == 0))
+    {
+        emit_system_wait_intrinsic ();
+        return (1);
     }
 
-    return 0; // Not handled here
+    return (0); // Not handled here
 }
 
-int try_emit_table_set_intrinsic(ASTNode *node) {
-    char base_path[256] = {0};
-    if (!resolve_static_path(node->as.table_set.table_expr, base_path) || 
-        node->as.table_set.key->type != NODE_STRING) {
-        return 0;
+int   try_emit_table_set_intrinsic (ASTNode *node)
+{
+    char  base_path[256] = {0};
+    if (!resolve_static_path (node -> as.table_set.table_expr, base_path) || 
+        node -> as.table_set.key -> type != NODE_STRING)
+    {
+        return (0);
     }
 
     char full_path[512];
@@ -221,30 +345,30 @@ int try_emit_table_set_intrinsic(ASTNode *node) {
 
             if ((ioports[i].type & IOPORT_TYPE_INTEGER) == IOPORT_TYPE_INTEGER)
             {
-                emit_asm("    ;; --- Intrinsic: Cast Lua Float to Hardware Integer ---\n");
-                emit_asm("    CFI R%d\n", val_reg);
+                emit_asm ("    ;; --- Intrinsic: Cast Lua Float to Hardware Integer ---\n");
+                emit_asm ("    CFI R%d\n", val_reg);
             }
             else if ((ioports[i].type & IOPORT_TYPE_BOOLEAN) == IOPORT_TYPE_BOOLEAN)
             {
-                emit_asm("    ;; --- Intrinsic: Cast Lua Float to Hardware Boolean ---\n");
-                emit_asm("    CFB R%d\n", val_reg);
+                emit_asm ("    ;; --- Intrinsic: Cast Lua Float to Hardware Boolean ---\n");
+                emit_asm ("    CFB R%d\n", val_reg);
             }
 
-            emit_asm("    OUT %s, R%d\n", ioports[i].asm_port, val_reg);
+            emit_asm ("    OUT %s, R%d\n", ioports[i].asm_port, val_reg);
 
             unlock_register(val_reg);
-            return 1;
+            return (1);
         }
     }
 
-    return 0;
+    return (0);
 }
 
 int try_emit_table_get_intrinsic(ASTNode *node, int dest_reg) {
     char base_path[256] = {0};
     if (!resolve_static_path(node->as.table_get.table_expr, base_path) || 
         node->as.table_get.key->type != NODE_STRING) {
-        return 0;
+        return (0);
     }
 
     char full_path[512];
@@ -265,22 +389,22 @@ int try_emit_table_get_intrinsic(ASTNode *node, int dest_reg) {
             }
             else if (dest_reg != 0)
             {
-                emit_asm("    ;; --- Intrinsic: Read Hardware Integer ---\n");
-                emit_asm("IN R%d, %s\n", dest_reg, ioports[i].asm_port);
+                emit_asm ("    ;; --- Intrinsic: Read Hardware Integer ---\n");
+                emit_asm ("IN R%d, %s\n", dest_reg, ioports[i].asm_port);
                 if ((ioports[i].type & IOPORT_TYPE_INTEGER) == IOPORT_TYPE_INTEGER)
                 {
-                    emit_asm("    ;; --- Intrinsic: Cast to Lua Float ---\n");
-                    emit_asm("CIF R%d\n", dest_reg);
+                    emit_asm ("    ;; --- Intrinsic: Cast to Lua Float ---\n");
+                    emit_asm ("CIF R%d\n", dest_reg);
                 }
                 else if ((ioports[i].type & IOPORT_TYPE_BOOLEAN) == IOPORT_TYPE_BOOLEAN)
                 {
-                    emit_asm("    ;; --- Intrinsic: Cast to Lua Float ---\n");
-                    emit_asm("CIF R%d\n", dest_reg);
+                    emit_asm ("    ;; --- Intrinsic: Cast to Lua Float ---\n");
+                    emit_asm ("CIF R%d\n", dest_reg);
                 }
             }
-            return 1;
+            return (1);
         }
     }
 
-    return 0;
+    return (0);
 }
