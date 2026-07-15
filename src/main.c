@@ -129,14 +129,8 @@ int main(int argc, char** argv) {
     log_stage(4, "analyzer", verbose);
     init_global_scope();
     
-    // Perform function pre-pass here before emitting code
-    ASTNode* current = root_node;
-    while (current != NULL) {
-        if (current->type == NODE_FUNCTION_DEF) {
-            mark_global_as_function(current->as.function_def.name);
-        }
-        current = current->next;
-    }
+    // Perform full symbol pre-pass before code generation
+    register_all_globals_prepass(root_node);
 
     // --- Stage 5: Emitter ---
     log_stage(5, "emitter", verbose);

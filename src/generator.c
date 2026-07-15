@@ -301,6 +301,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     emit_asm ("POP BP\n");
                 }
                 emit_asm ("RET\n");
+                emit_asm ("\n");
 
                 pop_function_context ();
                 break;
@@ -802,7 +803,7 @@ void generate_global_setup (ASTNode *node)
     // 1. Emit the section header and entry label
     emit_asm ("\n; --- Global Variable & Runtime Initialization ---\n");
     emit_asm ("__init_globals:\n");
-    emit_asm ("MOV R0, %d ; heap start", (next_ram_address+2));
+    emit_asm ("MOV R0, %d ; heap start", next_ram_address);
     emit_asm ("MOV [heap_pointer], R0");
 
     if (node != NULL)

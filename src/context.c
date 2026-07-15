@@ -70,6 +70,42 @@ SymbolNode *resolve_symbol (const char *name)
     return (NULL); // Not found anywhere
 }
 
+void register_all_globals_prepass(ASTNode *node) {
+    while (node != NULL) {
+        switch (node->type) {
+            case NODE_FUNCTION_DEF:
+                mark_global_as_function(node->as.function_def.name);
+                // Note: If you want to be 100% thorough, you can also recursively
+                // traverse function bodies here to catch undeclared globals!
+                break;
+
+            case NODE_MULTIPLE_ASSIGNMENT:
+                // If it is not a local assignment, register targets as globals
+                if (!node->as.mult_assign.is_local) {
+                    ASTNode *tgt = node->as.mult_assign.targets_head;
+                    while (tgt != NULL) {
+                        if (tgt->type == NODE_IDENTIFIER) {
+                            register_global(tgt->as.id.name);
+                        }
+                        tgt = tgt->next;
+                    }
+                }
+                break;
+
+            case NODE_CART_HINT:
+                // Resource hints like '--#texture background "bg.png"' generate variables
+                if (node->as.cart_hint.resource_id != -1 && node->as.cart_hint.name != NULL) {
+                    register_global(node->as.cart_hint.name);
+                }
+                break;
+
+            default:
+                break;
+        }
+        node = node->next;
+    }
+}
+
 // Add a local variable to the *current* scope
 SymbolNode *register_local (const char* name)
 {

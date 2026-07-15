@@ -1,5 +1,5 @@
 --#title "Dig Dug"
---#version "1.0"
+--#version 1.0
 --#texture tileset "textures/digdug_sprites.png"
 
 --@ ============================================================================
