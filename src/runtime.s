@@ -102,10 +102,15 @@ __builtin_table_get:
     MOV  R2, [BP+2]          ; R2 = Key (must be preserved for fallback!) 
 
     ;; FAST-PATH CHECK 1: Is Key an unboxed IEEE Float? 
-    MOV  R3, R2 
-    AND  R3, 0xFFC00000      ; Isolate top 10 bits of Key 
-    INE  R3, 0               ; Destructive test: If top bits != 0, it's tagged 
-    JT   R3, __table_get_fallback ; Route tagged keys (String/Bool/Nil) to hash fallback! 
+	MOV  R3, R2 
+    AND  R3, 0x7F800000      ; Isolate exponent bits
+    IEQ  R3, 0x7F800000      ; Are they all 1s? (If so, it's tagged/NaN)
+    JT   R3, __table_get_fallback
+
+    ;MOV  R3, R2 
+    ;AND  R3, 0xFFC00000      ; Isolate top 10 bits of Key 
+    ;INE  R3, 0               ; Destructive test: If top bits != 0, it's tagged 
+    ;JT   R3, __table_get_fallback ; Route tagged keys (String/Bool/Nil) to hash fallback! 
 
     ;; FAST-PATH CHECK 2: Is Key an integer >= 1? 
     MOV  R3, R2              ; Copy float Key to R3 (preserves original in R2) 
@@ -349,32 +354,52 @@ __strcat_finish:
 ;; Built-in: Direct Print to Screen at Coordinate (x, y)
 ;; Incoming Stack: [BP+4] = X Coordinate, [BP+3] = Y Coordinate, [BP+2] = Tagged String
 ;; -------------------------------------------------------------------------------------
+;; -------------------------------------------------------------------------------------
+;; Built-in: Direct Print to Screen at Coordinate (x, y) with Safety Coercion
+;; Incoming Stack: [BP+4] = X Coordinate, [BP+3] = Y Coordinate, [BP+2] = Target Value
+;; -------------------------------------------------------------------------------------
 __builtin_print:
     PUSH BP 
     MOV  BP, SP 
 
     ;; 1. Initialize GPU Texture/Region state (back up existing, set to BIOS)
-    IN   R5, GPU_SelectedTexture ; save current texture
-    IN   R6, GPU_SelectedRegion  ; save current region
-    OUT  GPU_SelectedTexture, -1 ; set BIOS font texture
+    IN   R5, GPU_SelectedTexture ; Save current texture
+    IN   R6, GPU_SelectedRegion  ; Save current region
+    OUT  GPU_SelectedTexture, -1 ; Set BIOS font texture
     
-    ;; 2. Load Parameters and Unbox String
+    ;; 2. Load Parameters
     MOV  R1, [BP+4]          ; R1 = X Pixel Coordinate (Integer)
     MOV  R2, [BP+3]          ; R2 = Y Pixel Coordinate (Integer)
-    MOV  R3, [BP+2]          ; R3 = Tagged String Pointer
-    AND  R3, 0x003FFFFF      ; UNBOX: Isolate 22-bit raw heap pointer
-    
-    ;; 3. Pass Arguments and Draw via BIOS Text Routine
-    ;; __bios_print_text expects: [BP+4]=String, [BP+3]=Y, [BP+2]=X
-    PUSH R3                  ; Push Unboxed Raw String Pointer
-    PUSH R2                  ; Push Y Coordinate
-    PUSH R1                  ; Push X Coordinate[cite: 11]
-    CALL __bios_print_text   ; Draw the string directly to the GPU screen[cite: 11]
-    ISUB SP, 3               ; Clean up arguments from stack[cite: 11]
+    MOV  R3, [BP+2]          ; R3 = Target Value to Print
 
-    ;; 4. Restore previous GPU texture and region[cite: 11]
-    OUT  GPU_SelectedTexture, R5 ; restore previous texture[cite: 11]
-    OUT  GPU_SelectedRegion, R6  ; restore previous region[cite: 11]
+    ;; 3. SAFETY COERCION LAYER: Verify Tag without destroying R3
+    MOV  R4, R3              ; Copy target value to scratch register R4
+    AND  R4, 0xFFC00000      ; Isolate upper 10 bits (Tag)
+    IEQ  R4, 0x7FC00000      ; Is it ALREADY a String? (Destructive test on R4)
+    JT   R4, __print_unbox   ; If Tag == 0x7FC00000, skip coercion!
+
+    ;; --- COERCION FALLBACK ---
+    ;; Target is a Float, Boolean, Nil, Table, or Function. 
+    ;; Route it through __builtin_tostring to generate a valid String on the heap!
+    PUSH R3                  ; Push non-string value as argument
+    CALL __builtin_tostring  ; R0 now holds a newly minted Tagged String Pointer[cite: 8]
+    ISUB SP, 1               ; Clean up argument from stack[cite: 8]
+    MOV  R3, R0              ; Replace our target register R3 with the new String pointer[cite: 8]
+
+__print_unbox:
+    ;; 4. Unbox String and Dispatch to BIOS
+    AND  R3, 0x003FFFFF      ; UNBOX: Isolate 22-bit raw heap pointer[cite: 8]
+    
+    ;; __bios_print_text expects: [BP+4]=String, [BP+3]=Y, [BP+2]=X[cite: 8]
+    PUSH R3                  ; Push Unboxed Raw String Pointer[cite: 8]
+    PUSH R2                  ; Push Y Coordinate[cite: 8]
+    PUSH R1                  ; Push X Coordinate[cite: 8]
+    CALL __bios_print_text   ; Draw the string directly to the GPU screen[cite: 8]
+    ISUB SP, 3               ; Clean up arguments from stack[cite: 8]
+
+    ;; 5. Restore previous GPU texture and region
+    OUT  GPU_SelectedTexture, R5 ; Restore previous texture[cite: 8]
+    OUT  GPU_SelectedRegion, R6  ; Restore previous region[cite: 8]
     
     MOV  SP, BP 
     POP  BP 
@@ -389,28 +414,35 @@ __builtin_print:
 ;; Incoming Stack: [BP+3] = Left_Val, [BP+2] = Right_Val 
 ;; -------------------------------------------------------------------------------------
 __builtin_eq:
-    PUSH BP 
-    MOV  BP, SP 
+    PUSH BP
+    MOV  BP, SP
 
-    MOV  R1, [BP+3]          ; R1 = Left Value 
-    MOV  R2, [BP+2]          ; R2 = Right Value 
+    MOV  R1, [BP+3]          ; R1 = Left Value
+    MOV  R2, [BP+2]          ; R2 = Right Value
 
-    ;; FAST-PATH 1: Exact Bitwise Equality 
-    ;; Handles identical Floats, Booleans, Nils, and identical heap pointers in O(1)! 
-    MOV  R3, R1 
-    IEQ  R3, R2              ; Destructive comparison: Does R1 == R2? 
-    JT   R3, __eq_true       ; If bit-patterns match exactly, they are equal! 
+    ;; FAST-PATH 1: Bitwise match (Handles identical types instantly)
+    MOV  R3, R1
+    IEQ  R3, R2
+    JT   R3, __eq_true
 
-    ;; FAST-PATH 2: Check if Tags Match 
-    ;; If values aren't identical, they can ONLY be equal if they are Strings 
-    ;; stored at different heap addresses. First, verify both have the same Tag! 
-    MOV  R3, R1 
-    AND  R3, 0xFFC00000      ; Isolate Left Tag in R3 
-    MOV  R4, R2 
-    AND  R4, 0xFFC00000      ; Isolate Right Tag in R4 
+    ;; FAST-PATH 2: Check if BOTH are raw floats (Exponent bits != all 1s)
+    MOV  R3, R1
+    AND  R3, 0x7F800000
+    IEQ  R3, 0x7F800000      ; Is Left tagged? (R3 = 1 if tagged, 0 if float)
+    JT   R3, __eq_check_tags ; If Left is tagged, skip float check
 
-    IEQ  R3, R4              ; Do the tags match? 
-    JF   R3, __eq_false      ; If tags differ, types differ -> return false! 
+    MOV  R4, R2
+    AND  R4, 0x7F800000
+    IEQ  R4, 0x7F800000      ; Is Right tagged?
+    JT   R4, __eq_check_tags ; If Right is tagged, skip float check
+
+    ;; Both are floats! Perform standard floating-point equality
+    MOV  R3, R1
+    FEQ  R3, R2              ; Destructive float equality
+    JT   R3, __eq_true
+    JMP  __eq_false
+
+__eq_check_tags:
 
     ;; FAST-PATH 3: Are they Strings? 
     ;; We know R3 holds the common Tag. Is it the String Tag (0x7FC00000)? 
@@ -626,8 +658,9 @@ __builtin_ftoa:
     MOV  R3, R0              ; R3 = End of string pointer (will advance)
     
     ;; Handle zero explicitly
-    INE  R1, 0
-    JT   R1, __ftoa_extract_loop
+	MOV  R4, R1
+    INE  R4, 0               ; Overwrites R4, preserving R1
+    JT   R4, __ftoa_extract_loop
     MOV  R4, '0'
     MOV  [R3], R4
     IADD R3, 1
