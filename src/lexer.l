@@ -63,10 +63,14 @@ char *process_string_literal (const char *text, int  len)
     return TOKEN_COMMENT_LINE;
 }
 
-	/* Cartridge Building Hint: --# ... */
 "--#".* { 
-    // Strip the leading "--#" (3 chars) and pass the trimmed payload
-    yylval.string_val  = strdup (yytext + 3);
+    char *hint = strdup (yytext + 3);
+    int len = strlen(hint);
+    // Strip trailing \r, \n, or spaces
+    while (len > 0 && (hint[len - 1] == '\r' || hint[len - 1] == '\n' || hint[len - 1] == ' ')) {
+        hint[--len] = '\0';
+    }
+    yylval.string_val = hint;
     return (TOKEN_CART_HINT);
 }
 

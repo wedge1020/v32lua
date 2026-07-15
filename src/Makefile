@@ -37,36 +37,25 @@ lex.yy.c: lexer.l parser.tab.h
 
 # --- Monolithic Source Generation Rule ---
 monofile:
-	@rm -f ../monofile_compiler_source.c
-	@echo "/* ========================================================================== */" >> ../monofile_compiler_source.c
-	@echo "/*                   MONOLITHIC SOURCE: HEADERS & SOURCE                      */" >> ../monofile_compiler_source.c
-	@echo "/* ========================================================================== */" >> ../monofile_compiler_source.c
-	@echo "" >> ../monofile_compiler_source.c
-	@for file in ../inc/*.h; do \
-		if [ -f "$$file" ]; then \
-			echo "/* -------------------------------------------------------------------------- */" >> ../monofile_compiler_source.c; \
-			echo "/* HEADER FILE: $$file */" >> ../monofile_compiler_source.c; \
-			echo "/* -------------------------------------------------------------------------- */" >> ../monofile_compiler_source.c; \
-			cat "$$file" >> ../monofile_compiler_source.c; \
-			echo "" >> ../monofile_compiler_source.c; \
-			echo "/* -------------------------------------------------------------------------- */" >> ../monofile_compiler_source.c; \
-			echo "" >> ../monofile_compiler_source.c; \
-		fi; \
-	done
+	@rm -f ../monolithic_source.c
+	@echo "/* ========================================================================== */" >> ../monolithic_source.c
+	@echo "/*                   MONOLITHIC SOURCE                                        */" >> ../monolithic_source.c
+	@echo "/* ========================================================================== */" >> ../monolithic_source.c
+	@echo "" >> ../monolithic_source.c
 	@for file in *.c; do \
 		if [ -f "$$file" ]; then \
-			echo "/* -------------------------------------------------------------------------- */" >> ../monofile_compiler_source.c; \
-			echo "/* SOURCE FILE: $$file */" >> ../monofile_compiler_source.c; \
-			echo "/* -------------------------------------------------------------------------- */" >> ../monofile_compiler_source.c; \
-			cat "$$file" >> ../monofile_compiler_source.c; \
-			echo "" >> ../monofile_compiler_source.c; \
-			echo "/* -------------------------------------------------------------------------- */" >> ../monofile_compiler_source.c; \
-			echo "" >> ../monofile_compiler_source.c; \
+			echo "/* -------------------------------------------------------------------------- */" >> ../monolithic_source.c; \
+			echo "/* SOURCE FILE: $$file */" >> ../monolithic_source.c; \
+			echo "/* -------------------------------------------------------------------------- */" >> ../monolithic_source.c; \
+			cat "$$file" >> ../monolithic_source.c; \
+			echo "" >> ../monolithic_source.c; \
+			echo "/* -------------------------------------------------------------------------- */" >> ../monolithic_source.c; \
+			echo "" >> ../monolithic_source.c; \
 		fi; \
 	done
-	@echo "Successfully generated consolidated file: ../monofile_compiler_source.c"
+	@echo "Successfully generated consolidated file: ../monolithic_source.c"
 
 clean:
-	rm -f $(TARGET) $(OBJS) parser.tab.c parser.tab.h lex.yy.c ../monofile_compiler_source.c
+	rm -f $(TARGET) $(OBJS) parser.tab.c parser.tab.h lex.yy.c ../monolithic_source.c
 
 .PHONY: all clean monorule

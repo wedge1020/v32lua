@@ -1,8 +1,10 @@
 #include "v32lua.h"
 
+// Address 0 is reserved for the heap_pointer variable itself!
+int next_ram_address = 1; 
+
 ScopeNode* current_scope = NULL;
 ScopeNode* global_scope = NULL;
-int next_ram_address = 0; // Address 0 is reserved for our heap_pointer
 
 void init_global_scope(void) {
     if (global_scope != NULL) return;
@@ -73,19 +75,30 @@ SymbolNode* register_local(const char* name) {
     return sym;
 }
 
-// Add a global variable to the *global* (bottom-most) scope
-SymbolNode* register_global(const char* name) {
-    // Safety check - if global scope isn't initialized, do it now
-    if (global_scope == NULL) init_global_scope();
+SymbolNode* register_global (const char *name)
+{
+    SymbolNode *sym = resolve_symbol (name);
+    if (sym != NULL) return sym; // Already registered, do not allocate a new slot!
 
-    SymbolNode* sym = (SymbolNode*)calloc(1, sizeof(SymbolNode));
+    sym = (SymbolNode*)calloc(1, sizeof(SymbolNode));
     sym->name = strdup(name);
     sym->type = SYM_GLOBAL;
-    sym->location = next_ram_address++; // Allocate fixed RAM address
-    
+    sym->location = next_ram_address++; // Sequentially assign RAM slots from 1 upwards
+    sym->is_function = 0;
+
+    if (global_scope == NULL) init_global_scope();
     sym->next = global_scope->symbols;
     global_scope->symbols = sym;
+    
     return sym;
+}
+
+void mark_global_as_function (const char *name)
+{
+    // Register it as a standard RAM variable first so it gets a valid pointer slot
+    SymbolNode *sym = register_global (name);
+    sym -> type         = SYM_GLOBAL;
+    sym->is_function = 1; 
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -146,17 +159,6 @@ void  get_variable_access_string (const char *name, char *output_buffer)
             sprintf (output_buffer, "[BP - %d]", sym -> location);
         }
     }
-}
-
-void  mark_global_as_function (const char *name)
-{
-    SymbolNode *sym     = resolve_symbol (name);
-    if (sym            == NULL)
-    {
-        sym             = register_global (name);
-    }
-    sym -> is_function  = 1;
-    sym -> type         = SYM_GLOBAL;
 }
 
 // ============================================================================

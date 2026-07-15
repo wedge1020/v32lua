@@ -332,30 +332,26 @@ void  emit_falsy_jump (int  reg, const char *target_label)
     emit_asm("JT R6, %s ; If False (falsy), jump to target\n", target_label);
 }
 
-int  emit_variable_map (void)
+int   emit_variable_map (void)
 {
-    int  lines_printed       = 0;
-    int  location            = -1;
-    if (global_scope        != NULL)
+    int  lines_printed       = 2;
+    fprintf(out(), ";; --- Memory Map ---\n");
+    fprintf(out(), "%%define heap_pointer 0\n");
+    
+    SymbolNode *curr = global_scope ? global_scope->symbols : NULL;
+    while (curr != NULL)
     {
-        SymbolNode *current  = global_scope -> symbols;
-        while (current      != NULL)
-        {
-            fprintf (out(), "%%define %s%s %d\n", 
-                            current -> is_function ? "func_" : "var_", 
-                            current -> name, 
-                            current -> location);
-            lines_printed    = lines_printed + 1;
-            if (location    <  current -> location)
-            {
-                location         = current -> location;
-            }
-            current          = current -> next;
-        }
-        location             = location + 1;
-        fprintf (out(), "%%define heap_pointer %d\n", location);
+        if (curr->is_function)
+            fprintf(out(), "%%define func_%s %d\n", curr->name, curr->location);
+        else
+            fprintf(out(), "%%define var_%s %d\n", curr->name, curr->location);
+		lines_printed    = lines_printed + 1;
+        curr = curr->next;
     }
-    return (lines_printed);
+    fprintf(out(), "\n;; Highest used global RAM address: %d\n", next_ram_address - 1);
+    fprintf(out(), ";; Dynamic heap will start at runtime address: %d\n\n", next_ram_address);
+	lines_printed    = lines_printed + 2;
+	return (lines_printed);
 }
 
 void  emit_string_data_section (void)

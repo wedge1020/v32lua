@@ -699,8 +699,8 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 // Get the formatted string for SP and BP snapshots
                 char sp_access[256];
                 char bp_access[256];
-                get_variable_access_string("asm_snap_sp", sp_access);
-                get_variable_access_string("asm_snap_bp", bp_access);
+                get_variable_access_string ("asm_snap_sp", sp_access);
+                get_variable_access_string ("asm_snap_bp", bp_access);
                 
                 emit_asm ("MOV %s, SP\n", sp_access);
                 emit_asm ("MOV %s, BP\n", bp_access);
@@ -711,7 +711,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                         sprintf (snap_name, "asm_snap_r%d", i);
                         
                         char reg_access[256];
-                        get_variable_access_string(snap_name, reg_access);
+                        get_variable_access_string (snap_name, reg_access);
                         emit_asm ("MOV %s, R%d\n", reg_access, i);
                     }
                 }
@@ -724,7 +724,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                         sprintf (snap_name, "asm_snap_r%d", i);
                         
                         char reg_access[256];
-                        get_variable_access_string(snap_name, reg_access);
+                        get_variable_access_string (snap_name, reg_access);
                         emit_asm ("MOV R%d, %s\n", i, reg_access);
                     }
                 }
@@ -784,12 +784,15 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     emit_asm ("    ;; Texture: Initialize '%s' to resource ID %d\n", 
                              node -> as.cart_hint.name,
                              node -> as.cart_hint.resource_id);
-                    emit_asm ("MOV %s, %d\n", var_access,
+                             
+                    // FIX: Stage the immediate resource ID into our scratch register first,
+                    // then move the register's contents into the memory address!
+                    emit_asm ("MOV R%d, %d\n", dest_reg, 
                               node -> as.cart_hint.resource_id);
+                    emit_asm ("MOV %s, R%d\n", var_access, dest_reg);
                 }
                 break;
             }
-
         }
     }
 }
@@ -799,6 +802,8 @@ void generate_global_setup (ASTNode *node)
     // 1. Emit the section header and entry label
     emit_asm ("\n; --- Global Variable & Runtime Initialization ---\n");
     emit_asm ("__init_globals:\n");
+    emit_asm ("MOV R0, %d ; heap start", (next_ram_address+1));
+    emit_asm ("MOV [heap_pointer], R0");
 
     if (node != NULL)
     {
@@ -847,11 +852,11 @@ void  generate_functions (ASTNode *node)
 
 void generate_program (ASTNode *head)
 {
-    ASTNode *current            = NULL;
-    int      globals_need_stack = 0;
+    ASTNode *current             = NULL;
+    int      globals_need_stack  = 0;
     char     buffer[1024];
-    char    *check              = NULL;
-    int final_line_offset = 0; 
+    char    *check               = NULL;
+    int      final_line_offset   = 0; 
 
     init_global_scope (); 
 
@@ -874,6 +879,7 @@ void generate_program (ASTNode *head)
 
     emit_asm ("\n;; --- Function Definitions ---\n");
     current = head;
+    globals_need_stack  = 0;
     while (current != NULL)
     {
         if (current->type == NODE_FUNCTION_DEF) {
@@ -888,10 +894,6 @@ void generate_program (ASTNode *head)
 
     // Restore output back to your final target file
     set_output_stream(final_out_stream);
-
-    // Write Headers and meticulously calculate the exact offset
-    //fprintf (out(), ";; --- System Constants ---\n"); final_line_offset++;
-    //fprintf (out(), "%%define heap_pointer 0\n");     final_line_offset++;
 
     fprintf (out(), ";; --- Global Variable RAM Map ---\n"); final_line_offset += 2;
     
