@@ -218,10 +218,10 @@ void  emit_cart_xml (const char *input_filename, int  verbose)
         exit (4);
     }
 
-	if (cart_version[0] == 34) // if cart_version is enclosed in quotes
-	{
-		; //replace cart_version, scooping out contents
-	}
+    if (cart_version[0] == 34) // if cart_version is enclosed in quotes
+    {
+        ; //replace cart_version, scooping out contents
+    }
 
     // 5. Emit the Vircon32 XML configuration
     fprintf (xml, "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\" ?>\n");
@@ -269,9 +269,25 @@ void  emit_cart_xml (const char *input_filename, int  verbose)
         CARTresource *curr  = sounds_head;
         while (curr        != NULL)
         {
-            fprintf (xml, "    <sound id=\"%d\" path=\"%s\" /> <!-- %s -->\n",
-                     curr -> id, curr -> filename, curr -> var_name);
+            len           = strlen (curr -> filename);
+            resource      = (char *) malloc (sizeof (char) * (len + 6));
+            last_dot      = NULL;
+
+            strcpy (resource,    curr -> filename);
+            last_dot              = strrchr (resource, '.');
+            if (last_dot         != NULL)
+            {
+                strcpy (last_dot, ".vsnd");
+            }
+            else
+            {
+                strcat (resource, ".vsnd");
+            }
+            fprintf (xml, "    <sound path=\"%s\" /> <!-- %s -->\n",
+                     resource, curr -> var_name);
             curr            = curr -> next;
+            free (resource);
+            resource      = NULL;
         }
         fprintf (xml, "</sounds>\n");
     }
@@ -349,13 +365,13 @@ int   emit_variable_map (void)
             fprintf(out(), "%%define func_%s %d\n", curr->name, curr->location);
         else
             fprintf(out(), "%%define var_%s %d\n", curr->name, curr->location);
-		lines_printed    = lines_printed + 1;
+        lines_printed    = lines_printed + 1;
         curr = curr->next;
     }
     fprintf(out(), "\n;; Highest used global RAM address: %d\n", next_ram_address - 1);
     fprintf(out(), ";; Dynamic heap will start at runtime address: %d\n\n", next_ram_address);
-	lines_printed    = lines_printed + 2;
-	return (lines_printed);
+    lines_printed    = lines_printed + 2;
+    return (lines_printed);
 }
 
 void  emit_string_data_section (void)
