@@ -5,20 +5,20 @@
 --@ ============================================================================
 --@ VIRCON32 HARDWARE CONSTANTS & CONFIGURATION
 --@ ============================================================================
-local SCREEN_WIDTH  = 640
-local SCREEN_HEIGHT = 360
-local TILE_SIZE     = 32
-local MAP_COLS      = 20  -- 640 / 32 = 20 columns
-local MAP_ROWS      = 10  -- 320 / 32 = 10 rows (Top 40px reserved for HUD)
-local HUD_OFFSET_Y  = 40
+SCREEN_WIDTH  = 640
+SCREEN_HEIGHT = 360
+TILE_SIZE     = 32
+MAP_COLS      = 20  -- 640 / 32 = 20 columns
+MAP_ROWS      = 10  -- 320 / 32 = 10 rows (Top 40px reserved for HUD)
+HUD_OFFSET_Y  = 40
 
 -- Sprite Sheet Coordinates (tx, ty in digdug_sprites.png)
-local SPR_DIRT      = 0
-local SPR_SKY       = 32
-local SPR_PLAYER    = 64
-local SPR_POOKA     = 0
-local SPR_POOKA_EYES = 32
-local SPR_HARPOON   = 0
+SPR_DIRT      = 0
+SPR_SKY       = 32
+SPR_PLAYER    = 64
+SPR_POOKA     = 0
+SPR_POOKA_EYES = 32
+SPR_HARPOON   = 0
 
 --@ ============================================================================
 --@ HARDWARE RENDERING HELPERS
@@ -42,7 +42,7 @@ end
 --@ ============================================================================
 --@ GAME STATE & MAP GENERATION
 --@ ============================================================================
-local Game = {}
+Game = {}
 
 function Game:init()
     self.score = 0
@@ -70,7 +70,7 @@ end
 --@ ============================================================================
 --@ PLAYER (TAIZO HORI) CLASS
 --@ ============================================================================
-local Player = {}
+Player = {}
 
 function Player:init(start_col, start_row)
     self.col = start_col
@@ -140,7 +140,7 @@ end
 --@ ============================================================================
 --@ HARPOON / PUMP WEAPON CLASS
 --@ ============================================================================
-local Harpoon = {}
+Harpoon = {}
 
 function Harpoon:init()
     self.active = 0
@@ -223,7 +223,7 @@ end
 --@ ============================================================================
 --@ ENEMY (POOKA) CLASS
 --@ ============================================================================
-local Enemy = {}
+Enemy = {}
 
 function Enemy:init(start_col, start_row)
     self.x = start_col * TILE_SIZE

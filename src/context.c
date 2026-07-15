@@ -79,7 +79,7 @@ SymbolNode *register_local (const char* name)
 		return (sym); // Already registered, do not allocate a new slot!
 	}
 
-    SymbolNode *sym                    = (SymbolNode *) calloc (1, sizeof (SymbolNode));
+	sym                                = (SymbolNode *) calloc (1, sizeof (SymbolNode));
     sym -> name                        = strdup (name);
     sym -> type                        = SYM_LOCAL;
     sym -> location                    = current_scope -> local_offset_counter; // Allocate [BP - offset]
@@ -110,8 +110,9 @@ SymbolNode* register_global (const char *name)
     sym                               = (SymbolNode *) calloc (1, sizeof (SymbolNode));
     sym -> name                       = strdup (name);
     sym -> type                       = SYM_GLOBAL;
-    sym -> location                   = next_ram_address++; // Sequentially assign RAM slots from 1 upwards
+    sym -> location                   = next_ram_address; // Sequentially assign RAM slots from 1 upwards
     sym -> is_function                = 0;
+	next_ram_address                  = next_ram_address + 1;
 
     if (global_scope                 == NULL)
 	{

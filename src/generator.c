@@ -802,7 +802,7 @@ void generate_global_setup (ASTNode *node)
     // 1. Emit the section header and entry label
     emit_asm ("\n; --- Global Variable & Runtime Initialization ---\n");
     emit_asm ("__init_globals:\n");
-    emit_asm ("MOV R0, %d ; heap start", (next_ram_address+1));
+    emit_asm ("MOV R0, %d ; heap start", (next_ram_address+2));
     emit_asm ("MOV [heap_pointer], R0");
 
     if (node != NULL)
@@ -856,7 +856,7 @@ void  show_global_symbol_list (const char *label)
     fprintf (stderr, "[debug] show_global_symbol_list(\"%s\")\n", label);
     while (tmp      != NULL)
     {
-        fprintf (stderr, "[debug] %%define %s%s %d\n", (tmp -> type == NODE_FUNCTION_DEF) ? "func" : "var", tmp -> name, tmp -> location);
+        fprintf (stderr, "[debug] %%define %s%s %d\n", (tmp -> is_function == 1) ? "func" : "var", tmp -> name, tmp -> location);
         tmp          = tmp -> next;
     }
 }
@@ -890,7 +890,6 @@ void generate_program (ASTNode *head)
 
     emit_asm ("\n;; --- Function Definitions ---\n");
     current = head;
-    globals_need_stack  = 0;
     while (current != NULL)
     {
         if (current -> type == NODE_FUNCTION_DEF) {
