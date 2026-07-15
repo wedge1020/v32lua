@@ -29,7 +29,7 @@ __malloc:
     ;; We maintain a 1024-word safety buffer between Heap and Stack.
     MOV  R3, SP
     ISUB R3, 1024            ; R3 = Lowest safe memory address for stack
-	MOV  R6, R2
+    MOV  R6, R2
     IGE  R6, R3              ; Will the new heap top collide with the stack?
     JT   R6, __malloc_oom    ; If Heap >= SafeBoundary, allocation fails!
     
@@ -102,15 +102,10 @@ __builtin_table_get:
     MOV  R2, [BP+2]          ; R2 = Key (must be preserved for fallback!) 
 
     ;; FAST-PATH CHECK 1: Is Key an unboxed IEEE Float? 
-	MOV  R3, R2 
+    MOV  R3, R2 
     AND  R3, 0x7F800000      ; Isolate exponent bits
     IEQ  R3, 0x7F800000      ; Are they all 1s? (If so, it's tagged/NaN)
     JT   R3, __table_get_fallback
-
-    ;MOV  R3, R2 
-    ;AND  R3, 0xFFC00000      ; Isolate top 10 bits of Key 
-    ;INE  R3, 0               ; Destructive test: If top bits != 0, it's tagged 
-    ;JT   R3, __table_get_fallback ; Route tagged keys (String/Bool/Nil) to hash fallback! 
 
     ;; FAST-PATH CHECK 2: Is Key an integer >= 1? 
     MOV  R3, R2              ; Copy float Key to R3 (preserves original in R2) 
@@ -139,7 +134,7 @@ __table_get_fallback:
     MOV  R4, R1 
     AND  R4, 0x003FFFFF      ; Unbox Table pointer 
     MOV  R5, [R4+3]          ; R5 = Hash Data Pointer (from Header Word 3) 
-	MOV  R9, R5              ; use R9 as scratch to prevent destructive comparison
+    MOV  R9, R5              ; use R9 as scratch to prevent destructive comparison
     IEQ  R9, 0               ; Is Hash Buffer null (no sparse keys stored)? 
     JT   R9, __table_get_not_found 
 
@@ -152,7 +147,7 @@ __table_get_scan_loop:
     JT   R6, __table_get_not_found 
     
     MOV  R8, [R7]            ; Load Stored Key directly from running pointer R7
-	MOV  R9, R8              ; R9 as scratch
+    MOV  R9, R8              ; R9 as scratch
     IEQ  R9, R2              ; ZERO-COST COMPARISON: Does Stored Key == Search Key? 
     JT   R9, __table_get_found ; Match found! 
     
@@ -186,11 +181,11 @@ __builtin_table_set:
     MOV  R3, [BP+2]          ; R3 = Value to store 
 
     ;; --- FAST-PATH VALIDATION ---
-    MOV  R4, R2 
-    AND  R4, 0xFFC00000 
-    INE  R4, 0 
-    JT   R4, __table_set_fallback 
-    
+    MOV  R4, R2
+    AND  R4, 0x7F800000      ; Isolate exponent bits
+    IEQ  R4, 0x7F800000      ; Are they all 1s? (If so, it's tagged/NaN)
+    JT   R4, __table_set_fallback
+
     MOV  R4, R2              ; Copy float Key to R4 
     CFI  R4                  ; Vircon32 in-place conversion: R4 = (int) R4 
     MOV  R5, R4              ; Copy integer index to R5 for destructive comparison 
@@ -382,24 +377,24 @@ __builtin_print:
     ;; Target is a Float, Boolean, Nil, Table, or Function. 
     ;; Route it through __builtin_tostring to generate a valid String on the heap!
     PUSH R3                  ; Push non-string value as argument
-    CALL __builtin_tostring  ; R0 now holds a newly minted Tagged String Pointer[cite: 8]
-    ISUB SP, 1               ; Clean up argument from stack[cite: 8]
-    MOV  R3, R0              ; Replace our target register R3 with the new String pointer[cite: 8]
+    CALL __builtin_tostring  ; R0 now holds a newly minted Tagged String Pointer
+    ISUB SP, 1               ; Clean up argument from stack
+    MOV  R3, R0              ; Replace our target register R3 with the new String pointer
 
 __print_unbox:
     ;; 4. Unbox String and Dispatch to BIOS
-    AND  R3, 0x003FFFFF      ; UNBOX: Isolate 22-bit raw heap pointer[cite: 8]
+    AND  R3, 0x003FFFFF      ; UNBOX: Isolate 22-bit raw heap pointer
     
-    ;; __bios_print_text expects: [BP+4]=String, [BP+3]=Y, [BP+2]=X[cite: 8]
-    PUSH R3                  ; Push Unboxed Raw String Pointer[cite: 8]
-    PUSH R2                  ; Push Y Coordinate[cite: 8]
-    PUSH R1                  ; Push X Coordinate[cite: 8]
-    CALL __bios_print_text   ; Draw the string directly to the GPU screen[cite: 8]
-    ISUB SP, 3               ; Clean up arguments from stack[cite: 8]
+    ;; __bios_print_text expects: [BP+4]=String, [BP+3]=Y, [BP+2]=X
+    PUSH R3                  ; Push Unboxed Raw String Pointer
+    PUSH R2                  ; Push Y Coordinate
+    PUSH R1                  ; Push X Coordinate
+    CALL __bios_print_text   ; Draw the string directly to the GPU screen
+    ISUB SP, 3               ; Clean up arguments from stack
 
     ;; 5. Restore previous GPU texture and region
-    OUT  GPU_SelectedTexture, R5 ; Restore previous texture[cite: 8]
-    OUT  GPU_SelectedRegion, R6  ; Restore previous region[cite: 8]
+    OUT  GPU_SelectedTexture, R5 ; Restore previous texture
+    OUT  GPU_SelectedRegion, R6  ; Restore previous region
     
     MOV  SP, BP 
     POP  BP 
@@ -443,16 +438,26 @@ __builtin_eq:
     JMP  __eq_false
 
 __eq_check_tags:
+    ;; 1. Re-isolate tags into scratch registers R3 and R4
+    MOV  R3, R1
+    AND  R3, 0xFFC00000      ; Isolate Left Tag in R3
+    MOV  R4, R2
+    AND  R4, 0xFFC00000      ; Isolate Right Tag in R4
 
-    ;; FAST-PATH 3: Are they Strings? 
-    ;; We know R3 holds the common Tag. Is it the String Tag (0x7FC00000)? 
-    IEQ  R3, 0x7FC00000 
-    JF   R3, __eq_false      ; If not strings (e.g., two distinct tables), return false! 
+    ;; 2. Do the tags match? If not, different types cannot be equal!
+    IEQ  R3, R4
+    JF   R3, __eq_false      ; If tags differ -> return false!
 
-    ;; FALLBACK: Deep String Comparison (strcmp) 
-    ;; Both are strings with different pointers. We must scan character by character! 
-    AND  R1, 0x003FFFFF      ; Unbox Left string pointer -> R1 
-    AND  R2, 0x003FFFFF      ; Unbox Right string pointer -> R2 
+    ;; 3. FAST-PATH 3: Are they Strings?
+    ;; Re-isolate Left tag into R3 since the previous IEQ destroyed it
+    MOV  R3, R1
+    AND  R3, 0xFFC00000
+    IEQ  R3, 0x7FC00000      ; Is it the String Tag?
+    JF   R3, __eq_false      ; If not strings (e.g., distinct tables), return false!
+
+    ;; FALLBACK: Deep String Comparison (strcmp)
+    AND  R1, 0x003FFFFF      ; Unbox Left string pointer -> R1
+    AND  R2, 0x003FFFFF      ; Unbox Right string pointer -> R2
 
 __eq_strcmp_loop:
     MOV  R3, [R1]            ; Load character word from Left string -> R3 
@@ -658,7 +663,7 @@ __builtin_ftoa:
     MOV  R3, R0              ; R3 = End of string pointer (will advance)
     
     ;; Handle zero explicitly
-	MOV  R4, R1
+    MOV  R4, R1
     INE  R4, 0               ; Overwrites R4, preserving R1
     JT   R4, __ftoa_extract_loop
     MOV  R4, '0'
@@ -773,13 +778,13 @@ __const_str_nil:
     string "nil"
 
 __const_str_false:
-	string "false"
+    string "false"
 
 __const_str_true:
-	string "true"
+    string "true"
 
 __const_str_table:
-	string "table"
+    string "table"
 
 __const_str_function:
-	string "function"
+    string "function"
