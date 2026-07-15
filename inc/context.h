@@ -54,6 +54,7 @@ int         get_next_label               (void);
 void        init_global_scope            (void);
 int         add_string_literal           (const char *);
 void        register_all_globals_prepass (ASTNode *);
+SymbolNode *register_global              (const char *);
 SymbolNode *register_local               (const char *);
 SymbolNode *register_parameter           (const char *, int);
 void        mark_global_as_function      (const char *);
