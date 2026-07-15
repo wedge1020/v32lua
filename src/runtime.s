@@ -29,8 +29,9 @@ __malloc:
     ;; We maintain a 1024-word safety buffer between Heap and Stack.
     MOV  R3, SP
     ISUB R3, 1024            ; R3 = Lowest safe memory address for stack
-    IGE  R2, R3              ; Will the new heap top collide with the stack?
-    JT   R2, __malloc_oom    ; If Heap >= SafeBoundary, allocation fails!
+	MOV  R6, R2
+    IGE  R6, R3              ; Will the new heap top collide with the stack?
+    JT   R6, __malloc_oom    ; If Heap >= SafeBoundary, allocation fails!
     
     ;; Success: Commit new heap top and return base address in R0
     MOV  [heap_pointer], R2
@@ -117,9 +118,9 @@ __builtin_table_get:
     MOV  R4, R1 
     AND  R4, 0x003FFFFF      ; Unbox Table pointer into R4 
     MOV  R5, [R4+1]          ; R5 = Array Capacity (from Header Word 1) 
-    MOV  R6, R3              ; Copy integer index R3 to R6 
-    IGT  R6, R5              ; Destructive test: Is Key > Capacity? 
-    JT   R6, __table_get_fallback ; Out-of-bounds integers go to fallback! 
+    MOV  R9, R3              ; Copy integer index R3 to R9
+    IGT  R9, R5              ; Destructive test: Is Key > Capacity? 
+    JT   R9, __table_get_fallback ; Out-of-bounds integers go to fallback! 
 
     ;; FAST-PATH EXECUTION: O(1) Contiguous Array Read 
     MOV  R5, [R4+2]          ; R5 = Array Data Pointer (from Header Word 2) 
@@ -133,8 +134,9 @@ __table_get_fallback:
     MOV  R4, R1 
     AND  R4, 0x003FFFFF      ; Unbox Table pointer 
     MOV  R5, [R4+3]          ; R5 = Hash Data Pointer (from Header Word 3) 
-    IEQ  R5, 0               ; Is Hash Buffer null (no sparse keys stored)? 
-    JT   R5, __table_get_not_found 
+	MOV  R9, R5              ; use R9 as scratch to prevent destructive comparison
+    IEQ  R9, 0               ; Is Hash Buffer null (no sparse keys stored)? 
+    JT   R9, __table_get_not_found 
 
     MOV  R6, [R5]            ; R6 = PairCount (how many pairs are stored) 
     MOV  R7, R5              ; Setup R7 as running memory pointer
@@ -145,8 +147,9 @@ __table_get_scan_loop:
     JT   R6, __table_get_not_found 
     
     MOV  R8, [R7]            ; Load Stored Key directly from running pointer R7
-    IEQ  R8, R2              ; ZERO-COST COMPARISON: Does Stored Key == Search Key? 
-    JT   R8, __table_get_found ; Match found! 
+	MOV  R9, R8              ; R9 as scratch
+    IEQ  R9, R2              ; ZERO-COST COMPARISON: Does Stored Key == Search Key? 
+    JT   R9, __table_get_found ; Match found! 
     
     IADD R7, 2               ; Advance pointer by 2 words (skip Value slot to next Key) 
     ISUB R6, 1               ; Decrement remaining PairCount 
