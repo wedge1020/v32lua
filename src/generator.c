@@ -253,7 +253,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 //
                 // Emit function prologue
                 //
-                emit_asm("__function_%s:\n", func_name);
+                emit_asm ("__function_%s:\n", func_name);
                 int  needs_stack  = check_needs_stack (node -> as.function_def.body);
                 if (needs_stack)
                 {
@@ -850,10 +850,21 @@ void  generate_functions (ASTNode *node)
     }
 }
 
+void  show_global_symbol_list (const char *label)
+{
+    SymbolNode *tmp  = global_scope ? global_scope -> symbols : NULL;
+    fprintf (stderr, "[debug] show_global_symbol_list(\"%s\")\n", label);
+    while (tmp      != NULL)
+    {
+        fprintf (stderr, "[debug] %%define %s%s %d\n", (tmp -> type == NODE_FUNCTION_DEF) ? "func" : "var", tmp -> name, tmp -> location);
+        tmp          = tmp -> next;
+    }
+}
+
 void generate_program (ASTNode *head)
 {
     ASTNode *current             = NULL;
-    int      globals_need_stack  = 0;
+    //int      globals_need_stack  = 0;
     char     buffer[1024];
     char    *check               = NULL;
     int      final_line_offset   = 0; 
@@ -882,24 +893,26 @@ void generate_program (ASTNode *head)
     globals_need_stack  = 0;
     while (current != NULL)
     {
-        if (current->type == NODE_FUNCTION_DEF) {
+        if (current -> type == NODE_FUNCTION_DEF) {
             generate_asm (current, 0);
-        } else if (check_needs_stack (current)) {
+        }/* else if (check_needs_stack (current)) {
             globals_need_stack = 1;
-        }
+        }*/
         current = current->next;
     }
 
     generate_global_setup (head);
 
     // Restore output back to your final target file
-    set_output_stream(final_out_stream);
+    set_output_stream (final_out_stream);
 
-    fprintf (out(), ";; --- Global Variable RAM Map ---\n"); final_line_offset += 2;
+    fprintf (out(), ";; --- Global Variable RAM Map ---\n");
+    final_line_offset           = final_line_offset + 2;
     
     // Factor in the dynamic size of your variables
     final_line_offset += emit_variable_map();
-    fprintf (out(), "\n"); final_line_offset++;
+    fprintf (out(), "\n");
+    final_line_offset           = final_line_offset + 1;
 
     // Dump your buffered assembly code to the final file
     rewind (temp_asm_stream);

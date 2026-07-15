@@ -23,6 +23,15 @@ typedef struct ScopeNode {
 } ScopeNode;
 
 // ============================================================================
+// --- Function Context Stack ---
+// ============================================================================
+typedef struct FunctionContextNode {
+    const char* name;
+    int label_counter;
+    struct FunctionContextNode* next;
+} FunctionContextNode;
+
+// ============================================================================
 // --- String Literal Tracking ---
 // ============================================================================
 
@@ -38,6 +47,8 @@ extern int string_counter;
 extern ScopeNode *current_scope;
 extern ScopeNode *global_scope;
 extern int        next_ram_address;
+extern FunctionContextNode *context_stack_head;
+extern int global_label_counter; 
   
 int         get_next_label             (void);
 void        init_global_scope          (void);

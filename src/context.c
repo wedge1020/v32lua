@@ -6,6 +6,9 @@ int next_ram_address = 1;
 ScopeNode* current_scope = NULL;
 ScopeNode* global_scope = NULL;
 
+FunctionContextNode *context_stack_head = NULL;
+int global_label_counter = 0; 
+
 void init_global_scope(void) {
     if (global_scope != NULL) return;
     global_scope = (ScopeNode*)calloc(1, sizeof(ScopeNode));
@@ -47,74 +50,93 @@ void pop_scope(void) {
 }
 
 // Lookup a variable starting from the innermost scope outward
-SymbolNode* resolve_symbol(const char* name) {
-    ScopeNode* search_scope = current_scope;
+SymbolNode *resolve_symbol (const char *name)
+{
+    ScopeNode *search_scope = current_scope;
     
-    while (search_scope != NULL) {
-        SymbolNode* sym = search_scope->symbols;
-        while (sym != NULL) {
-            if (strcmp(sym->name, name) == 0) {
-                return sym; // Found it!
+    while (search_scope                    != NULL)
+    {
+        SymbolNode *sym                     = search_scope->symbols;
+        while (sym                         != NULL)
+        {
+            if (strcmp (sym -> name, name) == 0)
+            {
+                return (sym); // Found it!
             }
-            sym = sym->next;
+            sym                             = sym -> next;
         }
-        search_scope = search_scope->parent; // Move down the stack
+        search_scope                        = search_scope -> parent; // Move down the stack
     }
-    return NULL; // Not found anywhere
+    return (NULL); // Not found anywhere
 }
 
 // Add a local variable to the *current* scope
-SymbolNode* register_local(const char* name) {
-    SymbolNode* sym = (SymbolNode*)calloc(1, sizeof(SymbolNode));
-    sym->name = strdup(name);
-    sym->type = SYM_LOCAL;
-    sym->location = current_scope->local_offset_counter++; // Allocate [BP - offset]
+SymbolNode *register_local (const char* name)
+{
+    SymbolNode *sym                    = resolve_symbol (name);
+    if (sym                           != NULL)
+	{
+		return (sym); // Already registered, do not allocate a new slot!
+	}
+
+    SymbolNode *sym                    = (SymbolNode *) calloc (1, sizeof (SymbolNode));
+    sym -> name                        = strdup (name);
+    sym -> type                        = SYM_LOCAL;
+    sym -> location                    = current_scope -> local_offset_counter; // Allocate [BP - offset]
+                                                                             
+    current_scope -> local_offset_counter++;
     
-	if (current_scope -> last == NULL)
-	{
-	    current_scope -> symbols  = sym;
-	}
-	else
-	{
-		current_scope -> last -> next  = sym;
-	}
-	current_scope -> last = sym;
-    return sym;
+    if (current_scope -> last         == NULL)
+    {
+        current_scope -> symbols       = sym;
+    }
+    else
+    {
+        current_scope -> last -> next  = sym;
+    }
+    current_scope -> last              = sym;
+
+    return (sym);
 }
 
 SymbolNode* register_global (const char *name)
 {
-    SymbolNode *sym = resolve_symbol (name);
-    if (sym != NULL) return sym; // Already registered, do not allocate a new slot!
-
-    sym = (SymbolNode*)calloc(1, sizeof(SymbolNode));
-    sym->name = strdup(name);
-    sym->type = SYM_GLOBAL;
-    sym->location = next_ram_address++; // Sequentially assign RAM slots from 1 upwards
-    sym->is_function = 0;
-
-    if (global_scope == NULL) init_global_scope();
-	if (global_scope -> last == NULL)
+    SymbolNode *sym                   = resolve_symbol (name);
+    if (sym                          != NULL)
 	{
-		global_scope -> symbols  = sym;
+		return (sym); // Already registered, do not allocate a new slot!
 	}
-	else
+
+    sym                               = (SymbolNode *) calloc (1, sizeof (SymbolNode));
+    sym -> name                       = strdup (name);
+    sym -> type                       = SYM_GLOBAL;
+    sym -> location                   = next_ram_address++; // Sequentially assign RAM slots from 1 upwards
+    sym -> is_function                = 0;
+
+    if (global_scope                 == NULL)
 	{
-		global_scope -> last -> next  = sym;
+		init_global_scope ();
 	}
-	global_scope -> last  = sym;
-    //sym->next = global_scope->symbols;
-    //global_scope->symbols = sym;
+
+    if (global_scope -> last         == NULL)
+    {
+        global_scope -> symbols       = sym;
+    }
+    else
+    {
+        global_scope -> last -> next  = sym;
+    }
+
+    global_scope -> last              = sym;
     
-    return sym;
+    return (sym);
 }
 
 void mark_global_as_function (const char *name)
 {
     // Register it as a standard RAM variable first so it gets a valid pointer slot
-    SymbolNode *sym = register_global (name);
-    sym -> type         = SYM_GLOBAL;
-    sym->is_function = 1; 
+    SymbolNode *sym     = register_global (name);
+    sym -> is_function  = 1; 
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -178,20 +200,12 @@ void  get_variable_access_string (const char *name, char *output_buffer)
 }
 
 // ============================================================================
-// --- Label Generator & Function Context Stack ---
+// --- Label Generator
 // ============================================================================
-
-typedef struct FunctionContextNode {
-    const char* name;
-    int label_counter;
-    struct FunctionContextNode* next;
-} FunctionContextNode;
-
-static FunctionContextNode* context_stack_head = NULL;
-static int global_label_counter = 0; 
-
-int get_next_label(void) {
-    if (context_stack_head == NULL) {
+int get_next_label (void)
+{
+    if (context_stack_head == NULL)
+	{
         return global_label_counter++;
     }
     return context_stack_head->label_counter++;
@@ -291,13 +305,14 @@ int current_loop(void) {
 }
 //
 // Add to context.c
-SymbolNode* register_parameter(const char* name, int offset) {
-    SymbolNode* sym = (SymbolNode*)calloc(1, sizeof(SymbolNode));
-    sym->name = strdup(name);
-    sym->type = SYM_LOCAL;
-    sym->location = -offset; // Store as negative so we know it's a parameter!
+SymbolNode *register_parameter (const char *name, int  offset)
+{
+    SymbolNode *sym = (SymbolNode *) calloc (1, sizeof (SymbolNode));
+    sym -> name           = strdup (name);
+    sym -> type = SYM_LOCAL;
+    sym -> location = -offset; // Store as negative so we know it's a parameter!
     
-    sym->next = current_scope->symbols;
-    current_scope->symbols = sym;
-    return sym;
+    sym -> next = current_scope -> symbols;
+    current_scope -> symbols = sym;
+    return (sym);
 }
