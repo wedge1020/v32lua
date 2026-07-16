@@ -687,6 +687,8 @@ __tostring_true:
 
 __tostring_passthrough:
     MOV  R0, R1                  ; Return string pointer exactly as received
+    MOV  SP, BP
+    POP  BP
     RET
 
 __tostring_table:

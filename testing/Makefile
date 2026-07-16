@@ -17,14 +17,14 @@ all: $(ASM_OUTS)
 # Pattern rule: How to convert a .lua file into a .asm file
 %.asm: %.lua $(COMPILER)
 	@echo "Compiling test case: $< -> $@"
-	$(COMPILER) $< -o $@
+	$(COMPILER) -g $< -o $@
 
 # Assembly verification: Attempt to assemble all .asm files without halting on errors
 asmcheck: $(ASM_OUTS)
 	@echo "--- Verifying Vircon32 Assembly ---"
 	@for f in $(ASM_OUTS); do \
 		out=$${f%.asm}.vbin; \
-		if assemble -o $$out $$f > /dev/null 2>&1; then \
+		if assemble -g program -o $$out $$f > /dev/null 2>&1; then \
 			printf "[  OK  ] %-25s -> %s\n" "$$f" "$$out"; \
 		else \
 			printf "[ FAIL ] %-25s\n" "$$f"; \
