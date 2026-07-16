@@ -7,6 +7,9 @@ char *process_string_literal (const char *text, int  len)
     // Allocate space. The processed string will never be longer 
     // than the raw string minus the two quotes.
     char *processed  = (char *) malloc (len - 1); 
+	if (processed   == NULL) {
+		compiler_error (ERR_INTERNAL, -1, "Memory allocation failed while processing string literal\n");
+	}
     int   i          = 1; // Start at 1 to skip the opening quote
     int   j          = 0;
     
