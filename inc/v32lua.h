@@ -6,6 +6,7 @@
 #include <stdarg.h>
 #include <stdbool.h>
 #include <string.h>
+#include <ctype.h>
 
 #include "enums.h"
 #include "emit.h"
@@ -16,7 +17,7 @@
 #include "internals.h"
 #include "register.h"
 
-#define  VERSION  "20260714-dev"
+#define  VERSION  "20260716-dev"
 #define  AUTHOR   "Matthew Haas"
 #define  URL      "https://github.com/wedge1020/v32lua"
 

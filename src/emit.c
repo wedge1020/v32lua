@@ -1,9 +1,5 @@
 #include "v32lua.h"
 
-#include <stdarg.h>
-#include <string.h>
-#include <ctype.h>
-
 void emit_asm(const char *format, ...) {
     char raw_buf[1024];
     va_list args;

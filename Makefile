@@ -30,5 +30,5 @@ demos: bin/v32lua
 	$(MAKE) -C demo
 
 monofiles:
-	$(MAKE) -C src monofile
+	scripts/monolithic_code.sh
 	$(MAKE) -C testing monofiles
