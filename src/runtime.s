@@ -208,15 +208,37 @@ __builtin_table_set:
 
 ;; --- FALLBACK EXECUTION: Update Existing or Append New ---
 __table_set_fallback:
-    MOV  R5, R1 
-    AND  R5, 0x003FFFFF      ; Unbox Table pointer 
-    MOV  R6, [R5+3]          ; R6 = Hash Data Pointer 
-    
-    ;; Note: If R6 is null or full, call your __hash_grow helper here! 
-    
-    MOV  R7, [R6]            ; R7 = PairCount 
+    MOV  R5, R1
+    AND  R5, 0x003FFFFF      ; Unbox Table pointer
+    MOV  R6, [R5+3]          ; R6 = Hash Data Pointer
+
+    ;; --- INSERT SAFETY ALLOCATION HERE ---
+    INE  R6, 0               ; Is the hash buffer already allocated?
+    JT   R6, __table_set_hash_ready
+
+    ;; Allocate a fixed 16-word hash buffer on the fly
+    PUSH R1                  ; Save critical registers from __malloc clobbering
+    PUSH R2
+    PUSH R3
+    PUSH R5
+    MOV  R0, 16              ; Request 16 words (holds 1 header + up to 7 key/val pairs)
+    PUSH R0
+    CALL __malloc
+    ISUB SP, 1
+    POP  R5
+    POP  R3
+    POP  R2
+    POP  R1
+
+    MOV  R6, R0              ; R6 = New hash buffer base address
+    MOV  R7, 0
+    MOV  [R6], R7            ; Initialize PairCount (Word 0) to 0
+    MOV  [R5+3], R6          ; Store new buffer pointer back into Table Header Word 3!
+    ;; -------------------------------------
+
+    MOV  R7, [R6]            ; R7 = PairCount (Now guaranteed to be safe!)
     MOV  R8, R6              ; Setup R8 as running memory pointer
-    IADD R8, 2               ; Advance R8 to point directly at Key0 
+    IADD R8, 2               ; Advance R8 to point directly at Key0
 
 __table_set_update_loop:
     IEQ  R7, 0               ; If we exhausted existing pairs, Key is brand new! 
@@ -263,10 +285,10 @@ __table_set_done:
 ;; ===================================================================================
 __unbox_string:
     MOV R1, R0
-    AND R1, 0x00400000          ; Isolate Bit 22 (The ROM/RAM flag bit)
+    AND R1, 0x80000000          ; Check Bit 31 (1 = RAM String, 0 = ROM String)
     AND R0, 0x003FFFFF          ; Strip the entire NaN tag (Leaves 22-bit offset)
 
-    IEQ R1, 0                   ; If Bit 22 is 0, it's a RAM string
+    INE R1, 0                   ; If Bit 31 is non-zero, it is a RAM string
     JT  R1, __unbox_string_end  ; Jump to end (RAM addresses start at 0x00000000)
 
     ;; It is a ROM string: Apply Vircon32 Cartridge Page Bit (Bit 29)
@@ -285,14 +307,15 @@ __builtin_strcat:
     MOV  BP, SP
 
     ;; --- 1. Unbox and Calculate Length of Left String ---
-    MOV  R1, [BP+3]          ; R1 = Left tagged pointer
-    MOV  R3, R1              ; Copy to inspect tag
+    MOV  R0, [BP+3]          ; R1 = Left tagged pointer
+    CALL __unbox_string      ; unbox the string
+    MOV  R3, R0              ; Copy to inspect tag
     AND  R3, 0xFFC00000      ; Isolate upper 10 bits
     IEQ  R3, 0x7FC00000      ; Is it a ROM String Literal?
     JT   R3, __strcat_len_left_rom
 
     ;; RAM String (Tag 0xFFC0xxxx)
-    AND  R1, 0x003FFFFF      ; Strip tag to get raw 22-bit RAM pointer (4MW limit)
+    AND  R0, 0x003FFFFF      ; Strip tag to get raw 22-bit RAM pointer (4MW limit)
     JMP  __strcat_len_left_init
 
 __strcat_len_left_rom:
@@ -311,8 +334,9 @@ __strcat_len_left:
 
     ;; --- 2. Unbox and Calculate Length of Right String ---
 __strcat_len_right_check:
-    MOV  R1, [BP+2]          ; R1 = Right tagged pointer
-    MOV  R3, R1
+    MOV  R0, [BP+2]          ; R1 = Right tagged pointer
+    CALL __UNBOX_STRING
+    MOV  R3, R0
     AND  R3, 0xFFC00000
     IEQ  R3, 0x7FC00000
     JT   R3, __strcat_len_right_rom
@@ -321,7 +345,7 @@ __strcat_len_right_check:
     JMP  __strcat_len_right_init
 
 __strcat_len_right_rom:
-    AND  R1, 0x07FFFFFF
+    AND  R1, 0x003FFFFF
     OR   R1, 0x20000000      ; ROM unbox
 
 __strcat_len_right_init:
@@ -357,7 +381,7 @@ __strcat_alloc:
     JMP  __strcat_copy_left
 
 __strcat_copy_left_rom:
-    AND  R1, 0x07FFFFFF
+    AND  R1, 0x003FFFFF
     OR   R1, 0x20000000      ; ROM unbox
 
 __strcat_copy_left:
@@ -450,7 +474,7 @@ __print_unbox_ram:
 
 __print_unbox_rom:
     ;; 4b. Unbox ROM String: Isolate offset and add ROM page bit
-    AND  R3, 0x07FFFFFF      ; Isolate up to 27-bit raw ROM offset
+    AND  R3, 0x003FFFFF      ; Isolate up to 27-bit raw ROM offset
     OR   R3, 0x20000000      ; Restore Vircon32 CART page bit
 
 __print_dispatch:
@@ -685,11 +709,18 @@ __builtin_tostring:
     JT   R4, __tostring_passthrough  ; It is a RAM String: return unchanged!
 
 __tostring_check_primitives:
-    ;; Handle Nil (0), False (1), True (2), or fall through to float-to-ASCII (__builtin_ftoa)
-    ;; 2. Check Pointer Tags 
-    MOV  R2, R1 
-    AND  R2, 0xFFC00000      ; Isolate upper 10 bits 
-    
+    ;; Add these three explicit checks:
+    IEQ  R1, 0xFFC00000
+    JT   R1, __tostring_nil
+    IEQ  R1, 0xFFC00001
+    JT   R1, __tostring_false
+    IEQ  R1, 0xFFC00002
+    JT   R1, __tostring_true
+
+    ;; Existing tag checks follow...
+    MOV  R2, R1
+    AND  R2, 0xFFC00000
+
     MOV  R3, R2 
     IEQ  R3, 0x7FC00000      ; Is it already a String? 
     JT   R3, __tostring_passthrough 
