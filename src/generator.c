@@ -77,6 +77,58 @@ int resolve_static_path(ASTNode* node, char* path_buffer) {
     return 0;
 }
 
+int count_function_locals(ASTNode* node) {
+    int count = 0;
+
+    // Traverse sibling statements in the current block[cite: 1]
+    while (node != NULL) {
+        switch (node->type) {
+            case NODE_MULTIPLE_ASSIGNMENT:
+                // Check if this assignment is a local declaration[cite: 1, 10]
+                if (node->as.mult_assign.is_local) {
+                    // Count how many variables are in the target list[cite: 1, 10]
+                    ASTNode* target = node->as.mult_assign.targets_head;
+                    while (target != NULL) {
+                        count++;
+                        target = target->next;
+                    }
+                }
+                break;
+
+            case NODE_IF:
+                // Recurse into both branches of an IF statement[cite: 1, 10]
+				int  max       = 0;
+				int  tmpcount  = 0;
+                max            = count_function_locals (node -> as.if_stmt.if_body);
+                tmpcount       = count_function_locals (node -> as.if_stmt.else_body);
+				if (tmpcount  >  max)
+				{
+					max        = tmpcount;
+				}
+				count          = count + max;
+                break;
+
+            case NODE_WHILE:
+                // Recurse into WHILE loop bodies[cite: 1, 10]
+                count += count_function_locals(node->as.while_loop.body);
+                break;
+
+            case NODE_FUNCTION_DEF:
+                // CRITICAL BOUNDARY: Do NOT recurse into nested function definitions!
+                // Any locals inside a closure/nested function belong to THAT function's 
+                // stack frame, not our current enclosing function.
+                break;
+
+            default:
+                break;
+        }
+
+        node = node->next; // Move to the next statement in the block[cite: 1]
+    }
+
+    return count;
+}
+
 int check_needs_stack (ASTNode *node)
 {
     if (node  == NULL)
@@ -239,38 +291,35 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 break;
             }
 
-            case NODE_FUNCTION_DEF: {
-                const char *func_name  = node -> as.function_def.name;
-                push_function_context (func_name);
+			case NODE_FUNCTION_DEF: {
+				const char *func_name  = node -> as.function_def.name;
+				push_function_context (func_name);
 
-                if (g_debug_mode)
-                {
-                    // Register the label so emit_asm catches it on the very next line write
-                    snprintf (g_current_label, sizeof (g_current_label), "func_%s", func_name);
-                }
+				if (g_debug_mode)
+				{
+					snprintf (g_current_label, sizeof (g_current_label), "func_%s", func_name);
+				}
 
-                ////////////////////////////////////////////////////////////////////////
-                //
-                // Emit function prologue
-                //
-                emit_asm ("__function_%s:\n", func_name);
-                int  needs_stack  = check_needs_stack (node -> as.function_def.body);
-                if (needs_stack)
-                {
-                    emit_asm ("PUSH BP\n");
-                    emit_asm ("MOV BP, SP\n");
-                }
-                else
-                {
-                    emit_asm ("    ;; OPTIMIZATION: frame pointer omitted (Leaf Function)\n");
-                }
-
-				/*
-				// Allocate stack space for local variables
-				int local_count = node -> as.function_def.total_locals_count;
-				if (local_count > 0) {
-					emit_asm("ISUB  SP, %d ; Reserve frame space for locals\n", local_count);
-				}*/
+				// Emit function prologue
+				emit_asm("__function_%s:\n", func_name);
+				int  needs_stack  = check_needs_stack (node -> as.function_def.body);
+				if (needs_stack)
+				{
+					emit_asm ("PUSH BP\n");
+					emit_asm ("MOV BP, SP\n");
+					
+					// --- NEW: Calculate and allocate space for local variables ---
+					int num_locals = count_function_locals(node->as.function_def.body);
+					if (num_locals > 0)
+					{
+						emit_asm ("    ;; Reserve stack space for %d local variable(s)\n", num_locals);
+						emit_asm ("ISUB SP, %d\n", num_locals);
+					}
+				}
+				else
+				{
+					emit_asm ("    ;; OPTIMIZATION: frame pointer omitted (Leaf Function)\n");
+				}
 
                 ////////////////////////////////////////////////////////////////////////
                 //
@@ -364,11 +413,30 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 }
                 break;
             }
-
-            case NODE_MULTIPLE_ASSIGNMENT: {
+							 
+			case NODE_MULTIPLE_ASSIGNMENT: {
                 ASTNode *curr_tgt         = node -> as.mult_assign.targets_head;
                 ASTNode *curr_val         = node -> as.mult_assign.values_head;
                 int      val_reg          = -1;
+
+				// --- Intercept Bare Local Declarations ---
+				if (node->as.mult_assign.is_local && node->as.mult_assign.values_head == NULL) {
+					ASTNode *curr_tgt = node->as.mult_assign.targets_head;
+					while (curr_tgt != NULL) {
+						if (curr_tgt->type == NODE_IDENTIFIER) {
+							// 1. Register in the local scope symbol table
+							register_local(curr_tgt->as.id.name);
+							
+							// 2. Retrieve stack offset string (e.g., [BP - 1]) and initialize to Nil/0
+							char var_access[256];
+							get_variable_access_string(curr_tgt->as.id.name, var_access);
+							emit_asm("    ;; Initialize bare local '%s' to nil\n", curr_tgt->as.id.name);
+							emit_asm("MOV %s, 0\n", var_access);
+						}
+						curr_tgt = curr_tgt->next;
+					}
+					break; // Stop processing; we are done with the bare local!
+				}
 
                 while ((curr_tgt         != NULL) &&
                        (curr_val         != NULL))

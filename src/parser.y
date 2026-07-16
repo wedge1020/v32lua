@@ -183,12 +183,12 @@ statement:
             $$ -> as.if_stmt.if_body    = $4;
             $$ -> as.if_stmt.else_body  = $5;
     }
-    /* --- NEW: Local Variable Declaration (e.g., local x, y) --- */
-    | TOKEN_LOCAL var_list {
-        // If your compiler doesn't do anything with uninitialized variables yet,
-        // you can safely return NULL so it doesn't break compilation.
-        $$ = NULL; 
-    }
+	| TOKEN_LOCAL var_list {
+		$$ = make_node(NODE_MULTIPLE_ASSIGNMENT);
+		$$->as.mult_assign.is_local = 1;
+		$$->as.mult_assign.targets_head = $2;
+		$$->as.mult_assign.values_head = NULL; 
+	}
     | function_def               { $$ = $1; }
     | func_start TOKEN_IDENTIFIER ':' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
         $$ = $1;
