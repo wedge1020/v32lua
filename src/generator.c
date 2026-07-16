@@ -431,7 +431,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
 							char var_access[256];
 							get_variable_access_string(curr_tgt->as.id.name, var_access);
 							emit_asm("    ;; Initialize bare local '%s' to nil\n", curr_tgt->as.id.name);
-							emit_asm("MOV %s, 0\n", var_access);
+							emit_asm("MOV %s, 0xFFC00000\n", var_access);
 						}
 						curr_tgt = curr_tgt->next;
 					}

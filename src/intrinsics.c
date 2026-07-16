@@ -163,7 +163,7 @@ static void emit_gpu_blending_intrinsic (ASTNode *node, int  dest_reg)
     }
 
     if (dest_reg != 0) {
-        emit_asm ("    MOV R%d, 0 ; return nil\n", dest_reg);
+        emit_asm ("    MOV R%d, 0xFFC00000 ; return nil\n", dest_reg);
     }
 }
 
@@ -187,7 +187,7 @@ static void emit_gpu_draw_intrinsic (ASTNode *node, int  dest_reg)
     }
 
     if (dest_reg != 0) {
-        emit_asm ("    MOV R%d, 0 ; return nil\n", dest_reg);
+        emit_asm ("    MOV R%d, 0xFFC00000 ; return nil\n", dest_reg);
     }
 }
 
@@ -219,7 +219,7 @@ static void emit_spu_cmd_intrinsic (ASTNode *node, int  dest_reg)
     }
 
     if (dest_reg != 0) {
-        emit_asm ("    MOV R%d, 0 ; return nil\n", dest_reg);
+        emit_asm ("    MOV R%d, 0xFFC00000 ; return nil\n", dest_reg);
     }
 }
 
@@ -255,7 +255,7 @@ static void emit_gpu_clear_intrinsic(ASTNode *node, int dest_reg) {
 
     emit_asm ("    OUT GPU_Command, GPUCommand_ClearScreen\n");
     if (dest_reg != 0) {
-        emit_asm ("    MOV R%d, 0 ; return nil\n", dest_reg);
+        emit_asm ("    MOV R%d, 0xFFC00000 ; return nil\n", dest_reg);
     }
 }
 
