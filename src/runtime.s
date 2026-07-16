@@ -234,8 +234,8 @@ __table_set_fallback:
     MOV  R7, 0
     MOV  [R6], R7            ; Initialize PairCount (Word 0) to 0
     MOV  [R5+3], R6          ; Store new buffer pointer back into Table Header Word 3!
-    ;; -------------------------------------
 
+__table_set_hash_ready:      ; <-- ADD THIS LABEL HERE!
     MOV  R7, [R6]            ; R7 = PairCount (Now guaranteed to be safe!)
     MOV  R8, R6              ; Setup R8 as running memory pointer
     IADD R8, 2               ; Advance R8 to point directly at Key0
@@ -297,11 +297,6 @@ __unbox_string:
 __unbox_string_end:
     RET
 
-;; -------------------------------------------------------------------------------------
-;; Built-in: Tag-Aware String Concatenation (4MW RAM / 128MW ROM Rework)
-;; Incoming Stack: [BP+3] = Tagged Left_Str, [BP+2] = Tagged Right_Str
-;; Returns: R0 = Tagged pointer to newly allocated RAM heap string (0xFFC0....)
-;; -------------------------------------------------------------------------------------
 ;; -------------------------------------------------------------------------------------
 ;; Built-in: Tag-Aware String Concatenation (4MW RAM / 128MW ROM Rework)
 ;; Incoming Stack: [BP+3] = Tagged Left_Str, [BP+2] = Tagged Right_Str
@@ -514,57 +509,43 @@ __builtin_eq:
     IEQ  R1, R2
     JT   R1, __eq_return_true
 
-    ;; --- 1. Unbox & Validate LEFT Operand (R1) ---
+    ;; Validate LEFT Operand is a String (Tag 0x7FC0... or 0xFFC0... with payload >= 4)
     MOV  R3, R1
-    AND  R3, 0xFFC00000          ; Isolate 10-bit tag
-
-    IEQ  R3, 0x7FC00000          ; Is Left a ROM String?
-    JT   R3, __eq_left_rom
-
-    IEQ  R3, 0xFFC00000          ; Is Left a Primitive / RAM String?
-    JF   R3, __eq_return_false   ; If neither, tags don't match string types; return false!
-
+    AND  R3, 0xFFC00000
+    IEQ  R3, 0x7FC00000
+    JT   R3, __eq_left_valid
+    IEQ  R3, 0xFFC00000
+    JF   R3, __eq_return_false
     MOV  R3, R1
-    AND  R3, 0x003FFFFF          ; Isolate 22-bit payload
-    ILT  R3, 4                   ; Nil (0), False (1), True (2) are handled by fast-path
+    AND  R3, 0x003FFFFF
+    ILT  R3, 4
     JT   R3, __eq_return_false
 
-    ;; Left is a valid RAM String: retain 22-bit heap memory pointer
-    AND  R1, 0x003FFFFF
-    JMP  __eq_check_right
-
-__eq_left_rom:
-    ;; Left is a valid ROM String: strip tag & restore CART page bit (0x20000000)
-    AND  R1, 0x003FFFFF
-    OR   R1, 0x20000000
-
-__eq_check_right:
-    ;; --- 2. Unbox & Validate RIGHT Operand (R2) ---
+__eq_left_valid:
+    ;; Validate RIGHT Operand is a String
     MOV  R3, R2
-    AND  R3, 0xFFC00000          ; Isolate 10-bit tag
-
-    IEQ  R3, 0x7FC00000          ; Is Right a ROM String?
-    JT   R3, __eq_right_rom
-
-    IEQ  R3, 0xFFC00000          ; Is Right a Primitive / RAM String?
-    JF   R3, __eq_return_false   ; Not a string -> return false
-
+    AND  R3, 0xFFC00000
+    IEQ  R3, 0x7FC00000
+    JT   R3, __eq_right_valid
+    IEQ  R3, 0xFFC00000
+    JF   R3, __eq_return_false
     MOV  R3, R2
     AND  R3, 0x003FFFFF
     ILT  R3, 4
     JT   R3, __eq_return_false
 
-    ;; Right is a valid RAM String: retain 22-bit heap memory pointer
-    AND  R2, 0x003FFFFF
-    JMP  __eq_strcmp_loop
+__eq_right_valid:
+    ;; Unbox both validated string pointers!
+    MOV  R0, R1
+    CALL __unbox_string
+    PUSH R0                  ; Save unboxed Left pointer
 
-__eq_right_rom:
-    ;; Right is a valid ROM String: strip tag & restore CART page bit
-    AND  R2, 0x003FFFFF
-    OR   R2, 0x20000000
+    MOV  R0, R2
+    CALL __unbox_string
+    MOV  R2, R0              ; R2 = Unboxed Right pointer
+    POP  R1                  ; R1 = Unboxed Left pointer
 
 __eq_strcmp_loop:
-    ;; R1 and R2 now point to raw ASCII string data in either ROM or RAM
     MOV  R3, [R1]
     MOV  R4, [R2]
 
