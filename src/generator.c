@@ -265,6 +265,13 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     emit_asm ("    ;; OPTIMIZATION: frame pointer omitted (Leaf Function)\n");
                 }
 
+				/*
+				// Allocate stack space for local variables
+				int local_count = node -> as.function_def.total_locals_count;
+				if (local_count > 0) {
+					emit_asm("ISUB  SP, %d ; Reserve frame space for locals\n", local_count);
+				}*/
+
                 ////////////////////////////////////////////////////////////////////////
                 //
                 // Push a new scope for the function body!

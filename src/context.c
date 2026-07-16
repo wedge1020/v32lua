@@ -111,11 +111,11 @@ SymbolNode *register_local (const char* name)
 {
     SymbolNode *sym                    = resolve_symbol (name);
     if (sym                           != NULL)
-	{
-		return (sym); // Already registered, do not allocate a new slot!
-	}
+    {
+        return (sym); // Already registered, do not allocate a new slot!
+    }
 
-	sym                                = (SymbolNode *) calloc (1, sizeof (SymbolNode));
+    sym                                = (SymbolNode *) calloc (1, sizeof (SymbolNode));
     sym -> name                        = strdup (name);
     sym -> type                        = SYM_LOCAL;
     sym -> location                    = current_scope -> local_offset_counter; // Allocate [BP - offset]
@@ -139,21 +139,21 @@ SymbolNode* register_global (const char *name)
 {
     SymbolNode *sym                   = resolve_symbol (name);
     if (sym                          != NULL)
-	{
-		return (sym); // Already registered, do not allocate a new slot!
-	}
+    {
+        return (sym); // Already registered, do not allocate a new slot!
+    }
 
     sym                               = (SymbolNode *) calloc (1, sizeof (SymbolNode));
     sym -> name                       = strdup (name);
     sym -> type                       = SYM_GLOBAL;
     sym -> location                   = next_ram_address; // Sequentially assign RAM slots from 1 upwards
     sym -> is_function                = 0;
-	next_ram_address                  = next_ram_address + 1;
+    next_ram_address                  = next_ram_address + 1;
 
     if (global_scope                 == NULL)
-	{
-		init_global_scope ();
-	}
+    {
+        init_global_scope ();
+    }
 
     if (global_scope -> last         == NULL)
     {
@@ -222,7 +222,7 @@ void  get_variable_access_string (const char *name, char *output_buffer)
         //
         if (sym -> location    <  0)
         {
-            sprintf (output_buffer, "[BP + %d]", -sym -> location);
+            sprintf (output_buffer, "[BP + %d]", -(sym -> location + 1));
         }
 
         ////////////////////////////////////////////////////////////////////////////////
@@ -231,7 +231,7 @@ void  get_variable_access_string (const char *name, char *output_buffer)
         //
         else
         {
-            sprintf (output_buffer, "[BP - %d]", sym -> location);
+            sprintf (output_buffer, "[BP - %d]", (sym -> location + 1));
         }
     }
 }
@@ -242,7 +242,7 @@ void  get_variable_access_string (const char *name, char *output_buffer)
 int get_next_label (void)
 {
     if (context_stack_head == NULL)
-	{
+    {
         return global_label_counter++;
     }
     return context_stack_head->label_counter++;
