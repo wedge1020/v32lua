@@ -513,6 +513,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 
                 // AUDITED: Strip the 0xFF800000 NaN tag before jumping!
                 emit_asm ("AND R%d, 0x003FFFFF ; Unbox code pointer\n", target_reg);
+				emit_asm ("OR  R%d, 0x20000000 ; restore memory page bit\n", target_reg);
                 emit_asm ("CALL R%d\n", target_reg);
                 unlock_register(target_reg);
 
