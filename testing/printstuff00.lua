@@ -1,4 +1,4 @@
 function main()
     print(0, 100, "hello")
-	print(100, 120, "world")
+	print(0, 120, 42)
 end

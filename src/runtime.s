@@ -447,12 +447,16 @@ __print_dispatch:
     RET
 
 __print_coerce:
-    ;; Target is a Float, Boolean, Nil, Table, or Function.
-    PUSH R3                  ; Push non-string value as argument
-    CALL __builtin_tostring  ; R0 now holds a Tagged String (ROM or RAM!)
-    ISUB SP, 1               ; Clean up argument from stack
-    MOV  R3, R0              ; Replace target R3 with the new String pointer
-    JMP  __print_check_tag   ; Loop back to safely unbox the new string!
+    ;; Target is a Float, Boolean, Nil, Table, or Function.[cite: 18]
+    PUSH  R1                  ; ADD THIS: Preserve X coordinate
+    PUSH  R2                  ; ADD THIS: Preserve Y coordinate
+    PUSH  R3                  ; Push non-string value as argument[cite: 18]
+    CALL  __builtin_tostring  ; R0 now holds a Tagged String (ROM or RAM!)[cite: 18]
+    ISUB  SP, 1               ; Clean up argument from stack[cite: 18]
+    MOV   R3, R0              ; Replace target R3 with the new String pointer[cite: 18]
+    POP   R2                  ; ADD THIS: Restore Y coordinate
+    POP   R1                  ; ADD THIS: Restore X coordinate
+    JMP   __print_check_tag   ; Loop back to safely unbox the new string![cite: 18]
 
 ;; =====================================================================================
 ;; SECTION 4: CORE OPERATORS & TYPE UTILITIES
@@ -759,8 +763,9 @@ __builtin_ftoa:
     JMP  __ftoa_terminate
 
 __ftoa_extract_loop:
-    IEQ  R1, 0               ; If quotient is 0, we are done extracting digits
-    JT   R1, __ftoa_reverse_init
+	MOV  R5, R1
+    IEQ  R5, 0               ; If quotient is 0, we are done extracting digits
+    JT   R5, __ftoa_reverse_init
     
     MOV  R4, R1              ; R4 = Current number
     IMOD R4, 10              ; R4 = Remainder (Digit 0-9)

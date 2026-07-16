@@ -932,7 +932,10 @@ void generate_global_setup (ASTNode *node)
     // 1. Emit the section header and entry label
     emit_asm ("\n; --- Global Variable & Runtime Initialization ---\n");
     emit_asm ("__init_globals:\n");
-    emit_asm ("MOV R0, %d ; heap start", next_ram_address);
+    if (next_ram_address >= 4)
+        emit_asm ("MOV R0, %d ; heap start", next_ram_address);
+    else
+        emit_asm ("MOV R0, 4  ; heap start (minimum bound, for nil/false/true)");
     emit_asm ("MOV [heap_pointer], R0");
 
     if (node != NULL)
