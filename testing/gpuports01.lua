@@ -8,5 +8,5 @@ function main()
 	ioports.gpu.Y        = 170
 	ioports.gpu.draw()
 
-	__asm__("HLT")
+	-- __asm__("HLT")
 end
