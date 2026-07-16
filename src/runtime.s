@@ -257,153 +257,295 @@ __table_set_done:
 ;; =====================================================================================
 
 ;; -------------------------------------------------------------------------------------
-;; Built-in: Tag-Aware String Concatenation (Non-Destructive & Safe) 
-;; Incoming Stack: [BP+3] = Tagged Left_Str, [BP+2] = Tagged Right_Str 
-;; Returns: R0 = Tagged pointer to newly allocated string 
+;; Built-in: Tag-Aware String Concatenation (4MW RAM / 128MW ROM Rework)
+;; Incoming Stack: [BP+3] = Tagged Left_Str, [BP+2] = Tagged Right_Str
+;; Returns: R0 = Tagged pointer to newly allocated RAM heap string (0xFFC0....)
 ;; -------------------------------------------------------------------------------------
 __builtin_strcat:
-    PUSH BP 
-    MOV  BP, SP 
-    
-    ;; Unbox and Calculate Length of Left String 
-    MOV  R1, [BP+3]          ; R1 = Left tagged pointer 
-    AND  R1, 0x003FFFFF      ; UNBOX: Isolate 22-bit raw pointer 
-    MOV  R2, 0               ; R2 = Left length 
+    PUSH BP
+    MOV  BP, SP
+
+    ;; --- 1. Unbox and Calculate Length of Left String ---
+    MOV  R1, [BP+3]          ; R1 = Left tagged pointer
+    MOV  R3, R1              ; Copy to inspect tag
+    AND  R3, 0xFFC00000      ; Isolate upper 10 bits
+    IEQ  R3, 0x7FC00000      ; Is it a ROM String Literal?
+    JT   R3, __strcat_len_left_rom
+
+    ;; RAM String (Tag 0xFFC0xxxx)
+    AND  R1, 0x003FFFFF      ; Strip tag to get raw 22-bit RAM pointer (4MW limit)
+    JMP  __strcat_len_left_init
+
+__strcat_len_left_rom:
+    AND  R1, 0x07FFFFFF      ; Strip tag to get up to 27-bit ROM offset
+    OR   R1, 0x20000000      ; Restore Vircon32 CART page bit
+
+__strcat_len_left_init:
+    MOV  R2, 0               ; R2 = Left length
 __strcat_len_left:
-    MOV  R3, [R1]            ; Read character 
-    IEQ  R3, 0               ; Destructive test is safe here (we don't need R3 again) 
-    JT   R3, __strcat_len_right_init 
-    IADD R1, 1 
-    IADD R2, 1 
-    JMP  __strcat_len_left 
+    MOV  R3, [R1]            ; Read character
+    IEQ  R3, 0               ; Destructive test is safe here
+    JT   R3, __strcat_len_right_check
+    IADD R1, 1
+    IADD R2, 1
+    JMP  __strcat_len_left
 
-    ;; Unbox and Calculate Length of Right String 
+    ;; --- 2. Unbox and Calculate Length of Right String ---
+__strcat_len_right_check:
+    MOV  R1, [BP+2]          ; R1 = Right tagged pointer
+    MOV  R3, R1
+    AND  R3, 0xFFC00000
+    IEQ  R3, 0x7FC00000
+    JT   R3, __strcat_len_right_rom
+
+    AND  R1, 0x003FFFFF      ; RAM unbox (4MW limit)
+    JMP  __strcat_len_right_init
+
+__strcat_len_right_rom:
+    AND  R1, 0x07FFFFFF
+    OR   R1, 0x20000000      ; ROM unbox
+
 __strcat_len_right_init:
-    MOV  R1, [BP+2]          ; R1 = Right tagged pointer 
-    AND  R1, 0x003FFFFF      ; UNBOX: Isolate 22-bit raw pointer 
-    MOV  R4, 0               ; R4 = Right length 
+    MOV  R4, 0               ; R4 = Right length
 __strcat_len_right:
-    MOV  R3, [R1]            ; Read character 
-    IEQ  R3, 0               ; Destructive test is safe here 
-    JT   R3, __strcat_alloc 
-    IADD R1, 1 
-    IADD R4, 1 
-    JMP  __strcat_len_right 
+    MOV  R3, [R1]            ; Read character
+    IEQ  R3, 0               ; Destructive test is safe here
+    JT   R3, __strcat_alloc
+    IADD R1, 1
+    IADD R4, 1
+    JMP  __strcat_len_right
 
-    ;; Allocate Memory on Heap 
+    ;; --- 3. Allocate Memory on Heap ---
 __strcat_alloc:
-    MOV  R0, [heap_pointer]  ; R0 = New string base (raw pointer) 
-    MOV  R5, R0              ; R5 = Write head 
+    MOV  R0, [heap_pointer]  ; R0 = New string base (raw pointer)
+    MOV  R5, R0              ; R5 = Write head
 
-    ;; Advance heap_pointer = old_heap + left_len + right_len + 1 
-    MOV  R6, R0 
-    IADD R6, R2 
-    IADD R6, R4 
-    IADD R6, 1 
-    MOV  [heap_pointer], R6 
+    ;; Advance heap_pointer = old_heap + left_len + right_len + 1
+    MOV  R6, R0
+    IADD R6, R2
+    IADD R6, R4
+    IADD R6, 1
+    MOV  [heap_pointer], R6
 
-    ;; Copy Left String (Using R6 as a non-destructive scratch register!) 
-    MOV  R1, [BP+3]          ; R1 = Reset left pointer 
-    AND  R1, 0x003FFFFF      ; UNBOX for copying 
+    ;; --- 4. Copy Left String to Heap ---
+    MOV  R1, [BP+3]          ; R1 = Reset left pointer
+    MOV  R3, R1
+    AND  R3, 0xFFC00000
+    IEQ  R3, 0x7FC00000
+    JT   R3, __strcat_copy_left_rom
+
+    AND  R1, 0x003FFFFF      ; RAM unbox (4MW limit)
+    JMP  __strcat_copy_left
+
+__strcat_copy_left_rom:
+    AND  R1, 0x07FFFFFF
+    OR   R1, 0x20000000      ; ROM unbox
+
 __strcat_copy_left:
-    MOV  R3, [R1]            ; Read ASCII character into R3 
-    MOV  R6, R3              ; Copy to scratch register R6 for testing 
-    IEQ  R6, 0               ; Destructive test on R6 (R3 remains intact!) 
-    JT   R6, __strcat_copy_right_init 
-    MOV  [R5], R3            ; Write preserved character to heap 
-    IADD R1, 1 
-    IADD R5, 1 
-    JMP  __strcat_copy_left 
+    MOV  R3, [R1]            ; Read ASCII character into R3
+    MOV  R6, R3              ; Copy to scratch register R6 for testing
+    IEQ  R6, 0               ; Destructive test on R6 (R3 remains intact!)
+    JT   R6, __strcat_copy_right_check
+    MOV  [R5], R3            ; Write preserved character to heap
+    IADD R1, 1
+    IADD R5, 1
+    JMP  __strcat_copy_left
 
-    ;; Copy Right String (Using R6 as a non-destructive scratch register!) 
-__strcat_copy_right_init:
-    MOV  R1, [BP+2]          ; R1 = Reset right pointer 
-    AND  R1, 0x003FFFFF      ; UNBOX for copying 
+    ;; --- 5. Copy Right String to Heap ---
+__strcat_copy_right_check:
+    MOV  R1, [BP+2]          ; R1 = Reset right pointer
+    MOV  R3, R1
+    AND  R3, 0xFFC00000
+    IEQ  R3, 0x7FC00000
+    JT   R3, __strcat_copy_right_rom
+
+    AND  R1, 0x003FFFFF      ; RAM unbox (4MW limit)
+    JMP  __strcat_copy_right
+
+__strcat_copy_right_rom:
+    AND  R1, 0x07FFFFFF
+    OR   R1, 0x20000000      ; ROM unbox
+
 __strcat_copy_right:
-    MOV  R3, [R1]            ; Read ASCII character into R3 
-    MOV  R6, R3              ; Copy to scratch register R6 for testing 
-    IEQ  R6, 0               ; Destructive test on R6 (R3 remains intact!) 
-    JT   R6, __strcat_finish 
-    MOV  [R5], R3            ; Write preserved character to heap 
-    IADD R1, 1 
-    IADD R5, 1 
-    JMP  __strcat_copy_right 
+    MOV  R3, [R1]            ; Read ASCII character into R3
+    MOV  R6, R3              ; Copy to scratch register R6 for testing
+    IEQ  R6, 0               ; Destructive test on R6
+    JT   R6, __strcat_finish
+    MOV  [R5], R3            ; Write preserved character to heap
+    IADD R1, 1
+    IADD R5, 1
+    JMP  __strcat_copy_right
 
-    ;; Null-Terminate, BOX output, and Return 
+    ;; --- 6. Null-Terminate, BOX as RAM String, and Return ---
 __strcat_finish:
-    MOV  R3, 0 
-    MOV  [R5], R3            ; Null terminator 
-    
-    ;; Apply NaN-Box String Tag to the returned heap pointer 
-    OR   R0, 0x7FC00000      ; BOX: R0 is now a valid Lua String! 
-    
-    MOV  SP, BP 
-    POP  BP 
-    RET 
+    MOV  R3, 0
+    MOV  [R5], R3            ; Write Null terminator
+
+    ;; Apply RAM Heap String Tag (0xFFC00000)
+    OR   R0, 0xFFC00000      ; BOX: R0 is now a valid RAM Heap String!
+
+    MOV  SP, BP
+    POP  BP
+    RET
 
 ;; -------------------------------------------------------------------------------------
-;; Built-in: Print to Terminal 
-;; Incoming Stack: [BP+2] = Tagged String Pointer 
-;; -------------------------------------------------------------------------------------
-;; -------------------------------------------------------------------------------------
-;; Built-in: Direct Print to Screen at Coordinate (x, y)
-;; Incoming Stack: [BP+4] = X Coordinate, [BP+3] = Y Coordinate, [BP+2] = Tagged String
-;; -------------------------------------------------------------------------------------
-;; -------------------------------------------------------------------------------------
-;; Built-in: Direct Print to Screen at Coordinate (x, y) with Safety Coercion
+;; Built-in: Direct Print to Screen at Coordinate (x, y) with Split-Tag Coercion
 ;; Incoming Stack: [BP+4] = X Coordinate, [BP+3] = Y Coordinate, [BP+2] = Target Value
 ;; -------------------------------------------------------------------------------------
 __builtin_print:
-    PUSH BP 
-    MOV  BP, SP 
+    PUSH BP
+    MOV  BP, SP
 
-    ;; 1. Initialize GPU Texture/Region state (back up existing, set to BIOS)
+    ;; 1. Initialize GPU Texture/Region state
     IN   R5, GPU_SelectedTexture ; Save current texture
     IN   R6, GPU_SelectedRegion  ; Save current region
     OUT  GPU_SelectedTexture, -1 ; Set BIOS font texture
-    
+
     ;; 2. Load Parameters
     MOV  R1, [BP+4]          ; R1 = X Pixel Coordinate (Integer)
     MOV  R2, [BP+3]          ; R2 = Y Pixel Coordinate (Integer)
     MOV  R3, [BP+2]          ; R3 = Target Value to Print
 
-    ;; 3. SAFETY COERCION LAYER: Verify Tag without destroying R3
+__print_check_tag:
+    ;; 3. SAFETY COERCION LAYER: Check for ROM vs RAM String tags
     MOV  R4, R3              ; Copy target value to scratch register R4
     AND  R4, 0xFFC00000      ; Isolate upper 10 bits (Tag)
-    IEQ  R4, 0x7FC00000      ; Is it ALREADY a String? (Destructive test on R4)
-    JT   R4, __print_unbox   ; If Tag == 0x7FC00000, skip coercion!
 
-    ;; --- COERCION FALLBACK ---
-    ;; Target is a Float, Boolean, Nil, Table, or Function. 
-    ;; Route it through __builtin_tostring to generate a valid String on the heap!
-    PUSH R3                  ; Push non-string value as argument
-    CALL __builtin_tostring  ; R0 now holds a newly minted Tagged String Pointer
-    ISUB SP, 1               ; Clean up argument from stack
-    MOV  R3, R0              ; Replace our target register R3 with the new String pointer
+    IEQ  R4, 0x7FC00000      ; Is it a ROM String Literal?
+    JT   R4, __print_unbox_rom
 
-__print_unbox:
-    ;; 4. Unbox String and Dispatch to BIOS
-    AND  R3, 0x003FFFFF      ; UNBOX: Isolate 22-bit raw heap pointer
-	OR   R3, 0x20000000      ; restore Vircon32 CART page bit
-    
-    ;; __bios_print_text expects: [BP+4]=String, [BP+3]=Y, [BP+2]=X
+    ;; Check if it's a RAM Heap String (Tag 0xFFC0xxxx with address >= 4)
+    IEQ  R4, 0xFFC00000      ; Does it have the RAM String / Primitive tag?
+    JF   R4, __print_coerce  ; If neither string tag, coerce!
+
+    ;; It has tag 0xFFC00000. Make sure it's not Nil (0), False (1), or True (2)!
+    MOV  R4, R3
+    AND  R4, 0x003FFFFF      ; Isolate payload
+    ILT  R4, 4               ; Is payload < 4 (Nil/False/True)?
+    JT   R4, __print_coerce  ; If < 4, it's a boolean/nil -> coerce!
+
+__print_unbox_ram:
+    ;; 4a. Unbox RAM String: Keep raw 22-bit heap address (4MW limit)
+    AND  R3, 0x003FFFFF      ; Isolate 22-bit raw RAM heap pointer
+    JMP  __print_dispatch
+
+__print_unbox_rom:
+    ;; 4b. Unbox ROM String: Isolate offset and add ROM page bit
+    AND  R3, 0x07FFFFFF      ; Isolate up to 27-bit raw ROM offset
+    OR   R3, 0x20000000      ; Restore Vircon32 CART page bit
+
+__print_dispatch:
+    ;; 5. Dispatch Unboxed Pointer to BIOS
     PUSH R3                  ; Push Unboxed Raw String Pointer
     PUSH R2                  ; Push Y Coordinate
     PUSH R1                  ; Push X Coordinate
     CALL __bios_print_text   ; Draw the string directly to the GPU screen
     ISUB SP, 3               ; Clean up arguments from stack
 
-    ;; 5. Restore previous GPU texture and region
+    ;; 6. Restore previous GPU texture and region
     OUT  GPU_SelectedTexture, R5 ; Restore previous texture
     OUT  GPU_SelectedRegion, R6  ; Restore previous region
-    
-    MOV  SP, BP 
-    POP  BP 
+
+    MOV  SP, BP
+    POP  BP
     RET
+
+__print_coerce:
+    ;; Target is a Float, Boolean, Nil, Table, or Function.
+    PUSH R3                  ; Push non-string value as argument
+    CALL __builtin_tostring  ; R0 now holds a Tagged String (ROM or RAM!)
+    ISUB SP, 1               ; Clean up argument from stack
+    MOV  R3, R0              ; Replace target R3 with the new String pointer
+    JMP  __print_check_tag   ; Loop back to safely unbox the new string!
 
 ;; =====================================================================================
 ;; SECTION 4: CORE OPERATORS & TYPE UTILITIES
 ;; =====================================================================================
+
+;; -------------------------------------------------------------------------------------
+;; Built-in: Lexicographical String Comparison (strcmp)
+;; Incoming Stack: [BP+3] = Tagged Left_Str, [BP+2] = Tagged Right_Str
+;; Returns: R0 = Raw integer (-1 if Left < Right, 0 if Equal, 1 if Left > Right)
+;; -------------------------------------------------------------------------------------
+__builtin_strcmp:
+    PUSH BP
+    MOV  BP, SP
+
+    ;; --- Unbox Left String ---
+    MOV  R1, [BP+3]          ; R1 = Left tagged pointer
+    MOV  R3, R1              ; Copy to check tag
+    AND  R3, 0xFFF00000      ; Isolate upper 12 bits (Tag)
+
+    ;; Check if it is a ROM String (Tag 0x7FC00000)
+    IEQ  R3, 0x7FC00000      ;
+    JT   R3, __strcmp_unbox_left_rom
+
+    ;; Otherwise, treat as a RAM String (Tag 0x7FB00000) - skip ROM page bit
+    AND  R1, 0x003FFFFF      ;
+    JMP  __strcmp_unbox_right
+
+__strcmp_unbox_left_rom:
+    AND  R1, 0x003FFFFF      ;
+    OR   R1, 0x20000000      ; Restore CART page bit[cite: 2, 8]
+
+__strcmp_unbox_right:
+    ;; --- Unbox Right String ---
+    MOV  R2, [BP+2]          ; R2 = Right tagged pointer
+    MOV  R3, R2              ; Copy to check tag
+    AND  R3, 0xFFF00000      ; Isolate upper 12 bits[cite: 8]
+
+    ;; Check if it is a ROM String (Tag 0x7FC00000)
+    IEQ  R3, 0x7FC00000      ;[cite: 8]
+    JT   R3, __strcmp_unbox_right_rom
+
+    ;; Otherwise, treat as a RAM String (Tag 0x7FB00000)
+    AND  R2, 0x003FFFFF      ;[cite: 8]
+    JMP  __strcmp_compare
+
+__strcmp_unbox_right_rom:
+    AND  R2, 0x003FFFFF      ;[cite: 8]
+    OR   R2, 0x20000000      ;[cite: 2, 8]
+
+__strcmp_compare:
+    ;; --- Character Comparison Loop ---
+__strcmp_loop:
+    MOV  R3, [R1]            ; Load character word from Left string[cite: 8]
+    MOV  R4, [R2]            ; Load character word from Right string[cite: 8]
+
+    ;; Compare characters
+    MOV  R5, R3              ;[cite: 8]
+    IEQ  R5, R4              ; Does Left char == Right char?[cite: 8]
+    JF   R5, __strcmp_mismatch
+
+    ;; If they match, did we hit the null terminator?
+    IEQ  R3, 0               ;[cite: 8]
+    JT   R3, __strcmp_equal
+
+    ;; Advance pointers
+    IADD R1, 1               ;[cite: 8]
+    IADD R2, 1               ;[cite: 8]
+    JMP  __strcmp_loop       ;[cite: 8]
+
+__strcmp_mismatch:
+    MOV  R5, R3
+    ILT  R5, R4              ; Is Left char < Right char?
+    JT   R5, __strcmp_less
+
+__strcmp_greater:
+    MOV  R0, 1               ; Left > Right[cite: 8]
+    JMP  __strcmp_done
+
+__strcmp_less:
+    MOV  R0, -1              ; Left < Right
+    JMP  __strcmp_done
+
+__strcmp_equal:
+    MOV  R0, 0               ; Left == Right[cite: 8]
+
+__strcmp_done:
+    MOV  SP, BP              ;[cite: 8]
+    POP  BP                  ;[cite: 8]
+    RET                      ;[cite: 8]
 
 ;; -------------------------------------------------------------------------------------
 ;; Universal Equality (==): Returns raw integer 1 (true) or 0 (false) in R0 
@@ -439,23 +581,23 @@ __builtin_eq:
     JMP  __eq_false
 
 __eq_check_tags:
-    ;; 1. Re-isolate tags into scratch registers R3 and R4
-    MOV  R3, R1
-    AND  R3, 0xFFC00000      ; Isolate Left Tag in R3
-    MOV  R4, R2
-    AND  R4, 0xFFC00000      ; Isolate Right Tag in R4
-
-    ;; 2. Do the tags match? If not, different types cannot be equal!
-    IEQ  R3, R4
-    JF   R3, __eq_false      ; If tags differ -> return false!
-
-    ;; 3. FAST-PATH 3: Are they Strings?
-    ;; Re-isolate Left tag into R3 since the previous IEQ destroyed it
+    ;; Are they both ROM Strings?
     MOV  R3, R1
     AND  R3, 0xFFC00000
-    IEQ  R3, 0x7FC00000      ; Is it the String Tag?
-    JF   R3, __eq_false      ; If not strings (e.g., distinct tables), return false!
+    IEQ  R3, 0x7FC00000
+    JT   R3, __eq_is_string
 
+    ;; Are they both RAM Strings? (Tag == 0xFFC00000 AND Payload >= 4)
+    MOV  R3, R1
+    AND  R3, 0xFFC00000
+    IEQ  R3, 0xFFC00000
+    JF   R3, __eq_false      ; Not strings!
+    MOV  R3, R1
+    AND  R3, 0x003FFFFF
+    ILT  R3, 4               ; Is it Nil/True/False?
+    JT   R3, __eq_false      ; Booleans/Nil handled earlier!
+
+__eq_is_string:
     ;; FALLBACK: Deep String Comparison (strcmp)
     AND  R1, 0x003FFFFF      ; Unbox Left string pointer -> R1
     AND  R2, 0x003FFFFF      ; Unbox Right string pointer -> R2
@@ -524,23 +666,40 @@ __error_attempt_to_get_length:
     HLT                      ; Halt CPU to preserve register state for debugging
     JMP __error_attempt_to_get_length
 
+;; -------------------------------------------------------------------------------------
+;; Corrected String Length Handler
+;; -------------------------------------------------------------------------------------
 __len_string:
-    AND  R1, 0x003FFFFF      ; Unbox string pointer to read header 
-	OR   R1, 0x20000000
-    MOV  R0, [R1]            ; String struct stores length in word 0 (Stripped +0 offset)
-    CIF  R0                  ; Vircon32 in-place conversion: R0 = (float) R0 
-    JMP  __len_done
+    ;; 1. Unbox String Pointer (Handling RAM vs ROM tags)
+    MOV  R1, [BP+2]          ; R1 = Target Value[cite: 8]
+    MOV  R2, R1
+    AND  R2, 0xFFF00000      ; Isolate tag
 
-__len_table:
-    AND  R1, 0x003FFFFF      ; Unbox table pointer to read header 
-	OR   R1, 0x20000000
-    MOV  R0, [R1+1]          ; Table struct stores array boundary length in word 1 
-    CIF  R0                  ; Vircon32 in-place conversion: R0 = (float) R0 
-    
-__len_done:
-    MOV  SP, BP
-    POP  BP
-    RET
+    IEQ  R2, 0x7FC00000      ; Is it ROM?
+    JT   R2, __len_str_rom
+
+    AND  R1, 0x003FFFFF      ; RAM unbox
+    JMP  __len_str_calc
+
+__len_str_rom:
+    AND  R1, 0x003FFFFF
+    OR   R1, 0x20000000      ; ROM unbox[cite: 2, 8]
+
+__len_str_calc:
+    MOV  R0, 0               ; Initialize character counter
+
+__len_str_loop:
+    MOV  R3, [R1]            ; Read character
+    IEQ  R3, 0               ; Is it null terminator?
+    JT   R3, __len_str_done
+
+    IADD R1, 1               ; Move to next character
+    IADD R0, 1               ; Increment count
+    JMP  __len_str_loop
+
+__len_str_done:
+    CIF  R0                  ; Convert integer length to float[cite: 8]
+    JMP  __len_done          ; Return via length dispatcher[cite: 8]
 
 ;; -------------------------------------------------------------------------------------
 ;; Universal Type Serializer: Converts any tagged value to a String pointer 
@@ -582,10 +741,13 @@ __builtin_tostring:
     JT   R3, __tostring_function 
     
     ;; 3. Fallback: It must be a standard IEEE 754 Float! 
+	;; In __builtin_tostring float fallback:
     PUSH R1 
     CALL __builtin_ftoa 
     ISUB SP, 1 
-    OR   R0, 0x7FC00000      ; Box raw pointer as String 
+    
+    ;; Box as RAM Heap String (0xFFC00000) instead of ROM (0x7FC00000)
+    OR   R0, 0xFFC00000      ; Box raw pointer as RAM String 
     JMP  __tostring_done
 
 __tostring_nil:
