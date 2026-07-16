@@ -437,13 +437,11 @@ void  emit_string_data_section (void)
 
 void  emit_runtime_library (void)
 {
-    emit_asm("\n;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;");
-    emit_asm(";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\n");
+    emit_asm("\n;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\n");
     emit_asm(";;\n");
     emit_asm(";; Lua assembly support Runtime Library Subroutines\n");
     emit_asm(";;\n");
-    emit_asm(";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;");
-    emit_asm(";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\n");
+    emit_asm(";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\n");
     emit_asm("\n");
 
     // Point our cursor to the start of the embedded Vircon32 assembly
