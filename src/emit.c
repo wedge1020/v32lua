@@ -536,3 +536,15 @@ void  emit_get_gamepad_inputs_intrinsic (int  dest_reg)
     emit_asm ("CIF R%d\n", dest_reg);
     unlock_register (bit_reg);
 }
+
+void  emit_table_get_literal (int  table_reg, const char *property_name)
+{
+    int  string_id  = emit_string_data_section (property_name);
+
+    emit_asm (";; Lookup table property: .%s", property_name);
+    emit_asm ("MOV R1, R%d          ; Arg 1: Table pointer", table_reg);
+    emit_asm ("MOV R2, __string_%d", string_id);
+    emit_asm ("OR  R2, 0x7FC00000   ; Arg 2: Box key as ROM String");
+    emit_asm ("CALL __builtin_table_get");
+    emit_asm ("MOV R%d, R0          ; Store result", table_reg);
+}

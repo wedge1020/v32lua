@@ -108,7 +108,7 @@ int count_function_locals(ASTNode* node) {
                 }
                 count          = count + max;
                 break;
-			}
+            }
 
             case NODE_WHILE:
                 // Recurse into WHILE loop bodies
@@ -373,7 +373,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     char to_true_label[128], end_label[128];
                     snprintf(to_true_label, sizeof(to_true_label), "__%s_not_true_%d", ctx, label_id); // Prefix added
                     snprintf(end_label, sizeof(end_label), "__%s_not_end_%d", ctx, label_id);         // Prefix added
-					int  scratch_reg  = allocate_register ();
+                    int  scratch_reg  = allocate_register ();
 
                     // 1. Check if Nil or False using scratch register
                     emit_asm("MOV R%d, R%d\n", scratch_reg, dest_reg);
@@ -391,9 +391,9 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     emit_asm("%s:\n", to_true_label);
                     emit_asm("MOV R%d, 0xFFC00002 ; Return True\n", dest_reg);
                     emit_asm("%s:\n", end_label);
-					unlock_register (scratch_reg);
+                    unlock_register (scratch_reg);
                 }
-                else if (node->as.unary.operator == OP_UNM) {
+                else if (node -> as.unary.operator == OP_UNM) {
                     emit_asm ("PUSH R%d\n", dest_reg);
                     emit_asm ("CALL __builtin_unm\n");
                     emit_asm ("ISUB SP, 1\n");
@@ -402,9 +402,9 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 break;
             }
                              
-			case NODE_MULTIPLE_ASSIGNMENT: {
-                ASTNode *curr_tgt = node->as.mult_assign.targets_head;
-                ASTNode *curr_val = node->as.mult_assign.values_head;
+            case NODE_MULTIPLE_ASSIGNMENT: {
+                ASTNode *curr_tgt = node -> as.mult_assign.targets_head;
+                ASTNode *curr_val = node -> as.mult_assign.values_head;
                 int      val_reg  = -1;
 
                 // --- Intercept Bare Local Declarations (e.g., "local x, y") ---
@@ -515,7 +515,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 
                 // AUDITED: Strip the 0xFF800000 NaN tag before jumping!
                 emit_asm ("AND R%d, 0x003FFFFF ; Unbox code pointer\n", target_reg);
-				emit_asm ("OR  R%d, 0x20000000 ; restore memory page bit\n", target_reg);
+                emit_asm ("OR  R%d, 0x20000000 ; restore memory page bit\n", target_reg);
                 emit_asm ("CALL R%d\n", target_reg);
                 unlock_register(target_reg);
 
@@ -539,7 +539,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 
                 while (expr != NULL) {
                     int val_reg = allocate_register();
-                    generate_asm (expr, val_reg); 
+                    generate_asm (expr, val_reg);
                     
                     if (ret_idx == 0)      { emit_asm ("MOV R0, R%d\n", val_reg); }
                     else if (ret_idx == 1) { emit_asm ("MOV R2, R%d\n", val_reg); }
@@ -557,48 +557,48 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 break;
             }
 
-			case NODE_ADD: {
-				// OPTIMIZATION (-O1): x + 0.0 -> x
-				if ((o_optflag                                >= 1) &&
-					(node -> as.binary.right -> type          == NODE_NUMBER) &&
-					(node -> as.binary.right -> as.number.val == 0.0))
-				{
-					generate_asm (node -> as.binary.left, dest_reg);
-					break;
-				}
+            case NODE_ADD: {
+                // OPTIMIZATION (-O1): x + 0.0 -> x
+                if ((o_optflag                                >= 1) &&
+                    (node -> as.binary.right -> type          == NODE_NUMBER) &&
+                    (node -> as.binary.right -> as.number.val == 0.0))
+                {
+                    generate_asm (node -> as.binary.left, dest_reg);
+                    break;
+                }
 
-				// OPTIMIZATION (-O1): 0.0 + x -> x
-				if ((o_optflag                                >= 1) &&
-					(node -> as.binary.left -> type           == NODE_NUMBER) &&
-					(node -> as.binary.left -> as.number.val  == 0.0))
-				{
-					generate_asm (node -> as.binary.right, dest_reg);
-					break;
-				}
+                // OPTIMIZATION (-O1): 0.0 + x -> x
+                if ((o_optflag                                >= 1) &&
+                    (node -> as.binary.left -> type           == NODE_NUMBER) &&
+                    (node -> as.binary.left -> as.number.val  == 0.0))
+                {
+                    generate_asm (node -> as.binary.right, dest_reg);
+                    break;
+                }
 
-				generate_asm (node -> as.binary.left, dest_reg);
-				int  right_reg                                 = allocate_register ();
-				generate_asm (node -> as.binary.right, right_reg);
-				emit_asm ("FADD R%d, R%d\n", dest_reg, right_reg);
-				unlock_register (right_reg);
-				break;
-			}
+                generate_asm (node -> as.binary.left, dest_reg);
+                int  right_reg                                 = allocate_register ();
+                generate_asm (node -> as.binary.right, right_reg);
+                emit_asm ("FADD R%d, R%d\n", dest_reg, right_reg);
+                unlock_register (right_reg);
+                break;
+            }
 
             case NODE_MUL: {
                 // OPTIMIZATION (-O1): x * 1.0 -> x
                 if ((o_optflag                                >= 1) &&
-					(node -> as.binary.right -> type          == NODE_NUMBER) &&
-					(node -> as.binary.right -> as.number.val == 1.0))
-				{
+                    (node -> as.binary.right -> type          == NODE_NUMBER) &&
+                    (node -> as.binary.right -> as.number.val == 1.0))
+                {
                     generate_asm (node -> as.binary.left, dest_reg);
                     break;
                 }
 
                 // OPTIMIZATION (-O1): x * 0.0 -> 0.0 (Assuming left operand has no function call side effects)
                 if ((o_optflag                                >= 1) &&
-					(node -> as.binary.right -> type          == NODE_NUMBER) &&
-					(node -> as.binary.right -> as.number.val == 0.0))
-				{
+                    (node -> as.binary.right -> type          == NODE_NUMBER) &&
+                    (node -> as.binary.right -> as.number.val == 0.0))
+                {
                     if (!check_needs_stack (node -> as.binary.left)) {
                         emit_asm ("MOV R%d, 0.000000 ; Optimized multiplication by zero\n", dest_reg);
                         break;
@@ -614,14 +614,14 @@ void  generate_asm (ASTNode *node, int  dest_reg)
             }
 
             case NODE_SUB: {
-				// OPTIMIZATION (-O1): x - 0.0 -> x
-				if ((o_optflag                                >= 1) &&
-					(node -> as.binary.right -> type          == NODE_NUMBER) &&
-					(node -> as.binary.right -> as.number.val == 0.0))
-				{
-					generate_asm (node -> as.binary.left, dest_reg);
-					break;
-				}
+                // OPTIMIZATION (-O1): x - 0.0 -> x
+                if ((o_optflag                                >= 1) &&
+                    (node -> as.binary.right -> type          == NODE_NUMBER) &&
+                    (node -> as.binary.right -> as.number.val == 0.0))
+                {
+                    generate_asm (node -> as.binary.left, dest_reg);
+                    break;
+                }
 
                 generate_asm (node -> as.binary.left, dest_reg);
                 int  right_reg                                 = allocate_register ();
@@ -634,9 +634,9 @@ void  generate_asm (ASTNode *node, int  dest_reg)
             case NODE_DIV: {
                 // OPTIMIZATION (-O1): x / 1.0 -> x
                 if ((o_optflag                                >= 1) &&
-					(node -> as.binary.right -> type          == NODE_NUMBER) &&
-					(node -> as.binary.right -> as.number.val == 1.0))
-				{
+                    (node -> as.binary.right -> type          == NODE_NUMBER) &&
+                    (node -> as.binary.right -> as.number.val == 1.0))
+                {
                     generate_asm (node -> as.binary.left, dest_reg);
                     break;
                 }
@@ -727,7 +727,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 emit_asm ("MOV R%d, __string_%d\n", dest_reg, string_id);
                 
                 // Apply the NaN-box String Tag (Base NaN + Bit 22)
-                emit_asm ("OR R%d, 0x7FC00000 ; Box as String\n", dest_reg);
+                emit_asm ("OR R%d, 0x7FC00000 ; Box as ROM String\n", dest_reg);
                 break;
             }
 
@@ -973,7 +973,7 @@ void  generate_functions (ASTNode *node)
         {
             ASTNode *next_sibling  = node -> next;
             node -> next           = NULL;
-            generate_asm (node, 0); 
+            generate_asm (node, 0);
             node -> next           = next_sibling;
         }
         node                       = node -> next;

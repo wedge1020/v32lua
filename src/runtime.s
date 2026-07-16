@@ -464,242 +464,189 @@ __print_coerce:
 
 ;; -------------------------------------------------------------------------------------
 ;; Built-in: Lexicographical String Comparison (strcmp)
-;; Incoming Stack: [BP+3] = Tagged Left_Str, [BP+2] = Tagged Right_Str
+;; Incoming: R1 = Unboxed string (left), R2 = Unboxed string (right)
 ;; Returns: R0 = Raw integer (-1 if Left < Right, 0 if Equal, 1 if Left > Right)
 ;; -------------------------------------------------------------------------------------
 __builtin_strcmp:
-    PUSH BP
-    MOV  BP, SP
+    ;; Unbox Left (R1)
+    MOV  R3, R1
+    AND  R3, 0xFFC00000
+    IEQ  R3, 0x7FC00000
+    JT   R3, __strcmp_left_rom
+    AND  R1, 0x003FFFFF          ; Assume RAM String
+    JMP  __strcmp_check_right
+__strcmp_left_rom:
+    AND  R1, 0x003FFFFF
+    OR   R1, 0x20000000
 
-    ;; --- Unbox Left String ---
-    MOV  R1, [BP+3]          ; R1 = Left tagged pointer
-    MOV  R3, R1              ; Copy to check tag
-    AND  R3, 0xFFF00000      ; Isolate upper 12 bits (Tag)
+__strcmp_check_right:
+    ;; Unbox Right (R2)
+    MOV  R3, R2
+    AND  R3, 0xFFC00000
+    IEQ  R3, 0x7FC00000
+    JT   R3, __strcmp_right_rom
+    AND  R2, 0x003FFFFF          ; Assume RAM String
+    JMP  __strcmp_loop
+__strcmp_right_rom:
+    AND  R2, 0x003FFFFF
+    OR   R2, 0x20000000
 
-    ;; Check if it is a ROM String (Tag 0x7FC00000)
-    IEQ  R3, 0x7FC00000      ;
-    JT   R3, __strcmp_unbox_left_rom
-
-    ;; Otherwise, treat as a RAM String (Tag 0x7FB00000) - skip ROM page bit
-    AND  R1, 0x003FFFFF      ;
-    JMP  __strcmp_unbox_right
-
-__strcmp_unbox_left_rom:
-    AND  R1, 0x003FFFFF      ;
-    OR   R1, 0x20000000      ; Restore CART page bit[cite: 2, 8]
-
-__strcmp_unbox_right:
-    ;; --- Unbox Right String ---
-    MOV  R2, [BP+2]          ; R2 = Right tagged pointer
-    MOV  R3, R2              ; Copy to check tag
-    AND  R3, 0xFFF00000      ; Isolate upper 12 bits[cite: 8]
-
-    ;; Check if it is a ROM String (Tag 0x7FC00000)
-    IEQ  R3, 0x7FC00000      ;[cite: 8]
-    JT   R3, __strcmp_unbox_right_rom
-
-    ;; Otherwise, treat as a RAM String (Tag 0x7FB00000)
-    AND  R2, 0x003FFFFF      ;[cite: 8]
-    JMP  __strcmp_compare
-
-__strcmp_unbox_right_rom:
-    AND  R2, 0x003FFFFF      ;[cite: 8]
-    OR   R2, 0x20000000      ;[cite: 2, 8]
-
-__strcmp_compare:
-    ;; --- Character Comparison Loop ---
 __strcmp_loop:
-    MOV  R3, [R1]            ; Load character word from Left string[cite: 8]
-    MOV  R4, [R2]            ; Load character word from Right string[cite: 8]
+    MOV  R3, [R1]
+    MOV  R4, [R2]
 
-    ;; Compare characters
-    MOV  R5, R3              ;[cite: 8]
-    IEQ  R5, R4              ; Does Left char == Right char?[cite: 8]
-    JF   R5, __strcmp_mismatch
+    ;; If characters differ, return difference (R3 - R4)
+    INE  R3, R4
+    JT   R3, __strcmp_diff
 
-    ;; If they match, did we hit the null terminator?
-    IEQ  R3, 0               ;[cite: 8]
+    ;; If end of string reached, strings are equal (return 0)
+    IEQ  R3, 0
     JT   R3, __strcmp_equal
 
-    ;; Advance pointers
-    IADD R1, 1               ;[cite: 8]
-    IADD R2, 1               ;[cite: 8]
-    JMP  __strcmp_loop       ;[cite: 8]
+    IADD R1, 1
+    IADD R2, 1
+    JMP  __strcmp_loop
 
-__strcmp_mismatch:
-    MOV  R5, R3
-    ILT  R5, R4              ; Is Left char < Right char?
-    JT   R5, __strcmp_less
-
-__strcmp_greater:
-    MOV  R0, 1               ; Left > Right[cite: 8]
-    JMP  __strcmp_done
-
-__strcmp_less:
-    MOV  R0, -1              ; Left < Right
-    JMP  __strcmp_done
+__strcmp_diff:
+    ISUB R3, R4
+    MOV  R0, R3                  ; Return <0 if Left < Right, >0 if Left > Right
+    RET
 
 __strcmp_equal:
-    MOV  R0, 0               ; Left == Right[cite: 8]
-
-__strcmp_done:
-    MOV  SP, BP              ;[cite: 8]
-    POP  BP                  ;[cite: 8]
-    RET                      ;[cite: 8]
+    MOV  R0, 0
+    RET
 
 ;; -------------------------------------------------------------------------------------
 ;; Universal Equality (==): Returns raw integer 1 (true) or 0 (false) in R0 
 ;; Incoming Stack: [BP+3] = Left_Val, [BP+2] = Right_Val 
 ;; -------------------------------------------------------------------------------------
 __builtin_eq:
-    PUSH BP
-    MOV  BP, SP
+    ;; Fast-path: If bitwise identical, they are strictly equal
+    IEQ  R1, R2
+    JT   R1, __eq_return_true
 
-    MOV  R1, [BP+3]          ; R1 = Left Value
-    MOV  R2, [BP+2]          ; R2 = Right Value
-
-    ;; FAST-PATH 1: Bitwise match (Handles identical types instantly)
+    ;; --- 1. Unbox & Validate LEFT Operand (R1) ---
     MOV  R3, R1
-    IEQ  R3, R2
-    JT   R3, __eq_true
+    AND  R3, 0xFFC00000          ; Isolate 10-bit tag
 
-    ;; FAST-PATH 2: Check if BOTH are raw floats (Exponent bits != all 1s)
-    MOV  R3, R1
-    AND  R3, 0x7F800000
-    IEQ  R3, 0x7F800000      ; Is Left tagged? (R3 = 1 if tagged, 0 if float)
-    JT   R3, __eq_check_tags ; If Left is tagged, skip float check
+    IEQ  R3, 0x7FC00000          ; Is Left a ROM String?
+    JT   R3, __eq_left_rom
 
-    MOV  R4, R2
-    AND  R4, 0x7F800000
-    IEQ  R4, 0x7F800000      ; Is Right tagged?
-    JT   R4, __eq_check_tags ; If Right is tagged, skip float check
+    IEQ  R3, 0xFFC00000          ; Is Left a Primitive / RAM String?
+    JF   R3, __eq_return_false   ; If neither, tags don't match string types; return false!
 
-    ;; Both are floats! Perform standard floating-point equality
     MOV  R3, R1
-    FEQ  R3, R2              ; Destructive float equality
-    JT   R3, __eq_true
-    JMP  __eq_false
+    AND  R3, 0x003FFFFF          ; Isolate 22-bit payload
+    ILT  R3, 4                   ; Nil (0), False (1), True (2) are handled by fast-path
+    JT   R3, __eq_return_false
 
-__eq_check_tags:
-    ;; Are they both ROM Strings?
-    MOV  R3, R1
-    AND  R3, 0xFFC00000
-    IEQ  R3, 0x7FC00000
-    JT   R3, __eq_is_string
+    ;; Left is a valid RAM String: retain 22-bit heap memory pointer
+    AND  R1, 0x003FFFFF
+    JMP  __eq_check_right
 
-    ;; Are they both RAM Strings? (Tag == 0xFFC00000 AND Payload >= 4)
-    MOV  R3, R1
-    AND  R3, 0xFFC00000
-    IEQ  R3, 0xFFC00000
-    JF   R3, __eq_false      ; Not strings!
-    MOV  R3, R1
+__eq_left_rom:
+    ;; Left is a valid ROM String: strip tag & restore CART page bit (0x20000000)
+    AND  R1, 0x003FFFFF
+    OR   R1, 0x20000000
+
+__eq_check_right:
+    ;; --- 2. Unbox & Validate RIGHT Operand (R2) ---
+    MOV  R3, R2
+    AND  R3, 0xFFC00000          ; Isolate 10-bit tag
+
+    IEQ  R3, 0x7FC00000          ; Is Right a ROM String?
+    JT   R3, __eq_right_rom
+
+    IEQ  R3, 0xFFC00000          ; Is Right a Primitive / RAM String?
+    JF   R3, __eq_return_false   ; Not a string -> return false
+
+    MOV  R3, R2
     AND  R3, 0x003FFFFF
-    ILT  R3, 4               ; Is it Nil/True/False?
-    JT   R3, __eq_false      ; Booleans/Nil handled earlier!
+    ILT  R3, 4
+    JT   R3, __eq_return_false
 
-__eq_is_string:
-    ;; FALLBACK: Deep String Comparison (strcmp)
-    AND  R1, 0x003FFFFF      ; Unbox Left string pointer -> R1
-    AND  R2, 0x003FFFFF      ; Unbox Right string pointer -> R2
+    ;; Right is a valid RAM String: retain 22-bit heap memory pointer
+    AND  R2, 0x003FFFFF
+    JMP  __eq_strcmp_loop
+
+__eq_right_rom:
+    ;; Right is a valid ROM String: strip tag & restore CART page bit
+    AND  R2, 0x003FFFFF
+    OR   R2, 0x20000000
 
 __eq_strcmp_loop:
-    MOV  R3, [R1]            ; Load character word from Left string -> R3 
-    MOV  R4, [R2]            ; Load character word from Right string -> R4 
+    ;; R1 and R2 now point to raw ASCII string data in either ROM or RAM
+    MOV  R3, [R1]
+    MOV  R4, [R2]
 
-    ;; Check if characters are different 
-    MOV  R5, R3 
-    IEQ  R5, R4              ; Does Left char == Right char? 
-    JF   R5, __eq_false      ; If characters differ, strings are not equal! 
+    ;; Compare current characters
+    INE  R3, R4
+    JT   R3, __eq_return_false   ; Characters differ -> strings not equal
 
-    ;; We know characters match. Did we reach the null terminator (0)? 
-    IEQ  R3, 0               ; Is Left char == 0? 
-    JT   R3, __eq_true       ; If we hit null terminator while identical -> strings match! 
+    ;; Check for null terminator (0x00)
+    IEQ  R3, 0
+    JT   R3, __eq_return_true    ; Both reached null terminator -> strings equal!
 
-    ;; Advance pointers to next character word in memory 
-    IADD R1, 1 
-    IADD R2, 1 
-    JMP  __eq_strcmp_loop 
+    ;; Advance pointers to next character
+    IADD R1, 1
+    IADD R2, 1
+    JMP  __eq_strcmp_loop
 
-__eq_true:
-    MOV  R0, 1               ; Return raw integer 1 (True) 
-    JMP  __eq_done 
+__eq_return_true:
+    MOV  R0, 0xFFC00002          ; Return boxed Boolean True
+    RET
 
-__eq_false:
-    MOV  R0, 0               ; Return raw integer 0 (False) 
-
-__eq_done:
-    MOV  SP, BP 
-    POP  BP 
-    RET 
+__eq_return_false:
+    MOV  R0, 0xFFC00001          ; Return boxed Boolean False
+    RET
 
 ;; -------------------------------------------------------------------------------------
 ;; Length Operator Dispatch (#): Returns length as an IEEE 754 Float in R0 
 ;; Incoming Stack: [BP+2] = Target Value 
 ;; -------------------------------------------------------------------------------------
 __builtin_len:
-    PUSH BP
-    MOV  BP, SP
+    MOV  R3, R1
+    AND  R3, 0xFFC00000          ; 10-bit tag mask
     
-    MOV  R1, [BP+2]          ; R1 = Target Value
+    ;; Check for ROM String (0x7FC00000)
+    IEQ  R3, 0x7FC00000
+    JT   R3, __len_rom_string
     
-    ;; 1. Extract Tag into R2 
-    MOV  R2, R1 
-    AND  R2, 0xFFC00000 
+    ;; Check for RAM String / Primitive (0xFFC00000)
+    IEQ  R3, 0xFFC00000
+    JF   R3, __len_check_table
     
-    ;; 2. Check if String (Tag == 0x7FC00000) 
-    MOV  R3, R2 
-    IEQ  R3, 0x7FC00000 
-    JT   R3, __len_string 
+    ;; Validate payload is >= 4 (RAM String)
+    MOV  R3, R1
+    AND  R3, 0x003FFFFF
+    IGE  R3, 4
+    JT   R3, __len_ram_string
     
-    ;; 3. Check if Table (Tag == 0x7F800000) 
-    MOV  R3, R2 
-    IEQ  R3, 0x7F800000 
-    JT   R3, __len_table 
-    
-    ;; 4. Fallback: Invalid type for length operator -> Runtime Error! 
-    MOV  SP, BP
-    POP  BP
-    JMP  __error_attempt_to_get_length 
-    
-__error_attempt_to_get_length:
-    ;; Fatal Runtime Error: Attempted to get length of an unsupported type
-    HLT                      ; Halt CPU to preserve register state for debugging
-    JMP __error_attempt_to_get_length
+__len_check_table:
+    ;; Fall through to Table checking or trigger runtime error...
+    ...
 
-;; -------------------------------------------------------------------------------------
-;; Corrected String Length Handler
-;; -------------------------------------------------------------------------------------
-__len_string:
-    ;; 1. Unbox String Pointer (Handling RAM vs ROM tags)
-    MOV  R1, [BP+2]          ; R1 = Target Value[cite: 8]
-    MOV  R2, R1
-    AND  R2, 0xFFF00000      ; Isolate tag
-
-    IEQ  R2, 0x7FC00000      ; Is it ROM?
-    JT   R2, __len_str_rom
-
-    AND  R1, 0x003FFFFF      ; RAM unbox
-    JMP  __len_str_calc
-
-__len_str_rom:
+__len_rom_string:
     AND  R1, 0x003FFFFF
-    OR   R1, 0x20000000      ; ROM unbox[cite: 2, 8]
+    OR   R1, 0x20000000          ; Apply CART page bit
+    JMP  __len_string_loop
 
-__len_str_calc:
-    MOV  R0, 0               ; Initialize character counter
+__len_ram_string:
+    AND  R1, 0x003FFFFF          ; Keep heap memory address
+    
+__len_string_loop:
+    MOV  R0, 0                   ; Length counter
+__len_loop_continue:
+    MOV  R2, [R1]
+    IEQ  R2, 0
+    JT   R2, __len_return        ; Null terminator found
+    IADD R0, 1
+    IADD R1, 1
+    JMP  __len_loop_continue
 
-__len_str_loop:
-    MOV  R3, [R1]            ; Read character
-    IEQ  R3, 0               ; Is it null terminator?
-    JT   R3, __len_str_done
-
-    IADD R1, 1               ; Move to next character
-    IADD R0, 1               ; Increment count
-    JMP  __len_str_loop
-
-__len_str_done:
-    CIF  R0                  ; Convert integer length to float[cite: 8]
-    JMP  __len_done          ; Return via length dispatcher[cite: 8]
+__len_return:
+    ;; R0 contains raw integer length; box it as a Vircon32 float if necessary
+    RET
 
 ;; -------------------------------------------------------------------------------------
 ;; Universal Type Serializer: Converts any tagged value to a String pointer 
@@ -710,20 +657,25 @@ __builtin_tostring:
     MOV  BP, SP
     
     MOV  R1, [BP+2]          ; Load argument from Base Pointer
-    
-    ;; 1. Check Exact Primitives (Nil and Booleans) 
-    MOV  R2, R1 
-    IEQ  R2, 0xFFC00000      ; Is Nil? 
-    JT   R2, __tostring_nil 
-    
-    MOV  R2, R1 
-    IEQ  R2, 0xFFC00001      ; Is False? 
-    JT   R2, __tostring_false 
-    
-    MOV  R2, R1 
-    IEQ  R2, 0xFFC00002      ; Is True? 
-    JT   R2, __tostring_true 
-    
+
+    MOV  R3, R1
+    AND  R3, 0xFFC00000
+
+    ;; Pass through ROM Strings unchanged
+    IEQ  R3, 0x7FC00000
+    JT   R3, __tostring_passthrough
+
+    ;; Check for RAM Strings
+    IEQ  R3, 0xFFC00000
+    JF   R3, __tostring_check_primitives
+
+    MOV  R4, R1
+    AND  R4, 0x003FFFFF
+    IGE  R4, 4
+    JT   R4, __tostring_passthrough  ; It is a RAM String: return unchanged!
+
+__tostring_check_primitives:
+    ;; Handle Nil (0), False (1), True (2), or fall through to float-to-ASCII (__builtin_ftoa)
     ;; 2. Check Pointer Tags 
     MOV  R2, R1 
     AND  R2, 0xFFC00000      ; Isolate upper 10 bits 
@@ -741,7 +693,7 @@ __builtin_tostring:
     JT   R3, __tostring_function 
     
     ;; 3. Fallback: It must be a standard IEEE 754 Float! 
-	;; In __builtin_tostring float fallback:
+    ;; In __builtin_tostring float fallback:
     PUSH R1 
     CALL __builtin_ftoa 
     ISUB SP, 1 
@@ -766,8 +718,8 @@ __tostring_true:
     JMP  __tostring_done
 
 __tostring_passthrough:
-    MOV  R0, R1              ; Already a string! Return as-is. 
-    JMP  __tostring_done
+    MOV  R0, R1                  ; Return string pointer exactly as received
+    RET
 
 __tostring_table:
     MOV  SP, BP
