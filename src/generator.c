@@ -302,9 +302,9 @@ void  generate_asm (ASTNode *node, int  dest_reg)
 
 				// Emit function prologue
 				emit_asm("__function_%s:\n", func_name);
-				int  needs_stack  = check_needs_stack (node -> as.function_def.body);
-				if (needs_stack)
-				{
+				//int  needs_stack  = check_needs_stack (node -> as.function_def.body);
+				//if (needs_stack)
+				//{
 					emit_asm ("PUSH BP\n");
 					emit_asm ("MOV BP, SP\n");
 					
@@ -315,11 +315,11 @@ void  generate_asm (ASTNode *node, int  dest_reg)
 						emit_asm ("    ;; Reserve stack space for %d local variable(s)\n", num_locals);
 						emit_asm ("ISUB SP, %d\n", num_locals);
 					}
-				}
-				else
-				{
-					emit_asm ("    ;; OPTIMIZATION: frame pointer omitted (Leaf Function)\n");
-				}
+				//}
+				//else
+				//{
+				//	emit_asm ("    ;; OPTIMIZATION: frame pointer omitted (Leaf Function)\n");
+				//}
 
                 ////////////////////////////////////////////////////////////////////////
                 //
@@ -351,11 +351,11 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 // Emit function epilogue
                 //
                 emit_asm ("__%s_return:\n", func_name);
-                if (needs_stack)
-                {
+                //if (needs_stack)
+                //{
                     emit_asm ("MOV SP, BP\n");
                     emit_asm ("POP BP\n");
-                }
+                //}
                 emit_asm ("RET\n");
                 emit_asm ("\n");
 

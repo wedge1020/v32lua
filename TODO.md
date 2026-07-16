@@ -1,7 +1,5 @@
 Current identified project tasks that need to be done:
 
-  * calculate local variables in current scope, use to calculate stack space for storage
-    * this may involve storing another variable in the as.function_def struct
   * leaf optimizations may need some work
   * runtime.s needs to be audited for destructive comparison data hazards
     * and general logic errors, especially `_to_string` and `_print`
