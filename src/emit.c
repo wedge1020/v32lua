@@ -59,7 +59,7 @@ void emit_asm(const char *format, ...) {
             fprintf(out(), "%s\n", code_start);
         }
     }
-    // --- CASE C: Standard Instruction ---
+	// --- CASE C: Standard Instruction ---
     else {
         record_instruction = true;
         char *opcode = code_start;
@@ -71,6 +71,38 @@ void emit_asm(const char *format, ...) {
             operands = first_space + 1;
             while (*operands && isspace((unsigned char)*operands)) {
                 operands++; // Advance to the start of the operands
+            }
+        }
+
+        // --- PEEPHOLE OPTIMIZER (-O1) ---
+        char dest_buf[128] = {0};
+        char src_buf[128]  = {0};
+
+        if (operands != NULL) {
+            char op_copy[256];
+            strncpy(op_copy, operands, sizeof(op_copy) - 1);
+            char *comma = strchr(op_copy, ',');
+            if (comma != NULL) {
+                *comma = '\0';
+                strcpy(dest_buf, op_copy);
+                strcpy(src_buf, comma + 1);
+                trim_spaces(dest_buf);
+                trim_spaces(src_buf);
+            }
+        }
+
+        if (o_optflag >= 1 && dest_buf[0] != '\0' && src_buf[0] != '\0') {
+            if (strcmp(opcode, "MOV") == 0) {
+                // Rule 1: Eliminate self-moves (e.g., MOV R0, R0 or MOV [var_x], [var_x])
+                if (strcmp(dest_buf, src_buf) == 0) {
+                    return; // Suppress instruction completely!
+                }
+                // Rule 2: Eliminate redundant memory reloads (MOV A, B followed by MOV B, A)
+                if (strcmp(last_emitted_inst, "MOV") == 0 &&
+                    strcmp(dest_buf, last_emitted_src) == 0 &&
+                    strcmp(src_buf, last_emitted_dest) == 0) {
+                    return; // Suppress redundant reload!
+                }
             }
         }
 
@@ -95,6 +127,21 @@ void emit_asm(const char *format, ...) {
             fprintf(out(), "%s", comment_ptr);
         }
         fprintf(out(), "\n");
+
+        // --- UPDATE PEEPHOLE TRACKING STATE ---
+        if (strchr(code_start, ':') != NULL ||
+            strncmp(opcode, "JMP", 3) == 0 || strncmp(opcode, "JT", 2) == 0 ||
+            strncmp(opcode, "JF", 2) == 0 || strncmp(opcode, "CALL", 4) == 0 ||
+            strncmp(opcode, "RET", 3) == 0) {
+            // Jumps, labels, and calls break straight-line execution flow; invalidate cache!
+            last_emitted_inst[0] = '\0';
+            last_emitted_dest[0] = '\0';
+            last_emitted_src[0] = '\0';
+        } else {
+            strncpy(last_emitted_inst, opcode, sizeof(last_emitted_inst) - 1);
+            strncpy(last_emitted_dest, dest_buf, sizeof(last_emitted_dest) - 1);
+            strncpy(last_emitted_src, src_buf, sizeof(last_emitted_src) - 1);
+        }
     }
 
     // =========================================================================
@@ -214,9 +261,12 @@ void  emit_cart_xml (const char *input_filename, int  verbose)
         exit (4);
     }
 
-    if (cart_version[0] == 34) // if cart_version is enclosed in quotes
-    {
-        ; //replace cart_version, scooping out contents
+	if (cart_version[0] == 34) {
+        size_t vlen = strlen(cart_version);
+        if (vlen >= 2 && cart_version[vlen - 1] == 34) {
+            cart_version[vlen - 1] = '\0'; // Remove trailing quote
+            memmove(cart_version, cart_version + 1, vlen - 1); // Shift out leading quote
+        }
     }
 
     // 5. Emit the Vircon32 XML configuration

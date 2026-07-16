@@ -46,27 +46,32 @@ static void  print_usage (const char *prog_name)
     fprintf (stdout, "  -o <file>    Output file, default name is the same as input\n");
     //fprintf (stdout, "  -b           Compiles the program as a BIOS\n");
     fprintf (stdout, "  -v           Displays additional information (verbose)\n");
+    fprintf (stdout, "  -O0          Disable compiler optimizations (default)\n");
+    fprintf (stdout, "  -O1          Enable compiler optimizations\n");
     fprintf (stdout, "  -g           Outputs an additional file with debug info\n");
     //fprintf (stdout, "  -w           Inhibit all warnings\n");
     //fprintf (stdout, "  -Wall        Enable all warnings\n");
 }
 
-static void log_stage(int stage_num, const char* stage_name, int verbose) {
+static void log_stage (int  stage_num, const char *stage_name, int  verbose)
+{
     if (verbose)
     {
         fprintf (stdout, "stage %d: running %s\n", stage_num, stage_name);
     }
 }
 
-int main(int argc, char** argv) {
-    if (argc < 2) {
-        print_usage(argv[0]);
-        return 1;
+int  main (int  argc, char** argv)
+{
+    if (argc                   <  2)
+    {
+        print_usage (argv[0]);
+        return (1);
     }
 
-    char* input_filename = NULL;
-    char output_filename[256] = {0};
-    int verbose = 0;
+    char *input_filename        = NULL;
+    char  output_filename[256]  = { 0 };
+    int   verbose               = 0;
 
     // --- Command Line Argument Parsing ---
     for (int i = 1; i < argc; i++) {
@@ -76,6 +81,10 @@ int main(int argc, char** argv) {
             g_debug_mode = true;
         } else if (strcmp(argv[i], "--verbose") == 0 || strcmp(argv[i], "-v") == 0) {
             verbose = 1;
+        } else if (strcmp(argv[i], "-O0") == 0) {
+            o_optflag                      = 0;
+        } else if (strcmp(argv[i], "-O1") == 0) {
+            o_optflag                      = 1;
         } else if (strcmp(argv[i], "--version") == 0) {
             print_version(argv[0]);
             return 0;
@@ -131,6 +140,37 @@ int main(int argc, char** argv) {
     
     // Perform full symbol pre-pass before code generation
     register_all_globals_prepass(root_node);
+
+    // --- AST OPTIMIZATION PASSES ---
+	if (o_optflag            >= 1)
+	{
+		bool  ast_changed     = true;
+		int   max_iterations  = 5; // Guard against infinite compiler loops
+		int   iter            = 0;
+
+		int   o_optimizations_performed  = 0; // this probably needs to be a global variable
+
+		while (ast_changed && iter < max_iterations) {
+			ast_changed = false;
+        
+			// You can add a global modification counter inside your optimize passes
+			// e.g., g_optimizations_performed++ whenever a node mutates.
+			int before_count = o_optimizations_performed;
+        
+			clear_const_table();
+			root_node = propagate_constants(root_node);
+			root_node = fold_constants(root_node);
+        
+			if (o_optimizations_performed > before_count) {
+				ast_changed = true;
+			}
+			iter++;
+		}
+    
+		if (g_debug_mode) {
+			printf("[Optimizer] Converged after %d iteration(s).\n", iter);
+		}
+	}
 
     // --- Stage 5: Emitter ---
     log_stage(5, "emitter", verbose);

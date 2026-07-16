@@ -7,12 +7,14 @@
 #include <stdbool.h>
 #include <string.h>
 #include <ctype.h>
+#include <math.h>
 
 #include "enums.h"
 #include "emit.h"
 #include "ast.h"
 #include "context.h"
 #include "intrinsics.h"
+#include "optimize.h"
 #include "generate.h"
 #include "internals.h"
 #include "register.h"

@@ -1,6 +1,7 @@
 #include "v32lua.h"
 
 // Allocate storage for the global variables exactly once
+int  o_optflag  = 0; // by default, no compiler optimizations take place
 bool g_debug_mode = false;
 const char *g_asm_filename = NULL;
 const char *g_lua_filename = NULL;
@@ -80,13 +81,13 @@ int resolve_static_path(ASTNode* node, char* path_buffer) {
 int count_function_locals(ASTNode* node) {
     int count = 0;
 
-    // Traverse sibling statements in the current block[cite: 1]
+    // Traverse sibling statements in the current block
     while (node != NULL) {
         switch (node->type) {
             case NODE_MULTIPLE_ASSIGNMENT:
-                // Check if this assignment is a local declaration[cite: 1, 10]
+                // Check if this assignment is a local declaration
                 if (node->as.mult_assign.is_local) {
-                    // Count how many variables are in the target list[cite: 1, 10]
+                    // Count how many variables are in the target list
                     ASTNode* target = node->as.mult_assign.targets_head;
                     while (target != NULL) {
                         count++;
@@ -96,20 +97,20 @@ int count_function_locals(ASTNode* node) {
                 break;
 
             case NODE_IF:
-                // Recurse into both branches of an IF statement[cite: 1, 10]
-				int  max       = 0;
-				int  tmpcount  = 0;
+                // Recurse into both branches of an IF statement
+                int  max       = 0;
+                int  tmpcount  = 0;
                 max            = count_function_locals (node -> as.if_stmt.if_body);
                 tmpcount       = count_function_locals (node -> as.if_stmt.else_body);
-				if (tmpcount  >  max)
-				{
-					max        = tmpcount;
-				}
-				count          = count + max;
+                if (tmpcount  >  max)
+                {
+                    max        = tmpcount;
+                }
+                count          = count + max;
                 break;
 
             case NODE_WHILE:
-                // Recurse into WHILE loop bodies[cite: 1, 10]
+                // Recurse into WHILE loop bodies
                 count += count_function_locals(node->as.while_loop.body);
                 break;
 
@@ -123,7 +124,7 @@ int count_function_locals(ASTNode* node) {
                 break;
         }
 
-        node = node->next; // Move to the next statement in the block[cite: 1]
+        node = node->next; // Move to the next statement in the block
     }
 
     return count;
@@ -291,75 +292,59 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 break;
             }
 
-			case NODE_FUNCTION_DEF: {
-				const char *func_name  = node -> as.function_def.name;
-				push_function_context (func_name);
+            case NODE_FUNCTION_DEF: {
+                const char *func_name = node->as.function_def.name;
+                push_function_context(func_name);
 
-				if (g_debug_mode)
-				{
-					snprintf (g_current_label, sizeof (g_current_label), "func_%s", func_name);
-				}
-
-				// Emit function prologue
-				emit_asm("__function_%s:\n", func_name);
-				//int  needs_stack  = check_needs_stack (node -> as.function_def.body);
-				//if (needs_stack)
-				//{
-					emit_asm ("PUSH BP\n");
-					emit_asm ("MOV BP, SP\n");
-					
-					// --- NEW: Calculate and allocate space for local variables ---
-					int num_locals = count_function_locals(node->as.function_def.body);
-					if (num_locals > 0)
-					{
-						emit_asm ("    ;; Reserve stack space for %d local variable(s)\n", num_locals);
-						emit_asm ("ISUB SP, %d\n", num_locals);
-					}
-				//}
-				//else
-				//{
-				//	emit_asm ("    ;; OPTIMIZATION: frame pointer omitted (Leaf Function)\n");
-				//}
-
-                ////////////////////////////////////////////////////////////////////////
-                //
-                // Push a new scope for the function body!
-                //
-                push_scope ();
-
-                ////////////////////////////////////////////////////////////////////////
-                //
-                // Register function parameters into the local scope as
-                // [BP + 2], [BP + 3]
-                //
-                int      param_offset  = 2; 
-                ASTNode *p             = node -> as.function_def.params;
-                while (p              != NULL)
-                {
-                    if (p -> type     == NODE_IDENTIFIER)
-                    {
-                        register_parameter (p -> as.id.name, param_offset++);
-                    }
-                    p                  = p -> next;
+                if (g_debug_mode) {
+                    snprintf(g_current_label, sizeof(g_current_label), "func_%s", func_name);
                 }
 
-                generate_block (node -> as.function_def.body);
-                pop_scope (); // Exit function scope
+                emit_asm("__function_%s:\n", func_name);
 
-                ////////////////////////////////////////////////////////////////////////
-                //
-                // Emit function epilogue
-                //
-                emit_asm ("__%s_return:\n", func_name);
-                //if (needs_stack)
-                //{
-                    emit_asm ("MOV SP, BP\n");
-                    emit_asm ("POP BP\n");
-                //}
-                emit_asm ("RET\n");
-                emit_asm ("\n");
+                // --- OPTIMIZATION: Check eligibility for Frame Pointer Omission ---
+                int num_locals = count_function_locals(node->as.function_def.body);
+                bool has_params = (node->as.function_def.params != NULL);
+                bool body_needs_stack = check_needs_stack(node->as.function_def.body);
 
-                pop_function_context ();
+                bool omit_frame_pointer = (o_optflag >= 1) && !body_needs_stack && (num_locals == 0) && !has_params;
+
+                if (!omit_frame_pointer) {
+                    emit_asm("PUSH BP\n");
+                    emit_asm("MOV BP, SP\n");
+                    
+                    if (num_locals > 0) {
+                        emit_asm("    ;; Reserve stack space for %d local variable(s)\n", num_locals);
+                        emit_asm("ISUB SP, %d\n", num_locals);
+                    }
+                } else {
+                    emit_asm("    ;; OPTIMIZATION (-O1): Frame pointer omitted (Leaf Function)\n");
+                }
+
+                push_scope();
+
+                int param_offset = 2; 
+                ASTNode *p = node->as.function_def.params;
+                while (p != NULL) {
+                    if (p->type == NODE_IDENTIFIER) {
+                        register_parameter(p->as.id.name, param_offset++);
+                    }
+                    p = p->next;
+                }
+
+                generate_block(node->as.function_def.body);
+                pop_scope(); 
+
+                // --- Function Epilogue ---
+                emit_asm("__%s_return:\n", func_name);
+                if (!omit_frame_pointer) {
+                    emit_asm("MOV SP, BP\n");
+                    emit_asm("POP BP\n");
+                }
+                emit_asm("RET\n");
+                emit_asm("\n");
+
+                pop_function_context();
                 break;
             }
 
@@ -413,62 +398,71 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 }
                 break;
             }
-							 
+                             
 			case NODE_MULTIPLE_ASSIGNMENT: {
-                ASTNode *curr_tgt         = node -> as.mult_assign.targets_head;
-                ASTNode *curr_val         = node -> as.mult_assign.values_head;
-                int      val_reg          = -1;
+                ASTNode *curr_tgt = node->as.mult_assign.targets_head;
+                ASTNode *curr_val = node->as.mult_assign.values_head;
+                int      val_reg  = -1;
 
-				// --- Intercept Bare Local Declarations ---
-				if (node->as.mult_assign.is_local && node->as.mult_assign.values_head == NULL) {
-					ASTNode *curr_tgt = node->as.mult_assign.targets_head;
-					while (curr_tgt != NULL) {
-						if (curr_tgt->type == NODE_IDENTIFIER) {
-							// 1. Register in the local scope symbol table
-							register_local(curr_tgt->as.id.name);
-							
-							// 2. Retrieve stack offset string (e.g., [BP - 1]) and initialize to Nil/0
-							char var_access[256];
-							get_variable_access_string(curr_tgt->as.id.name, var_access);
-							emit_asm("    ;; Initialize bare local '%s' to nil\n", curr_tgt->as.id.name);
-							emit_asm("MOV %s, 0xFFC00000\n", var_access);
-						}
-						curr_tgt = curr_tgt->next;
-					}
-					break; // Stop processing; we are done with the bare local!
-				}
+                // --- Intercept Bare Local Declarations (e.g., "local x, y") ---
+                if (node->as.mult_assign.is_local && node->as.mult_assign.values_head == NULL) {
+                    while (curr_tgt != NULL) {
+                        if (curr_tgt->type == NODE_IDENTIFIER) {
+                            // Register local symbol and initialize to canonical Nil (0xFFC00000)
+                            SymbolNode *sym = register_local(curr_tgt->as.id.name);
+                            char access_str[128];
+                            get_variable_access_string(sym->name, access_str);
 
-                while ((curr_tgt         != NULL) &&
-                       (curr_val         != NULL))
-                {
-                    val_reg               = allocate_register();
-                    generate_asm (curr_val, val_reg);
-
-                    if (curr_tgt -> type == NODE_IDENTIFIER)
-                    {
-                        ////////////////////////////////////////////////////////////////
-                        //
-                        // If this is a `local` assignment, register it in the
-                        // current scope!
-                        //
-                        if (node -> as.mult_assign.is_local)
-                        {
-                            register_local (curr_tgt -> as.id.name);
+                            emit_asm("    ;; Bare local '%s' initialized to nil", sym->name);
+                            emit_asm("MOV %s, 0xFFC00000", access_str);
                         }
-                        
-                        ////////////////////////////////////////////////////////////////
-                        //
-                        // Retrieve the correct assembly access string
-                        // ([var_x] vs [BP - 1])
-                        //
-                        char  var_access[256];
-                        get_variable_access_string (curr_tgt -> as.id.name, var_access);
-                        emit_asm ("MOV %s, R%d\n", var_access, val_reg);
+                        curr_tgt = curr_tgt->next;
                     }
-                    
-                    unlock_register (val_reg);
-                    curr_tgt              = curr_tgt -> next;
-                    curr_val              = curr_val -> next;
+                    break;
+                }
+
+                // --- Standard & Multiple Assignment Evaluation ---
+                while (curr_tgt != NULL) {
+                    val_reg = allocate_register();
+
+                    if (curr_val != NULL) {
+                        // Evaluate the right-hand expression into our temporary register
+                        generate_asm(curr_val, val_reg);
+                        curr_val = curr_val->next;
+                    } else {
+                        // Lua rule: If values run out, remaining targets are assigned nil
+                        emit_asm("MOV R%d, 0xFFC00000 ; Pad missing value with Nil", val_reg);
+                    }
+
+                    // Assign evaluated value to the target
+                    if (curr_tgt->type == NODE_IDENTIFIER) {
+                        if (node->as.mult_assign.is_local) {
+                            register_local(curr_tgt->as.id.name);
+                        }
+                        char access_str[128];
+                        get_variable_access_string(curr_tgt->as.id.name, access_str);
+                        emit_asm("MOV %s, R%d", access_str, val_reg);
+                    }
+                    else if (curr_tgt->type == NODE_TABLE_GET) {
+                        // Handle table index assignment: table[key] = value
+                        int table_reg = allocate_register();
+                        int key_reg   = allocate_register();
+
+                        generate_asm(curr_tgt->as.table_get.table_expr, table_reg);
+                        generate_asm(curr_tgt->as.table_get.key, key_reg);
+
+                        emit_asm("PUSH R%d ; Push Table Pointer", table_reg);
+                        emit_asm("PUSH R%d ; Push Key", key_reg);
+                        emit_asm("PUSH R%d ; Push Value", val_reg);
+                        emit_asm("CALL __builtin_table_set");
+                        emit_asm("ISUB SP, 3 ; Clean up stack");
+
+                        unlock_register(key_reg);
+                        unlock_register(table_reg);
+                    }
+
+                    unlock_register(val_reg);
+                    curr_tgt = curr_tgt->next;
                 }
                 break;
             }
@@ -559,36 +553,92 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 break;
             }
 
-            case NODE_ADD: {
+			case NODE_ADD: {
+				// OPTIMIZATION (-O1): x + 0.0 -> x
+				if ((o_optflag                                >= 1) &&
+					(node -> as.binary.right -> type          == NODE_NUMBER) &&
+					(node -> as.binary.right -> as.number.val == 0.0))
+				{
+					generate_asm (node -> as.binary.left, dest_reg);
+					break;
+				}
+
+				// OPTIMIZATION (-O1): 0.0 + x -> x
+				if ((o_optflag                                >= 1) &&
+					(node -> as.binary.left -> type           == NODE_NUMBER) &&
+					(node -> as.binary.left -> as.number.val  == 0.0))
+				{
+					generate_asm (node -> as.binary.right, dest_reg);
+					break;
+				}
+
+				generate_asm (node -> as.binary.left, dest_reg);
+				int  right_reg                                 = allocate_register ();
+				generate_asm (node -> as.binary.right, right_reg);
+				emit_asm ("FADD R%d, R%d\n", dest_reg, right_reg);
+				unlock_register (right_reg);
+				break;
+			}
+
+            case NODE_MUL: {
+                // OPTIMIZATION (-O1): x * 1.0 -> x
+                if ((o_optflag                                >= 1) &&
+					(node -> as.binary.right -> type          == NODE_NUMBER) &&
+					(node -> as.binary.right -> as.number.val == 1.0))
+				{
+                    generate_asm (node -> as.binary.left, dest_reg);
+                    break;
+                }
+
+                // OPTIMIZATION (-O1): x * 0.0 -> 0.0 (Assuming left operand has no function call side effects)
+                if ((o_optflag                                >= 1) &&
+					(node -> as.binary.right -> type          == NODE_NUMBER) &&
+					(node -> as.binary.right -> as.number.val == 0.0))
+				{
+                    if (!check_needs_stack (node -> as.binary.left)) {
+                        emit_asm ("MOV R%d, 0.000000 ; Optimized multiplication by zero\n", dest_reg);
+                        break;
+                    }
+                }
+
                 generate_asm (node -> as.binary.left, dest_reg);
-                int right_reg = allocate_register ();
+                int  right_reg                                 = allocate_register ();
                 generate_asm (node -> as.binary.right, right_reg);
-                emit_asm ("FADD R%d, R%d\n", dest_reg, right_reg);
+                emit_asm ("FMUL R%d, R%d\n", dest_reg, right_reg);
                 unlock_register (right_reg);
                 break;
             }
 
             case NODE_SUB: {
+				// OPTIMIZATION (-O1): x - 0.0 -> x
+				if ((o_optflag                                >= 1) &&
+					(node -> as.binary.right -> type          == NODE_NUMBER) &&
+					(node -> as.binary.right -> as.number.val == 0.0))
+				{
+					generate_asm (node -> as.binary.left, dest_reg);
+					break;
+				}
+
                 generate_asm (node -> as.binary.left, dest_reg);
-                int right_reg = allocate_register ();
+                int  right_reg                                 = allocate_register ();
                 generate_asm (node -> as.binary.right, right_reg);
                 emit_asm ("FSUB R%d, R%d\n", dest_reg, right_reg);
                 unlock_register (right_reg);
                 break;
             }
         
-            case NODE_MUL: {
-                generate_asm (node -> as.binary.left, dest_reg);
-                int right_reg = allocate_register ();
-                generate_asm (node -> as.binary.right, right_reg);
-                emit_asm ("FMUL R%d, R%d\n", dest_reg, right_reg);
-                unlock_register (right_reg);
-                break;
-            }
-        
             case NODE_DIV: {
+                // OPTIMIZATION (-O1): x / 1.0 -> x
+                if ((o_optflag                                >= 1) &&
+					(node -> as.binary.right -> type          == NODE_NUMBER) &&
+					(node -> as.binary.right -> as.number.val == 1.0))
+				{
+                    generate_asm (node -> as.binary.left, dest_reg);
+                    break;
+                }
+
                 generate_asm (node -> as.binary.left, dest_reg);
-                int right_reg = allocate_register ();
+                int  right_reg                                 = allocate_register ();
                 generate_asm (node -> as.binary.right, right_reg);
                 emit_asm ("FDIV R%d, R%d\n", dest_reg, right_reg);
                 unlock_register (right_reg);

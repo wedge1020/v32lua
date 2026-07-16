@@ -60,7 +60,7 @@ typedef struct astnode {
         struct {
             struct astnode *targets_head; // Linked list of variables to assign to
             struct astnode *values_head;  // Linked list of expressions to assign
-            int is_local; // <--- ADD THIS
+            int is_local;
         } mult_assign;
 
         struct {

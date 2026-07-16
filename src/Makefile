@@ -5,14 +5,14 @@ LEX = flex
 YACC = bison
 
 # --- Flags ---
-CFLAGS = -Wall -Wextra -g -I ../inc -DYYDEBUG=1
+CFLAGS = -Wall -Wextra -lm -g -I ../inc -DYYDEBUG=1
 
 # --- Output Executable ---
 TARGET = ../bin/v32lua
 
 # --- Object Files ---
 # Add runtime_embed.o to your object list
-OBJS = parser.tab.o lex.yy.o main.o context.o intrinsics.o generator.o ast.o emit.o internals.o register.o runtime_embed.o
+OBJS = parser.tab.o lex.yy.o main.o context.o intrinsics.o optimize.o generator.o ast.o emit.o internals.o register.o runtime_embed.o
 
 # --- Build Rules ---
 all: $(TARGET)
