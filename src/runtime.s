@@ -302,31 +302,24 @@ __unbox_string_end:
 ;; Incoming Stack: [BP+3] = Tagged Left_Str, [BP+2] = Tagged Right_Str
 ;; Returns: R0 = Tagged pointer to newly allocated RAM heap string (0xFFC0....)
 ;; -------------------------------------------------------------------------------------
+;; -------------------------------------------------------------------------------------
+;; Built-in: Tag-Aware String Concatenation (4MW RAM / 128MW ROM Rework)
+;; Incoming Stack: [BP+3] = Tagged Left_Str, [BP+2] = Tagged Right_Str
+;; Returns: R0 = Tagged pointer to newly allocated RAM heap string (0xFFC0....)
+;; -------------------------------------------------------------------------------------
 __builtin_strcat:
     PUSH BP
     MOV  BP, SP
 
     ;; --- 1. Unbox and Calculate Length of Left String ---
-    MOV  R0, [BP+3]          ; R1 = Left tagged pointer
-    CALL __unbox_string      ; unbox the string
-    MOV  R3, R0              ; Copy to inspect tag
-    AND  R3, 0xFFC00000      ; Isolate upper 10 bits
-    IEQ  R3, 0x7FC00000      ; Is it a ROM String Literal?
-    JT   R3, __strcat_len_left_rom
-
-    ;; RAM String (Tag 0xFFC0xxxx)
-    AND  R0, 0x003FFFFF      ; Strip tag to get raw 22-bit RAM pointer (4MW limit)
-    JMP  __strcat_len_left_init
-
-__strcat_len_left_rom:
-    AND  R1, 0x07FFFFFF      ; Strip tag to get up to 27-bit ROM offset
-    OR   R1, 0x20000000      ; Restore Vircon32 CART page bit
-
-__strcat_len_left_init:
-    MOV  R2, 0               ; R2 = Left length
+    MOV  R0, [BP+3]          ; Load Left tagged pointer
+    CALL __unbox_string      ; R0 is now raw hardware address (ROM or RAM)
+    MOV  R7, R0              ; Cache unboxed Left pointer in R7 for Step 4
+    MOV  R1, R7              ; R1 = Reading pointer
+    MOV  R2, 0               ; R2 = Left length counter
 __strcat_len_left:
-    MOV  R3, [R1]            ; Read character
-    IEQ  R3, 0               ; Destructive test is safe here
+    MOV  R3, [R1]            ; Read ASCII character
+    IEQ  R3, 0               ; Check for null terminator
     JT   R3, __strcat_len_right_check
     IADD R1, 1
     IADD R2, 1
@@ -334,25 +327,14 @@ __strcat_len_left:
 
     ;; --- 2. Unbox and Calculate Length of Right String ---
 __strcat_len_right_check:
-    MOV  R0, [BP+2]          ; R1 = Right tagged pointer
-    CALL __UNBOX_STRING
-    MOV  R3, R0
-    AND  R3, 0xFFC00000
-    IEQ  R3, 0x7FC00000
-    JT   R3, __strcat_len_right_rom
-
-    AND  R1, 0x003FFFFF      ; RAM unbox (4MW limit)
-    JMP  __strcat_len_right_init
-
-__strcat_len_right_rom:
-    AND  R1, 0x003FFFFF
-    OR   R1, 0x20000000      ; ROM unbox
-
-__strcat_len_right_init:
-    MOV  R4, 0               ; R4 = Right length
+    MOV  R0, [BP+2]          ; Load Right tagged pointer
+    CALL __unbox_string      ; R0 is now raw hardware address (ROM or RAM)
+    MOV  R8, R0              ; Cache unboxed Right pointer in R8 for Step 5
+    MOV  R1, R8              ; R1 = Reading pointer
+    MOV  R4, 0               ; R4 = Right length counter
 __strcat_len_right:
-    MOV  R3, [R1]            ; Read character
-    IEQ  R3, 0               ; Destructive test is safe here
+    MOV  R3, [R1]            ; Read ASCII character
+    IEQ  R3, 0               ; Check for null terminator
     JT   R3, __strcat_alloc
     IADD R1, 1
     IADD R4, 1
@@ -371,23 +353,11 @@ __strcat_alloc:
     MOV  [heap_pointer], R6
 
     ;; --- 4. Copy Left String to Heap ---
-    MOV  R1, [BP+3]          ; R1 = Reset left pointer
-    MOV  R3, R1
-    AND  R3, 0xFFC00000
-    IEQ  R3, 0x7FC00000
-    JT   R3, __strcat_copy_left_rom
-
-    AND  R1, 0x003FFFFF      ; RAM unbox (4MW limit)
-    JMP  __strcat_copy_left
-
-__strcat_copy_left_rom:
-    AND  R1, 0x003FFFFF
-    OR   R1, 0x20000000      ; ROM unbox
-
+    MOV  R1, R7              ; Restore cached unboxed Left pointer
 __strcat_copy_left:
     MOV  R3, [R1]            ; Read ASCII character into R3
     MOV  R6, R3              ; Copy to scratch register R6 for testing
-    IEQ  R6, 0               ; Destructive test on R6 (R3 remains intact!)
+    IEQ  R6, 0               ; Check for null terminator (R3 remains intact)
     JT   R6, __strcat_copy_right_check
     MOV  [R5], R3            ; Write preserved character to heap
     IADD R1, 1
@@ -396,23 +366,11 @@ __strcat_copy_left:
 
     ;; --- 5. Copy Right String to Heap ---
 __strcat_copy_right_check:
-    MOV  R1, [BP+2]          ; R1 = Reset right pointer
-    MOV  R3, R1
-    AND  R3, 0xFFC00000
-    IEQ  R3, 0x7FC00000
-    JT   R3, __strcat_copy_right_rom
-
-    AND  R1, 0x003FFFFF      ; RAM unbox (4MW limit)
-    JMP  __strcat_copy_right
-
-__strcat_copy_right_rom:
-    AND  R1, 0x07FFFFFF
-    OR   R1, 0x20000000      ; ROM unbox
-
+    MOV  R1, R8              ; Restore cached unboxed Right pointer
 __strcat_copy_right:
     MOV  R3, [R1]            ; Read ASCII character into R3
     MOV  R6, R3              ; Copy to scratch register R6 for testing
-    IEQ  R6, 0               ; Destructive test on R6
+    IEQ  R6, 0               ; Check for null terminator (R3 remains intact)
     JT   R6, __strcat_finish
     MOV  [R5], R3            ; Write preserved character to heap
     IADD R1, 1
@@ -425,7 +383,7 @@ __strcat_finish:
     MOV  [R5], R3            ; Write Null terminator
 
     ;; Apply RAM Heap String Tag (0xFFC00000)
-    OR   R0, 0xFFC00000      ; BOX: R0 is now a valid RAM Heap String!
+    OR   R0, 0xFFC00000      ; BOX: R0 untouched since Step 3, holds new string base!
 
     MOV  SP, BP
     POP  BP
@@ -511,28 +469,16 @@ __print_coerce:
 ;; Returns: R0 = Raw integer (-1 if Left < Right, 0 if Equal, 1 if Left > Right)
 ;; -------------------------------------------------------------------------------------
 __builtin_strcmp:
-    ;; Unbox Left (R1)
-    MOV  R3, R1
-    AND  R3, 0xFFC00000
-    IEQ  R3, 0x7FC00000
-    JT   R3, __strcmp_left_rom
-    AND  R1, 0x003FFFFF          ; Assume RAM String
-    JMP  __strcmp_check_right
-__strcmp_left_rom:
-    AND  R1, 0x003FFFFF
-    OR   R1, 0x20000000
+    ;; Unbox Left Operand into R1
+    MOV  R0, R1
+    CALL __unbox_string
+    PUSH R0                  ; Save unboxed Left pointer on stack safely
 
-__strcmp_check_right:
-    ;; Unbox Right (R2)
-    MOV  R3, R2
-    AND  R3, 0xFFC00000
-    IEQ  R3, 0x7FC00000
-    JT   R3, __strcmp_right_rom
-    AND  R2, 0x003FFFFF          ; Assume RAM String
-    JMP  __strcmp_loop
-__strcmp_right_rom:
-    AND  R2, 0x003FFFFF
-    OR   R2, 0x20000000
+    ;; Unbox Right Operand into R2
+    MOV  R0, R2
+    CALL __unbox_string
+    MOV  R2, R0              ; R2 = Unboxed Right pointer
+    POP  R1                  ; R1 = Unboxed Left pointer
 
 __strcmp_loop:
     MOV  R3, [R1]
