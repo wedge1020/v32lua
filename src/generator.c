@@ -96,7 +96,7 @@ int count_function_locals(ASTNode* node) {
                 }
                 break;
 
-            case NODE_IF:
+            case NODE_IF: {
                 // Recurse into both branches of an IF statement
                 int  max       = 0;
                 int  tmpcount  = 0;
@@ -108,6 +108,7 @@ int count_function_locals(ASTNode* node) {
                 }
                 count          = count + max;
                 break;
+			}
 
             case NODE_WHILE:
                 // Recurse into WHILE loop bodies

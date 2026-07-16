@@ -5,7 +5,8 @@ LEX = flex
 YACC = bison
 
 # --- Flags ---
-CFLAGS = -Wall -Wextra -lm -g -I ../inc -DYYDEBUG=1
+CFLAGS = -Wall -Wextra -g -I ../inc -DYYDEBUG=1
+CLIBS = -lm
 
 # --- Output Executable ---
 TARGET = ../bin/v32lua
@@ -33,7 +34,7 @@ lex.yy.c: lexer.l parser.tab.h
 # Rule for Assembly files (handles our .incbin wrapper)
 # Rule for Assembly files (instructs assembler to disable executable stack requirement)
 %.o: %.S
-	$(CC) $(CFLAGS) -Wa,--noexecstack -c $< -o $@
+	$(CC) $(CFLAGS) -Wa,--noexecstack -c $< -o $@ $(CLIBS)
 
 # --- Monolithic Source Generation Rule ---
 monofile:
