@@ -8,6 +8,7 @@ all:
 
 # Clean both the build files in src/ and the generated assembly in testing/
 clean:
+	rm -f err.txt v32lua.[ch]
 	$(MAKE) -C src clean
 	$(MAKE) -C testing clean
 	$(MAKE) -C demo clean
