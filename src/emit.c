@@ -360,43 +360,49 @@ void  emit_cart_xml (const char *input_filename, int  verbose)
 }
 
 // Emits Vircon32 assembly to jump to target_label if reg is TRUTHY!
-// (i.e., NOT Nil and NOT False). Uses scratch register R6.
+// (i.e., NOT Nil and NOT False). Uses scratch register.
 void emit_truthy_jump(int reg, const char *target_label)
 {
     int check_id = get_next_label();
     const char *ctx = get_current_function_name(); // Fetch context
     char eval_right_label[128];
     snprintf(eval_right_label, sizeof(eval_right_label), "__%s_truthy_fail_%d", ctx, check_id); // Prefix added
+	int  scratch_reg  = allocate_register ();
 
     // 1. If it IS Nil, it's not truthy -> jump to evaluate right operand
-    emit_asm("MOV R6, R%d ; Copy to scratch register R6\n", reg);
-    emit_asm("IEQ R6, 0xFFC00000 ; Is it Nil?\n");
-    emit_asm("JT R6, %s ; If Nil, do not short-circuit\n", eval_right_label);
+    emit_asm("MOV R%d, R%d ; Copy to scratch register\n", scratch_reg, reg);
+    emit_asm("IEQ R%d, 0xFFC00000 ; Is it Nil?\n", scratch_reg);
+    emit_asm("JT R%d, %s ; If Nil, do not short-circuit\n", scratch_reg, eval_right_label);
 
     // 2. If it IS False, it's not truthy -> jump to evaluate right operand
-    emit_asm("MOV R6, R%d ; Copy to scratch register R6\n", reg);
-    emit_asm("IEQ R6, 0xFFC00001 ; Is it False?\n");
-    emit_asm("JT R6, %s ; If False, do not short-circuit\n", eval_right_label);
+    emit_asm("MOV R%d, R%d ; Copy to scratch register\n", scratch_reg, reg);
+    emit_asm("IEQ R%d, 0xFFC00001 ; Is it False?\n", scratch_reg);
+    emit_asm("JT R%d, %s ; If False, do not short-circuit\n", scratch_reg, eval_right_label);
 
     // 3. If we survived both checks, the value is TRUTHY! Short-circuit!
     emit_asm("JMP %s ; Value is truthy -> short-circuit!\n", target_label);
 
     emit_asm("%s:\n", eval_right_label);
+
+	unlock_register (scratch_reg);
 }
 
 // Emits Vircon32 assembly to jump to target_label if reg holds Nil or False.
-// Uses scratch register R6 to prevent destructive comparison bugs!
+// Uses scratch register to prevent destructive comparison bugs!
 void  emit_falsy_jump (int  reg, const char *target_label)
 {
+	int  scratch_reg  = allocate_register ();
     // 1. Test against canonical Nil (0xFFC00000)
-    emit_asm("MOV R6, R%d ; Copy condition to scratch register R6\n", reg);
-    emit_asm("IEQ R6, 0xFFC00000 ; Destructive test: Is it Nil?\n");
-    emit_asm("JT R6, %s ; If Nil (falsy), jump to target\n", target_label);
+    emit_asm("MOV R%d, R%d ; Copy condition to scratch register\n", scratch_reg, reg);
+    emit_asm("IEQ R%d, 0xFFC00000 ; Destructive test: Is it Nil?\n", scratch_reg);
+    emit_asm("JT R%d, %s ; If Nil (falsy), jump to target\n", scratch_reg, target_label);
 
     // 2. Test against Boolean False (0xFFC00001)
-    emit_asm("MOV R6, R%d ; Copy condition to scratch register R6\n", reg);
-    emit_asm("IEQ R6, 0xFFC00001 ; Destructive test: Is it False?\n");
-    emit_asm("JT R6, %s ; If False (falsy), jump to target\n", target_label);
+    emit_asm("MOV R%d, R%d ; Copy condition to scratch register\n", scratch_reg, reg);
+    emit_asm("IEQ R%d, 0xFFC00001 ; Destructive test: Is it False?\n", scratch_reg);
+    emit_asm("JT R%d, %s ; If False (falsy), jump to target\n", scratch_reg, target_label);
+
+	unlock_register (scratch_reg);
 }
 
 int   emit_variable_map (void)

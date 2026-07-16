@@ -453,7 +453,6 @@ __eq_check_tags:
     ;; Re-isolate Left tag into R3 since the previous IEQ destroyed it
     MOV  R3, R1
     AND  R3, 0xFFC00000
-	OR   R3, 0x20000000
     IEQ  R3, 0x7FC00000      ; Is it the String Tag?
     JF   R3, __eq_false      ; If not strings (e.g., distinct tables), return false!
 
@@ -504,7 +503,6 @@ __builtin_len:
     ;; 1. Extract Tag into R2 
     MOV  R2, R1 
     AND  R2, 0xFFC00000 
-	OR   R2, 0x20000000
     
     ;; 2. Check if String (Tag == 0x7FC00000) 
     MOV  R3, R2 

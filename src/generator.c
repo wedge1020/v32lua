@@ -373,14 +373,15 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     char to_true_label[128], end_label[128];
                     snprintf(to_true_label, sizeof(to_true_label), "__%s_not_true_%d", ctx, label_id); // Prefix added
                     snprintf(end_label, sizeof(end_label), "__%s_not_end_%d", ctx, label_id);         // Prefix added
+					int  scratch_reg  = allocate_register ();
 
-                    // 1. Check if Nil or False using scratch register R6
-                    emit_asm("MOV R6, R%d\n", dest_reg);
-                    emit_asm("IEQ R6, 0xFFC00000 ; Is Nil?\n");
-                    emit_asm("JT  R6, %s\n", to_true_label);
-                    emit_asm("MOV R6, R%d\n", dest_reg);
-                    emit_asm("IEQ R6, 0xFFC00001 ; Is False?\n");
-                    emit_asm("JT  R6, %s\n", to_true_label);
+                    // 1. Check if Nil or False using scratch register
+                    emit_asm("MOV R%d, R%d\n", scratch_reg, dest_reg);
+                    emit_asm("IEQ R%d, 0xFFC00000 ; Is Nil?\n", scratch_reg);
+                    emit_asm("JT  R%d, %s\n", scratch_reg, to_true_label);
+                    emit_asm("MOV R%d, R%d\n", scratch_reg, dest_reg);
+                    emit_asm("IEQ R%d, 0xFFC00001 ; Is False?\n", scratch_reg);
+                    emit_asm("JT  R%d, %s\n", scratch_reg, to_true_label);
 
                     // 2. If truthy, return VAL_FALSE (0xFFC00001)
                     emit_asm("MOV R%d, 0xFFC00001 ; Return False\n", dest_reg);
@@ -390,6 +391,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     emit_asm("%s:\n", to_true_label);
                     emit_asm("MOV R%d, 0xFFC00002 ; Return True\n", dest_reg);
                     emit_asm("%s:\n", end_label);
+					unlock_register (scratch_reg);
                 }
                 else if (node->as.unary.operator == OP_UNM) {
                     emit_asm ("PUSH R%d\n", dest_reg);
@@ -915,8 +917,8 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                              
                     // FIX: Stage the immediate resource ID into our scratch register first,
                     // then move the register's contents into the memory address!
-                    emit_asm ("MOV R%d, %d\n", dest_reg, 
-                              node -> as.cart_hint.resource_id);
+                    emit_asm ("MOV R%d, %f\n", dest_reg, 
+                              (float) node -> as.cart_hint.resource_id);
                     emit_asm ("MOV %s, R%d\n", var_access, dest_reg);
                 }
                 break;
