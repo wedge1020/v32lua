@@ -59,7 +59,7 @@ void emit_asm(const char *format, ...) {
             fprintf(out(), "%s\n", code_start);
         }
     }
-	// --- CASE C: Standard Instruction ---
+    // --- CASE C: Standard Instruction ---
     else {
         record_instruction = true;
         char *opcode = code_start;
@@ -261,7 +261,7 @@ void  emit_cart_xml (const char *input_filename, int  verbose)
         exit (4);
     }
 
-	if (cart_version[0] == 34) {
+    if (cart_version[0] == 34) {
         size_t vlen = strlen(cart_version);
         if (vlen >= 2 && cart_version[vlen - 1] == 34) {
             cart_version[vlen - 1] = '\0'; // Remove trailing quote
@@ -367,7 +367,7 @@ void emit_truthy_jump(int reg, const char *target_label)
     const char *ctx = get_current_function_name(); // Fetch context
     char eval_right_label[128];
     snprintf(eval_right_label, sizeof(eval_right_label), "__%s_truthy_fail_%d", ctx, check_id); // Prefix added
-	int  scratch_reg  = allocate_register ();
+    int  scratch_reg  = allocate_register ();
 
     // 1. If it IS Nil, it's not truthy -> jump to evaluate right operand
     emit_asm("MOV R%d, R%d ; Copy to scratch register\n", scratch_reg, reg);
@@ -384,14 +384,14 @@ void emit_truthy_jump(int reg, const char *target_label)
 
     emit_asm("%s:\n", eval_right_label);
 
-	unlock_register (scratch_reg);
+    unlock_register (scratch_reg);
 }
 
 // Emits Vircon32 assembly to jump to target_label if reg holds Nil or False.
 // Uses scratch register to prevent destructive comparison bugs!
 void  emit_falsy_jump (int  reg, const char *target_label)
 {
-	int  scratch_reg  = allocate_register ();
+    int  scratch_reg  = allocate_register ();
     // 1. Test against canonical Nil (0xFFC00000)
     emit_asm("MOV R%d, R%d ; Copy condition to scratch register\n", scratch_reg, reg);
     emit_asm("IEQ R%d, 0xFFC00000 ; Destructive test: Is it Nil?\n", scratch_reg);
@@ -402,7 +402,7 @@ void  emit_falsy_jump (int  reg, const char *target_label)
     emit_asm("IEQ R%d, 0xFFC00001 ; Destructive test: Is it False?\n", scratch_reg);
     emit_asm("JT R%d, %s ; If False (falsy), jump to target\n", scratch_reg, target_label);
 
-	unlock_register (scratch_reg);
+    unlock_register (scratch_reg);
 }
 
 int   emit_variable_map (void)
@@ -428,6 +428,10 @@ int   emit_variable_map (void)
 
 void  emit_string_data_section (void)
 {
+    emit_asm ("\n;; =========================================================");
+    emit_asm (";; Read-Only String Data Section");
+    emit_asm (";; =========================================================");
+
     if (strings_head               != NULL)
     {
         fprintf (out(), "\n; --- String Literal Allocations ---\n");
@@ -537,14 +541,27 @@ void  emit_get_gamepad_inputs_intrinsic (int  dest_reg)
     unlock_register (bit_reg);
 }
 
-void  emit_table_get_literal (int  table_reg, const char *property_name)
+void emit_table_get_literal(int table_reg, const char *property_name)
 {
-    int  string_id  = emit_string_data_section (property_name);
+    // 1. Intern the property name into the compiler's string pool and get its ID
+    int string_id = add_string_literal(property_name);
 
-    emit_asm (";; Lookup table property: .%s", property_name);
-    emit_asm ("MOV R1, R%d          ; Arg 1: Table pointer", table_reg);
-    emit_asm ("MOV R2, __string_%d", string_id);
-    emit_asm ("OR  R2, 0x7FC00000   ; Arg 2: Box key as ROM String");
-    emit_asm ("CALL __builtin_table_get");
-    emit_asm ("MOV R%d, R0          ; Store result", table_reg);
+    emit_asm("    ;; Lookup table property: .%s", property_name);
+
+    // 2. Push Table Pointer (Arg 1)
+    emit_asm("    PUSH R%d             ; Arg 1: Table pointer", table_reg);
+
+    // 3. Load and Box Key as ROM String, then Push (Arg 2)
+    int scratch = allocate_register();
+    emit_asm("    MOV  R%d, __string_%d", scratch, string_id);
+    emit_asm("    OR   R%d, 0x7FC00000 ; Box key as ROM String", scratch);
+    emit_asm("    PUSH R%d             ; Arg 2: Property Key", scratch);
+    unlock_register(scratch);
+
+    // 4. Call Routine and Clean Stack
+    emit_asm("    CALL __builtin_table_get");
+    emit_asm("    ISUB SP, 2           ; Clean up stack arguments");
+
+    // 5. Capture Return Value
+    emit_asm("    MOV  R%d, R0         ; Store returned value", table_reg);
 }

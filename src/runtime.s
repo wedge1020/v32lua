@@ -251,10 +251,29 @@ __table_set_done:
     POP  BP
     RET
 
-
-;; =====================================================================================
+;; ===================================================================================
 ;; SECTION 3: STRING & TERMINAL OPERATIONS
-;; =====================================================================================
+;; ===================================================================================
+
+;; ===================================================================================
+;; Internal Helper: __unbox_string
+;; Input:  R0 = NaN-boxed String (0x7F800000 for RAM, 0x7FC00000 for ROM)
+;; Output: R0 = Raw Vircon32 Hardware Memory Address (Page bit applied if ROM)
+;; Clobbers: R1
+;; ===================================================================================
+__unbox_string:
+    MOV R1, R0
+    AND R1, 0x00400000          ; Isolate Bit 22 (The ROM/RAM flag bit)
+    AND R0, 0x003FFFFF          ; Strip the entire NaN tag (Leaves 22-bit offset)
+
+    IEQ R1, 0                   ; If Bit 22 is 0, it's a RAM string
+    JT  R1, __unbox_string_end  ; Jump to end (RAM addresses start at 0x00000000)
+
+    ;; It is a ROM string: Apply Vircon32 Cartridge Page Bit (Bit 29)
+    OR  R0, 0x20000000
+
+__unbox_string_end:
+    RET
 
 ;; -------------------------------------------------------------------------------------
 ;; Built-in: Tag-Aware String Concatenation (4MW RAM / 128MW ROM Rework)
@@ -604,48 +623,39 @@ __eq_return_false:
 ;; Length Operator Dispatch (#): Returns length as an IEEE 754 Float in R0 
 ;; Incoming Stack: [BP+2] = Target Value 
 ;; -------------------------------------------------------------------------------------
+;; =========================================================================
+;; Runtime Built-in: __builtin_len
+;; ABI: Arg 1 at [BP+2] (Stack Parameter), Caller cleans up.
+;; Returns: R0 = Length of string as a Lua Float.
+;; =========================================================================
 __builtin_len:
-    MOV  R3, R1
-    AND  R3, 0xFFC00000          ; 10-bit tag mask
-    
-    ;; Check for ROM String (0x7FC00000)
-    IEQ  R3, 0x7FC00000
-    JT   R3, __len_rom_string
-    
-    ;; Check for RAM String / Primitive (0xFFC00000)
-    IEQ  R3, 0xFFC00000
-    JF   R3, __len_check_table
-    
-    ;; Validate payload is >= 4 (RAM String)
-    MOV  R3, R1
-    AND  R3, 0x003FFFFF
-    IGE  R3, 4
-    JT   R3, __len_ram_string
-    
-__len_check_table:
-    ;; Fall through to Table checking or trigger runtime error...
-    ...
+    PUSH BP
+    MOV  BP, SP
 
-__len_rom_string:
-    AND  R1, 0x003FFFFF
-    OR   R1, 0x20000000          ; Apply CART page bit
-    JMP  __len_string_loop
+    ;; 1. Fetch argument from caller's stack frame
+    ;; [BP+0] is old BP, [BP+1] is Return Address, [BP+2] is Arg 1
+    MOV  R0, [BP+2]
 
-__len_ram_string:
-    AND  R1, 0x003FFFFF          ; Keep heap memory address
-    
-__len_string_loop:
-    MOV  R0, 0                   ; Length counter
-__len_loop_continue:
-    MOV  R2, [R1]
-    IEQ  R2, 0
-    JT   R2, __len_return        ; Null terminator found
-    IADD R0, 1
-    IADD R1, 1
-    JMP  __len_loop_continue
+    ;; 2. Unbox to get raw hardware address (handles RAM vs ROM automatically)
+    CALL __unbox_string
 
-__len_return:
-    ;; R0 contains raw integer length; box it as a Vircon32 float if necessary
+    ;; 3. Calculate string length
+    MOV  R1, 0                  ; R1 = Character counter
+__len_loop:
+    MOV  R2, [R0]               ; Read character from address
+    IEQ  R2, 0                  ; Is it null terminator?
+    JT   R2, __len_done
+    IADD R0, 1                  ; Advance pointer
+    IADD R1, 1                  ; Increment counter
+    JMP  __len_loop
+
+__len_done:
+    ;; 4. Convert integer count in R1 to a Vircon32 Float in R0
+    MOV  R0, R1
+    CIF  R0                     ; Cast Integer to Float (Standard Lua number)
+
+    MOV  SP, BP
+    POP  BP
     RET
 
 ;; -------------------------------------------------------------------------------------
