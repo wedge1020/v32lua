@@ -813,11 +813,11 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     emit_asm("    CALL __builtin_table_set");
                     emit_asm("    ISUB SP, 3");
 
-                    free_register(table_reg);
-                    free_register(key_reg);
+                    unlock_register (table_reg);
+                    unlock_register (key_reg);
                 }
 
-                free_register(val_reg);
+                unlock_register (val_reg);
                 break;
             }
 
