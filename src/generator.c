@@ -960,6 +960,8 @@ void generate_global_setup (ASTNode *node)
     // 1. Emit the section header and entry label
     emit_asm ("\n; --- Global Variable & Runtime Initialization ---\n");
     emit_asm ("__init_globals:\n");
+    emit_asm ("PUSH BP\n");
+    emit_asm ("MOV BP, SP\n");
     if (next_ram_address >= 4)
         emit_asm ("MOV R0, %d ; heap start", next_ram_address);
     else
@@ -993,6 +995,8 @@ void generate_global_setup (ASTNode *node)
     }
 
     // 4. Emit RET to prevent falling through into __malloc or the runtime library
+    emit_asm ("MOV SP, BP\n");
+    emit_asm ("POP BP\n");
     emit_asm ("RET\n");
 }
 
