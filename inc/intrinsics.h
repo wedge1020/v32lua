@@ -11,6 +11,14 @@
 #define IOPORT_TYPE_FLOAT   2
 #define IOPORT_TYPE_BOOLEAN 4
 
+typedef struct {
+    const char *lua_path;
+    const char *asm_port;
+    int         mode;     // PORT_READ, PORT_WRIT
+    int         type;
+} IOPortMap;
+
+extern const IOPortMap ioports[];
 
 // Returns 1 if the node was an intrinsic and assembly was emitted; 0 otherwise.
 //

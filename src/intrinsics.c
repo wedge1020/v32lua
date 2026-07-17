@@ -1,17 +1,9 @@
 #include "v32lua.h"
 
 // ============================================================================
-// --- Internal GPU Port Mapping Table ---
+// --- Internal IO Port Mapping Table ---
 // ============================================================================
-
-typedef struct {
-    const char *lua_path;
-    const char *asm_port;
-    int         mode;     // PORT_READ, PORT_WRIT
-    int         type;
-} IOPortMap;
-
-static const IOPortMap ioports[] = {
+const IOPortMap ioports[] = {
     { "ioports.tim.date",      "TIM_CurrentDate",          IOPORT_READ,                 IOPORT_TYPE_INTEGER },
     { "system.date",           "TIM_CurrentDate",          IOPORT_READ,                 IOPORT_TYPE_INTEGER },
     { "ioports.tim.time",      "TIM_CurrentTime",          IOPORT_READ,                 IOPORT_TYPE_INTEGER },
@@ -74,6 +66,12 @@ static const IOPortMap ioports[] = {
     { NULL, NULL, 0, 0 } // Sentinel
 };
 
+static void  emit_spu_cmd_intrinsic (ASTNode *node, int  dest_reg)
+{
+	if (node != NULL)
+		dest_reg  = dest_reg;
+}
+
 static void  emit_system_wait_intrinsic ()
 {
     emit_asm ("WAIT\n");
@@ -116,28 +114,28 @@ static void  emit_print_intrinsic (ASTNode *node)
     // 3. Convert text coordinates from Lua Floats to Hardware Integers
     // Because all numbers in your compiler are floats, we must cast 
     // screen spaces using the Vircon32 'CFI' (Cast Float to Integer) instruction.
-    emit_asm ("    CFI R%d ; Convert X to hardware integer\n", reg_x);
-    emit_asm ("    CFI R%d ; Convert Y to hardware integer\n", reg_y);
+    emit_asm ("CFI R%d ; Convert X to hardware integer\n", reg_x);
+    emit_asm ("CFI R%d ; Convert Y to hardware integer\n", reg_y);
 
     // 4. Push arguments to the stack (Left-to-Right layout)
-    emit_asm ("    PUSH R%d ; Push X coordinate\n", reg_x);
-    emit_asm ("    PUSH R%d ; Push Y coordinate\n", reg_y);
-    emit_asm ("    PUSH R%d ; Push raw value to convert\n", reg_val);
+    emit_asm ("PUSH R%d ; Push X coordinate\n", reg_x);
+    emit_asm ("PUSH R%d ; Push Y coordinate\n", reg_y);
+    emit_asm ("PUSH R%d ; Push raw value to convert\n", reg_val);
 
     // 5. Coerce the value to a string pointer
     // Because value was pushed last, it is safely resting on top of the stack [SP].
     // __builtin_tostring will process it and return the string address in R0.
-    emit_asm ("    CALL __builtin_tostring\n"); 
-    emit_asm ("    MOV  [SP], R0 ; Overwrite raw value with the string pointer\n");
+    emit_asm ("CALL __builtin_tostring\n"); 
+    emit_asm ("MOV  [SP], R0 ; Overwrite raw value with the string pointer\n");
 
     // 6. Fire the printing routine and tear down the stack frame
-    emit_asm ("    CALL __builtin_print\n");    
-    emit_asm ("    ISUB SP, 3 ; Clean up x, y, and string from the stack\n");
+    emit_asm ("CALL __builtin_print\n");    
+    emit_asm ("ISUB SP, 3 ; Clean up x, y, and string from the stack\n");
 
     // 7. Unlock registers back to the compiler pool
-    unlock_register(reg_val);
-    unlock_register(reg_y);
-    unlock_register(reg_x);
+    unlock_register (reg_val);
+    unlock_register (reg_y);
+    unlock_register (reg_x);
 }
 
 static void emit_gpu_blending_intrinsic (ASTNode *node, int  dest_reg)
@@ -175,47 +173,23 @@ static void emit_gpu_draw_intrinsic (ASTNode *node, int  dest_reg)
     if (arg != NULL && arg -> type == NODE_STRING) {
         const char *drawtype = arg->as.string_val.value;
         if (strcmp(drawtype, "zoom") == 0)
-            emit_asm ("    OUT GPU_Command, GPUCommand_DrawRegionZoomed\n");
+            emit_asm ("OUT GPU_Command, GPUCommand_DrawRegionZoomed\n");
         else if (strcmp(drawtype, "rotate") == 0)
-            emit_asm ("    OUT GPU_Command, GPUCommand_DrawRegionRotated\n");
+            emit_asm ("OUT GPU_Command, GPUCommand_DrawRegionRotated\n");
         else if (strcmp(drawtype, "rotozoom") == 0)
-            emit_asm ("    OUT GPU_Command, GPUCommand_DrawRegionRotozoomed\n");
+            emit_asm ("OUT GPU_Command, GPUCommand_DrawRegionRotozoomed\n");
         else
-            emit_asm ("    OUT GPU_Command, GPUCommand_DrawRegion\n");
-    } else {
-        emit_asm ("    OUT GPU_Command, GPUCommand_DrawRegion\n");
+        {
+            compiler_error (ERR_SEMANTIC, yylineno, "%s: invalid action '%s'", "ioports.gpu.draw()", drawtype);
+        }
     }
-
-    if (dest_reg != 0) {
-        emit_asm ("    MOV R%d, 0xFFC00000 ; return nil\n", dest_reg);
-    }
-}
-
-static void emit_spu_cmd_intrinsic (ASTNode *node, int  dest_reg)
-{
-    emit_asm ("    ;; --- Intrinsic: ioports.spu.command() ---\n");
-    ASTNode *arg  = node -> as.call.args_head;
-
-    if (arg != NULL && arg -> type == NODE_STRING) {
-        const char *spucmd = arg -> as.string_val.value;
-        if (strcmp(spucmd, "play") == 0)
-            emit_asm ("OUT SPU_Command, SPUCommand_PlaySelectedChannel\n");
-        else if (strcmp(spucmd, "pause") == 0)
-            emit_asm ("OUT SPU_Command, SPUCommand_PauseSelectedChannel\n");
-        else if (strcmp(spucmd, "stop") == 0)
-            emit_asm ("OUT SPU_Command, SPUCommand_StopSelectedChannel\n");
-        else if (strcmp(spucmd, "pauseall") == 0)
-            emit_asm ("OUT SPU_Command, SPUCommand_PauseAllChannels\n");
-        else if (strcmp(spucmd, "resumeall") == 0)
-            emit_asm ("OUT SPU_Command, SPUCommand_ResumeAllChannels\n");
-        else if (strcmp(spucmd, "stopall") == 0)
-            emit_asm ("OUT SPU_Command, SPUCommand_StopAllChannels\n");
-        else
-            compiler_error (ERR_SEMANTIC, yylineno, "%s: invalid SPU command '%s'", "ioports.spu.command()", spucmd);
+    else if (arg == NULL)
+    {
+        emit_asm ("OUT GPU_Command, GPUCommand_DrawRegion\n");
     }
     else
     {
-        compiler_error (ERR_SEMANTIC, yylineno, "%s: invalid SPU command", "ioports.spu.command()");
+        compiler_error (ERR_SEMANTIC, yylineno, "%s: invalid action", "ioports.gpu.draw()");
     }
 
     if (dest_reg != 0) {
