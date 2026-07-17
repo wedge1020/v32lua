@@ -446,6 +446,34 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                         get_variable_access_string(curr_tgt->as.id.name, access_str);
                         emit_asm("MOV %s, R%d", access_str, val_reg);
                     }
+                    else if (curr_tgt -> type == NODE_TABLE_GET)
+                    {
+                        // 1. Attempt to intercept as a hardware I/O intrinsic first!
+                        if (try_emit_table_set_intrinsic (curr_tgt->as.table_get.table_expr,
+                                                          curr_tgt->as.table_get.key,
+                                                          val_reg))
+                        {
+                            // Intrinsic successfully emitted! Skip dynamic heap allocation entirely.
+                            continue;
+                        }
+
+                        // 2. Fallback: Dynamic heap table assignment (table[key] = value)
+                        int  table_reg  = allocate_register ();
+                        int  key_reg    = allocate_register ();
+
+                        generate_asm (curr_tgt->as.table_get.table_expr, table_reg);
+                        generate_asm (curr_tgt->as.table_get.key, key_reg);
+
+                        emit_asm ("PUSH R%d ; Push Table Pointer", table_reg);
+                        emit_asm ("PUSH R%d ; Push Key", key_reg);
+                        emit_asm ("PUSH R%d ; Push Value", val_reg);
+                        emit_asm ("CALL __builtin_table_set");
+                        emit_asm ("ISUB SP, 3 ; Clean up stack");
+
+                        unlock_register (table_reg);
+                        unlock_register (key_reg);
+                    }
+                    /*
                     else if (curr_tgt->type == NODE_TABLE_GET) {
                         // Handle table index assignment: table[key] = value
                         int table_reg = allocate_register();
@@ -462,7 +490,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
 
                         unlock_register(key_reg);
                         unlock_register(table_reg);
-                    }
+                    }*/
 
                     unlock_register(val_reg);
                     curr_tgt = curr_tgt->next;
@@ -764,61 +792,58 @@ void  generate_asm (ASTNode *node, int  dest_reg)
             }
 
             case NODE_TABLE_SET: {
-                // 1. HARDWARE INTRINSIC INTERCEPT (e.g., ioports.gpu.x = 10)
-                if (try_emit_table_set_intrinsic(node)) {
-                    return; // Terminate early, skipping dynamic table assignment
-                }
-
-                int table_reg = allocate_register();
-                int key_reg = allocate_register();
                 int val_reg = allocate_register();
-
-                // 1. Evaluate table, key, and value
-                generate_asm(node->as.table_set.table_expr, table_reg);
-                generate_asm(node->as.table_set.key, key_reg);
                 generate_asm(node->as.table_set.value, val_reg);
 
-                // 2. Push arguments (Reverse order: Table, Key, Value)
-                emit_asm("    PUSH R%d\n", table_reg);
-                emit_asm("    PUSH R%d\n", key_reg);
-                emit_asm("    PUSH R%d\n", val_reg);
+                // Try hardware intrinsic first
+                if (!try_emit_table_set_intrinsic(node->as.table_set.table_expr, 
+                                                  node->as.table_set.key, 
+                                                  val_reg))
+                {
+                    // Fallback to dynamic table set
+                    int table_reg = allocate_register();
+                    int key_reg   = allocate_register();
 
-                // 3. Call the built-in and clean up
-                emit_asm("    CALL __builtin_table_set\n");
-                emit_asm("    ISUB SP, 3\n");
+                    generate_asm(node->as.table_set.table_expr, table_reg);
+                    generate_asm(node->as.table_set.key, key_reg);
 
-                unlock_register(table_reg);
-                unlock_register(key_reg);
-                unlock_register(val_reg);
+                    emit_asm("    PUSH R%d", table_reg);
+                    emit_asm("    PUSH R%d", key_reg);
+                    emit_asm("    PUSH R%d", val_reg);
+                    emit_asm("    CALL __builtin_table_set");
+                    emit_asm("    ISUB SP, 3");
+
+                    free_register(table_reg);
+                    free_register(key_reg);
+                }
+
+                free_register(val_reg);
                 break;
             }
 
             case NODE_TABLE_GET: {
-                // 1. HARDWARE INTRINSIC INTERCEPT (e.g., val = ioports.gpu.x)
-                if (try_emit_table_get_intrinsic(node, dest_reg)) {
-                    return; // Terminate early, skipping dynamic table lookup
+                // 1. Attempt hardware intrinsic read directly into dest_reg
+                if (try_emit_table_get_intrinsic(node->as.table_get.table_expr,
+                                                 node->as.table_get.key,
+                                                 dest_reg)) {
+                    break; // Successfully emitted Vircon32 IN instruction!
                 }
 
+                // 2. Fallback: Dynamic heap table lookup
                 int table_reg = allocate_register();
-                int key_reg = allocate_register();
+                int key_reg   = allocate_register();
 
-                // 1. Evaluate the table and the key
                 generate_asm(node->as.table_get.table_expr, table_reg);
                 generate_asm(node->as.table_get.key, key_reg);
 
-                // 2. Push arguments (Reverse order: Table, then Key)
-                emit_asm("    PUSH R%d\n", table_reg);
-                emit_asm("    PUSH R%d\n", key_reg);
+                emit_asm ("PUSH R%d ; Push Table Pointer", table_reg);
+                emit_asm ("PUSH R%d ; Push Key", key_reg);
+                emit_asm ("CALL __builtin_table_get");
+                emit_asm ("ISUB SP, 2 ; Clean up stack");
+                emit_asm ("MOV R%d, R0 ; Store result in destination register", dest_reg);
 
-                // 3. Call the built-in and clean up
-                emit_asm("    CALL __builtin_table_get\n");
-                emit_asm("    ISUB SP, 2\n");
-
-                // 4. Move result to destination register
-                emit_asm("    MOV R%d, R0\n", dest_reg);
-
-                unlock_register(table_reg);
-                unlock_register(key_reg);
+                unlock_register (table_reg);
+                unlock_register (key_reg);
                 break;
             }
 
