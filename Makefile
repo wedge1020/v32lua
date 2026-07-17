@@ -11,7 +11,7 @@ clean:
 	rm -f err.txt v32lua.[ch]
 	$(MAKE) -C src clean
 	$(MAKE) -C testing clean
-	$(MAKE) -C demo clean
+	$(MAKE) -C demos clean
 
 # Pass the install target down to the src directory
 install:
@@ -28,7 +28,7 @@ asmcheck: bin/v32lua
 	$(MAKE) -C testing asmcheck
 
 demos: bin/v32lua
-	$(MAKE) -C demo
+	$(MAKE) -C demos
 
 monofiles:
 	scripts/monolithic_code.sh

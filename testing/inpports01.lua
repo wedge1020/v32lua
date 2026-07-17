@@ -2,15 +2,19 @@ function init()
 	ioports.gpu.texture = -1
 	x = 315
 	y = 170
+	ioports.gpu.clear("black")
+	ioports.gpu.x = x
+	ioports.gpu.y = y
+	ioports.gpu.draw()
 end
 
 function game_loop()
-	ioports.gpu.clear(black)
 	buttonA = ioports.inp.A
 	if (buttonA >  0) then
 		speed = 5
 	else
 		speed = 1
+		ioports.gpu.clear("black")
 	end
 
 	left = ioports.inp.left

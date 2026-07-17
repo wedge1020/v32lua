@@ -208,28 +208,28 @@ static void emit_gpu_clear_intrinsic(ASTNode *node, int dest_reg) {
             unsigned int color_hex = 0x000000FF; // Default Opaque Black
             int is_preset = 1;
 
-            if      (strcmp(color_name, "black") == 0) color_hex = 0x000000FF; 
+            if      (strcmp(color_name, "black") == 0) color_hex = 0xFF000000; 
             else if (strcmp(color_name, "white") == 0) color_hex = 0xFFFFFFFF;
-            else if (strcmp(color_name, "blue") == 0)  color_hex = 0x0000FFFF;
+            else if (strcmp(color_name, "blue") == 0)  color_hex = 0xFFFF0000;
             else if (strcmp(color_name, "red") == 0)   color_hex = 0xFF0000FF;
-            else if (strcmp(color_name, "green") == 0) color_hex = 0x00FF00FF;
+            else if (strcmp(color_name, "green") == 0) color_hex = 0xFF00FF00;
             else is_preset = 0; 
             
             if (is_preset) {
-                emit_asm ("    MOV R%d, %u ; Preset color '%s'\n", color_reg, color_hex, color_name);
+                emit_asm ("MOV R%d, 0x%.8X ; Preset color '%s'\n", color_reg, color_hex, color_name);
             } else {
                 generate_asm(arg, color_reg);
             }
         } else {
             generate_asm(arg, color_reg);
         }
-        emit_asm ("    OUT GPU_ClearColor, R%d\n", color_reg);
+        emit_asm ("OUT GPU_ClearColor, R%d\n", color_reg);
         unlock_register(color_reg);
     }
 
-    emit_asm ("    OUT GPU_Command, GPUCommand_ClearScreen\n");
+    emit_asm ("OUT GPU_Command, GPUCommand_ClearScreen\n");
     if (dest_reg != 0) {
-        emit_asm ("    MOV R%d, 0xFFC00000 ; return nil\n", dest_reg);
+        emit_asm ("MOV R%d, 0xFFC00000 ; return nil\n", dest_reg);
     }
 }
 
