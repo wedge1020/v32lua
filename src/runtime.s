@@ -61,7 +61,7 @@ __builtin_exec:
     MOV R1, R0
     AND R1, 0xFF800000          ; Isolate upper tag bits (adjust if your tag mask differs)
     IEQ R1, 0xFF800000          ; Is this tagged as a boxed function pointer?
-    JT  __exec_valid            ; If valid, jump to unboxing and execution
+    JT  R1, __exec_valid            ; If valid, jump to unboxing and execution
 
     ; 2. Tag validation failed! We attempted to call nil, a number, or a table.
     JMP __runtime_error_not_callable
@@ -83,8 +83,9 @@ __exec_valid:
 ; ==============================================================================
 __runtime_error_not_callable:
     ; Clear screen to dark red to signal a hardware/runtime panic
-    MOV ioports.gpu.clear_color, 0xFF800000 
-    ioports.gpu.clear()
+    MOV R0, 0xFF800000 
+	OUT GPU_ClearColor, R0
+	OUT GPU_Command, GPUCommand_ClearScreen
     
 	; Prepare screen coordinates for error text (e.g., X=20, Y=20)
     MOV   R0, 20                ; X coordinate

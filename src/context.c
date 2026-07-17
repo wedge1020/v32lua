@@ -106,33 +106,52 @@ void register_all_globals_prepass(ASTNode *node) {
     }
 }
 
+// Search ONLY the immediate current block scope (do not traverse parent pointers!)
+SymbolNode *resolve_local_symbol_current_scope (const char *name)
+{
+    if (current_scope == NULL) return NULL;
+    
+    SymbolNode *sym = current_scope->symbols;
+    while (sym != NULL)
+    {
+        if (strcmp (sym->name, name) == 0)
+        {
+            return sym;
+        }
+        sym = sym->next;
+    }
+    return NULL;
+}
+
+
 // Add a local variable to the *current* scope
 SymbolNode *register_local (const char* name)
 {
-    SymbolNode *sym                    = resolve_symbol (name);
-    if (sym                           != NULL)
+    // ONLY check if it's already declared in this exact block scope!
+    SymbolNode *sym = resolve_local_symbol_current_scope (name);
+    if (sym != NULL)
     {
-        return (sym); // Already registered, do not allocate a new slot!
+        return sym; // Already registered in this scope
     }
 
-    sym                                = (SymbolNode *) calloc (1, sizeof (SymbolNode));
-    sym -> name                        = strdup (name);
-    sym -> type                        = SYM_LOCAL;
-    sym -> location                    = current_scope -> local_offset_counter; // Allocate [BP - offset]
+    sym           = (SymbolNode *) calloc (1, sizeof (SymbolNode));
+    sym->name     = strdup (name);
+    sym->type     = SYM_LOCAL;
+    sym->location = current_scope->local_offset_counter;
                                                                              
-    current_scope -> local_offset_counter++;
+    current_scope->local_offset_counter++;
     
-    if (current_scope -> last         == NULL)
+    if (current_scope->last == NULL)
     {
-        current_scope -> symbols       = sym;
+        current_scope->symbols = sym;
     }
     else
     {
-        current_scope -> last -> next  = sym;
+        current_scope->last->next = sym;
     }
-    current_scope -> last              = sym;
+    current_scope->last = sym;
 
-    return (sym);
+    return sym;
 }
 
 SymbolNode* register_global (const char *name)
@@ -340,16 +359,28 @@ int current_loop(void) {
     }
     return loop_stack_head->loop_id;
 }
-//
-// Add to context.c
-SymbolNode *register_parameter (const char *name, int  offset)
+
+SymbolNode *register_parameter (const char *name, int offset)
 {
     SymbolNode *sym = (SymbolNode *) calloc (1, sizeof (SymbolNode));
-    sym -> name           = strdup (name);
-    sym -> type = SYM_LOCAL;
-    sym -> location = -offset; // Store as negative so we know it's a parameter!
+    if (!sym) {
+        compiler_error(ERR_INTERNAL, -1, "Out of memory allocating parameter");
+    }
     
-    sym -> next = current_scope -> symbols;
-    current_scope -> symbols = sym;
-    return (sym);
+    sym->name     = strdup (name);
+    sym->type     = SYM_LOCAL;
+    sym->location = -offset; // Store as negative so we know it's a parameter!
+    
+    // Cleanly append to the scope list and maintain 'last'
+    if (current_scope->last == NULL)
+    {
+        current_scope->symbols = sym;
+    }
+    else
+    {
+        current_scope->last->next = sym;
+    }
+    current_scope->last = sym;
+
+    return sym;
 }
