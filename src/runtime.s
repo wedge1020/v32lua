@@ -53,6 +53,54 @@ __oom_handler:
     HLT                      ; Halt Vircon32 CPU instantly to prevent data corruption
     JMP  __oom_handler       ; Infinite loop safeguard in case CPU resumes
 
+; ==============================================================================
+; __builtin_exec: Safely validates and executes a boxed function pointer in R0
+; ==============================================================================
+__builtin_exec:
+    ; 1. Isolate and validate the NaN-box tag bits
+    MOV R1, R0
+    AND R1, 0xFF800000          ; Isolate upper tag bits (adjust if your tag mask differs)
+    IEQ R1, 0xFF800000          ; Is this tagged as a boxed function pointer?
+    JT  __exec_valid            ; If valid, jump to unboxing and execution
+
+    ; 2. Tag validation failed! We attempted to call nil, a number, or a table.
+    JMP __runtime_error_not_callable
+
+__exec_valid:
+    ; 3. Unbox the address and restore the Vircon32 memory page bit
+    AND R0, 0x003FFFFF          ; Strip NaN-box tag bits
+    OR  R0, 0x20000000          ; Restore Vircon32 code memory page bit
+    
+    ; 4. The Tail-Call Jump!
+    ; We do NOT use CALL R0 here. Because the original call site executed 
+    ; "CALL __builtin_exec", the return address to the script is already on the 
+    ; stack. By jumping directly to R0, the target function executes and its own 
+    ; "RET" instruction will cleanly return straight to the original caller!
+    JMP R0
+
+; ==============================================================================
+; Runtime Panic Handler
+; ==============================================================================
+__runtime_error_not_callable:
+    ; Clear screen to dark red to signal a hardware/runtime panic
+    MOV ioports.gpu.clear_color, 0xFF800000 
+    ioports.gpu.clear()
+    
+	; Prepare screen coordinates for error text (e.g., X=20, Y=20)
+    MOV   R0, 20                ; X coordinate
+	PUSH  R0
+    MOV   R0, 20                ; Y coordinate
+	PUSH  R0
+
+    ; Print base error message
+    MOV   R0, __const_str_err_call_nil  ; Load base error string address
+	PUSH  R0
+    CALL __builtin_print        ; Call your runtime's internal print routine
+    JMP __panic_halt
+    
+__panic_halt:
+    WAIT                        ; Yield CPU frame to prevent runaway execution
+    JMP __panic_halt            ; Trap CPU in an infinite loop
 
 ;; =====================================================================================
 ;; SECTION 2: TABLE OPERATIONS
@@ -73,8 +121,9 @@ __builtin_table_new:
     ISUB SP, 1 
     
     ;; Check for out-of-memory (if R0 == 0, handle OOM error) 
-    IEQ  R0, 0 
-    JT   R0, __oom_handler 
+	MOV  R1, R0
+    IEQ  R1, 0 
+    JT   R1, __oom_handler 
     
     ;; 2. Initialize table header in data memory (Stripped redundant +0 offset) 
     MOV  R1, 0
@@ -884,3 +933,6 @@ __const_str_table:
 
 __const_str_function:
     string "function"
+
+__const_str_err_call_nil:
+	string "RUNTIME ERROR: ATTEMPT TO CALL NIL"

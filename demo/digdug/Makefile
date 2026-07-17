@@ -7,6 +7,7 @@ PACKER        = packrom
 
 # This variable is empty by default, but is set to -g during a debug build
 DEBUG_FLAGS   =
+ASM_DEBUG_FLAGS =
 
 # --- Phony Targets ---
 .PHONY: all asm vbin vtex v32 debug clean
@@ -16,6 +17,7 @@ all: prep asm vbin vtex v32
 
 # Debug target: Sets the debug flags and builds all targets
 debug: DEBUG_FLAGS = -g
+debug: ASM_DEBUG_FLAGS = -g program
 debug: all
 
 # --- Build Rules ---
@@ -33,7 +35,7 @@ obj/$(DEMO).asm: $(DEMO).lua
 vbin: obj/$(DEMO).vbin
 
 obj/$(DEMO).vbin: obj/$(DEMO).asm
-	$(ASSEMBLER) $(DEBUG_FLAGS) -o obj/$(DEMO).vbin obj/$(DEMO).asm
+	$(ASSEMBLER) $(ASM_DEBUG_FLAGS) -o obj/$(DEMO).vbin obj/$(DEMO).asm
 
 # Process PNG sprite sheet to Vircon texture
 vtex: textures/$(DEMO)_sprites.vtex

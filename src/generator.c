@@ -513,10 +513,13 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 int target_reg = allocate_register();
                 generate_asm (node -> as.call.target, target_reg);
                 
-                // AUDITED: Strip the 0xFF800000 NaN tag before jumping!
-                emit_asm ("AND R%d, 0x003FFFFF ; Unbox code pointer\n", target_reg);
-                emit_asm ("OR  R%d, 0x20000000 ; restore memory page bit\n", target_reg);
-                emit_asm ("CALL R%d\n", target_reg);
+				// Ensure the boxed target is in register R0 (if it isn't already there)
+				if (target_reg != 0) {
+					emit_asm ("MOV R0, R%d ; Prepare boxed target for validation", target_reg);
+				}
+
+				// Emits a single instruction that handles validation, unboxing, and execution!
+				emit_asm("CALL __builtin_exec ; Validate tag and tail-call execute");
                 unlock_register(target_reg);
 
                 if (arg_count > 0) emit_asm ("ISUB SP, %d\n", arg_count);
