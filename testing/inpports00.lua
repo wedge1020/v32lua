@@ -1,5 +1,5 @@
 function game_loop()
-	gpu.clear(black)
+	ioports.gpu.clear(black)
 	left = ioports.inp.left
 	if (left >  0) then
 		print (0, 0, "up   ")
@@ -20,7 +20,7 @@ function game_loop()
 		print (0, 0, "down ")
 	end
 
-	start = ioports.inp.START
+	start = ioports.inp.start
 	if (start >  0) then
 		print (0, 0, "start")
 	end
