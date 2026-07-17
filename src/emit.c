@@ -7,6 +7,16 @@ void emit_asm(const char *format, ...) {
     vsnprintf(raw_buf, sizeof(raw_buf), format, args);
     va_end(args);
 
+    // =========================================================================
+    // DETECT WAIT INSTRUCTION IN MAIN()
+    // =========================================================================
+    if (strcmp(get_current_function_name(), "main") == 0) {
+        // Look for the "WAIT" instruction or opcode in the raw buffer
+        if (strstr(raw_buf, "WAIT") != NULL) {
+            w_mainwait  = 0;
+        }
+    }
+
     // 1. Strip trailing newlines/carriage returns for safe parsing
     size_t len = strlen(raw_buf);
     while (len > 0 && (raw_buf[len - 1] == '\n' || raw_buf[len - 1] == '\r')) {

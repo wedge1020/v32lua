@@ -1052,6 +1052,7 @@ void generate_program (ASTNode *head)
     // Route to main() if available; fall back to game_loop() otherwise
     if (has_main)
     {
+        w_mainwait  = 1; // look for WAIT, issue warning if not found
         emit_asm ("CALL __function_main ; Execute main execution cycle\n");
     }
     else if (has_game_loop)

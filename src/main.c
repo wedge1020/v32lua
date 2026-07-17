@@ -49,7 +49,7 @@ static void  print_usage (const char *prog_name)
     fprintf (stdout, "  -O0          Disable compiler optimizations (default)\n");
     fprintf (stdout, "  -O1          Enable compiler optimizations\n");
     fprintf (stdout, "  -g           Outputs an additional file with debug info\n");
-    //fprintf (stdout, "  -w           Inhibit all warnings\n");
+    fprintf (stdout, "  -w           Inhibit all warnings\n");
     //fprintf (stdout, "  -Wall        Enable all warnings\n");
 }
 
@@ -72,6 +72,7 @@ int  main (int  argc, char** argv)
     char *input_filename        = NULL;
     char  output_filename[256]  = { 0 };
     int   verbose               = 0;
+    int   o_dowarnings          = 1; // display warnings by default
 
     // --- Command Line Argument Parsing ---
     for (int i = 1; i < argc; i++) {
@@ -79,6 +80,8 @@ int  main (int  argc, char** argv)
             strncpy(output_filename, argv[++i], sizeof(output_filename) - 1);
         } else if (strcmp(argv[i], "-g") == 0) {
             g_debug_mode = true;
+        } else if (strcmp(argv[i], "-w") == 0) {
+            o_dowarnings = 0; // disable display of compiler warnings
         } else if (strcmp(argv[i], "--verbose") == 0 || strcmp(argv[i], "-v") == 0) {
             verbose = 1;
         } else if (strcmp(argv[i], "-O0") == 0) {
@@ -142,35 +145,35 @@ int  main (int  argc, char** argv)
     register_all_globals_prepass(root_node);
 
     // --- AST OPTIMIZATION PASSES ---
-	if (o_optflag            >= 1)
-	{
-		bool  ast_changed     = true;
-		int   max_iterations  = 5; // Guard against infinite compiler loops
-		int   iter            = 0;
+    if (o_optflag            >= 1)
+    {
+        bool  ast_changed     = true;
+        int   max_iterations  = 5; // Guard against infinite compiler loops
+        int   iter            = 0;
 
-		int   o_optimizations_performed  = 0; // this probably needs to be a global variable
+        int   o_optimizations_performed  = 0; // this probably needs to be a global variable
 
-		while (ast_changed && iter < max_iterations) {
-			ast_changed = false;
+        while (ast_changed && iter < max_iterations) {
+            ast_changed = false;
         
-			// You can add a global modification counter inside your optimize passes
-			// e.g., g_optimizations_performed++ whenever a node mutates.
-			int before_count = o_optimizations_performed;
+            // You can add a global modification counter inside your optimize passes
+            // e.g., g_optimizations_performed++ whenever a node mutates.
+            int before_count = o_optimizations_performed;
         
-			clear_const_table();
-			root_node = propagate_constants(root_node);
-			root_node = fold_constants(root_node);
+            clear_const_table();
+            root_node = propagate_constants(root_node);
+            root_node = fold_constants(root_node);
         
-			if (o_optimizations_performed > before_count) {
-				ast_changed = true;
-			}
-			iter++;
-		}
+            if (o_optimizations_performed > before_count) {
+                ast_changed = true;
+            }
+            iter++;
+        }
     
-		if (g_debug_mode) {
-			printf("[Optimizer] Converged after %d iteration(s).\n", iter);
-		}
-	}
+        if (g_debug_mode) {
+            printf("[Optimizer] Converged after %d iteration(s).\n", iter);
+        }
+    }
 
     // --- Stage 5: Emitter ---
     log_stage(5, "emitter", verbose);
@@ -190,6 +193,12 @@ int  main (int  argc, char** argv)
 
     // 4. Safely flush, close, and reset the stream infrastructure
     close_output_stream();
+
+    if ((o_dowarnings == 1) &&
+        (w_mainwait   == 1))
+    {
+        compiler_warning (ERR_SEMANTIC, -1, "main(): no WAIT or ioports.gpu.sync() present");
+    }
 
     // --- Artifact Notification ---
     if (verbose)
