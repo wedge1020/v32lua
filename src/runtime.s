@@ -283,6 +283,8 @@ __table_set_fallback:
     MOV  R6, R0              ; R6 = New hash buffer base address
     MOV  R7, 0
     MOV  [R6], R7            ; Initialize PairCount (Word 0) to 0
+
+	;; R5 is in CART ROM, this causes a memory write error
     MOV  [R5+3], R6          ; Store new buffer pointer back into Table Header Word 3!
 
 __table_set_hash_ready:      ; <-- ADD THIS LABEL HERE!
