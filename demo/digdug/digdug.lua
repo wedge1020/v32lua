@@ -375,8 +375,7 @@ function main()
 		if Game.lives <= 0 then
 			print(260, 180, "GAME OVER")
 		end
-	end
 
-    -- 6. Hardware Vsync Wait Intrinsic (Injects Vircon32 WAIT instruction)
- --   __asm__("WAIT")
+		ioports.gpu.sync()
+	end
 end

@@ -52,6 +52,7 @@ extern int global_label_counter;
   
 int         get_next_label               (void);
 void        init_global_scope            (void);
+SymbolNode *resolve_symbol               (const char *);
 int         add_string_literal           (const char *);
 void        register_all_globals_prepass (ASTNode *);
 SymbolNode *register_global              (const char *);

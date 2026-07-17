@@ -513,13 +513,13 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 int target_reg = allocate_register();
                 generate_asm (node -> as.call.target, target_reg);
                 
-				// Ensure the boxed target is in register R0 (if it isn't already there)
-				if (target_reg != 0) {
-					emit_asm ("MOV R0, R%d ; Prepare boxed target for validation", target_reg);
-				}
+                // Ensure the boxed target is in register R0 (if it isn't already there)
+                if (target_reg != 0) {
+                    emit_asm ("MOV R0, R%d ; Prepare boxed target for validation", target_reg);
+                }
 
-				// Emits a single instruction that handles validation, unboxing, and execution!
-				emit_asm("CALL __builtin_exec ; Validate tag and tail-call execute");
+                // Emits a single instruction that handles validation, unboxing, and execution!
+                emit_asm("CALL __builtin_exec ; Validate tag and tail-call execute");
                 unlock_register(target_reg);
 
                 if (arg_count > 0) emit_asm ("ISUB SP, %d\n", arg_count);
@@ -1000,6 +1000,151 @@ void  show_global_symbol_list (const char *label)
 void generate_program (ASTNode *head)
 {
     ASTNode *current             = NULL;
+    char     buffer[1024];
+    char    *check               = NULL;
+    int      final_line_offset   = 0; 
+
+    init_global_scope (); 
+
+    // =========================================================================
+    // 1. CONDITIONAL ENTRY POINT CHECKS
+    // =========================================================================
+    SymbolNode *init_sym      = resolve_symbol("init");
+    SymbolNode *main_sym      = resolve_symbol("main");
+    SymbolNode *game_loop_sym = resolve_symbol("game_loop");
+
+    bool has_init      = (init_sym != NULL && init_sym->is_function == 1);
+    bool has_main      = (main_sym != NULL && main_sym->is_function == 1);
+    bool has_game_loop = (game_loop_sym != NULL && game_loop_sym->is_function == 1);
+
+    // If neither main() nor game_loop() exists, halt compilation immediately
+    if (!has_main && !has_game_loop)
+    {
+        compiler_error(ERR_SEMANTIC, -1, 
+            "Compilation failed: Your program must declare either a 'main()' or a 'game_loop()' function.");
+    }
+
+    // =========================================================================
+    // 2. CODE GENERATION SETUP
+    // =========================================================================
+    FILE *temp_asm_stream = tmpfile();
+    if (g_debug_mode) {
+        temp_debug_stream = tmpfile();
+        g_temp_asm_line = 1;
+        g_current_label[0] = '\0';
+    }
+
+    FILE *final_out_stream = out();
+    set_output_stream(temp_asm_stream);
+    
+    // =========================================================================
+    // 3. EMIT COMPILED CODE ENTRY VECTOR
+    // =========================================================================
+    emit_asm (";; --- Compiled Code Entry Vector ---\n");
+    emit_asm ("CALL __init_globals  ; Run top-level setups first\n");
+    
+    // If init() exists, execute it immediately after global variable setup
+    if (has_init)
+    {
+        emit_asm ("CALL __function_init   ; Run user-defined init function\n");
+    }
+
+    // Route to main() if available; fall back to game_loop() otherwise
+    if (has_main)
+    {
+        emit_asm ("CALL __function_main ; Execute main execution cycle\n");
+    }
+    else if (has_game_loop)
+    {
+        emit_asm ("__start:\n");
+        emit_asm ("CALL __function_game_loop ; Execute game loop tick\n");
+        emit_asm ("WAIT\n");
+        emit_asm ("JMP __start\n");
+    }
+
+    emit_asm ("HLT                  ; Safe-guard halt\n");
+
+    // =========================================================================
+    // 4. FUNCTION DEFINITIONS & GLOBAL INITIALIZERS
+    // =========================================================================
+    emit_asm ("\n;; --- Function Definitions ---\n");
+    current = head;
+    while (current != NULL)
+    {
+        if (current -> type == NODE_FUNCTION_DEF) {
+            generate_asm (current, 0);
+        }
+        current = current->next;
+    }
+
+    generate_global_setup (head);
+
+    // Restore output back to the final compilation output file
+    set_output_stream (final_out_stream);
+
+    fprintf (out(), ";; --- Global Variable RAM Map ---\n");
+    final_line_offset           = final_line_offset + 2;
+    
+    final_line_offset += emit_variable_map();
+    fprintf (out(), "\n");
+    final_line_offset           = final_line_offset + 1;
+
+    // Flush buffered compiler assembly to our output target
+    rewind (temp_asm_stream);
+    while ((check = fgets (buffer, sizeof (buffer), temp_asm_stream)) != NULL) {
+        fputs (buffer, out());
+    }
+    fclose (temp_asm_stream);
+
+    emit_runtime_library ();
+    emit_string_data_section ();
+
+    // --- GENERATE DEBUG FILE ---
+    if (g_debug_mode && temp_debug_stream != NULL)
+    {
+        char debug_filename[1024];
+        snprintf(debug_filename, sizeof(debug_filename), "%s.debug", g_asm_filename);
+        
+        FILE *debug_file = fopen(debug_filename, "w");
+        if (debug_file != NULL)
+        {
+            rewind(temp_debug_stream);
+            char dbg_buffer[512];
+            int last_seen_lua_line = -1; 
+            
+            while (fgets(dbg_buffer, sizeof(dbg_buffer), temp_debug_stream) != NULL)
+            {
+                int rel_line = 0;
+                int lua_line = 0;
+                char label[256] = "";
+                
+                int items = sscanf(dbg_buffer, "%d,%d,%255s", &rel_line, &lua_line, label);
+                if (items >= 2)
+                {
+                    if (lua_line != last_seen_lua_line)
+                    {
+                        last_seen_lua_line = lua_line;
+                        int actual_asm_line = final_line_offset + rel_line;
+                        
+                        if (items == 3) {
+                            label[strcspn(label, "\r\n")] = 0;
+                            fprintf(debug_file, "%s,%d,%s,%d,%s\n", g_asm_filename, actual_asm_line, g_lua_filename, lua_line, label);
+                        } else {
+                            fprintf(debug_file, "%s,%d,%s,%d\n", g_asm_filename, actual_asm_line, g_lua_filename, lua_line);
+                        }
+                    }
+                }
+            }
+            fclose(debug_file);
+        }
+        fclose(temp_debug_stream);
+        temp_debug_stream = NULL; 
+    }
+}
+/*
+void generate_program (ASTNode *head)
+{
+    ASTNode *current             = NULL;
     //int      globals_need_stack  = 0;
     char     buffer[1024];
     char    *check               = NULL;
@@ -1033,9 +1178,9 @@ void generate_program (ASTNode *head)
     {
         if (current -> type == NODE_FUNCTION_DEF) {
             generate_asm (current, 0);
-        }/* else if (check_needs_stack (current)) {
-            globals_need_stack = 1;
-        }*/
+        }// else if (check_needs_stack (current)) {
+         //   globals_need_stack = 1;
+        //}
         current = current->next;
     }
 
@@ -1110,3 +1255,4 @@ void generate_program (ASTNode *head)
         temp_debug_stream = NULL; 
     }
 }
+*/
