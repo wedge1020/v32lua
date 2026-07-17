@@ -46,7 +46,7 @@ function test_nested_if()
     end
 end
 
-function main()
+function game_loop()
     -- Run all conditional scenarios
     test_basic_if()
     test_if_else()

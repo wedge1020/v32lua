@@ -1,4 +1,4 @@
-function main()
+function game_loop()
 	value  = 17
 	value  = add (value, 2)
 end

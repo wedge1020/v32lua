@@ -1,4 +1,4 @@
-function main()
+function game_loop()
 	value1  = 17
 	value2  = 5
 

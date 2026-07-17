@@ -7,7 +7,7 @@
 --   3
 --   and now wrapping it up --]]
 
-function main()
+function game_loop()
 
 	-- indented comment: 9999 will not be seen in the resulting assembly
 	a=5

@@ -1,6 +1,6 @@
 BIOS = -1
 
-function main()
+function game_loop()
 	-- draw a capital A in the dead center of the screen
     ioports.gpu.texture  = BIOS
 	ioports.gpu.region   = 65

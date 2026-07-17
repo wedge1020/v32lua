@@ -1,7 +1,7 @@
 xpos=0
 ypos=0
 
-function main()
+function game_loop()
 	x=59
 	ypos=ypos+7
 	x=x+ypos

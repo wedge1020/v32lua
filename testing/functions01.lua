@@ -1,6 +1,6 @@
 value      = 2
 
-function main()
+function game_loop()
 	value  = add (value, 2)
 end
 

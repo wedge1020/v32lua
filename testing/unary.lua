@@ -2,7 +2,7 @@
 -- Vircon32 Lua Compiler: Unary Operations Test Suite
 -- =========================================================
 
-function main()
+function game_loop()
 	local y = 0
 	print(0, y, "--- 1. UNARY MINUS (-) ---")
 	y = y + 20

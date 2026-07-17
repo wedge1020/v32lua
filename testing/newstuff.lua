@@ -2,7 +2,7 @@
 -- Vircon32 Lua Compiler: Feature Demo
 -- ==========================================
 
-function main()
+function game_loop()
 	-- 1. Test Type Coercion & Negative Numbers
 	print(0, 0, "--- TYPES & COERCION ---")
 	print(0, 20, 42)            -- Positive integer float

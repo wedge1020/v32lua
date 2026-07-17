@@ -1,4 +1,4 @@
-function main()
+function game_loop()
 	gpu.clear(black)
 	left = ioports.inp.left
 	if (left >  0) then

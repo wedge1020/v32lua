@@ -1,6 +1,6 @@
 -- test_while_break.lua
 
-function main()
+function game_loop()
     local counter = 0
     local max_limit = 10
     local break_point = 5

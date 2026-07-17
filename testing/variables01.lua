@@ -1,7 +1,7 @@
 xpos=0
 ypos=0
 
-function main()
+function game_loop()
     xpos=xpos+1
 	ypos=240
 end

@@ -3,7 +3,7 @@
 
 version=1.02
 
-function main()
+function game_loop()
 	value=175 -- setting a variable
 	value=value+255 -- manipulating a variable
 end

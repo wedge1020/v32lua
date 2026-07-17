@@ -1,6 +1,6 @@
 current=0
 
-function main()
+function game_loop()
     current=ioports.gpu.texture
 	value=4
 	ioports.gpu.texture  = value

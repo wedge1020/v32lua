@@ -1,7 +1,7 @@
 -- test_scopes.lua
 x = 100  -- Global variable
 
-function main()
+function game_loop()
     local x = 50  -- Local variable (Shadows the global 'x' inside this function)
     
     if x > 10 then
