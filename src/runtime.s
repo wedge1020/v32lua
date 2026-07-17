@@ -641,12 +641,15 @@ __builtin_tostring:
 
 __tostring_check_primitives:
     ;; Add these three explicit checks:
-    IEQ  R1, 0xFFC00000
-    JT   R1, __tostring_nil
-    IEQ  R1, 0xFFC00001
-    JT   R1, __tostring_false
-    IEQ  R1, 0xFFC00002
-    JT   R1, __tostring_true
+    MOV  R6, R1
+    IEQ  R6, 0xFFC00000
+    JT   R6, __tostring_nil
+    MOV  R6, R1
+    IEQ  R6, 0xFFC00001
+    JT   R6, __tostring_false
+    MOV  R6, R1
+    IEQ  R6, 0xFFC00002
+    JT   R6, __tostring_true
 
     ;; Existing tag checks follow...
     MOV  R2, R1
@@ -741,14 +744,14 @@ __builtin_ftoa:
     PUSH BP
     MOV  BP, SP
     
-    MOV  R1, [BP+2]          ; R1 = Float value
-    CFI  R1                  ; Convert Float to Integer (in-place)
-    
     ;; Allocate a 16-word character buffer on the heap for the string
     MOV  R0, 16
     PUSH R0
     CALL __malloc            ; R0 = Base address of new string buffer
     ISUB SP, 1
+
+    MOV  R1, [BP+2]          ; R1 = Float value
+    CFI  R1                  ; Convert Float to Integer (in-place)
     
     MOV  R2, R0              ; R2 = Start of buffer
     MOV  R3, R0              ; R3 = End of string pointer (will advance)
@@ -763,7 +766,7 @@ __builtin_ftoa:
     JMP  __ftoa_terminate
 
 __ftoa_extract_loop:
-	MOV  R5, R1
+    MOV  R5, R1
     IEQ  R5, 0               ; If quotient is 0, we are done extracting digits
     JT   R5, __ftoa_reverse_init
     
@@ -783,15 +786,16 @@ __ftoa_reverse_init:
     MOV  R5, R2              ; R5 = Left pointer (first character)
 
 __ftoa_reverse_loop:
-    IGE  R5, R4              ; If Left >= Right, string is reversed
-    JT   R5, __ftoa_terminate
-    
+    MOV  R6, R5              ; Copy left pointer R5 to scratch R6
+    IGE  R6, R4              ; Test R6 instead of R5!
+    JT   R6, __ftoa_terminate
+
     ;; Swap characters at [R5] and [R4]
     MOV  R6, [R5]
     MOV  R7, [R4]
     MOV  [R5], R7
     MOV  [R4], R6
-    
+
     IADD R5, 1               ; Move Left pointer inward
     ISUB R4, 1               ; Move Right pointer inward
     JMP  __ftoa_reverse_loop
