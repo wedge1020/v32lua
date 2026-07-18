@@ -1,3 +1,6 @@
+--#title "inpports01 test of GPU+INP port access"
+--#version "0.4"
+
 function init()
 	ioports.gpu.texture = -1
 	x = 315
