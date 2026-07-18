@@ -288,7 +288,8 @@ __table_set_fallback:
     MOV  R0, 16              
     PUSH R0
     CALL __malloc
-    ISUB SP, 1
+    ;ISUB SP, 1  ; this is throwing off the stack
+	IADD SP, 1   ; attempting to compensate
     POP  R5
     POP  R3
     POP  R2
@@ -304,7 +305,6 @@ __table_set_fallback:
     MOV  [R6+1], R7          ; Word 1: NextBucketPtr = 0x0 (Tail)
 
 	; this is apparently causing a memory write error
-__potential_problem:
     MOV  [R5+3], R6          ; Link to Table Header Word 3
 
 ;; --- BUCKET SEARCH LOOP ---
