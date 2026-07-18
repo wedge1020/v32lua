@@ -288,8 +288,8 @@ __table_set_fallback:
     MOV  R0, 16              
     PUSH R0
     CALL __malloc
-    ;ISUB SP, 1  ; this is throwing off the stack
-	IADD SP, 1   ; attempting to compensate
+    ;ISUB SP, 1  ; FIX: this is throwing off the stack (commented out)
+	IADD SP, 1   ; FIX: apparently need to compensate this direction
     POP  R5
     POP  R3
     POP  R2
@@ -300,7 +300,7 @@ __table_set_fallback:
     JT   R6, __oom_handler   ; Trap out-of-memory
 
     MOV  R7, 0
-    MOV  R6, R0              ; restore R6 after comparison
+    MOV  R6, R0              ; FIX: restore R6 after comparison
     MOV  [R6], R7            ; Word 0: PairCount = 0
     MOV  [R6+1], R7          ; Word 1: NextBucketPtr = 0x0 (Tail)
 
@@ -312,12 +312,14 @@ __table_set_fallback:
 __table_set_bucket_loop:
     MOV  R7, [R6]            ; R7 = PairCount in current bucket
     MOV  R8, R6              
+	AND  R8, 0x003FFFFF      ; attempt to unbox address
     IADD R8, 2               ; R8 points to Key0 of current bucket
 
 __table_set_scan_pairs:
     IEQ  R7, 0               ; No more pairs in this specific bucket?
     JT   R7, __table_set_check_next_bucket
     
+	; R8 is somehow an invalid address, leading to memory read
     MOV  R9, [R8]            ; Load stored Key
     IEQ  R9, R2              ; Does Stored Key == Search Key?
     JT   R9, __table_set_overwrite_val ; Found it -> Overwrite value!
