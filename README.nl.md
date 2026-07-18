@@ -12,7 +12,7 @@
 
 Hoewel het nog niet compleet is, is een van de doelen van de ontwikkeling om van `v32lua` een alternatief (in geen geval een vervanging) te maken voor de Vircon32 C-compiler in de Vircon32-ontwikkelingsstack. U kiest in feite uw taal: C of Lua, waarna u na het compileren assembly heeft en door kunt gaan met de build, ongeacht de implementatietaal. Als gevolg hiervan is er moeite gedaan om verschillende gedragingen van de Vircon32 C-compiler na te bootsen om de vervanging van de compiler transparanter te maken.
 
-Vanaf de grond af ontworpen met de beperkingen van retro fantasy consoles in gedachten, beschikt deze compiler over gratis hardware-intrinsics (zero-cost), aangepaste NaN-boxing, algebraïsche peephole-optimalisaties en uitgebreide ontwikkeltools die zijn ontworpen om uw Lua-gameontwikkelingsprojecten te faciliteren.
+Vanaf de grond af ontworpen met de beperkingen van retro fantasy consoles in gedachten, beschikt deze compiler over gratis hardware-intrinsics (zero-cost), aangepaste [NaN-boxing](doc/NaN_boxing.md), algebraïsche peephole-optimalisaties en uitgebreide ontwikkeltools die zijn ontworpen om uw Lua-gameontwikkelingsprojecten te faciliteren.
 
 ```
 +------------------+     +-------------------+     +------------------+

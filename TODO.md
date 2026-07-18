@@ -1,11 +1,10 @@
 Current identified project tasks that need to be done:
 
-  * leaf optimizations may need some work
-  * runtime.s needs to be audited for destructive comparison data hazards
-    * and general logic errors, especially `_to_string` and `_print`
-  * reimplement peephole optimization
+  * compiler optimizations all need to be tested
+    * an earlier quick test did prove things got broken
+  * table logic hardening and testing
+  * verify non-string data can be processed by `print()`
+  * explore some sort of `.free()` intrinsic to use with tables
+  * test, test, test (digdug demo still doesn't work)
+  * finish **blang!** demo
   * assemble DEVLOG
-  * update README files
-
-Seemingly quite close, these bugs both  familiar and perhaps not all that
-big. Hopefully there's not something big lurking.

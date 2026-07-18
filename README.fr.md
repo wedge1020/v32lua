@@ -12,7 +12,7 @@
 
 Bien qu'il ne soit pas encore complet, l'un des objectifs du développement est de faire de `v32lua` un substitut (en aucun cas un remplacement total) au compilateur C Vircon32 dans la pile de développement Vircon32. En gros, vous choisissez votre langage — C ou Lua —, puis une fois compilé, vous obtenez du code assembleur et pouvez poursuivre la compilation sans vous soucier du langage d'implémentation. Par conséquent, des efforts ont été faits pour imiter divers comportements du compilateur C Vircon32 afin de rendre la substitution du compilateur plus transparente.
 
-Conçu à partir de zéro en gardant à l'esprit les contraintes des consoles fantasy rétro, ce compilateur intègre des intrinsèques matérielles sans coût (zero-cost), un NaN-boxing personnalisé, des optimisations peephole algébriques et des outils de développement riches conçus pour faciliter vos projets de développement de jeux Lua.
+Conçu à partir de zéro en gardant à l'esprit les contraintes des consoles fantasy rétro, ce compilateur intègre des intrinsèques matérielles sans coût (zero-cost), un [NaN-boxing](doc/NaN_boxing.md) personnalisé, des optimisations peephole algébriques et des outils de développement riches conçus pour faciliter vos projets de développement de jeux Lua.
 
 ```
 +------------------+     +-------------------+     +------------------+

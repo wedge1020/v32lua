@@ -23,8 +23,9 @@ Vircon32 C Compiler to make compiler substitution more transparent.
 
 Designed from  the ground  up with retro  fantasy console  constraints in
 mind,  this  compiler  features  zero-cost  hardware  intrinsics,  custom
-NaN-boxing, algebraic peephole optimizations,  and rich developer tooling
-designed to facilitate your lua game development endeavours.
+[NaN-boxing](doc/NaN_boxing.md),  algebraic  peephole optimizations,  and
+rich developer tooling  designed to facilitate your  lua game development
+endeavours.
 
 ```
 +------------------+     +-------------------+     +------------------+
