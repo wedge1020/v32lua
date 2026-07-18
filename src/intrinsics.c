@@ -40,13 +40,13 @@ const IOPortMap ioports[] = {
     { "ioports.spu.loopend",   "SPU_SoundLoopEnd",         IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
     { "ioports.spu.state",     "SPU_ChannelState",         IOPORT_READ,                 IOPORT_TYPE_INTEGER },
     { "ioports.spu.chansound", "SPU_ChannelAssignedSound", IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
-    { "ioports.spu.chansound", "SPU_ChannelVolume",        IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_FLOAT   },
+    { "ioports.spu.chanvolume", "SPU_ChannelVolume",       IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_FLOAT   },
     { "ioports.spu.chanspeed", "SPU_ChannelSpeed",         IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_FLOAT   },
     { "ioports.spu.chanloop",  "SPU_ChannelLoopEnabled",   IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_BOOLEAN },
     { "ioports.spu.chanpos",   "SPU_ChannelPosition",      IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_FLOAT   },
     { "ioports.inp.gamepad",   "INP_SelectedGamepad",      IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
     { "ioports.inp.status",    "INP_GamepadConnected",     IOPORT_READ,                 IOPORT_TYPE_BOOLEAN },
-    { "ioports.inp.inputs",    "custom",                   IOPORT_READ | IOPORT_ACTION, IOPORT_TYPE_INTEGER },
+    { "ioports.inp.inputs",    "ioports.inp.inputs",       IOPORT_READ | IOPORT_ACTION, IOPORT_TYPE_INTEGER },
     { "ioports.inp.left",      "INP_GamepadLeft",          IOPORT_READ,                 IOPORT_TYPE_INTEGER },
     { "ioports.inp.right",     "INP_GamepadRight",         IOPORT_READ,                 IOPORT_TYPE_INTEGER },
     { "ioports.inp.up",        "INP_GamepadUp",            IOPORT_READ,                 IOPORT_TYPE_INTEGER },
@@ -68,8 +68,8 @@ const IOPortMap ioports[] = {
 
 static void  emit_spu_cmd_intrinsic (ASTNode *node, int  dest_reg)
 {
-	if (node != NULL)
-		dest_reg  = dest_reg;
+    if (node != NULL)
+        dest_reg  = dest_reg;
 }
 
 static void  emit_system_wait_intrinsic ()
