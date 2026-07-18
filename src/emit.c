@@ -559,19 +559,19 @@ void emit_table_get_literal(int table_reg, const char *property_name)
     emit_asm("    ;; Lookup table property: .%s", property_name);
 
     // 2. Push Table Pointer (Arg 1)
-    emit_asm("    PUSH R%d             ; Arg 1: Table pointer", table_reg);
+    emit_asm("PUSH R%d             ; Arg 1: Table pointer", table_reg);
 
     // 3. Load and Box Key as ROM String, then Push (Arg 2)
     int scratch = allocate_register();
-    emit_asm("    MOV  R%d, __string_%d", scratch, string_id);
-    emit_asm("    OR   R%d, 0x7FC00000 ; Box key as ROM String", scratch);
-    emit_asm("    PUSH R%d             ; Arg 2: Property Key", scratch);
+    emit_asm("MOV  R%d, __string_%d", scratch, string_id);
+    emit_asm("OR   R%d, 0x7FC00000 ; Box key as ROM String", scratch);
+    emit_asm("PUSH R%d             ; Arg 2: Property Key", scratch);
     unlock_register(scratch);
 
     // 4. Call Routine and Clean Stack
-    emit_asm("    CALL __builtin_table_get");
-    emit_asm("    ISUB SP, 2           ; Clean up stack arguments");
+    emit_asm("CALL __builtin_table_get");
+    emit_asm("IADD SP, 2           ; Clean up stack arguments");
 
     // 5. Capture Return Value
-    emit_asm("    MOV  R%d, R0         ; Store returned value", table_reg);
+    emit_asm("MOV  R%d, R0         ; Store returned value", table_reg);
 }

@@ -119,7 +119,7 @@ __builtin_table_new:
     MOV  R0, 4 
     PUSH R0 
     CALL __malloc 
-    ISUB SP, 1 
+    IADD SP, 1 
     
     ;; Check for out-of-memory (if R0 == 0, handle OOM error) 
     MOV  R1, R0
@@ -602,7 +602,7 @@ __print_dispatch:
     PUSH R2                  ; Push Y Coordinate
     PUSH R1                  ; Push X Coordinate
     CALL __bios_print_text   ; Draw the string directly to the GPU screen
-    ISUB SP, 3               ; Clean up arguments from stack
+    IADD SP, 3               ; Clean up arguments from stack
 
     ;; 6. Restore previous GPU texture and region
     OUT  GPU_SelectedTexture, R5 ; Restore previous texture
@@ -618,7 +618,7 @@ __print_coerce:
     PUSH  R2                  ; ADD THIS: Preserve Y coordinate
     PUSH  R3                  ; Push non-string value as argument
     CALL  __builtin_tostring  ; R0 now holds a Tagged String (ROM or RAM!)
-    ISUB  SP, 1               ; Clean up argument from stack
+    IADD  SP, 1               ; Clean up argument from stack
     MOV   R3, R0              ; Replace target R3 with the new String pointer
     POP   R2                  ; ADD THIS: Restore Y coordinate
     POP   R1                  ; ADD THIS: Restore X coordinate
@@ -837,7 +837,7 @@ __tostring_check_primitives:
     ;; In __builtin_tostring float fallback:
     PUSH R1 
     CALL __builtin_ftoa 
-    ISUB SP, 1 
+    IADD SP, 1 
     
     ;; Box as RAM Heap String (0xFFC00000) instead of ROM (0x7FC00000)
     OR   R0, 0xFFC00000      ; Box raw pointer as RAM String 
@@ -914,7 +914,7 @@ __builtin_ftoa:
     MOV  R0, 16
     PUSH R0
     CALL __malloc            ; R0 = Base address of new string buffer
-    ISUB SP, 1
+    IADD SP, 1
 
     MOV  R1, [BP+2]          ; R1 = Float value
     CFI  R1                  ; Convert Float to Integer (in-place)

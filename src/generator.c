@@ -361,7 +361,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     emit_asm ("CALL __builtin_len\n");
                     
                     // Clean up the stack
-                    emit_asm ("ISUB SP, 1\n");
+                    emit_asm ("IADD SP, 1\n");
                     
                     // Move the returned length into the destination register
                     emit_asm ("MOV R%d, R0\n", dest_reg);
@@ -396,7 +396,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 else if (node -> as.unary.operator == OP_UNM) {
                     emit_asm ("PUSH R%d\n", dest_reg);
                     emit_asm ("CALL __builtin_unm\n");
-                    emit_asm ("ISUB SP, 1\n");
+                    emit_asm ("IADD SP, 1\n");
                     emit_asm ("MOV R%d, R0\n", dest_reg);
                 }
                 break;
@@ -468,29 +468,11 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                         emit_asm ("PUSH R%d ; Push Key", key_reg);
                         emit_asm ("PUSH R%d ; Push Value", val_reg);
                         emit_asm ("CALL __builtin_table_set");
-                        emit_asm ("ISUB SP, 3 ; Clean up stack");
+                        emit_asm ("IADD SP, 3 ; Clean up stack");
 
                         unlock_register (table_reg);
                         unlock_register (key_reg);
                     }
-                    /*
-                    else if (curr_tgt->type == NODE_TABLE_GET) {
-                        // Handle table index assignment: table[key] = value
-                        int table_reg = allocate_register();
-                        int key_reg   = allocate_register();
-
-                        generate_asm(curr_tgt->as.table_get.table_expr, table_reg);
-                        generate_asm(curr_tgt->as.table_get.key, key_reg);
-
-                        emit_asm("PUSH R%d ; Push Table Pointer", table_reg);
-                        emit_asm("PUSH R%d ; Push Key", key_reg);
-                        emit_asm("PUSH R%d ; Push Value", val_reg);
-                        emit_asm("CALL __builtin_table_set");
-                        emit_asm("ISUB SP, 3 ; Clean up stack");
-
-                        unlock_register(key_reg);
-                        unlock_register(table_reg);
-                    }*/
 
                     unlock_register(val_reg);
                     curr_tgt = curr_tgt->next;
@@ -550,7 +532,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 emit_asm("CALL __builtin_exec ; Validate tag and tail-call execute");
                 unlock_register(target_reg);
 
-                if (arg_count > 0) emit_asm ("ISUB SP, %d\n", arg_count);
+                if (arg_count > 0) emit_asm ("IADD SP, %d\n", arg_count);
                 if (dest_reg != 0) emit_asm ("MOV R%d, R0\n", dest_reg);
                 break;
             }
@@ -722,7 +704,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     emit_asm ("PUSH R%d\n", dest_reg);
                     emit_asm ("PUSH R%d\n", right_reg);
                     emit_asm ("CALL __builtin_eq\n");
-                    emit_asm ("ISUB SP, 2\n");
+                    emit_asm ("IADD SP, 2\n");
                     
                     if (node -> as.binary.operator == OP_NEQ) {
                         emit_asm ("MOV R%d, R0\n", dest_reg);
@@ -774,7 +756,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 unlock_register(right_reg);
                 
                 emit_asm ("CALL __builtin_strcat\n");
-                emit_asm ("ISUB SP, 2\n");
+                emit_asm ("IADD SP, 2\n");
                 if (dest_reg != 0)
                     emit_asm ("MOV R%d, R0\n", dest_reg);
                 break;
@@ -811,7 +793,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     emit_asm("    PUSH R%d", key_reg);
                     emit_asm("    PUSH R%d", val_reg);
                     emit_asm("    CALL __builtin_table_set");
-                    emit_asm("    ISUB SP, 3");
+                    emit_asm("    IADD SP, 3");
 
                     unlock_register (table_reg);
                     unlock_register (key_reg);
@@ -836,16 +818,11 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 generate_asm(node->as.table_get.table_expr, table_reg);
                 generate_asm(node->as.table_get.key, key_reg);
 
-				// originally, which seems incorrect:
-                //emit_asm ("PUSH R%d ; Push Table Pointer", table_reg);
-                //emit_asm ("PUSH R%d ; Push Key", key_reg);
-
-				// swapped them, now the first check lines up
-                emit_asm ("PUSH R%d ; Push Key", key_reg);
-                emit_asm ("PUSH R%d ; Push Table Pointer", table_reg);
+                emit_asm ("PUSH R%d ; Arg1: Table Pointer", table_reg);
+                emit_asm ("PUSH R%d ; Arg2: Key", key_reg);
 
                 emit_asm ("CALL __builtin_table_get");
-                emit_asm ("ISUB SP, 2 ; Clean up stack");
+                emit_asm ("IADD SP, 2 ; Clean up stack");
                 emit_asm ("MOV R%d, R0 ; Store result in destination register", dest_reg);
 
                 unlock_register (table_reg);

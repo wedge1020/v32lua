@@ -99,20 +99,20 @@ void generate_binary_op (ASTNode* node)
         generate_asm(node->as.binary.left, 0);
 
         // Push left operand to stack (Sits at SP+1 relative to call)
-        emit_asm ("PUSH  R0             ; Save left string operand");
+        emit_asm ("PUSH R0             ; Save left string operand");
 
         // --- Step 2: Evaluate Right Operand ---
         // Generates assembly for right child and leaves result in R0 (register index 0)
         generate_asm(node->as.binary.right, 0);
 
         // Push right operand to stack (Sits at SP+0 relative to call)
-        emit_asm ("PUSH  R0             ; Save right string operand");
+        emit_asm ("PUSH R0             ; Save right string operand");
 
         // --- Step 3: Invoke Built-in ---
-        emit_asm ("CALL  __builtin_strcat ; Execute NaN-boxed string concatenation");
+        emit_asm ("CALL __builtin_strcat ; Execute NaN-boxed string concatenation");
 
         // --- Step 4: Stack Cleanup ---
-        emit_asm ("ISUB  SP, 2          ; Pop concatenation arguments");
+        emit_asm ("IADD SP, 2          ; Pop concatenation arguments");
         return;
     }
 
