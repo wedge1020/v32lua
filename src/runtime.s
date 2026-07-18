@@ -167,6 +167,9 @@ __builtin_table_get:
 
     ;; FAST-PATH CHECK 2: Convert float to integer & verify no fractional part (FIXED)
     MOV  R3, R2              ; Copy float Key to R3 
+
+	; ISSUE: R3 contains a CART ROM address of 0x20000065
+	; an integer, so this CFI will obliterate it
     CFI  R3                  ; Vircon32 in-place conversion: R3 = (int) R3 
     
     ;; Ensure float key had no fractional component (R3 == R2 mathematically)
