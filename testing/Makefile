@@ -9,6 +9,9 @@ LUA_SRCS = $(wildcard *.lua)
 # Translate the list of .lua source files into target .asm files
 ASM_OUTS = $(LUA_SRCS:.lua=.asm)
 
+# Translate the list of .lua source files into target .xml files
+XML_OUTS = $(LUA_SRCS:.lua=.xml)
+
 .PHONY: all clean asmcheck
 
 # Default target builds all the .asm files
@@ -26,6 +29,19 @@ asmcheck: $(ASM_OUTS)
 		out=$${f%.asm}.vbin; \
 		if assemble -g program -o $$out $$f > /dev/null 2>&1; then \
 			printf "[  OK  ] %-25s -> %s\n" "$$f" "$$out"; \
+		else \
+			printf "[ FAIL ] %-25s\n" "$$f"; \
+		fi; \
+	done
+
+# CART verification: Attempt to pack all .vbin files without halting on errors (testing XML)
+v32check: $(XML_OUTS)
+	@echo "--- Verifying Vircon32 CART packing and XML config validity ---"
+	@for f in $(XML_OUTS); do \
+		vbin=$${f%.xml}.vbin; \
+		out=$${f%.xml}.v32; \
+		if packrom $$f > /dev/null 2>&1; then \
+			printf "[  OK  ] %-25s -> %s\n" "$$vbin" "$$out"; \
 		else \
 			printf "[ FAIL ] %-25s\n" "$$f"; \
 		fi; \

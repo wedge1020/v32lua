@@ -4,25 +4,25 @@
 function init()
     ioports.gpu.texture  = -1  -- set BIOS texture
     player               = { }
-	player.r             = 94  -- region
+    player.r             = 94  -- region
     player.x             = 315 -- x position
     player.y             = 170 -- y position
     player.v             = 0   -- velocity
 
-	-- enemy[]              = { }
+    -- enemy                = { }
 
     ioports.gpu.clear("black") -- initial clear screen
 
-	-- draw player at initial position
-	draw(player)
-	-- ioports.region       = player.r   -- set region
-    -- ioports.gpu.x        = player.x   -- set drawing point X
-    -- ioports.gpu.y        = player.y   -- set drawing point Y
-    -- ioports.gpu.draw()                -- draw region to screen
+    -- draw player at initial position
+    draw(player)
+    --ioports.region       = player.r   -- set region
+    --ioports.gpu.x        = player.x   -- set drawing point X
+    --ioports.gpu.y        = player.y   -- set drawing point Y
+    --ioports.gpu.draw()                -- draw region to screen
 end
 
 function draw(object)
-	ioports.region       = object.r   -- set region
+    ioports.region       = object.r   -- set region
     ioports.gpu.x        = object.x   -- set drawing point X
     ioports.gpu.y        = object.y   -- set drawing point Y
     ioports.gpu.draw()                -- draw region to screen
@@ -51,20 +51,20 @@ function game_loop()
 
     up = ioports.inp.up
     if (up >  0) then
-		player.r = 94
+        player.r = 94
         player.y = player.y - player.v
     end
 
     down = ioports.inp.down
     if (down >  0) then
-		player.r = 86
+        player.r = 86
         player.y = player.y + player.v
     end
 
-	-- render player
-	-- ioports.region = player.r
+    -- render player
+    -- ioports.region = player.r
     -- ioports.gpu.x  = player.x
     -- ioports.gpu.y  = player.y
     -- ioports.gpu.draw()
-	draw(player)
+    draw(player)
 end
