@@ -145,22 +145,37 @@ __builtin_table_new:
 ;; Incoming Stack: [BP+3] = Tagged Table Pointer, [BP+2] = Key 
 ;; -------------------------------------------------------------------------------------
 __builtin_table_get:
-    PUSH BP
-    MOV  BP, SP
+    PUSH BP 
+    MOV  BP, SP 
     
     MOV  R1, [BP+3]          ; R1 = Tagged Table Pointer (0x7F80....) 
     MOV  R2, [BP+2]          ; R2 = Key (must be preserved for fallback!) 
 
+    ;; --- 1. STRICT TABLE TYPE VALIDATION (FIXED) ---
+    ;; Ensure R1 is actually a Table before touching memory!
+    MOV  R4, R1
+    AND  R4, 0xFF800000      ; Isolate upper tag bits 
+    IEQ  R4, 0x7F800000      ; Is it tagged as a Table? 
+    JF   R4, __runtime_error_not_table ; Trap if indexing non-table! 
+
+    ;; --- 2. FAST-PATH VALIDATION ---
     ;; FAST-PATH CHECK 1: Is Key an unboxed IEEE Float? 
     MOV  R3, R2 
-    AND  R3, 0x7F800000      ; Isolate exponent bits
-    IEQ  R3, 0x7F800000      ; Are they all 1s? (If so, it's tagged/NaN)
-    JT   R3, __table_get_fallback
+    AND  R3, 0x7F800000      ; Isolate exponent bits 
+    IEQ  R3, 0x7F800000      ; Are they all 1s? (If so, it's tagged/NaN) 
+    JT   R3, __table_get_fallback 
 
-    ;; FAST-PATH CHECK 2: Is Key an integer >= 1? 
-    MOV  R3, R2              ; Copy float Key to R3 (preserves original in R2) 
+    ;; FAST-PATH CHECK 2: Convert float to integer & verify no fractional part (FIXED)
+    MOV  R3, R2              ; Copy float Key to R3 
     CFI  R3                  ; Vircon32 in-place conversion: R3 = (int) R3 
-    MOV  R4, R3              ; Copy integer index to R4 for destructive comparison 
+    
+    ;; Ensure float key had no fractional component (R3 == R2 mathematically)
+    MOV  R4, R3
+    CIF  R4                  ; Cast int back to float in R4 
+    INE  R4, R2              ; If (float)(int)Key != Key, it's fractional -> fallback! 
+    JT   R4, __table_get_fallback 
+
+    MOV  R4, R3              ; Copy integer index to R4 for comparison 
     ILT  R4, 1               ; Destructive test: Is integer key < 1? 
     JT   R4, __table_get_fallback ; Zero or negative keys go to fallback! 
 
@@ -168,7 +183,7 @@ __builtin_table_get:
     MOV  R4, R1 
     AND  R4, 0x003FFFFF      ; Unbox Table pointer into R4 
     MOV  R5, [R4+1]          ; R5 = Array Capacity (from Header Word 1) 
-    MOV  R9, R3              ; Copy integer index R3 to R9
+    MOV  R9, R3              ; Copy integer index R3 to R9 
     IGT  R9, R5              ; Destructive test: Is Key > Capacity? 
     JT   R9, __table_get_fallback ; Out-of-bounds integers go to fallback! 
 
@@ -177,28 +192,30 @@ __builtin_table_get:
     ISUB R3, 1               ; Convert 1-based Lua index to 0-based memory offset 
     IADD R5, R3              ; Memory Address = ArrayPtr + (Key - 1) 
     MOV  R0, [R5]            ; Read value directly from heap buffer! 
-    JMP  __table_get_done
+    JMP  __table_get_done 
 
 ;; --- FALLBACK EXECUTION: Association List Scan ---
 __table_get_fallback:
     MOV  R4, R1 
     AND  R4, 0x003FFFFF      ; Unbox Table pointer 
-    MOV  R5, [R4+3]          ; R5 = Hash Data Pointer (from Header Word 3) 
-    MOV  R9, R5              ; use R9 as scratch to prevent destructive comparison
+    MOV  R5, [R4+3]          ; R5 = Base Hash Data Pointer (from Header Word 3) 
+    MOV  R9, R5              ; use R9 as scratch to prevent destructive comparison 
     IEQ  R9, 0               ; Is Hash Buffer null (no sparse keys stored)? 
     JT   R9, __table_get_not_found 
 
-    MOV  R6, [R5]            ; R6 = PairCount (how many pairs are stored) 
-    MOV  R7, R5              ; Setup R7 as running memory pointer
+;; --- BUCKET SEARCH LOOP (FIXED: Supports Extension Chains!) ---
+__table_get_bucket_loop:
+    MOV  R6, [R5]            ; R6 = PairCount (how many pairs are stored in this bucket) 
+    MOV  R7, R5              ; Setup R7 as running memory pointer 
     IADD R7, 2               ; Advance R7 to point directly at Key0 (Offset 2 words) 
 
 __table_get_scan_loop:
-	MOV  R9, R6
-    IEQ  R9, 0               ; Have we checked all stored pairs? 
-    JT   R9, __table_get_not_found 
+    MOV  R9, R6 
+    IEQ  R9, 0               ; Have we checked all stored pairs in this bucket? 
+    JT   R9, __table_get_check_next_bucket ; Do NOT jump to not_found! Check chain!
     
-    MOV  R8, [R7]            ; Load Stored Key directly from running pointer R7
-    MOV  R9, R8              ; R9 as scratch
+    MOV  R8, [R7]            ; Load Stored Key directly from running pointer R7 
+    MOV  R9, R8              ; R9 as scratch 
     IEQ  R9, R2              ; ZERO-COST COMPARISON: Does Stored Key == Search Key? 
     JT   R9, __table_get_found ; Match found! 
     
@@ -206,18 +223,27 @@ __table_get_scan_loop:
     ISUB R6, 1               ; Decrement remaining PairCount 
     JMP  __table_get_scan_loop 
 
+;; --- BUCKET CHAIN STEPPING ---
+__table_get_check_next_bucket:
+    MOV  R9, [R5+1]          ; Load NextBucketPtr (Word 1 of current bucket) 
+    IEQ  R9, 0               ; Is this the end of the chain (Next == 0x0)? 
+    JT   R9, __table_get_not_found ; End of chain reached -> Key definitely does not exist!
+    
+    MOV  R5, R9              ; Step forward: Current Bucket = Next Bucket
+    JMP  __table_get_bucket_loop ; Scan the next bucket in the chain!
+
 __table_get_found:
     IADD R7, 1               ; Value is stored 1 word after the matching Key 
-    MOV  R0, [R7]            ; Read Value into return register R0
-    JMP  __table_get_done
+    MOV  R0, [R7]            ; Read Value into return register R0 
+    JMP  __table_get_done 
 
 __table_get_not_found:
     MOV  R0, 0xFFC00000      ; Key does not exist -> Return canonical Lua Nil! 
 
 __table_get_done:
-    MOV  SP, BP
-    POP  BP
-    RET
+    MOV  SP, BP 
+    POP  BP 
+    RET 
 
 ;; -------------------------------------------------------------------------------------
 ;; Table Write Indexer: t[k] = v -> Writes Value into Table Storage 
