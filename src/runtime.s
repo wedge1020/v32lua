@@ -84,18 +84,18 @@ __exec_valid:
 __runtime_error_not_callable:
     ; Clear screen to dark red to signal a hardware/runtime panic
     MOV R0, 0xFF800000 
-	OUT GPU_ClearColor, R0
-	OUT GPU_Command, GPUCommand_ClearScreen
+    OUT GPU_ClearColor, R0
+    OUT GPU_Command, GPUCommand_ClearScreen
     
-	; Prepare screen coordinates for error text (e.g., X=20, Y=20)
+    ; Prepare screen coordinates for error text (e.g., X=20, Y=20)
     MOV   R0, 20                ; X coordinate
-	PUSH  R0
+    PUSH  R0
     MOV   R0, 20                ; Y coordinate
-	PUSH  R0
+    PUSH  R0
 
     ; Print base error message
     MOV   R0, __const_str_err_call_nil  ; Load base error string address
-	PUSH  R0
+    PUSH  R0
     CALL __builtin_print        ; Call your runtime's internal print routine
     JMP __panic_halt
     
@@ -122,7 +122,7 @@ __builtin_table_new:
     ISUB SP, 1 
     
     ;; Check for out-of-memory (if R0 == 0, handle OOM error) 
-	MOV  R1, R0
+    MOV  R1, R0
     IEQ  R1, 0 
     JT   R1, __oom_handler 
     
@@ -227,23 +227,37 @@ __builtin_table_set:
     MOV  BP, SP
     
     MOV  R1, [BP+4]          ; R1 = Table Pointer 
-    MOV  R2, [BP+3]          ; R2 = Key (must be preserved for fallback!) 
+    MOV  R2, [BP+3]          ; R2 = Key 
     MOV  R3, [BP+2]          ; R3 = Value to store 
 
-    ;; --- FAST-PATH VALIDATION ---
+    ;; --- 1. STRICT TABLE TYPE VALIDATION ---
+    ;; Ensure R1 is actually a Table (0x7F80xxxx) before touching memory!
+    MOV  R4, R1
+    AND  R4, 0xFF800000      ; Isolate upper tag bits
+    IEQ  R4, 0x7F800000      ; Is it tagged as a Table?
+    JF   R4, __runtime_error_not_table ; Trap if indexing a string/func/nil!
+
+    ;; --- 2. FAST-PATH VALIDATION ---
     MOV  R4, R2
     AND  R4, 0x7F800000      ; Isolate exponent bits
-    IEQ  R4, 0x7F800000      ; Are they all 1s? (If so, it's tagged/NaN)
+    IEQ  R4, 0x7F800000      ; Are all exponent bits 1s? (If so, it's tagged/NaN)
     JT   R4, __table_set_fallback
 
     MOV  R4, R2              ; Copy float Key to R4 
     CFI  R4                  ; Vircon32 in-place conversion: R4 = (int) R4 
-    MOV  R5, R4              ; Copy integer index to R5 for destructive comparison 
+    
+    ;; Ensure float key had no fractional component (R4 == R2 mathematically)
+    MOV  R5, R4
+    CIF  R5                  ; Cast int back to float in R5
+    INE  R5, R2              ; If (float)(int)Key != Key, it's fractional -> fallback!
+    JT   R5, __table_set_fallback
+
+    MOV  R5, R4              ; Copy integer index to R5 for comparison 
     ILT  R5, 1 
     JT   R5, __table_set_fallback 
     
     MOV  R5, R1 
-    AND  R5, 0x003FFFFF      ; R5 = Unboxed Table Pointer 
+    AND  R5, 0x003FFFFF      ; R5 = Unboxed Table Pointer (Guaranteed RAM address!)
     MOV  R6, [R5+1]          ; R6 = Array Capacity 
     MOV  R7, R4              ; Copy integer index R4 to R7 
     IGT  R7, R6 
@@ -257,21 +271,22 @@ __builtin_table_set:
     JMP  __table_set_done
 
 ;; --- FALLBACK EXECUTION: Update Existing or Append New ---
+;; --- FALLBACK EXECUTION: Chained Hash Bucket Traversal ---
 __table_set_fallback:
     MOV  R5, R1
-    AND  R5, 0x003FFFFF      ; Unbox Table pointer
-    MOV  R6, [R5+3]          ; R6 = Hash Data Pointer
+    AND  R5, 0x003FFFFF      ; Unbox Table pointer to raw RAM address
+    MOV  R6, [R5+3]          ; R6 = Base Hash Data Pointer
 
-    ;; --- INSERT SAFETY ALLOCATION HERE ---
-    INE  R6, 0               ; Is the hash buffer already allocated?
-    JT   R6, __table_set_hash_ready
+    ;; 1. Ensure Base Hash Buffer exists
+    INE  R6, 0               
+    JT   R6, __table_set_bucket_loop
 
-    ;; Allocate a fixed 16-word hash buffer on the fly
-    PUSH R1                  ; Save critical registers from __malloc clobbering
+    ;; Allocate Base Bucket (16 words)
+    PUSH R1
     PUSH R2
     PUSH R3
     PUSH R5
-    MOV  R0, 16              ; Request 16 words (holds 1 header + up to 7 key/val pairs)
+    MOV  R0, 16              
     PUSH R0
     CALL __malloc
     ISUB SP, 1
@@ -280,50 +295,114 @@ __table_set_fallback:
     POP  R2
     POP  R1
 
-    MOV  R6, R0              ; R6 = New hash buffer base address
+    MOV  R6, R0
+    IEQ  R6, 0
+    JT   R6, __oom_handler   ; Trap out-of-memory
+
     MOV  R7, 0
-    MOV  [R6], R7            ; Initialize PairCount (Word 0) to 0
+    MOV  [R6], R7            ; Word 0: PairCount = 0
+    MOV  [R6+1], R7          ; Word 1: NextBucketPtr = 0x0 (Tail)
+    MOV  [R5+3], R6          ; Link to Table Header Word 3
 
-	;; R5 is in CART ROM, this causes a memory write error
-    MOV  [R5+3], R6          ; Store new buffer pointer back into Table Header Word 3!
+;; --- BUCKET SEARCH LOOP ---
+;; R6 always points to the start of the CURRENT bucket being scanned
+__table_set_bucket_loop:
+    MOV  R7, [R6]            ; R7 = PairCount in current bucket
+    MOV  R8, R6              
+    IADD R8, 2               ; R8 points to Key0 of current bucket
 
-__table_set_hash_ready:      ; <-- ADD THIS LABEL HERE!
-    MOV  R7, [R6]            ; R7 = PairCount (Now guaranteed to be safe!)
-    MOV  R8, R6              ; Setup R8 as running memory pointer
-    IADD R8, 2               ; Advance R8 to point directly at Key0
-
-__table_set_update_loop:
-    IEQ  R7, 0               ; If we exhausted existing pairs, Key is brand new! 
-    JT   R7, __table_set_append_new_pair 
+__table_set_scan_pairs:
+    IEQ  R7, 0               ; No more pairs in this specific bucket?
+    JT   R7, __table_set_check_next_bucket
     
-    MOV  R9, [R8]            ; Load stored Key directly from running pointer R8
-    IEQ  R9, R2              ; Does Stored Key == Search Key? 
-    JT   R9, __table_set_overwrite_val ; Key already exists -> overwrite its value! 
+    MOV  R9, [R8]            ; Load stored Key
+    IEQ  R9, R2              ; Does Stored Key == Search Key?
+    JT   R9, __table_set_overwrite_val ; Found it -> Overwrite value!
     
-    IADD R8, 2               ; Step to next key 
-    ISUB R7, 1 
-    JMP  __table_set_update_loop 
+    IADD R8, 2               ; Advance 2 words to next key
+    ISUB R7, 1
+    JMP  __table_set_scan_pairs
 
 __table_set_overwrite_val:
-    IADD R8, 1               ; Step to Value slot 
-    MOV  [R8], R3            ; Overwrite existing value with new Value
+    IADD R8, 1               ; Step from Key slot to Value slot
+    MOV  [R8], R3            ; Update value in place
     JMP  __table_set_done
 
-__table_set_append_new_pair:
-    ;; R8 currently points to the first unallocated slot at the end of the buffer 
-    MOV  [R8], R2            ; Store new Key
-    IADD R8, 1 
-    MOV  [R8], R3            ; Store new Value
+;; --- BUCKET CHAIN STEPPING ---
+__table_set_check_next_bucket:
+    MOV  R9, [R6+1]          ; Load NextBucketPtr (Word 1)
+    IEQ  R9, 0               ; Is this the end of the chain (Next == 0x0)?
+    JT   R9, __table_set_append_to_tail
     
-    ;; Increment PairCount in Hash Buffer Header (Word 0) 
-    MOV  R7, [R6]
-    IADD R7, 1 
+    MOV  R6, R9              ; Step forward: Current Bucket = Next Bucket
+    JMP  __table_set_bucket_loop ; Scan the next bucket in the chain!
+
+;; --- APPEND NEW PAIR (We reached the tail and key wasn't found) ---
+__table_set_append_to_tail:
+    MOV  R7, [R6]            ; R7 = PairCount of the TAIL bucket
+    IGE  R7, 7               ; Is this tail bucket completely full (7 pairs)?
+    JT   R7, __table_set_allocate_extension_bucket
+
+    ;; There is room in the current tail bucket! 
+    ;; R8 already points to the exact unallocated word offset from our scan loop.
+    MOV  [R8], R2            ; Store Key
+    IADD R8, 1
+    MOV  [R8], R3            ; Store Value
+    
+    ;; Increment PairCount in current bucket header
+    IADD R7, 1
     MOV  [R6], R7
+    JMP  __table_set_done
+
+;; --- ALLOCATE EXTENSION BUCKET (Tail was full) ---
+__table_set_allocate_extension_bucket:
+    PUSH R1
+    PUSH R2
+    PUSH R3
+    PUSH R6
+    MOV  R0, 16              ; Request another 16-word chunk
+    PUSH R0
+    CALL __malloc
+    ISUB SP, 1
+    POP  R6
+    POP  R3
+    POP  R2
+    POP  R1
+
+    MOV  R8, R0              ; R8 = New Extension Bucket Address
+    IEQ  R8, 0
+    JT   R8, __oom_handler
+
+    ;; Initialize New Extension Bucket
+    MOV  R7, 1
+    MOV  [R8], R7            ; Word 0: PairCount = 1 (We are adding a pair right now)
+    MOV  R7, 0
+    MOV  [R8+1], R7          ; Word 1: NextBucketPtr = 0x0 (This is the new tail)
     
+    ;; Store the new Key/Value pair directly into Slot 0 of the new bucket
+    MOV  [R8+2], R2          ; Word 2: Key0
+    MOV  [R8+3], R3          ; Word 3: Val0
+
+    ;; Link old tail bucket to this new extension bucket!
+    MOV  [R6+1], R8          ; OldBucket[NextBucketPtr] = NewBucketAddress
+
 __table_set_done:
     MOV  SP, BP
     POP  BP
     RET
+
+;; -------------------------------------------------------------------------------------
+;; Runtime Panic Handlers for Table Errors
+;; -------------------------------------------------------------------------------------
+__runtime_error_not_table:
+    ;; Trap CPU if script attempts to index a non-table (e.g. String or Function in ROM)
+    HLT
+    JMP __runtime_error_not_table
+
+__runtime_error_hash_overflow:
+    ;; Trap CPU if hash part exceeds 7 pairs (until dynamic rehashing is implemented)
+    HLT
+    JMP __runtime_error_hash_overflow
 
 ;; ===================================================================================
 ;; SECTION 3: STRING & TERMINAL OPERATIONS
@@ -879,14 +958,20 @@ __builtin_unm:
     POP  BP 
     RET 
 
-;; =====================================================================================
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
 ;; SECTION 5: BIOS & HARDWARE SUPPORT ROUTINES
-;; =====================================================================================
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; -------------------------------------------------------------------------------------
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
 ;; __bios_print_text: Displays ASCII string content to the GPU screen 
-;; Incoming Stack: [BP+2]=X, [BP+3]=Y, [BP+4]=Unboxed Heap String Pointer 
-;; -------------------------------------------------------------------------------------
+;;
+;;     Incoming Stack: [BP+2]=X
+;;                     [BP+3]=Y
+;;                     [BP+4]=Unboxed Heap String Pointer 
+;;
 __bios_print_text:
     PUSH BP 
     MOV  BP, SP 
@@ -918,9 +1003,11 @@ __bios_print_done:
     POP  BP 
     RET 
 
-;; =====================================================================================
-;; SECTION 6: STATIC DATA & STRING CONSTANTS
-;; =====================================================================================
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; SECTION 6: ROM DATA & STRING CONSTANTS
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 __const_str_nil:
     string "nil"
@@ -938,4 +1025,4 @@ __const_str_function:
     string "function"
 
 __const_str_err_call_nil:
-	string "RUNTIME ERROR: ATTEMPT TO CALL NIL"
+    string "RUNTIME ERROR: ATTEMPT TO CALL NIL"
