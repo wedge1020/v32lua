@@ -193,8 +193,9 @@ __table_get_fallback:
     IADD R7, 2               ; Advance R7 to point directly at Key0 (Offset 2 words) 
 
 __table_get_scan_loop:
-    IEQ  R6, 0               ; Have we checked all stored pairs? 
-    JT   R6, __table_get_not_found 
+	MOV  R9, R6
+    IEQ  R9, 0               ; Have we checked all stored pairs? 
+    JT   R9, __table_get_not_found 
     
     MOV  R8, [R7]            ; Load Stored Key directly from running pointer R7
     MOV  R9, R8              ; R9 as scratch
@@ -276,50 +277,48 @@ __table_set_fallback:
     AND  R5, 0x003FFFFF      ; Unbox Table pointer to raw RAM address
     MOV  R6, [R5+3]          ; R6 = Base Hash Data Pointer
 
-    ;; 1. Ensure Base Hash Buffer exists
-    INE  R6, 0               
-    JT   R6, __table_set_bucket_loop
+    ;; 1. Ensure Base Hash Buffer exists (Use R9 as scratch!)
+    MOV  R9, R6
+    INE  R9, 0               
+    JT   R9, __table_set_bucket_loop
 
     ;; Allocate Base Bucket (16 words)
     PUSH R1
     PUSH R2
     PUSH R3
     PUSH R5
-    MOV  R0, 16              
+    MOV  R0, 16             
     PUSH R0
     CALL __malloc
-    ;ISUB SP, 1  ; FIX: this is throwing off the stack (commented out)
-	IADD SP, 1   ; FIX: apparently need to compensate this direction
+    IADD SP, 1               ; Correct stack cleanup direction for SP growing down!
     POP  R5
     POP  R3
     POP  R2
     POP  R1
 
     MOV  R6, R0
-    IEQ  R6, 0
-    JT   R6, __oom_handler   ; Trap out-of-memory
+    MOV  R9, R6              ; Check OOM on scratch register R9
+    IEQ  R9, 0
+    JT   R9, __oom_handler   ; Trap out-of-memory
 
     MOV  R7, 0
-    MOV  R6, R0              ; FIX: restore R6 after comparison
     MOV  [R6], R7            ; Word 0: PairCount = 0
     MOV  [R6+1], R7          ; Word 1: NextBucketPtr = 0x0 (Tail)
 
-	; this is apparently causing a memory write error
     MOV  [R5+3], R6          ; Link to Table Header Word 3
 
 ;; --- BUCKET SEARCH LOOP ---
-;; R6 always points to the start of the CURRENT bucket being scanned
 __table_set_bucket_loop:
     MOV  R7, [R6]            ; R7 = PairCount in current bucket
-    MOV  R8, R6              
-	AND  R8, 0x003FFFFF      ; attempt to unbox address
+    MOV  R8, R6             
+    AND  R8, 0x003FFFFF      ; unbox address
     IADD R8, 2               ; R8 points to Key0 of current bucket
 
 __table_set_scan_pairs:
-    IEQ  R7, 0               ; No more pairs in this specific bucket?
-    JT   R7, __table_set_check_next_bucket
+    MOV  R9, R7              ; Use R9 to prevent destroying remaining PairCount!
+    IEQ  R9, 0               ; No more pairs in this specific bucket?
+    JT   R9, __table_set_check_next_bucket
     
-	; R8 is somehow an invalid address, leading to memory read
     MOV  R9, [R8]            ; Load stored Key
     IEQ  R9, R2              ; Does Stored Key == Search Key?
     JT   R9, __table_set_overwrite_val ; Found it -> Overwrite value!
@@ -336,8 +335,9 @@ __table_set_overwrite_val:
 ;; --- BUCKET CHAIN STEPPING ---
 __table_set_check_next_bucket:
     MOV  R9, [R6+1]          ; Load NextBucketPtr (Word 1)
-    IEQ  R9, 0               ; Is this the end of the chain (Next == 0x0)?
-    JT   R9, __table_set_append_to_tail
+    MOV  R10, R9             ; Use R10 to prevent destroying R9 pointer!
+    IEQ  R10, 0              ; Is this the end of the chain (Next == 0x0)?
+    JT   R10, __table_set_append_to_tail
     
     MOV  R6, R9              ; Step forward: Current Bucket = Next Bucket
     JMP  __table_set_bucket_loop ; Scan the next bucket in the chain!
@@ -345,11 +345,11 @@ __table_set_check_next_bucket:
 ;; --- APPEND NEW PAIR (We reached the tail and key wasn't found) ---
 __table_set_append_to_tail:
     MOV  R7, [R6]            ; R7 = PairCount of the TAIL bucket
-    IGE  R7, 7               ; Is this tail bucket completely full (7 pairs)?
-    JT   R7, __table_set_allocate_extension_bucket
+    MOV  R9, R7              ; Use R9 to prevent destroying PairCount!
+    IGE  R9, 7               ; Is this tail bucket completely full (7 pairs)?
+    JT   R9, __table_set_allocate_extension_bucket
 
-    ;; There is room in the current tail bucket! 
-    ;; R8 already points to the exact unallocated word offset from our scan loop.
+    ;; Room exists in tail bucket. R8 already points to unallocated word offset.
     MOV  [R8], R2            ; Store Key
     IADD R8, 1
     MOV  [R8], R3            ; Store Value
@@ -368,21 +368,22 @@ __table_set_allocate_extension_bucket:
     MOV  R0, 16              ; Request another 16-word chunk
     PUSH R0
     CALL __malloc
-    ISUB SP, 1
+    IADD SP, 1               ; Fixed stack cleanup direction!
     POP  R6
     POP  R3
     POP  R2
     POP  R1
 
     MOV  R8, R0              ; R8 = New Extension Bucket Address
-    IEQ  R8, 0
-    JT   R8, __oom_handler
+    MOV  R9, R8              ; Check OOM on scratch register R9
+    IEQ  R9, 0
+    JT   R9, __oom_handler
 
     ;; Initialize New Extension Bucket
     MOV  R7, 1
-    MOV  [R8], R7            ; Word 0: PairCount = 1 (We are adding a pair right now)
+    MOV  [R8], R7            ; Word 0: PairCount = 1
     MOV  R7, 0
-    MOV  [R8+1], R7          ; Word 1: NextBucketPtr = 0x0 (This is the new tail)
+    MOV  [R8+1], R7          ; Word 1: NextBucketPtr = 0x0
     
     ;; Store the new Key/Value pair directly into Slot 0 of the new bucket
     MOV  [R8+2], R2          ; Word 2: Key0
