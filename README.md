@@ -53,8 +53,8 @@ began as an honest attempt to get a  feel for AI and its impact: its role
 and detriment  to human thinking  and education.  That it has  a compiler
 theme was merely to accentuate a point of interest. It has certainly been
 a  learning experience.  If sufficient  compiler concepts  and background
-knowledge wasn't  known going into this,  the effort would have  ended in
-less successfully. 
+knowledge wasn't known  going into this, the effort would  have ended far
+less successfully.
 
 ---
 
