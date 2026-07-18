@@ -270,8 +270,7 @@ __builtin_table_set:
     MOV  [R6], R3            ; Write Value directly into contiguous array slot! 
     JMP  __table_set_done
 
-;; --- FALLBACK EXECUTION: Update Existing or Append New ---
-;; --- FALLBACK EXECUTION: Chained Hash Bucket Traversal ---
+;; --- FALLBACK EXECUTION ---
 __table_set_fallback:
     MOV  R5, R1
     AND  R5, 0x003FFFFF      ; Unbox Table pointer to raw RAM address
@@ -300,8 +299,12 @@ __table_set_fallback:
     JT   R6, __oom_handler   ; Trap out-of-memory
 
     MOV  R7, 0
+    MOV  R6, R0              ; restore R6 after comparison
     MOV  [R6], R7            ; Word 0: PairCount = 0
     MOV  [R6+1], R7          ; Word 1: NextBucketPtr = 0x0 (Tail)
+
+	; this is apparently causing a memory write error
+__potential_problem:
     MOV  [R5+3], R6          ; Link to Table Header Word 3
 
 ;; --- BUCKET SEARCH LOOP ---
