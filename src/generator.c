@@ -836,8 +836,8 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 generate_asm(node->as.table_get.table_expr, table_reg);
                 generate_asm(node->as.table_get.key, key_reg);
 
-                emit_asm ("PUSH R%d ; Push Table Pointer", table_reg);
                 emit_asm ("PUSH R%d ; Push Key", key_reg);
+                emit_asm ("PUSH R%d ; Push Table Pointer", table_reg);
                 emit_asm ("CALL __builtin_table_get");
                 emit_asm ("ISUB SP, 2 ; Clean up stack");
                 emit_asm ("MOV R%d, R0 ; Store result in destination register", dest_reg);
