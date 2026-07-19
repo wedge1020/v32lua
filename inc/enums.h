@@ -19,7 +19,7 @@ typedef enum
     NODE_SUB,
     NODE_MUL,
     NODE_DIV,
-	MODE_MOD,
+	NODE_MOD,
     NODE_AND,
     NODE_OR,
     NODE_RELATIONAL,

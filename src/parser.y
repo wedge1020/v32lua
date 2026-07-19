@@ -363,7 +363,7 @@ expr:
     | expr '-' expr     { $$ = make_node_binary (NODE_SUB, $1, $3); }
     | expr '*' expr     { $$ = make_node_binary (NODE_MUL, $1, $3); }
     | expr '/' expr     { $$ = make_node_binary (NODE_DIV, $1, $3); }
-    | expr '%' expr     { $$ = make_node_binary (NODE_TOD, $1, $3); }
+    | expr '%' expr     { $$ = make_node_binary (NODE_MOD, $1, $3); }
     | TOKEN_LEN expr    { $$ = make_node_unary  (OP_LEN,   $2);     }
     | '-' expr %prec UNARY_MINUS { $$ = make_node_unary (OP_UNM, $2); }
     | TOKEN_NOT expr             { $$ = make_node_unary (OP_NOT, $2); }
