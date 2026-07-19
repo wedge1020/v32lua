@@ -244,7 +244,7 @@ void  get_variable_access_string (const char *name, char *output_buffer)
         //
         if (sym -> location    <  0)
         {
-            sprintf (output_buffer, "[BP + %d]", -(sym -> location + 1));
+            sprintf (output_buffer, "[BP + %d]", -(sym -> location));
         }
 
         ////////////////////////////////////////////////////////////////////////////////
