@@ -239,6 +239,9 @@ void  get_variable_access_string (const char *name, char *output_buffer)
         //
         // It's a parameter! (e.g. location -2 formats as [BP + 2])
         //
+        // Assuming location is -1 for Arg 1, -2 for Arg 2...
+        // We need [BP + 2] for Arg 1, [BP + 3] for Arg 2...
+        //
         if (sym -> location    <  0)
         {
             sprintf (output_buffer, "[BP + %d]", -(sym -> location + 1));
@@ -246,11 +249,14 @@ void  get_variable_access_string (const char *name, char *output_buffer)
 
         ////////////////////////////////////////////////////////////////////////////////
         //
-        // It's a local! (e.g. location 1 formats as [BP - 1])
+        // It's a local variable! (e.g. location 1 formats as [BP - 1])
+        //
+        // Since local_offset_counter starts at 1, location is 1, 2, 3...
+        // We want [BP - 1], [BP - 2], [BP - 3]...
         //
         else
         {
-            sprintf (output_buffer, "[BP - %d]", (sym -> location + 1));
+            sprintf (output_buffer, "[BP - %d]", sym -> location);
         }
     }
 }
