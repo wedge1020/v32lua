@@ -41,7 +41,7 @@ char *mangle_method_name (const char *table_name, const char *method_name);
 
 %type <ast_node> statement statement_list stat_list expr function_def return_stmt
 %type <ast_node> table_constructor function_call else_branch prefix_expr
-%type <ast_node> last_statement func_start while_start if_start
+%type <ast_node> last_statement func_start while_start for_start if_start
 
 /* Operator Precedence Rules (PEMDAS + Logic Core) */
 %left TOKEN_OR
@@ -179,7 +179,7 @@ statement:
         $$->as.while_loop.condition = $2;
         $$->as.while_loop.body = $4;
     }
-    | for_start IDENTIFIER EQUALS expression COMMA expression DO block END {
+    | for_start TOKEN_IDENTIFIER '=' expr ',' expr TOKEN_DO statement_list TOKEN_END {
         $$ = make_node(NODE_FOR_NUMERIC);
         $$->as.for_numeric.index_name = $2;
         $$->as.for_numeric.start_expr = $4;
@@ -187,7 +187,7 @@ statement:
         $$->as.for_numeric.step_expr  = NULL; // Omitted step
         $$->as.for_numeric.body       = $8;
     }
-    | for_start IDENTIFIER EQUALS expression COMMA expression COMMA expression DO block END {
+    | for_start TOKEN_IDENTIFIER '=' expr ',' expr ',' expr TOKEN_DO statement_list TOKEN_END {
         $$ = make_node(NODE_FOR_NUMERIC);
         $$->as.for_numeric.index_name = $2;
         $$->as.for_numeric.start_expr = $4;

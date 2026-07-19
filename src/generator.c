@@ -293,7 +293,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
 				} else if (node->as.for_numeric.step_expr->type == NODE_NUMBER) {
 					// We caught a static float literal in the AST!
 					is_static_step = 1;
-					static_step_val = node->as.for_numeric.step_expr->as.number;
+					static_step_val = node->as.for_numeric.step_expr->as.number.val;
 					emit_asm("MOV R%d, %f", scratch, static_step_val);
 				} else {
 					generate_asm(node->as.for_numeric.step_expr, scratch);
