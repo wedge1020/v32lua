@@ -187,6 +187,7 @@ int check_needs_stack (ASTNode *node)
         case NODE_SUB:
         case NODE_MUL:
         case NODE_DIV:
+        case NODE_MOD:
         case NODE_AND:
         case NODE_OR:
         case NODE_RELATIONAL:
@@ -661,6 +662,45 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 unlock_register (right_reg);
                 break;
             }
+
+            case NODE_MOD: {
+                // OPTIMIZATION (-O1): x % 1.0 -> x
+                if ((o_optflag                                >= 1) &&
+                    (node -> as.binary.right -> type          == NODE_NUMBER) &&
+                    (node -> as.binary.right -> as.number.val == 1.0))
+                {
+                    generate_asm (node -> as.binary.left, dest_reg);
+                    break;
+                }
+
+                generate_asm (node -> as.binary.left, dest_reg);
+                int  right_reg                                 = allocate_register ();
+                generate_asm (node -> as.binary.right, right_reg);
+                emit_asm ("FMOD R%d, R%d\n", dest_reg, right_reg);
+                unlock_register (right_reg);
+                break;
+            }
+
+            /*
+            case NODE_MOD: {
+                generate_asm (node->as.binary.left, dest_reg);
+                int right_reg = allocate_register ();
+                generate_asm (node->as.binary.right, right_reg);
+                
+                // Convert both IEEE floats to integers in-place
+                emit_asm ("CFI R%d ; Cast left operand to int for modulo\n", dest_reg);
+                emit_asm ("CFI R%d ; Cast right operand to int for modulo\n", right_reg);
+                
+                // Perform hardware integer modulo
+                emit_asm ("IMOD R%d, R%d\n", dest_reg, right_reg);
+                
+                // Convert the remainder back to a standard Lua float
+                emit_asm ("CIF R%d ; Cast remainder back to float\n", dest_reg);
+                
+                unlock_register (right_reg);
+                break;
+            }
+            */
 
             case NODE_AND: {
                 int label_id = get_next_label();
@@ -1154,118 +1194,3 @@ void generate_program (ASTNode *head)
         temp_debug_stream = NULL; 
     }
 }
-/*
-void generate_program (ASTNode *head)
-{
-    ASTNode *current             = NULL;
-    //int      globals_need_stack  = 0;
-    char     buffer[1024];
-    char    *check               = NULL;
-    int      final_line_offset   = 0; 
-
-    init_global_scope (); 
-
-    FILE *temp_asm_stream = tmpfile();
-    if (g_debug_mode) {
-        temp_debug_stream = tmpfile();
-        g_temp_asm_line = 1;
-        g_current_label[0] = '\0';
-    }
-
-    FILE *final_out_stream = out();
-    set_output_stream(temp_asm_stream);
-    
-    // --- (AST Traversal & Code Generation occurs here) ---
-    // ... all your emit_asm calls execute and populate both temp streams ...
-    emit_asm (";; --- Compiled Code Entry Vector ---\n");
-    emit_asm ("CALL __init_globals  ; Run top-level setups first\n");
-    emit_asm ("__start:\n");
-    emit_asm ("CALL __function_main ; Then hand control to the user\n");
-    emit_asm ("WAIT\n");
-    emit_asm ("JMP __start\n");
-    emit_asm ("HLT                  ; Halt CPU when main finishes\n");
-
-    emit_asm ("\n;; --- Function Definitions ---\n");
-    current = head;
-    while (current != NULL)
-    {
-        if (current -> type == NODE_FUNCTION_DEF) {
-            generate_asm (current, 0);
-        }// else if (check_needs_stack (current)) {
-         //   globals_need_stack = 1;
-        //}
-        current = current->next;
-    }
-
-    generate_global_setup (head);
-
-    // Restore output back to your final target file
-    set_output_stream (final_out_stream);
-
-    fprintf (out(), ";; --- Global Variable RAM Map ---\n");
-    final_line_offset           = final_line_offset + 2;
-    
-    // Factor in the dynamic size of your variables
-    final_line_offset += emit_variable_map();
-    fprintf (out(), "\n");
-    final_line_offset           = final_line_offset + 1;
-
-    // Dump your buffered assembly code to the final file
-    rewind (temp_asm_stream);
-    while ((check = fgets (buffer, sizeof (buffer), temp_asm_stream)) != NULL) {
-        fputs (buffer, out());
-    }
-    fclose (temp_asm_stream);
-
-    // Write out trailing runtime items
-    emit_runtime_library ();
-    emit_string_data_section ();
-
-// --- GENERATE DEBUG FILE ---
-    if (g_debug_mode && temp_debug_stream != NULL)
-    {
-        char debug_filename[1024];
-        snprintf(debug_filename, sizeof(debug_filename), "%s.debug", g_asm_filename);
-        
-        FILE *debug_file = fopen(debug_filename, "w");
-        if (debug_file != NULL)
-        {
-            rewind(temp_debug_stream);
-            char dbg_buffer[512];
-            
-            // --- ADD TRACKER HERE ---
-            int last_seen_lua_line = -1; 
-            
-            while (fgets(dbg_buffer, sizeof(dbg_buffer), temp_debug_stream) != NULL)
-            {
-                int rel_line = 0;
-                int lua_line = 0;
-                char label[256] = "";
-                
-                int items = sscanf(dbg_buffer, "%d,%d,%255s", &rel_line, &lua_line, label);
-                if (items >= 2)
-                {
-                    // --- ONLY PROCESS IF THE LUA LINE HAS CHANGED ---
-                    if (lua_line != last_seen_lua_line)
-                    {
-                        last_seen_lua_line = lua_line; // Update the tracker
-                        
-                        // Scale the relative assembly line using our calculated header offset
-                        int actual_asm_line = final_line_offset + rel_line;
-                        
-                        if (items == 3) {
-                            label[strcspn(label, "\r\n")] = 0; // Guard against loose carriage returns
-                            fprintf(debug_file, "%s,%d,%s,%d,%s\n", g_asm_filename, actual_asm_line, g_lua_filename, lua_line, label);
-                        } else {
-                            fprintf(debug_file, "%s,%d,%s,%d\n", g_asm_filename, actual_asm_line, g_lua_filename, lua_line);
-                        }
-                    }
-                }
-            }
-            fclose(debug_file);
-        }
-        fclose(temp_debug_stream);
-        temp_debug_stream = NULL; 
-    }
-}
-*/

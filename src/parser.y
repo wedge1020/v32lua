@@ -49,7 +49,7 @@ char *mangle_method_name (const char *table_name, const char *method_name);
 %left TOKEN_EQ TOKEN_NEQ TOKEN_LT TOKEN_GT TOKEN_LE TOKEN_GE
 %right TOKEN_CONCAT
 %left '+' '-'
-%left '*' '/'
+%left '*' '/' '%'
 %right TOKEN_NOT TOKEN_LEN UNARY_MINUS
 %left '['
 %left '.'
@@ -363,6 +363,7 @@ expr:
     | expr '-' expr     { $$ = make_node_binary (NODE_SUB, $1, $3); }
     | expr '*' expr     { $$ = make_node_binary (NODE_MUL, $1, $3); }
     | expr '/' expr     { $$ = make_node_binary (NODE_DIV, $1, $3); }
+    | expr '%' expr     { $$ = make_node_binary (NODE_TOD, $1, $3); }
     | TOKEN_LEN expr    { $$ = make_node_unary  (OP_LEN,   $2);     }
     | '-' expr %prec UNARY_MINUS { $$ = make_node_unary (OP_UNM, $2); }
     | TOKEN_NOT expr             { $$ = make_node_unary (OP_NOT, $2); }
