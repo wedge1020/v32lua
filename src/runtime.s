@@ -59,7 +59,7 @@ __oom_handler:
 __builtin_exec:
     ; 1. Isolate and validate the NaN-box tag bits
     MOV R1, R0
-    AND R1, 0xFF800000          ; Isolate upper tag bits (adjust if your tag mask differs)
+    AND R1, 0xFFC00000          ; Isolate upper tag bits (adjust if your tag mask differs)
     IEQ R1, 0xFF800000          ; Is this tagged as a boxed function pointer?
     JT  R1, __exec_valid            ; If valid, jump to unboxing and execution
 
