@@ -32,13 +32,13 @@ end
 function init()
     ioports.gpu.texture  = -1  -- set BIOS font/sprite texture
     
-    -- Initialize player properties
+    --@ Initialize player properties
     player.r             = 94  -- region
     player.x             = 315 -- x position
     player.y             = 170 -- y position
     player.v             = 0   -- velocity
 
-    -- 3. Initialize an array of 4 enemies with distinct velocities and starting positions
+    --@ Initialize an array of 4 enemies with distinct velocities and starting positions
     index = 1
     while index <= 4 do
         enemies[index] = { }
@@ -53,7 +53,7 @@ function init()
 
     ioports.gpu.clear("black") -- initial clear screen
 
-    -- Draw player and enemies at initial positions
+    --@ Draw player and enemies at initial positions
     player:draw()
     index = 1
     while index <= 4 do
@@ -63,7 +63,7 @@ function init()
 end
 
 function game_loop()
-    -- --- PLAYER INPUT & PHYSICS ---
+    --@ --- PLAYER INPUT & PHYSICS ---
     buttonA = ioports.inp.A
     if (buttonA >  0) then
         player.v = 5
@@ -96,10 +96,10 @@ function game_loop()
         player.y = player.y + player.v
     end
 
-    -- Draw Player
+    --@ Draw Player
     player:draw()
 
-    -- --- ENEMY PONG-STYLE MOVEMENT & REFLECTION ---
+    --@ --- ENEMY PONG-STYLE MOVEMENT & REFLECTION ---
     index = 1
     while index <= 4 do
         e = enemies[index]

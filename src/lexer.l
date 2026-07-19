@@ -7,9 +7,9 @@ char *process_string_literal (const char *text, int  len)
     // Allocate space. The processed string will never be longer 
     // than the raw string minus the two quotes.
     char *processed  = (char *) malloc (len - 1); 
-	if (processed   == NULL) {
-		compiler_error (ERR_INTERNAL, -1, "Memory allocation failed while processing string literal\n");
-	}
+    if (processed   == NULL) {
+        compiler_error (ERR_INTERNAL, -1, "Memory allocation failed while processing string literal\n");
+    }
     int   i          = 1; // Start at 1 to skip the opening quote
     int   j          = 0;
     
@@ -59,10 +59,25 @@ char *process_string_literal (const char *text, int  len)
     /* 2. Standard Multiline Comment: --[[ ... ]] (Silently Skipped) */
 "--[["([^\]]|\][^\]])*"]]" { /* Skip standard multiline comments safely */ }
 
-    /* 3. Transposed Single-Line Comment: --@ ... */
-"--@".* { 
-    // Strip the leading "--@" (3 chars)
-    yylval.string_val = strdup(yytext + 3);
+	/* 3. Transposed Single-Line Comment: --@ ... */
+"--@".* {
+    // Allocate space and replace "--@" with ";  " to preserve length and add assembly prefix
+    char *comment = strdup(yytext);
+	int   index   = 0;
+
+	while (comment[index] != '\0')
+	{
+		if (comment[index] == '-')
+		{
+			comment[index]  = ';';
+		}
+		else if (comment[index] == '@')
+		{
+			break;
+		}
+		index               = index + 1;
+	}
+    yylval.string_val = comment;
     return TOKEN_COMMENT_LINE;
 }
 
