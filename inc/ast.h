@@ -135,6 +135,8 @@ ASTNode *make_node_string (const char *);
 ASTNode *make_node_cart_hint (const char *);
 ASTNode *make_node_unary (Operator, ASTNode *);
 ASTNode *make_node_binary (NodeType  type, ASTNode *left, ASTNode *right);
+ASTNode *make_node_function_def (const char *name, ASTNode *params, ASTNode *body);
+ASTNode *make_node_method_def   (ASTNode *table_expr, const char *method_name, int is_colon, ASTNode *params, ASTNode *body);
 ASTNode *make_node_table_constructor (void);
 ASTNode *make_node_table_get (ASTNode *table_expr, ASTNode *key_expr);
 ASTNode *make_node_table_set (ASTNode *table_expr, ASTNode *key_expr, ASTNode *value_expr);

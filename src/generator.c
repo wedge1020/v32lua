@@ -615,7 +615,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 break;
             }
 
-            case NODE_FUNCTION_CALL: {
+			case NODE_FUNCTION_CALL: {
 
                 // 1. HARDWARE & BUILTIN INTRINSIC INTERCEPT
                 if (try_emit_call_intrinsic(node, dest_reg)) {
@@ -623,37 +623,65 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 }
 
                 // 2. STANDARD LUA FUNCTION CALL (Fallback)
-                int arg_count = 0;
+                int arg_count  = 0;
+                int target_reg = allocate_register();
 
                 if (node -> as.call.is_method_call) {
-                    emit_asm ("  ; --- Injecting implicit 'self' ---\n");
-                    int self_reg = allocate_register();
-                    generate_asm (node -> as.call.target -> as.table_get.table_expr, self_reg);
-                    emit_asm ("    PUSH  R%d\n", self_reg);
-                    unlock_register(self_reg);
+                    emit_asm ("    ;; --- Method Call: Evaluate Table & Lookup Method ---\n");
+                    int table_reg = allocate_register();
+                    int key_reg   = allocate_register();
+
+                    // 1. Evaluate table expression exactly ONCE
+                    generate_asm (node -> as.call.target -> as.table_get.table_expr, table_reg);
+
+                    // 2. Perform method function pointer lookup immediately while table_reg is fresh!
+                    generate_asm (node -> as.call.target -> as.table_get.key, key_reg);
+                    emit_asm ("PUSH R%d ; Arg1: Table Pointer for method lookup\n", table_reg);
+                    emit_asm ("PUSH R%d ; Arg2: Method Key\n", key_reg);
+                    emit_asm ("CALL __builtin_table_get\n");
+                    emit_asm ("IADD SP, 2 ; Clean up lookup arguments\n");
+                    emit_asm ("MOV R%d, R0 ; Store method function pointer in target_reg\n", target_reg);
+
+                    // 3. Push table_reg as implicit 'self' (Arg 0)
+                    emit_asm ("PUSH R%d ; Push implicit 'self' (Arg 0)\n", table_reg);
                     arg_count++;
+
+                    // 4. Unlock registers so they are available for argument evaluation
+                    unlock_register (table_reg);
+                    unlock_register (key_reg);
+
+                    // 5. Evaluate remaining explicit arguments
+                    ASTNode *current_arg = node -> as.call.args_head;
+                    while (current_arg != NULL) {
+                        int arg_reg = allocate_register();
+                        generate_asm (current_arg, arg_reg);
+                        emit_asm ("    PUSH  R%d\n", arg_reg);
+                        unlock_register(arg_reg);
+                        arg_count++;
+                        current_arg = current_arg -> next;
+                    }
+                } else {
+                    // --- Standard Function Call ---
+                    ASTNode *current_arg = node -> as.call.args_head;
+                    while (current_arg != NULL) {
+                        int arg_reg = allocate_register();
+                        generate_asm (current_arg, arg_reg);
+                        emit_asm ("    PUSH  R%d\n", arg_reg);
+                        unlock_register(arg_reg);
+                        arg_count++;
+                        current_arg = current_arg -> next;
+                    }
+
+                    generate_asm (node -> as.call.target, target_reg);
                 }
 
-                ASTNode *current_arg = node -> as.call.args_head;
-                while (current_arg != NULL) {
-                    int arg_reg = allocate_register();
-                    generate_asm (current_arg, arg_reg);
-                    emit_asm ("    PUSH  R%d\n", arg_reg);
-                    unlock_register(arg_reg);
-                    arg_count++;
-                    current_arg = current_arg -> next;
-                }
-
-                int target_reg = allocate_register();
-                generate_asm (node -> as.call.target, target_reg);
-                
                 // Ensure the boxed target is in register R0 (if it isn't already there)
                 if (target_reg != 0) {
-                    emit_asm ("MOV R0, R%d ; Prepare boxed target for validation", target_reg);
+                    emit_asm ("MOV R0, R%d ; Prepare boxed target for validation\n", target_reg);
                 }
 
                 // Emits a single instruction that handles validation, unboxing, and execution!
-                emit_asm("CALL __builtin_exec ; Validate tag and tail-call execute");
+                emit_asm("CALL __builtin_exec ; Validate tag and tail-call execute\n");
                 unlock_register(target_reg);
 
                 if (arg_count > 0) emit_asm ("IADD SP, %d\n", arg_count);
@@ -937,26 +965,26 @@ void  generate_asm (ASTNode *node, int  dest_reg)
             }
 
             case NODE_TABLE_SET: {
-                int val_reg = allocate_register();
-                generate_asm(node->as.table_set.value, val_reg);
+                int  val_reg        = allocate_register ();
+                generate_asm (node -> as.table_set.value, val_reg);
 
                 // Try hardware intrinsic first
-                if (!try_emit_table_set_intrinsic(node->as.table_set.table_expr, 
-                                                  node->as.table_set.key, 
-                                                  val_reg))
+                if (!try_emit_table_set_intrinsic (node -> as.table_set.table_expr, 
+                                                   node -> as.table_set.key, 
+                                                   val_reg))
                 {
                     // Fallback to dynamic table set
-                    int table_reg = allocate_register();
-                    int key_reg   = allocate_register();
+                    int  table_reg  = allocate_register ();
+                    int  key_reg    = allocate_register ();
 
-                    generate_asm(node->as.table_set.table_expr, table_reg);
-                    generate_asm(node->as.table_set.key, key_reg);
+                    generate_asm (node -> as.table_set.table_expr, table_reg);
+                    generate_asm (node -> as.table_set.key, key_reg);
 
-                    emit_asm("    PUSH R%d", table_reg);
-                    emit_asm("    PUSH R%d", key_reg);
-                    emit_asm("    PUSH R%d", val_reg);
-                    emit_asm("    CALL __builtin_table_set");
-                    emit_asm("    IADD SP, 3");
+                    emit_asm ("PUSH R%d ; table pointer", table_reg);
+                    emit_asm ("PUSH R%d ; key",           key_reg);
+                    emit_asm ("PUSH R%d ; value",         val_reg);
+                    emit_asm ("CALL __builtin_table_set ; store key-value pair in table");
+                    emit_asm ("IADD SP, 3 ; clean up stack arguments");
 
                     unlock_register (table_reg);
                     unlock_register (key_reg);

@@ -196,31 +196,18 @@ statement:
         $$->as.for_numeric.body       = $10;
     }
     | if_start expr TOKEN_THEN statement_list else_branch TOKEN_END { 
-            $$                          = $1;
-            $$ -> as.if_stmt.condition  = $2;
-            $$ -> as.if_stmt.if_body    = $4;
-            $$ -> as.if_stmt.else_body  = $5;
+        $$                          = $1;
+        $$ -> as.if_stmt.condition  = $2;
+        $$ -> as.if_stmt.if_body    = $4;
+        $$ -> as.if_stmt.else_body  = $5;
     }
-	| TOKEN_LOCAL var_list {
-		$$ = make_node(NODE_MULTIPLE_ASSIGNMENT);
-		$$->as.mult_assign.is_local = 1;
-		$$->as.mult_assign.targets_head = $2;
-		$$->as.mult_assign.values_head = NULL; 
-	}
+    | TOKEN_LOCAL var_list {
+        $$ = make_node(NODE_MULTIPLE_ASSIGNMENT);
+        $$->as.mult_assign.is_local = 1;
+        $$->as.mult_assign.targets_head = $2;
+        $$->as.mult_assign.values_head = NULL; 
+    }
     | function_def               { $$ = $1; }
-    | func_start TOKEN_IDENTIFIER ':' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
-        $$ = $1;
-        
-        // 1. Mangle the name (e.g., "Player_move")
-        $$->as.function_def.name = mangle_method_name($2, $4); 
-        
-        // 2. INJECT "self" as the first parameter!
-        ASTNode* self_param = make_node_ident("self");
-        self_param->next = $6; // Link it to the rest of the parameters
-        
-        $$->as.function_def.params = self_param; // Set it as the head of the list
-        $$->as.function_def.body = $8;
-    }
     | TOKEN_ASM '(' TOKEN_STRING ')' { 
         $$ = make_node(NODE_ASM);
         $$->as.inline_asm.code = $3;
@@ -308,15 +295,15 @@ function_def:
         func_def->next = assign;
         $$ = func_def;
     }
-    | /* Table Function Desugaring: function my_table.my_func() ... end */
+    | /* Table Dot Method Desugaring: function my_table.my_func() ... end */
     func_start TOKEN_IDENTIFIER '.' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
-        // 1. Create a unique mangled label for assembly execution flow
-        char mangled_name[256];
-        snprintf(mangled_name, sizeof(mangled_name), "%s_%s", $2, $4);
+        // 1. Create a unique mangled label using the helper function
+        char* mangled_name = mangle_method_name($2, $4);
 
         // 2. Build the structural function definition body using pre-allocated node
         ASTNode* func_def = $1;
-        func_def->as.function_def.name = strdup(mangled_name);
+        func_def->as.function_def.name = mangled_name;
+        func_def->as.function_def.params = $6;
         func_def->as.function_def.body = $8;
 
         // 3. Instantiate a function pointer node evaluating to that address
@@ -326,13 +313,45 @@ function_def:
         ASTNode* key_node = make_node_string($4);
         ASTNode* table_node = make_node_ident($2);
         
-        // 6. Tie it all into a table assignment: table[key] = func_ptr
+        // 4. Tie it all into a table assignment: table[key] = func_ptr
         ASTNode* table_set = make_node(NODE_TABLE_SET);
         table_set->as.table_set.table_expr = table_node;
         table_set->as.table_set.key = key_node;
         table_set->as.table_set.value = func_ptr;
 
-        // 7. Chain them sequentially so the compiler outputs both properties cleanly
+        // 5. Chain them sequentially so the compiler outputs both properties cleanly
+        func_def->next = table_set;
+        $$ = func_def;
+    }
+    | /* Table Colon Method Desugaring: function my_table:my_func() ... end */
+    func_start TOKEN_IDENTIFIER ':' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
+        // 1. Create a unique mangled label using the helper function
+        char* mangled_name = mangle_method_name($2, $4);
+
+        // 2. INJECT "self" as the first parameter!
+        ASTNode* self_param = make_node_ident("self");
+        self_param->next = $6; // Link it to the rest of the parameters
+
+        // 3. Build the structural function definition body using pre-allocated node
+        ASTNode* func_def = $1;
+        func_def->as.function_def.name = mangled_name;
+        func_def->as.function_def.params = self_param; // Set self as the head of the list
+        func_def->as.function_def.body = $8;
+
+        // 4. Instantiate a function pointer node evaluating to that address
+        ASTNode* func_ptr = make_node(NODE_FUNCTION_POINTER);
+        func_ptr->as.func_ptr.mangled_name = strdup(mangled_name);
+
+        ASTNode* key_node = make_node_string($4);
+        ASTNode* table_node = make_node_ident($2);
+        
+        // 5. Tie it all into a table assignment: table[key] = func_ptr
+        ASTNode* table_set = make_node(NODE_TABLE_SET);
+        table_set->as.table_set.table_expr = table_node;
+        table_set->as.table_set.key = key_node;
+        table_set->as.table_set.value = func_ptr;
+
+        // 6. Chain them sequentially so the compiler outputs both properties cleanly
         func_def->next = table_set;
         $$ = func_def;
     }

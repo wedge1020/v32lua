@@ -80,6 +80,49 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
     return node;
 }
 
+ASTNode *make_node_function_def (const char *name, ASTNode *params, ASTNode *body)
+{
+    ASTNode *node = make_node(NODE_FUNCTION_DEF);
+    node->as.function_def.name = strdup(name);
+    node->as.function_def.params = params;
+    node->as.function_def.body = body;
+    return node;
+}
+
+ASTNode *make_node_method_def (ASTNode *table_expr, const char *method_name, int is_colon, ASTNode *params, ASTNode *body)
+{
+    // 1. Resolve a static base path for name mangling (e.g., "Player" + "move" -> "Player_move")
+    char base_path[256] = "table";
+    resolve_static_path(table_expr, base_path);
+    
+    char mangled_name[512];
+    snprintf(mangled_name, sizeof(mangled_name), "%s_%s", base_path, method_name);
+
+    // 2. If colon syntax was used (Table:method), inject implicit 'self' as the first parameter
+    if (is_colon) {
+        ASTNode *self_param = make_node_ident("self");
+        self_param->next = params;
+        params = self_param;
+    }
+
+    // 3. Create the underlying assembly subroutine definition node
+    ASTNode *func_def = make_node_function_def(mangled_name, params, body);
+
+    // 4. Create a function pointer node targeting the mangled assembly label
+    ASTNode *func_ptr = make_node(NODE_FUNCTION_POINTER);
+    func_ptr->as.func_ptr.mangled_name = strdup(mangled_name);
+
+    // 5. Create the table assignment: table_expr["method_name"] = func_ptr
+    ASTNode *key_str   = make_node_string(method_name);
+    ASTNode *table_set = make_node_table_set(table_expr, key_str, func_ptr);
+
+    // 6. Chain the nodes together:
+    // Pass 1 of generate_program() will compile func_def and ignore table_set.
+    // Pass 2 of generate_program() (in generate_global_setup) will ignore func_def and execute table_set!
+    func_def->next = table_set;
+
+    return func_def;
+}
 
 ASTNode *make_node_unary (Operator  op, ASTNode *operand)
 {

@@ -551,6 +551,31 @@ void  emit_get_gamepad_inputs_intrinsic (int  dest_reg)
     unlock_register (bit_reg);
 }
 
+void emit_table_set_literal(int table_reg, const char *property_name, int value_reg)
+{
+    // 1. Intern the property name into the compiler's string pool and get its ID
+    int string_id = add_string_literal(property_name);
+
+    emit_asm("    ;; Set table property: .%s = value", property_name);
+
+    // 2. Push Table Pointer (Arg 1 -> [BP+4])
+    emit_asm("PUSH R%d             ; Arg 1: Table pointer", table_reg);
+
+    // 3. Load and Box Key as ROM String, then Push (Arg 2 -> [BP+3])
+    int scratch = allocate_register();
+    emit_asm("MOV  R%d, __string_%d", scratch, string_id);
+    emit_asm("OR   R%d, 0x7FC00000 ; Box key as ROM String", scratch);
+    emit_asm("PUSH R%d             ; Arg 2: Property Key", scratch);
+    unlock_register(scratch);
+
+    // 4. Push Value (Arg 3 -> [BP+2])
+    emit_asm("PUSH R%d             ; Arg 3: Value to store", value_reg);
+
+    // 5. Call Routine and Clean Stack (3 arguments = 3 words)
+    emit_asm("CALL __builtin_table_set");
+    emit_asm("IADD SP, 3           ; Clean up stack arguments");
+}
+
 void emit_table_get_literal(int table_reg, const char *property_name)
 {
     // 1. Intern the property name into the compiler's string pool and get its ID
