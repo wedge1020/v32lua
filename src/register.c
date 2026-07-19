@@ -5,7 +5,7 @@
 // ============================================================================
 
 // 0 means free, 1 means currently holding data
-static int  register_inventory[NUM_GPRS] = { 0 }; 
+static int  register_inventory[NUM_GPRS] = { 1, 0 }; 
 
 void  lock_register (int  reg)
 {
@@ -16,7 +16,7 @@ void  lock_register (int  reg)
 
 void  unlock_register (int  reg)
 {
-    if (reg >= 0 && reg < NUM_GPRS) {
+    if (reg >  0 && reg < NUM_GPRS) {
         register_inventory[reg] = 0;
     }
 }
@@ -31,7 +31,7 @@ int  is_register_locked (int  reg)
 
 int  allocate_register (void)
 {
-    for (int i = 0; i < NUM_GPRS; i++) {
+    for (int i = 1; i < NUM_GPRS; i++) {
         if (!register_inventory[i]) {
             register_inventory[i] = 1;
             return i;

@@ -148,6 +148,16 @@ __builtin_table_get:
     PUSH BP 
     MOV  BP, SP 
     
+    PUSH R1
+    PUSH R2
+    PUSH R3
+    PUSH R4
+    PUSH R5
+    PUSH R6
+    PUSH R7
+    PUSH R8
+    PUSH R9
+
     MOV  R1, [BP+3]          ; R1 = Tagged Table Pointer (0x7F80....) 
     MOV  R2, [BP+2]          ; R2 = Key (must be preserved for fallback!) 
 
@@ -168,8 +178,8 @@ __builtin_table_get:
     ;; FAST-PATH CHECK 2: Convert float to integer & verify no fractional part (FIXED)
     MOV  R3, R2              ; Copy float Key to R3 
 
-	; ISSUE: R3 contains a CART ROM address of 0x20000065
-	; an integer, so this CFI will obliterate it
+    ; ISSUE: R3 contains a CART ROM address of 0x20000065
+    ; an integer, so this CFI will obliterate it
     CFI  R3                  ; Vircon32 in-place conversion: R3 = (int) R3 
     
     ;; Ensure float key had no fractional component (R3 == R2 mathematically)
@@ -244,6 +254,16 @@ __table_get_not_found:
     MOV  R0, 0xFFC00000      ; Key does not exist -> Return canonical Lua Nil! 
 
 __table_get_done:
+    POP  R9
+    POP  R8
+    POP  R7
+    POP  R6
+    POP  R5
+    POP  R4
+    POP  R3
+    POP  R2
+    POP  R1
+
     MOV  SP, BP 
     POP  BP 
     RET 
@@ -255,6 +275,16 @@ __table_get_done:
 __builtin_table_set:
     PUSH BP
     MOV  BP, SP
+    
+    PUSH R1
+    PUSH R2
+    PUSH R3
+    PUSH R4
+    PUSH R5
+    PUSH R6
+    PUSH R7
+    PUSH R8
+    PUSH R9
     
     MOV  R1, [BP+4]          ; R1 = Table Pointer 
     MOV  R2, [BP+3]          ; R2 = Key 
@@ -422,6 +452,16 @@ __table_set_allocate_extension_bucket:
     MOV  [R6+1], R8          ; OldBucket[NextBucketPtr] = NewBucketAddress
 
 __table_set_done:
+    POP  R9
+    POP  R8
+    POP  R7
+    POP  R6
+    POP  R5
+    POP  R4
+    POP  R3
+    POP  R2
+    POP  R1
+
     MOV  SP, BP
     POP  BP
     RET
