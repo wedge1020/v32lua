@@ -313,6 +313,9 @@ int  try_emit_table_set_intrinsic (ASTNode *table_expr, ASTNode *key_expr, int  
     char full_path[512];
     snprintf(full_path, sizeof(full_path), "%s.%s", base_path, key_expr->as.string_val.value);
 
+	// would be nice to somehow identify we're trying for an intrinsic, but have
+	// mistyped something, kicking out an error
+
     // 3. Scan the internal IOPortMap table for a match
     for (int i = 0; ioports[i].lua_path != NULL; i++)
     {

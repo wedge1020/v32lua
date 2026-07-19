@@ -15,14 +15,10 @@ function init()
 
     -- draw player at initial position
     draw(player)
-    --ioports.region       = player.r   -- set region
-    --ioports.gpu.x        = player.x   -- set drawing point X
-    --ioports.gpu.y        = player.y   -- set drawing point Y
-    --ioports.gpu.draw()                -- draw region to screen
 end
 
 function draw(object)
-    ioports.region       = object.r   -- set region
+    ioports.gpu.region   = object.r   -- set region
     ioports.gpu.x        = object.x   -- set drawing point X
     ioports.gpu.y        = object.y   -- set drawing point Y
     ioports.gpu.draw()                -- draw region to screen
@@ -61,10 +57,5 @@ function game_loop()
         player.y = player.y + player.v
     end
 
-    -- render player
-    -- ioports.region = player.r
-    -- ioports.gpu.x  = player.x
-    -- ioports.gpu.y  = player.y
-    -- ioports.gpu.draw()
     draw(player)
 end
