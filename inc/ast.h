@@ -29,6 +29,14 @@ typedef struct astnode {
             struct astnode* body;
         } while_loop;
 
+		struct {
+			char* index_name;          // The loop variable name (e.g., "i")
+			struct astnode* start_expr;
+			struct astnode* stop_expr;
+			struct astnode* step_expr; // Can be NULL (defaults to 1.0)
+			struct astnode* body;
+		} for_numeric;
+
         struct
         {
             struct astnode *condition;

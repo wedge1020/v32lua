@@ -8,6 +8,7 @@
 typedef enum
 {
     NODE_WHILE,
+	NODE_FOR_NUMERIC,
     NODE_BREAK,
     NODE_IF,
     NODE_FUNCTION_DEF,

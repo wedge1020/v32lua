@@ -115,6 +115,11 @@ int count_function_locals(ASTNode* node) {
                 count += count_function_locals(node->as.while_loop.body);
                 break;
 
+			case NODE_FOR_NUMERIC:
+				// Adds 3 to the stack requirement frame frame (+1 index, +1 limit, +1 step)
+				count += 3 + count_function_locals(node->as.for_numeric.body);
+				break;
+
             case NODE_FUNCTION_DEF:
                 // CRITICAL BOUNDARY: Do NOT recurse into nested function definitions!
                 // Any locals inside a closure/nested function belong to THAT function's 
@@ -139,6 +144,7 @@ int check_needs_stack (ASTNode *node)
     }
 
     switch (node -> type) {
+		case NODE_FOR_NUMERIC:
         case NODE_FUNCTION_CALL:
         case NODE_CONCAT:
         case NODE_TABLE_SET:
@@ -251,6 +257,123 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 break;
             }
 
+			case NODE_FOR_NUMERIC: {
+				int label_id = get_next_label();
+				const char *ctx = get_current_function_name();
+				
+				char start_label[128], end_label[128];
+				snprintf(start_label, sizeof(start_label), "__%s_for_start_%d", ctx, label_id);
+				snprintf(end_label, sizeof(end_label), "__%s_for_end_%d", ctx, label_id);
+
+				// 1. Enter implicit loop scope and register stack variables
+				push_scope();
+
+				char limit_var[64], step_var[64], index_var[64];
+				snprintf(limit_var, sizeof(limit_var), "__limit_%d", label_id);
+				snprintf(step_var, sizeof(step_var), "__step_%d", label_id);
+				strcpy(index_var, node->as.for_numeric.index_name);
+
+				char access_limit[128], access_step[128], access_index[128];
+				int scratch = allocate_register();
+
+				// Evaluate Limit
+				generate_asm(node->as.for_numeric.stop_expr, scratch);
+				register_local(limit_var);
+				get_variable_access_string(limit_var, access_limit);
+				emit_asm("MOV %s, R%d ; Save float limit", access_limit, scratch);
+
+				// Evaluate Step & determine if we can optimize compile-time branching
+				int is_static_step = 0;
+				double static_step_val = 1.0;
+
+				if (!node->as.for_numeric.step_expr) {
+					is_static_step = 1;
+					static_step_val = 1.0;
+					emit_asm("MOV R%d, 1.000000 ; Default step", scratch);
+				} else if (node->as.for_numeric.step_expr->type == NODE_NUMBER) {
+					// We caught a static float literal in the AST!
+					is_static_step = 1;
+					static_step_val = node->as.for_numeric.step_expr->as.number;
+					emit_asm("MOV R%d, %f", scratch, static_step_val);
+				} else {
+					generate_asm(node->as.for_numeric.step_expr, scratch);
+				}
+				
+				register_local(step_var);
+				get_variable_access_string(step_var, access_step);
+				emit_asm("MOV %s, R%d ; Save float step", access_step, scratch);
+
+				// Evaluate Index
+				generate_asm(node->as.for_numeric.start_expr, scratch);
+				register_local(index_var);
+				get_variable_access_string(index_var, access_index);
+				emit_asm("MOV %s, R%d ; Initialize float index", access_index, scratch);
+				unlock_register(scratch);
+
+				// 2. Setup Loop Break Tracking
+				push_loop(label_id);
+				emit_asm("%s:\n", start_label);
+
+				// 3. OPTIMIZED Loop Conditional Check
+				int r_idx = allocate_register();
+				int r_lim = allocate_register();
+				emit_asm("MOV R%d, %s", r_idx, access_index);
+				emit_asm("MOV R%d, %s", r_lim, access_limit);
+
+				if (is_static_step) {
+					// Fast Path: We know the direction at compile time!
+					if (static_step_val >= 0.0) {
+						emit_asm("FGT R%d, R%d ; Check if index > limit", r_idx, r_lim);
+					} else {
+						emit_asm("FLT R%d, R%d ; Check if index < limit", r_idx, r_lim);
+					}
+					emit_asm("JT R%d, %s ; Exit loop if limit exceeded", r_idx, end_label);
+				} else {
+					// Slow Path: Dynamic step requires runtime sign check
+					int r_step = allocate_register();
+					emit_asm("MOV R%d, %s", r_step, access_step);
+					
+					char pos_lbl[128], chk_lbl[128];
+					snprintf(pos_lbl, sizeof(pos_lbl), "__%s_for_pos_%d", ctx, label_id);
+					snprintf(chk_lbl, sizeof(chk_lbl), "__%s_for_chk_%d", ctx, label_id);
+
+					emit_asm("FGE R%step, 0.000000");
+					emit_asm("JT R%step, %s", pos_lbl);
+					emit_asm("FLT R%d, R%d", r_idx, r_lim);
+					emit_asm("JMP %s", chk_lbl);
+					
+					emit_asm("%s:\n", pos_lbl);
+					emit_asm("FGT R%d, R%d", r_idx, r_lim);
+					
+					emit_asm("%s:\n", chk_lbl);
+					emit_asm("JT R%d, %s", r_idx, end_label);
+					unlock_register(r_step);
+				}
+
+				unlock_register(r_idx);
+				unlock_register(r_lim);
+
+				// 4. Run Loop Body
+				generate_block(node->as.for_numeric.body);
+
+				// 5. Increment Step
+				int r_calc = allocate_register();
+				int r_st   = allocate_register();
+				emit_asm("MOV R%d, %s", r_calc, access_index);
+				emit_asm("MOV R%d, %s", r_st, access_step);
+				emit_asm("FADD R%d, R%d ; float index += float step", r_calc, r_st);
+				emit_asm("MOV %s, R%d", access_index, r_calc);
+				unlock_register(r_calc);
+				unlock_register(r_st);
+
+				// 6. Loop Loop Back & Clean up
+				emit_asm("JMP %s", start_label);
+				emit_asm("%s:\n", end_label);
+
+				pop_loop();
+				pop_scope();
+				break;
+			}
             case NODE_BREAK: {
                 int  current_id  = current_loop ();
                 if (current_id  == -1)

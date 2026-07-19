@@ -34,7 +34,7 @@ char *mangle_method_name (const char *table_name, const char *method_name);
 %token <string_val> TOKEN_COMMENT_LINE TOKEN_COMMENT_BLOCK
 %token <string_val> TOKEN_CART_HINT
 
-%token TOKEN_WHILE TOKEN_BREAK TOKEN_IF TOKEN_ELSEIF TOKEN_THEN TOKEN_ELSE TOKEN_END 
+%token TOKEN_WHILE TOKEN_FOR TOKEN_BREAK TOKEN_IF TOKEN_ELSEIF TOKEN_THEN TOKEN_ELSE TOKEN_END 
 %token TOKEN_FUNCTION TOKEN_ASM TOKEN_RAWASM TOKEN_RETURN TOKEN_AND TOKEN_OR
 %token TOKEN_EQ TOKEN_NEQ TOKEN_LE TOKEN_GE TOKEN_LT TOKEN_GT TOKEN_CONCAT
 %token TOKEN_LOCAL TOKEN_DO TOKEN_NOT TOKEN_LEN UNARY_MINUS
@@ -143,6 +143,8 @@ func_start:
 while_start:
     TOKEN_WHILE    { $$ = make_node(NODE_WHILE); }
     ;
+for_start:
+    TOKEN_FOR      { $$ = make_node(NODE_FOR_NUMERIC); }
 
 if_start:
     TOKEN_IF       { $$ = make_node(NODE_IF); }
@@ -176,6 +178,22 @@ statement:
         $$ = $1;
         $$->as.while_loop.condition = $2;
         $$->as.while_loop.body = $4;
+    }
+    | for_start IDENTIFIER EQUALS expression COMMA expression DO block END {
+        $$ = make_node(NODE_FOR_NUMERIC);
+        $$->as.for_numeric.index_name = $2;
+        $$->as.for_numeric.start_expr = $4;
+        $$->as.for_numeric.stop_expr  = $6;
+        $$->as.for_numeric.step_expr  = NULL; // Omitted step
+        $$->as.for_numeric.body       = $8;
+    }
+    | for_start IDENTIFIER EQUALS expression COMMA expression COMMA expression DO block END {
+        $$ = make_node(NODE_FOR_NUMERIC);
+        $$->as.for_numeric.index_name = $2;
+        $$->as.for_numeric.start_expr = $4;
+        $$->as.for_numeric.stop_expr  = $6;
+        $$->as.for_numeric.step_expr  = $8;  // Explicit step
+        $$->as.for_numeric.body       = $10;
     }
     | if_start expr TOKEN_THEN statement_list else_branch TOKEN_END { 
             $$                          = $1;
