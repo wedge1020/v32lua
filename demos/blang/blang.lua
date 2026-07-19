@@ -43,7 +43,7 @@ function init()
         enemies[index].r  = 80 + (index * 2)     -- assign slightly different visual regions
         enemies[index].x  = 100 * index          -- stagger initial X positions across screen
         enemies[index].y  = 50  * index          -- stagger initial Y positions down screen
-        enemies[index].xv   = (index * 2 == 0) and 3 or -3 -- alternate horizontal directions
+        enemies[index].xv   = (index % 2 == 0) and 3 or -3 -- alternate horizontal directions
         enemies[index].yv   = (index > 2)      and 2 or -2 -- alternate vertical directions
         enemies[index].draw = player.draw       -- attach our OOP draw method to the enemy!
         index = index + 1
