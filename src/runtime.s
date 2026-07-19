@@ -141,13 +141,15 @@ __builtin_table_new:
     RET
 
 ;; -------------------------------------------------------------------------------------
-;; Table Read Indexer: t[k] -> Returns Value in R0 (or Nil if not found) 
-;; Incoming Stack: [BP+3] = Tagged Table Pointer, [BP+2] = Key 
+;; Table Read Indexer: t[k] -> Returns Value in R0 (or Nil if not found)
+;; Incoming Stack: [BP+3] = Tagged Table Pointer, [BP+2] = Key
+;; Register Usage: R1-R7 (Audited: reduced from 9 registers down to 7!)
 ;; -------------------------------------------------------------------------------------
 __builtin_table_get:
-    PUSH BP 
-    MOV  BP, SP 
+    PUSH BP
+    MOV  BP, SP
     
+    ;; --- Callee-Save: Preserve 7 working registers ---
     PUSH R1
     PUSH R2
     PUSH R3
@@ -155,107 +157,106 @@ __builtin_table_get:
     PUSH R5
     PUSH R6
     PUSH R7
-    PUSH R8
-    PUSH R9
 
-    MOV  R1, [BP+3]          ; R1 = Tagged Table Pointer (0x7F80....) 
-    MOV  R2, [BP+2]          ; R2 = Key (must be preserved for fallback!) 
+    MOV  R1, [BP+3]          ; R1 = Tagged Table Pointer (0x7F80xxxx)
+    MOV  R2, [BP+2]          ; R2 = Search Key (preserved throughout routine)
 
-    ;; --- 1. STRICT TABLE TYPE VALIDATION (FIXED) ---
+    ;; --- 1. STRICT TABLE TYPE VALIDATION ---
     ;; Ensure R1 is actually a Table before touching memory!
     MOV  R4, R1
-    AND  R4, 0xFF800000      ; Isolate upper tag bits 
-    IEQ  R4, 0x7F800000      ; Is it tagged as a Table? 
-    JF   R4, __runtime_error_not_table ; Trap if indexing non-table! 
+    AND  R4, 0xFF800000      ; Isolate upper tag bits
+    IEQ  R4, 0x7F800000      ; Is it tagged as a Table?
+    JF   R4, __runtime_error_not_table ; Trap if indexing a non-table!
 
-    ;; --- 2. FAST-PATH VALIDATION ---
-    ;; FAST-PATH CHECK 1: Is Key an unboxed IEEE Float? 
-    MOV  R3, R2 
-    AND  R3, 0x7F800000      ; Isolate exponent bits 
-    IEQ  R3, 0x7F800000      ; Are they all 1s? (If so, it's tagged/NaN) 
-    JT   R3, __table_get_fallback 
+    ;; --- OPTIMIZATION: EARLY UNBOXING ---
+    ;; Strip tag immediately! R1 is now permanently the raw RAM heap address.
+    ;; This eliminates all redundant unboxing instructions in subsequent branches.
+    AND  R1, 0x003FFFFF
 
-    ;; FAST-PATH CHECK 2: Convert float to integer & verify no fractional part (FIXED)
-    MOV  R3, R2              ; Copy float Key to R3 
+    ;; --- 2. FAST-PATH VALIDATION (O(1) Contiguous Array Read) ---
+    ;; FAST-PATH CHECK 1: Is Key an unboxed IEEE Float?
+    MOV  R3, R2
+    AND  R3, 0x7F800000      ; Isolate exponent bits
+    IEQ  R3, 0x7F800000      ; Are all exponent bits 1s? (If so, it's tagged/NaN)
+    JT   R3, __table_get_fallback
 
-    ; ISSUE: R3 contains a CART ROM address of 0x20000065
-    ; an integer, so this CFI will obliterate it
-    CFI  R3                  ; Vircon32 in-place conversion: R3 = (int) R3 
+    ;; FAST-PATH CHECK 2: Convert float to integer & verify no fractional part
+    MOV  R3, R2              ; Copy float Key to R3
+    CFI  R3                  ; Vircon32 in-place conversion: R3 = (int) R3
     
     ;; Ensure float key had no fractional component (R3 == R2 mathematically)
     MOV  R4, R3
-    CIF  R4                  ; Cast int back to float in R4 
-    INE  R4, R2              ; If (float)(int)Key != Key, it's fractional -> fallback! 
-    JT   R4, __table_get_fallback 
+    CIF  R4                  ; Cast int back to float in R4
+    INE  R4, R2              ; If (float)(int)Key != Key, it's fractional -> fallback!
+    JT   R4, __table_get_fallback
 
-    MOV  R4, R3              ; Copy integer index to R4 for comparison 
-    ILT  R4, 1               ; Destructive test: Is integer key < 1? 
-    JT   R4, __table_get_fallback ; Zero or negative keys go to fallback! 
+    ;; FAST-PATH CHECK 3: Is integer key >= 1?
+    MOV  R4, R3              ; Copy integer index to R4 for comparison
+    ILT  R4, 1               ; Destructive test: Is integer key < 1?
+    JT   R4, __table_get_fallback ; Zero or negative keys go to fallback!
 
-    ;; FAST-PATH CHECK 3: Is Key within Array Capacity? 
-    MOV  R4, R1 
-    AND  R4, 0x003FFFFF      ; Unbox Table pointer into R4 
-    MOV  R5, [R4+1]          ; R5 = Array Capacity (from Header Word 1) 
-    MOV  R9, R3              ; Copy integer index R3 to R9 
-    IGT  R9, R5              ; Destructive test: Is Key > Capacity? 
-    JT   R9, __table_get_fallback ; Out-of-bounds integers go to fallback! 
+    ;; FAST-PATH CHECK 4: Is Key within Array Capacity?
+    MOV  R5, [R1+1]          ; R5 = Array Capacity (from Table Header Word 1)
+    MOV  R4, R3              ; Copy integer index R3 to scratch R4
+    IGT  R4, R5              ; Destructive test: Is Key > Capacity?
+    JT   R4, __table_get_fallback ; Out-of-bounds integers go to fallback!
 
-    ;; FAST-PATH EXECUTION: O(1) Contiguous Array Read 
-    MOV  R5, [R4+2]          ; R5 = Array Data Pointer (from Header Word 2) 
-    ISUB R3, 1               ; Convert 1-based Lua index to 0-based memory offset 
-    IADD R5, R3              ; Memory Address = ArrayPtr + (Key - 1) 
-    MOV  R0, [R5]            ; Read value directly from heap buffer! 
-    JMP  __table_get_done 
+    ;; --- FAST-PATH EXECUTION: O(1) Contiguous Array Read ---
+    MOV  R5, [R1+2]          ; R5 = Array Data Pointer (from Table Header Word 2)
+    ISUB R3, 1               ; Convert 1-based Lua index to 0-based memory offset
+    IADD R5, R3              ; Memory Address = ArrayPtr + (Key - 1)
+    MOV  R0, [R5]            ; Read value directly from contiguous heap buffer!
+    JMP  __table_get_done
 
 ;; --- FALLBACK EXECUTION: Association List Scan ---
 __table_get_fallback:
-    MOV  R4, R1 
-    AND  R4, 0x003FFFFF      ; Unbox Table pointer 
-    MOV  R5, [R4+3]          ; R5 = Base Hash Data Pointer (from Header Word 3) 
-    MOV  R9, R5              ; use R9 as scratch to prevent destructive comparison 
-    IEQ  R9, 0               ; Is Hash Buffer null (no sparse keys stored)? 
-    JT   R9, __table_get_not_found 
+    ;; Note: R1 is already unboxed! We read directly from Table Header Word 3.
+    MOV  R5, [R1+3]          ; R5 = Base Hash Data Pointer
+    MOV  R4, R5              ; Test on scratch R4 to preserve R5 pointer
+    IEQ  R4, 0               ; Is Hash Buffer null (no sparse keys stored)?
+    JT   R4, __table_get_not_found
 
-;; --- BUCKET SEARCH LOOP (FIXED: Supports Extension Chains!) ---
+;; --- BUCKET SEARCH LOOP ---
 __table_get_bucket_loop:
-    MOV  R6, [R5]            ; R6 = PairCount (how many pairs are stored in this bucket) 
-    MOV  R7, R5              ; Setup R7 as running memory pointer 
-    IADD R7, 2               ; Advance R7 to point directly at Key0 (Offset 2 words) 
+    MOV  R6, [R5]            ; R6 = PairCount (how many pairs are stored in this bucket)
+    MOV  R7, R5              ; Setup R7 as running memory pointer
+    IADD R7, 2               ; Advance R7 to point directly at Key0 (Offset 2 words)
 
 __table_get_scan_loop:
-    MOV  R9, R6 
-    IEQ  R9, 0               ; Have we checked all stored pairs in this bucket? 
-    JT   R9, __table_get_check_next_bucket ; Do NOT jump to not_found! Check chain!
+    MOV  R4, R6              ; Check remaining pairs using scratch R4
+    IEQ  R4, 0               ; Have we checked all stored pairs in this bucket?
+    JT   R4, __table_get_check_next_bucket ; If 0, step to next bucket in chain!
     
-    MOV  R8, [R7]            ; Load Stored Key directly from running pointer R7 
-    MOV  R9, R8              ; R9 as scratch 
-    IEQ  R9, R2              ; ZERO-COST COMPARISON: Does Stored Key == Search Key? 
-    JT   R9, __table_get_found ; Match found! 
+    ;; OPTIMIZATION: ZERO-COST DESTRUCTIVE COMPARISON
+    MOV  R4, [R7]            ; Load Stored Key directly into scratch R4
+    IEQ  R4, R2              ; Does Stored Key == Search Key? (Destroys R4!)
+    JT   R4, __table_get_found ; Match found!
     
-    IADD R7, 2               ; Advance pointer by 2 words (skip Value slot to next Key) 
-    ISUB R6, 1               ; Decrement remaining PairCount 
-    JMP  __table_get_scan_loop 
+    ;; No match: advance memory pointer and decrement loop counter
+    IADD R7, 2               ; Advance pointer by 2 words (skip Value slot to next Key)
+    ISUB R6, 1               ; Decrement remaining PairCount
+    JMP  __table_get_scan_loop
 
 ;; --- BUCKET CHAIN STEPPING ---
 __table_get_check_next_bucket:
-    MOV  R9, [R5+1]          ; Load NextBucketPtr (Word 1 of current bucket) 
-    IEQ  R9, 0               ; Is this the end of the chain (Next == 0x0)? 
-    JT   R9, __table_get_not_found ; End of chain reached -> Key definitely does not exist!
+    MOV  R4, [R5+1]          ; Load NextBucketPtr (Word 1 of current bucket)
+    MOV  R3, R4              ; Test on scratch R3 to preserve NextBucketPtr in R4
+    IEQ  R3, 0               ; Is this the end of the chain (Next == 0x0)?
+    JT   R3, __table_get_not_found ; End of chain reached -> Key does not exist!
     
-    MOV  R5, R9              ; Step forward: Current Bucket = Next Bucket
+    MOV  R5, R4              ; Step forward: Current Bucket = Next Bucket
     JMP  __table_get_bucket_loop ; Scan the next bucket in the chain!
 
 __table_get_found:
-    IADD R7, 1               ; Value is stored 1 word after the matching Key 
-    MOV  R0, [R7]            ; Read Value into return register R0 
-    JMP  __table_get_done 
+    IADD R7, 1               ; Value is stored exactly 1 word after the matching Key
+    MOV  R0, [R7]            ; Read Value into return register R0
+    JMP  __table_get_done
 
 __table_get_not_found:
-    MOV  R0, 0xFFC00000      ; Key does not exist -> Return canonical Lua Nil! 
+    MOV  R0, 0xFFC00000      ; Key does not exist -> Return canonical Lua Nil!
 
 __table_get_done:
-    POP  R9
-    POP  R8
+    ;; --- Callee-Restore: Pop 7 working registers in reverse order (LIFO) ---
     POP  R7
     POP  R6
     POP  R5
@@ -264,18 +265,20 @@ __table_get_done:
     POP  R2
     POP  R1
 
-    MOV  SP, BP 
-    POP  BP 
-    RET 
+    MOV  SP, BP
+    POP  BP
+    RET
 
 ;; -------------------------------------------------------------------------------------
-;; Table Write Indexer: t[k] = v -> Writes Value into Table Storage 
-;; Incoming Stack: [BP+4] = Table Pointer, [BP+3] = Key, [BP+2] = Value 
+;; Table Write Indexer: t[k] = v -> Writes Value into Table Storage
+;; Incoming Stack: [BP+4] = Table Pointer, [BP+3] = Key, [BP+2] = Value
+;; Register Usage: R1-R8 (Audited: reduced from 10 registers to 8, fixing R10 bug!)
 ;; -------------------------------------------------------------------------------------
 __builtin_table_set:
     PUSH BP
     MOV  BP, SP
     
+    ;; --- Callee-Save: Preserve 8 working registers ---
     PUSH R1
     PUSH R2
     PUSH R3
@@ -284,27 +287,32 @@ __builtin_table_set:
     PUSH R6
     PUSH R7
     PUSH R8
-    PUSH R9
     
-    MOV  R1, [BP+4]          ; R1 = Table Pointer 
-    MOV  R2, [BP+3]          ; R2 = Key 
-    MOV  R3, [BP+2]          ; R3 = Value to store 
+    MOV  R1, [BP+4]          ; R1 = Tagged Table Pointer (0x7F80xxxx)
+    MOV  R2, [BP+3]          ; R2 = Search Key (preserved throughout routine)
+    MOV  R3, [BP+2]          ; R3 = Value to store (preserved throughout routine)
 
     ;; --- 1. STRICT TABLE TYPE VALIDATION ---
-    ;; Ensure R1 is actually a Table (0x7F80xxxx) before touching memory!
+    ;; Ensure R1 is actually a Table before touching memory!
     MOV  R4, R1
     AND  R4, 0xFF800000      ; Isolate upper tag bits
     IEQ  R4, 0x7F800000      ; Is it tagged as a Table?
-    JF   R4, __runtime_error_not_table ; Trap if indexing a string/func/nil!
+    JF   R4, __runtime_error_not_table ; Trap if indexing a non-table!
 
-    ;; --- 2. FAST-PATH VALIDATION ---
+    ;; --- OPTIMIZATION: EARLY UNBOXING ---
+    ;; Strip tag immediately! R1 is now permanently the raw RAM heap address.
+    AND  R1, 0x003FFFFF
+
+    ;; --- 2. FAST-PATH VALIDATION (O(1) Contiguous Array Write) ---
+    ;; FAST-PATH CHECK 1: Is Key an unboxed IEEE Float?
     MOV  R4, R2
     AND  R4, 0x7F800000      ; Isolate exponent bits
     IEQ  R4, 0x7F800000      ; Are all exponent bits 1s? (If so, it's tagged/NaN)
     JT   R4, __table_set_fallback
 
-    MOV  R4, R2              ; Copy float Key to R4 
-    CFI  R4                  ; Vircon32 in-place conversion: R4 = (int) R4 
+    ;; FAST-PATH CHECK 2: Convert float to integer & verify no fractional part
+    MOV  R4, R2              ; Copy float Key to R4
+    CFI  R4                  ; Vircon32 in-place conversion: R4 = (int) R4
     
     ;; Ensure float key had no fractional component (R4 == R2 mathematically)
     MOV  R5, R4
@@ -312,147 +320,154 @@ __builtin_table_set:
     INE  R5, R2              ; If (float)(int)Key != Key, it's fractional -> fallback!
     JT   R5, __table_set_fallback
 
-    MOV  R5, R4              ; Copy integer index to R5 for comparison 
-    ILT  R5, 1 
-    JT   R5, __table_set_fallback 
+    ;; FAST-PATH CHECK 3: Is integer key >= 1?
+    MOV  R5, R4              ; Copy integer index to R5 for comparison
+    ILT  R5, 1               ; Destructive test: Is integer key < 1?
+    JT   R5, __table_set_fallback ; Zero or negative keys go to fallback!
     
-    MOV  R5, R1 
-    AND  R5, 0x003FFFFF      ; R5 = Unboxed Table Pointer (Guaranteed RAM address!)
-    MOV  R6, [R5+1]          ; R6 = Array Capacity 
-    MOV  R7, R4              ; Copy integer index R4 to R7 
-    IGT  R7, R6 
-    JT   R7, __table_set_fallback 
+    ;; FAST-PATH CHECK 4: Is Key within Array Capacity?
+    MOV  R6, [R1+1]          ; R6 = Array Capacity (from Table Header Word 1)
+    MOV  R7, R4              ; Copy integer index R4 to scratch R7
+    IGT  R7, R6              ; Destructive test: Is Key > Capacity?
+    JT   R7, __table_set_fallback ; Out-of-bounds integers go to fallback!
 
     ;; --- FAST-PATH EXECUTION: O(1) Contiguous Array Write ---
-    MOV  R6, [R5+2]          ; R6 = Array Data Pointer 
-    ISUB R4, 1               ; Convert 1-based Lua index to 0-based memory offset 
-    IADD R6, R4              ; Memory Address = ArrayPtr + (Key - 1) 
-    MOV  [R6], R3            ; Write Value directly into contiguous array slot! 
+    MOV  R6, [R1+2]          ; R6 = Array Data Pointer (from Table Header Word 2)
+    ISUB R4, 1               ; Convert 1-based Lua index to 0-based memory offset
+    IADD R6, R4              ; Memory Address = ArrayPtr + (Key - 1)
+    MOV  [R6], R3            ; Write Value directly into contiguous array slot!
     JMP  __table_set_done
 
-;; --- FALLBACK EXECUTION ---
+;; --- FALLBACK EXECUTION: Association List Storage ---
 __table_set_fallback:
-    MOV  R5, R1
-    AND  R5, 0x003FFFFF      ; Unbox Table pointer to raw RAM address
-    MOV  R6, [R5+3]          ; R6 = Base Hash Data Pointer
+    ;; Note: R1 is already unboxed! Read directly from Table Header Word 3.
+    MOV  R6, [R1+3]          ; R6 = Base Hash Data Pointer
 
-    ;; 1. Ensure Base Hash Buffer exists (Use R9 as scratch!)
-    MOV  R9, R6
-    INE  R9, 0               
-    JT   R9, __table_set_bucket_loop
+    ;; 1. Ensure Base Hash Buffer exists (Test on scratch R4)
+    MOV  R4, R6
+    INE  R4, 0               ; Is Base Hash Pointer non-null?
+    JT   R4, __table_set_bucket_loop
 
     ;; Allocate Base Bucket (16 words)
     PUSH R1
     PUSH R2
     PUSH R3
-    PUSH R5
-    MOV  R0, 16             
+    MOV  R0, 16
     PUSH R0
     CALL __malloc
-    IADD SP, 1               ; Correct stack cleanup direction for SP growing down!
-    POP  R5
+    IADD SP, 1               ; Correct stack cleanup for SP growing down!
     POP  R3
     POP  R2
     POP  R1
 
-    MOV  R6, R0
-    MOV  R9, R6              ; Check OOM on scratch register R9
-    IEQ  R9, 0
-    JT   R9, __oom_handler   ; Trap out-of-memory
+    MOV  R6, R0              ; R6 = New Base Bucket Address
+    MOV  R4, R6              ; Check OOM on scratch register R4
+    IEQ  R4, 0
+    JT   R4, __oom_handler   ; Trap out-of-memory if allocation failed
 
+    ;; Initialize Base Bucket header
     MOV  R7, 0
     MOV  [R6], R7            ; Word 0: PairCount = 0
     MOV  [R6+1], R7          ; Word 1: NextBucketPtr = 0x0 (Tail)
 
-    MOV  [R5+3], R6          ; Link to Table Header Word 3
+    ;; Link newly created Base Bucket to Table Header Word 3 (R1 is raw RAM address!)
+    MOV  [R1+3], R6
 
 ;; --- BUCKET SEARCH LOOP ---
 __table_set_bucket_loop:
     MOV  R7, [R6]            ; R7 = PairCount in current bucket
-    MOV  R8, R6             
-    AND  R8, 0x003FFFFF      ; unbox address
-    IADD R8, 2               ; R8 points to Key0 of current bucket
+    MOV  R8, R6              ; Setup R8 as running memory pointer
+    IADD R8, 2               ; Advance R8 to point directly at Key0 (Offset 2 words)
 
 __table_set_scan_pairs:
-    MOV  R9, R7              ; Use R9 to prevent destroying remaining PairCount!
-    IEQ  R9, 0               ; No more pairs in this specific bucket?
-    JT   R9, __table_set_check_next_bucket
+    MOV  R4, R7              ; Check remaining pairs using scratch R4
+    IEQ  R4, 0               ; Have we checked all stored pairs in this bucket?
+    JT   R4, __table_set_check_next_bucket ; If 0, check chain or append!
     
-    MOV  R9, [R8]            ; Load stored Key
-    IEQ  R9, R2              ; Does Stored Key == Search Key?
-    JT   R9, __table_set_overwrite_val ; Found it -> Overwrite value!
+    ;; OPTIMIZATION: ZERO-COST DESTRUCTIVE COMPARISON
+    MOV  R4, [R8]            ; Load stored Key into scratch R4
+    IEQ  R4, R2              ; Does Stored Key == Search Key? (Destroys R4!)
+    JT   R4, __table_set_overwrite_val ; Found existing key -> Overwrite value!
     
-    IADD R8, 2               ; Advance 2 words to next key
-    ISUB R7, 1
+    ;; No match: advance memory pointer and decrement loop counter
+    IADD R8, 2               ; Advance 2 words (skip Value slot to next Key)
+    ISUB R7, 1               ; Decrement remaining PairCount
     JMP  __table_set_scan_pairs
 
 __table_set_overwrite_val:
-    IADD R8, 1               ; Step from Key slot to Value slot
+    IADD R8, 1               ; Step from Key slot to Value slot (Offset +1 word)
     MOV  [R8], R3            ; Update value in place
     JMP  __table_set_done
 
 ;; --- BUCKET CHAIN STEPPING ---
 __table_set_check_next_bucket:
-    MOV  R9, [R6+1]          ; Load NextBucketPtr (Word 1)
-    MOV  R10, R9             ; Use R10 to prevent destroying R9 pointer!
-    IEQ  R10, 0              ; Is this the end of the chain (Next == 0x0)?
-    JT   R10, __table_set_append_to_tail
+    MOV  R4, [R6+1]          ; Load NextBucketPtr (Word 1 of current bucket)
     
-    MOV  R6, R9              ; Step forward: Current Bucket = Next Bucket
+    ;; OPTIMIZATION & BUG FIX: REUSE DEAD REGISTER
+    ;; At this point, R7 (PairCount) reached 0 and is completely dead.
+    ;; We reuse R7 to test NextBucketPtr instead of clobbering unsaved R10!
+    MOV  R7, R4
+    IEQ  R7, 0               ; Is this the end of the chain (Next == 0x0)?
+    JT   R7, __table_set_append_to_tail ; If end of chain, append new pair!
+    
+    MOV  R6, R4              ; Step forward: Current Bucket = Next Bucket
     JMP  __table_set_bucket_loop ; Scan the next bucket in the chain!
 
-;; --- APPEND NEW PAIR (We reached the tail and key wasn't found) ---
+;; --- APPEND NEW PAIR (Reached tail bucket and key was not found) ---
 __table_set_append_to_tail:
     MOV  R7, [R6]            ; R7 = PairCount of the TAIL bucket
-    MOV  R9, R7              ; Use R9 to prevent destroying PairCount!
-    IGE  R9, 7               ; Is this tail bucket completely full (7 pairs)?
-    JT   R9, __table_set_allocate_extension_bucket
+    MOV  R4, R7              ; Check capacity on scratch R4
+    IGE  R4, 7               ; Is this tail bucket completely full (7 pairs / 14 words)?
+    JT   R4, __table_set_allocate_extension_bucket
 
-    ;; Room exists in tail bucket. R8 already points to unallocated word offset.
-    MOV  [R8], R2            ; Store Key
-    IADD R8, 1
-    MOV  [R8], R3            ; Store Value
+    ;; Room exists in tail bucket.
+    ;; Note: Because we advanced R8 exactly PairCount times in the scan loop above,
+    ;; R8 already points directly to the first unallocated Key slot!
+    MOV  [R8], R2            ; Store new Key
+    IADD R8, 1               ; Step to Value slot
+    MOV  [R8], R3            ; Store new Value
     
-    ;; Increment PairCount in current bucket header
+    ;; Increment PairCount in current tail bucket header
     IADD R7, 1
     MOV  [R6], R7
     JMP  __table_set_done
 
-;; --- ALLOCATE EXTENSION BUCKET (Tail was full) ---
+;; --- ALLOCATE EXTENSION BUCKET (Tail bucket was full) ---
 __table_set_allocate_extension_bucket:
+    ;; Preserve working registers across __malloc call
     PUSH R1
     PUSH R2
     PUSH R3
     PUSH R6
-    MOV  R0, 16              ; Request another 16-word chunk
+    MOV  R0, 16              ; Request another 16-word chunk for extension bucket
     PUSH R0
     CALL __malloc
-    IADD SP, 1               ; Fixed stack cleanup direction!
+    IADD SP, 1               ; Correct stack cleanup direction!
     POP  R6
     POP  R3
     POP  R2
     POP  R1
 
     MOV  R8, R0              ; R8 = New Extension Bucket Address
-    MOV  R9, R8              ; Check OOM on scratch register R9
-    IEQ  R9, 0
-    JT   R9, __oom_handler
+    MOV  R4, R8              ; Check OOM on scratch register R4
+    IEQ  R4, 0
+    JT   R4, __oom_handler   ; Trap out-of-memory if allocation failed
 
-    ;; Initialize New Extension Bucket
+    ;; Initialize New Extension Bucket Header
     MOV  R7, 1
-    MOV  [R8], R7            ; Word 0: PairCount = 1
+    MOV  [R8], R7            ; Word 0: PairCount = 1 (we are storing 1 pair immediately)
     MOV  R7, 0
-    MOV  [R8+1], R7          ; Word 1: NextBucketPtr = 0x0
+    MOV  [R8+1], R7          ; Word 1: NextBucketPtr = 0x0 (This is the new tail!)
     
     ;; Store the new Key/Value pair directly into Slot 0 of the new bucket
     MOV  [R8+2], R2          ; Word 2: Key0
     MOV  [R8+3], R3          ; Word 3: Val0
 
     ;; Link old tail bucket to this new extension bucket!
-    MOV  [R6+1], R8          ; OldBucket[NextBucketPtr] = NewBucketAddress
+    MOV  [R6+1], R8          ; OldTailBucket[NextBucketPtr] = NewBucketAddress
 
 __table_set_done:
-    POP  R9
+    ;; --- Callee-Restore: Pop 8 working registers in reverse order (LIFO) ---
     POP  R8
     POP  R7
     POP  R6
