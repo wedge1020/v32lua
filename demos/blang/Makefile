@@ -28,6 +28,7 @@ prep:
 asm: obj/$(DEMO).asm
 
 obj/$(DEMO).asm: $(DEMO).lua
+	@mkdir -p bin obj
 	$(LUA_COMPILER) $(DEBUG_FLAGS) -o obj/$(DEMO).asm $(DEMO).lua
 	mv obj/$(DEMO).xml .
 

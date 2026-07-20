@@ -1,5 +1,5 @@
 --#title "BLANG!"
---#version "0.5"
+--#version "0.6"
 
 --
 -- BLANG! A lua demo utilizing tables and table method calls (OOPish)
@@ -14,8 +14,10 @@ function draw(object, mode)
     ioports.gpu.region   = object.r   -- set the region
     ioports.gpu.x        = object.x   -- set drawing point X
     ioports.gpu.y        = object.y   -- set drawing point Y
+	ioports.gpu.draw(mode)
     
     -- Evaluate mode at runtime and invoke the intrinsic with static literals!
+	--[[
     if (mode == "zoom") then
         ioports.gpu.draw("zoom")      -- Emits: OUT GPU_Command, GPUCommand_DrawRegionZoomed
     elseif (mode == "rotate") then
@@ -24,7 +26,7 @@ function draw(object, mode)
         ioports.gpu.draw("rotozoom")  -- Emits: OUT GPU_Command, GPUCommand_DrawRegionRotozoomed
     else
         ioports.gpu.draw()            -- Emits: OUT GPU_Command, GPUCommand_DrawRegion (Handles nil or "draw")
-    end
+    end --]]
 end
 
 function player:draw(mode)

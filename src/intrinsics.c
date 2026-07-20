@@ -165,39 +165,140 @@ static void emit_gpu_blending_intrinsic (ASTNode *node, int  dest_reg)
     }
 }
 
-static void emit_gpu_draw_intrinsic (ASTNode *node, int  dest_reg)
-{
-    emit_asm ("    ;; --- Intrinsic: ioports.gpu.draw() ---\n");
-    ASTNode *arg = node->as.call.args_head;
+bool emit_gpu_draw_intrinsic(ASTNode *node, int dest_reg) {
+    char path_buf[256] = {0};
 
-    if (arg != NULL && arg -> type == NODE_STRING) {
-        const char *drawtype = arg->as.string_val.value;
-        if (strcmp(drawtype, "zoom") == 0)
-            emit_asm ("OUT GPU_Command, GPUCommand_DrawRegionZoomed\n");
-        else if (strcmp(drawtype, "rotate") == 0)
-            emit_asm ("OUT GPU_Command, GPUCommand_DrawRegionRotated\n");
-        else if (strcmp(drawtype, "rotozoom") == 0)
-            emit_asm ("OUT GPU_Command, GPUCommand_DrawRegionRotozoomed\n");
-        else
-        {
-            compiler_error (ERR_SEMANTIC, yylineno, "%s: invalid action '%s'", "ioports.gpu.draw()", drawtype);
+    if (!resolve_static_path(node->as.call.target, path_buf)) {
+        return false;
+    }
+
+    if (strcmp(path_buf, "ioports.gpu.draw") != 0) {
+        return false;
+    }
+
+    ASTNode *arg = node -> as.call.args_head;
+
+    // =========================================================================
+    // FAST PATH 1: Omitted argument -> ioports.gpu.draw()
+    // =========================================================================
+    if (arg == NULL) {
+        emit_asm("    ;; Intrinsic: ioports.gpu.draw() [Fast-path default]\n");
+        emit_asm("OUT GPU_Command, GPUCommand_DrawRegion\n");
+        if (dest_reg >= 0) {
+            emit_asm("MOV R%d, 0x%08X ; Return true\n", dest_reg, BOXED_TRUE);
         }
-    }
-    else if (arg == NULL)
-    {
-        emit_asm ("OUT GPU_Command, GPUCommand_DrawRegion\n");
-    }
-    else
-    {
-        compiler_error (ERR_SEMANTIC, yylineno, "%s: invalid action", "ioports.gpu.draw()");
+        return true;
     }
 
-    if (dest_reg != 0) {
-        emit_asm ("    MOV R%d, 0xFFC00000 ; return nil\n", dest_reg);
+    // =========================================================================
+    // FAST PATH 2: Static String Literal -> ioports.gpu.draw("zoom")
+    // =========================================================================
+    if (arg->type == NODE_STRING) {
+        const char *val = arg->as.string_val.value;
+        bool valid = true;
+
+        emit_asm("    ;; Intrinsic: ioports.gpu.draw(\"%s\") [Static fast-path]\n", val);
+        if (strcmp(val, "draw") == 0) {
+            emit_asm("OUT GPU_Command, GPUCommand_DrawRegion\n");
+        } else if (strcmp(val, "zoom") == 0) {
+            emit_asm("OUT GPU_Command, GPUCommand_DrawRegionZoomed\n");
+        } else if (strcmp(val, "rotate") == 0) {
+            emit_asm("OUT GPU_Command, GPUCommand_DrawRegionRotated\n");
+        } else if (strcmp(val, "rotozoom") == 0) {
+            emit_asm("OUT GPU_Command, GPUCommand_DrawRegionRotozoomed\n");
+        } else {
+			compiler_error (ERR_SEMANTIC, yylineno, "%s: invalid draw mode '%s'", "ioports.gpu.draw()", val);
+        }
+
+        if (dest_reg >= 0)
+		{
+            emit_asm("MOV R%d, 0x%08X ; Return %s\n", dest_reg, valid ? BOXED_TRUE : BOXED_FALSE, valid ? "true" : "false");
+        }
+        return true;
     }
+
+    // =========================================================================
+    // RUNTIME PATH: Dynamic argument via NaN-Boxed Pointer Equality
+    // =========================================================================
+    int mode_reg = allocate_register();
+    generate_asm(arg, mode_reg);
+
+    int label_id = get_next_label();
+    const char *ctx = get_current_function_name();
+    
+    char lbl_zoom[128], lbl_rot[128], lbl_rotozoom[128], lbl_default[128], lbl_end[128];
+    snprintf(lbl_default, sizeof(lbl_default), "__%s_draw_default_%d", ctx, label_id);
+    snprintf(lbl_zoom, sizeof(lbl_zoom), "__%s_draw_zoom_%d", ctx, label_id);
+    snprintf(lbl_rot, sizeof(lbl_rot), "__%s_draw_rot_%d", ctx, label_id);
+    snprintf(lbl_rotozoom, sizeof(lbl_rotozoom), "__%s_draw_rotozoom_%d", ctx, label_id);
+    snprintf(lbl_end, sizeof(lbl_end), "__%s_draw_end_%d", ctx, label_id);
+
+    emit_asm("    ;; Intrinsic: ioports.gpu.draw(dynamic_arg) [NaN-boxed dispatch]\n");
+    
+    // 1. Check for Nil -> default draw
+    emit_asm("IEQ R%d, 0x%08X ; Is mode nil?\n", mode_reg, BOXED_NIL);
+    emit_asm("JT R%d, %s\n", mode_reg, lbl_default);
+
+	int  sid  = add_string_literal ("draw");
+
+	int  treg  = allocate_register ();
+    // 2. Direct NaN-boxed pointer/ID comparisons!
+    // (Assuming your compiler can emit symbols or known constants for ROM string literals)
+	emit_asm ("MOV R%d, __string_%d ; load string into tmp register\n", treg, sid);
+    emit_asm("IEQ R%d, R%d ; Compare against boxed \"draw\" pointer\n", mode_reg, treg);
+    emit_asm("JT R%d, %s\n", mode_reg, lbl_default);
+
+	sid  = add_string_literal ("zoom");
+	emit_asm ("MOV R%d, __string_%d ; load string into tmp register\n", treg, sid);
+    emit_asm("IEQ R%d, R%d ; Compare against boxed \"zoom\" pointer\n", mode_reg, treg);
+    emit_asm("JT R%d, %s\n", mode_reg, lbl_zoom);
+
+	sid  = add_string_literal ("rotate");
+	emit_asm ("MOV R%d, __string_%d ; load string into tmp register\n", treg, sid);
+    emit_asm("IEQ R%d, R%d ; Compare against boxed \"rotate\" pointer\n", mode_reg, treg);
+    emit_asm("JT R%d, %s\n", mode_reg, lbl_rot);
+
+	sid  = add_string_literal ("rotozoom");
+	emit_asm ("MOV R%d, __string_%d ; load string into tmp register\n", treg, sid);
+    emit_asm("IEQ R%d, R%d ; Compare against boxed \"rotozoom\" pointer\n", mode_reg, treg);
+    emit_asm("JT R%d, %s\n", mode_reg, lbl_rotozoom);
+
+    // 3. Invalid Mode Fallthrough -> Return false
+    emit_asm("    ;; Unrecognized dynamic mode -> do not draw, return false\n");
+    if (dest_reg >= 0) {
+        emit_asm("MOV R%d, 0x%08X ; Return false\n", dest_reg, BOXED_FALSE);
+    }
+    emit_asm("JMP %s\n", lbl_end);
+
+    // =========================================================================
+    // HARDWARE COMMAND EMISSION BLOCKS (All return true)
+    // =========================================================================
+    emit_asm("%s:\n", lbl_default);
+    emit_asm("OUT GPU_Command, GPUCommand_DrawRegion\n");
+    if (dest_reg >= 0) emit_asm("MOV R%d, 0x%08X ; Return true\n", dest_reg, BOXED_TRUE);
+    emit_asm("JMP %s\n", lbl_end);
+
+    emit_asm("%s:\n", lbl_zoom);
+    emit_asm("OUT GPU_Command, GPUCommand_DrawRegionZoomed\n");
+    if (dest_reg >= 0) emit_asm("MOV R%d, 0x%08X ; Return true\n", dest_reg, BOXED_TRUE);
+    emit_asm("JMP %s\n", lbl_end);
+
+    emit_asm("%s:\n", lbl_rot);
+    emit_asm("OUT GPU_Command, GPUCommand_DrawRegionRotated\n");
+    if (dest_reg >= 0) emit_asm("MOV R%d, 0x%08X ; Return true\n", dest_reg, BOXED_TRUE);
+    emit_asm("JMP %s\n", lbl_end);
+
+    emit_asm("%s:\n", lbl_rotozoom);
+    emit_asm("OUT GPU_Command, GPUCommand_DrawRegionRotozoomed\n");
+    if (dest_reg >= 0) emit_asm("MOV R%d, 0x%08X ; Return true\n", dest_reg, BOXED_TRUE);
+
+    emit_asm("%s:\n", lbl_end);
+
+    unlock_register(mode_reg);
+    return true;
 }
 
-static void emit_gpu_clear_intrinsic(ASTNode *node, int dest_reg) {
+void emit_gpu_clear_intrinsic(ASTNode *node, int dest_reg) {
     emit_asm ("    ;; --- Intrinsic: ioports.gpu.clear() ---\n");
     ASTNode *arg = node->as.call.args_head;
 

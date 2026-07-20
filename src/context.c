@@ -333,16 +333,16 @@ int add_string_literal(const char* str) {
         current = current->next;
     }
 
-    StringLiteralNode* new_node = (StringLiteralNode*)malloc(sizeof(StringLiteralNode));
+    StringLiteralNode *new_node  = (StringLiteralNode *) malloc (sizeof(StringLiteralNode));
     if (new_node == NULL) {
         compiler_error(ERR_INTERNAL, -1, "Out of memory allocating string literal");
     }
     
-    new_node->id = string_counter++;
-    new_node->value = strdup(str);
-    new_node->next = strings_head;
-    strings_head = new_node;
-    return new_node->id;
+    new_node -> id     = string_counter++;
+    new_node -> value  = strdup (str);
+    new_node -> next   = strings_head;
+    strings_head       = new_node;
+    return (new_node -> id);
 }
 
 // ============================================================================

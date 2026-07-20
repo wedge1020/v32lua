@@ -22,6 +22,7 @@ extern const IOPortMap ioports[];
 
 // Returns 1 if the node was an intrinsic and assembly was emitted; 0 otherwise.
 //
+bool emit_gpu_draw_intrinsic      (ASTNode    *, int);
 int  try_emit_action_intrinsic    (const char *, int);
 int  try_emit_call_intrinsic      (ASTNode    *, int);
 int  try_emit_table_set_intrinsic (ASTNode    *, ASTNode *, int);
