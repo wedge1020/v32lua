@@ -74,13 +74,11 @@ void register_all_globals_prepass(ASTNode *node) {
     while (node != NULL) {
         switch (node->type) {
             case NODE_FUNCTION_DEF:
-                mark_global_as_function(node->as.function_def.name);
-                // Note: If you want to be 100% thorough, you can also recursively
-                // traverse function bodies here to catch undeclared globals!
+                // Pass node->as.function_def.params along with the name!
+                mark_global_as_function(node->as.function_def.name, node->as.function_def.params);
                 break;
 
             case NODE_MULTIPLE_ASSIGNMENT:
-                // If it is not a local assignment, register targets as globals
                 if (!node->as.mult_assign.is_local) {
                     ASTNode *tgt = node->as.mult_assign.targets_head;
                     while (tgt != NULL) {
@@ -93,7 +91,6 @@ void register_all_globals_prepass(ASTNode *node) {
                 break;
 
             case NODE_CART_HINT:
-                // Resource hints like '--#texture background "bg.png"' generate variables
                 if (node->as.cart_hint.resource_id != -1 && node->as.cart_hint.name != NULL) {
                     register_global(node->as.cart_hint.name);
                 }
@@ -188,11 +185,20 @@ SymbolNode* register_global (const char *name)
     return (sym);
 }
 
-void mark_global_as_function (const char *name)
+void mark_global_as_function (const char *name, ASTNode *params)
 {
     // Register it as a standard RAM variable first so it gets a valid pointer slot
     SymbolNode *sym     = register_global (name);
-    sym -> is_function  = 1; 
+    sym -> is_function  = 1;
+
+    // --- NEW: Calculate and store arity during the pre-pass! ---
+    int count = 0;
+    ASTNode *p = params;
+    while (p != NULL) {
+        count++;
+        p = p->next;
+    }
+    sym->arity = count;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////

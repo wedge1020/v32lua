@@ -12,6 +12,7 @@ typedef struct SymbolNode {
     SymbolType type;
     int location;             // RAM address for globals, BP offset for locals
     int is_function;
+	int arity;
     struct SymbolNode* next;
 } SymbolNode;
 
@@ -58,7 +59,7 @@ void        register_all_globals_prepass (ASTNode *);
 SymbolNode *register_global              (const char *);
 SymbolNode *register_local               (const char *);
 SymbolNode *register_parameter           (const char *, int);
-void        mark_global_as_function      (const char *);
+void        mark_global_as_function      (const char *, ASTNode *);
 const char *get_current_function_name    (void);
 void        get_variable_access_string   (const char *, char *);
 void        push_function_context        (const char *);

@@ -78,6 +78,32 @@ int resolve_static_path(ASTNode* node, char* path_buffer) {
     return 0;
 }
 
+int get_expected_arity(ASTNode *target) {
+    if (!target) return -1;
+
+    // 1. Direct function call: foo(1, 2)
+    if (target->type == NODE_IDENTIFIER) {
+        SymbolNode *sym = resolve_symbol(target->as.id.name);
+        if (sym && sym->is_function) {
+            return sym->arity;
+        }
+    }
+
+    // 2. Method or static table call: player:draw() -> resolves to "player.draw" or mangled name
+    char path_buf[256] = {0};
+    if (resolve_static_path(target, path_buf)) {
+        // If your compiler mangles names (e.g. "table_draw" or "player_draw"),
+        // you can look up the mangled string here!
+        SymbolNode *sym = resolve_symbol(path_buf);
+        if (sym && sym->is_function) {
+            return sym->arity;
+        }
+    }
+
+    // Return -1 if dynamic/unknown so we don't accidentally pad unknown targets
+    return -1;
+}
+
 int count_function_locals(ASTNode* node) {
     int count = 0;
 
@@ -437,7 +463,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 if (!omit_frame_pointer) {
                     emit_asm("PUSH BP\n");
                     emit_asm("MOV BP, SP\n");
-                    
+
                     if (num_locals > 0) {
                         emit_asm("    ;; Reserve stack space for %d local variable(s)\n", num_locals);
                         emit_asm("ISUB SP, %d\n", num_locals);
@@ -448,7 +474,12 @@ void  generate_asm (ASTNode *node, int  dest_reg)
 
                 push_scope();
 
-                int param_offset = 2; 
+                // =============================================================
+                // PARAMETER TRAVERSAL:
+                // Arity is already safely stored on the symbol from Stage 4!
+                // We only need to map parameters to stack offsets [BP + 2], etc.
+                // =============================================================
+                int param_offset = 2;
                 ASTNode *p = node->as.function_def.params;
                 while (p != NULL) {
                     if (p->type == NODE_IDENTIFIER) {
@@ -456,9 +487,10 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     }
                     p = p->next;
                 }
+                // =============================================================
 
                 generate_block(node->as.function_def.body);
-                pop_scope(); 
+                pop_scope();
 
                 // --- Function Epilogue ---
                 emit_asm("__%s_return:\n", func_name);
@@ -615,75 +647,96 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 break;
             }
 
-			case NODE_FUNCTION_CALL: {
-
+            case NODE_FUNCTION_CALL: {
+                // =============================================================
                 // 1. HARDWARE & BUILTIN INTRINSIC INTERCEPT
+                // =============================================================
                 if (try_emit_call_intrinsic(node, dest_reg)) {
                     break; // Intrinsic handled! Skip standard Lua call generation.
                 }
 
-                // 2. STANDARD LUA FUNCTION CALL (Fallback)
+                // =============================================================
+                // 2. STANDARD LUA FUNCTION & METHOD CALL SETUP
+                // =============================================================
                 int arg_count  = 0;
                 int target_reg = allocate_register();
 
-                if (node -> as.call.is_method_call) {
+                if (node->as.call.is_method_call) {
+                    // --- Method Call Branch (e.g., object:method(arg)) ---
                     emit_asm ("    ;; --- Method Call: Evaluate Table & Lookup Method ---\n");
                     int table_reg = allocate_register();
                     int key_reg   = allocate_register();
 
-                    // 1. Evaluate table expression exactly ONCE
-                    generate_asm (node -> as.call.target -> as.table_get.table_expr, table_reg);
+                    // Evaluate table expression exactly ONCE
+                    generate_asm (node->as.call.target->as.table_get.table_expr, table_reg);
 
-                    // 2. Perform method function pointer lookup immediately while table_reg is fresh!
-                    generate_asm (node -> as.call.target -> as.table_get.key, key_reg);
+                    // Perform method function pointer lookup immediately while table_reg is fresh!
+                    generate_asm (node->as.call.target->as.table_get.key, key_reg);
                     emit_asm ("PUSH R%d ; Arg1: Table Pointer for method lookup\n", table_reg);
                     emit_asm ("PUSH R%d ; Arg2: Method Key\n", key_reg);
                     emit_asm ("CALL __builtin_table_get\n");
                     emit_asm ("IADD SP, 2 ; Clean up lookup arguments\n");
                     emit_asm ("MOV R%d, R0 ; Store method function pointer in target_reg\n", target_reg);
 
-                    // 3. Push table_reg as implicit 'self' (Arg 0)
+                    // Push table_reg as implicit 'self' (Arg 0)
                     emit_asm ("PUSH R%d ; Push implicit 'self' (Arg 0)\n", table_reg);
                     arg_count++;
 
-                    // 4. Unlock registers so they are available for argument evaluation
+                    // Unlock registers so they are available for argument evaluation
                     unlock_register (table_reg);
                     unlock_register (key_reg);
 
-                    // 5. Evaluate remaining explicit arguments
-                    ASTNode *current_arg = node -> as.call.args_head;
+                    // Evaluate remaining explicit arguments
+                    ASTNode *current_arg = node->as.call.args_head;
                     while (current_arg != NULL) {
                         int arg_reg = allocate_register();
                         generate_asm (current_arg, arg_reg);
                         emit_asm ("    PUSH  R%d\n", arg_reg);
                         unlock_register(arg_reg);
                         arg_count++;
-                        current_arg = current_arg -> next;
+                        current_arg = current_arg->next;
                     }
                 } else {
-                    // --- Standard Function Call ---
-                    ASTNode *current_arg = node -> as.call.args_head;
+                    // --- Standard Function Call Branch (e.g., my_func(arg)) ---
+                    ASTNode *current_arg = node->as.call.args_head;
                     while (current_arg != NULL) {
                         int arg_reg = allocate_register();
                         generate_asm (current_arg, arg_reg);
                         emit_asm ("    PUSH  R%d\n", arg_reg);
                         unlock_register(arg_reg);
                         arg_count++;
-                        current_arg = current_arg -> next;
+                        current_arg = current_arg->next;
                     }
 
-                    generate_asm (node -> as.call.target, target_reg);
+                    generate_asm (node->as.call.target, target_reg);
                 }
 
+                // =============================================================
+                // 3. STATIC CALLER-SIDE NIL PADDING
+                // =============================================================
+                int expected_args = get_expected_arity(node->as.call.target);
+                if (expected_args > arg_count) {
+                    int missing = expected_args - arg_count;
+                    emit_asm ("    ;; --- Pad %d missing argument(s) with Lua Nil ---\n", missing);
+                    for (int i = 0; i < missing; i++) {
+                        emit_asm ("PUSH 0xFFC00000 ; Missing param evaluates to nil\n");
+                        arg_count++; // CRITICAL: Ensure SP cleanup instruction removes these!
+                    }
+                }
+
+                // =============================================================
+                // 4. EXECUTION & STACK CLEANUP
+                // =============================================================
                 // Ensure the boxed target is in register R0 (if it isn't already there)
                 if (target_reg != 0) {
                     emit_asm ("MOV R0, R%d ; Prepare boxed target for validation\n", target_reg);
                 }
 
                 // Emits a single instruction that handles validation, unboxing, and execution!
-                emit_asm("CALL __builtin_exec ; Validate tag and tail-call execute\n");
-                unlock_register(target_reg);
+                emit_asm ("CALL __builtin_exec ; Validate tag and tail-call execute\n");
+                unlock_register (target_reg);
 
+                // Clean up ALL pushed arguments (explicit + padded Nils)
                 if (arg_count > 0) emit_asm ("IADD SP, %d\n", arg_count);
                 if (dest_reg != 0) emit_asm ("MOV R%d, R0\n", dest_reg);
                 break;
@@ -1201,8 +1254,6 @@ void generate_program (ASTNode *head)
     char     buffer[1024];
     char    *check               = NULL;
     int      final_line_offset   = 0; 
-
-    init_global_scope (); 
 
     // =========================================================================
     // 1. CONDITIONAL ENTRY POINT CHECKS
