@@ -43,6 +43,16 @@ typedef struct StringLiteralNode {
     struct StringLiteralNode* next;
 } StringLiteralNode;
 
+#define DEFAULT_FFI_RAM_RESERVE  65536 // 64 kW default (256 KB)
+#define FFI_SAFETY_PADDING         256 // 256 word alignment/padding buffer
+
+typedef struct {
+    int ffi_ram_reserve_words; // Explicit reserve set by user or default
+    int ffi_max_mem_detected;  // Discovered via ;;FFI_MAX_MEM
+} CompilerConfig;
+
+extern CompilerConfig o_config;
+
 extern StringLiteralNode *strings_head;
 extern int string_counter;
 

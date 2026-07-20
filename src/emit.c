@@ -213,6 +213,29 @@ void  emit_interpolated_asm (const char *raw_code)
     }
 }
 
+int calculate_lua_heap_start(void) {
+    int effective_start = o_config.ffi_ram_reserve_words;
+
+    // If C header metadata indicates static allocations exceed default/configured reserve, bump automatically!
+    if (o_config.ffi_max_mem_detected > 0) {
+        int auto_calculated = o_config.ffi_max_mem_detected + FFI_SAFETY_PADDING;
+        if (auto_calculated > effective_start) {
+            effective_start = auto_calculated;
+        }
+    }
+
+    return effective_start;
+}
+
+void emit_runtime_init(FILE *out) {
+    int heap_start_addr = calculate_lua_heap_start();
+
+    fprintf(out, "    ; --- v32lua Heap Base Initialization ---\n");
+    fprintf(out, "    ; FFI Reserved Offset: %d words (%d KB)\n",
+            heap_start_addr, (heap_start_addr * 4) / 1024);
+    fprintf(out, "    MOV [heap_pointer], %d\n", heap_start_addr);
+}
+
 void  emit_cart_xml (const char *input_filename, int  verbose)
 {
     // 1. Allocate enough memory for the filename plus ".xml" and the null terminator

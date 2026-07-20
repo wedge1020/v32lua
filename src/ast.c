@@ -33,6 +33,23 @@ ASTNode *make_node_string (const char* str_value)
     node->as.string_val.value = strdup(str_value);
     return node;
 }
+
+/*
+void handle_compiler_directive(const char *line) {
+    // 1. Manual user override: --#config FFI_RAM_RESERVE 262144
+    if (sscanf(line, "--#config FFI_RAM_RESERVE %d", &o_config.ffi_ram_reserve_words) == 1) {
+        return;
+    }
+
+    // 2. Auto-generated toolchain header: ;;FFI_MAX_MEM 4096
+    int detected_addr = 0;
+    if (sscanf(line, ";;FFI_MAX_MEM %d", &detected_addr) == 1) {
+        if (detected_addr > o_config.ffi_max_mem_detected) {
+            o_config.ffi_max_mem_detected = detected_addr;
+        }
+    }
+}*/
+
 ASTNode *make_node_cart_hint (const char *raw_hint)
 {
     ASTNode* node = make_node(NODE_CART_HINT);

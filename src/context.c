@@ -3,6 +3,8 @@
 // Address 0 is reserved for the heap_pointer variable itself!
 int next_ram_address = 1; 
 
+CompilerConfig o_config;
+
 ScopeNode* current_scope = NULL;
 ScopeNode* global_scope = NULL;
 
