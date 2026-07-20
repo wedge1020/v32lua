@@ -248,10 +248,11 @@ void  get_variable_access_string (const char *name, char *output_buffer)
         // Assuming location is -1 for Arg 1, -2 for Arg 2...
         // We need [BP + 2] for Arg 1, [BP + 3] for Arg 2...
         //
-        if (sym -> location    <  0)
-        {
-            sprintf (output_buffer, "[BP + %d]", -(sym -> location));
-        }
+		if (sym ->location     <  0)
+		{
+			int  stack_offset   = (-(sym -> location));
+			sprintf (output_buffer, "[BP + %d]", stack_offset);
+		}
 
         ////////////////////////////////////////////////////////////////////////////////
         //
