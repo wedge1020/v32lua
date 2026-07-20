@@ -201,6 +201,15 @@ void mark_global_as_function (const char *name, ASTNode *params)
     sym->arity = count;
 }
 
+void mark_global_as_c_function (const char *name, int arity)
+{
+    // Register as global so symbol lookup succeeds cleanly
+    SymbolNode *sym    = register_global (name);
+    sym->is_function   = 1;
+    sym->is_c_native   = 1;
+    sym->arity         = arity;
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////
 //
 // compose the variable prefix (function vs variable), since everything is

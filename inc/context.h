@@ -13,6 +13,7 @@ typedef struct SymbolNode {
     int location;             // RAM address for globals, BP offset for locals
     int is_function;
 	int arity;
+	int is_c_native;
     struct SymbolNode* next;
 } SymbolNode;
 
@@ -60,6 +61,7 @@ SymbolNode *register_global              (const char *);
 SymbolNode *register_local               (const char *);
 SymbolNode *register_parameter           (const char *, int);
 void        mark_global_as_function      (const char *, ASTNode *);
+void        mark_global_as_c_function    (const char *, int);
 const char *get_current_function_name    (void);
 void        get_variable_access_string   (const char *, char *);
 void        push_function_context        (const char *);

@@ -668,6 +668,27 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     break; // Intrinsic handled! Skip standard Lua call generation.
                 }
 
+                // --- FFI INTEGRATION: Resolve symbol to check if target is a native C function ---
+                SymbolNode *target_sym = NULL;
+                if (node->as.call.target->type == NODE_IDENTIFIER) {
+                    target_sym = resolve_symbol(node->as.call.target->as.id.name);
+                } else {
+                    char path_buf[256] = {0};
+                    if (resolve_static_path(node->as.call.target, path_buf)) {
+                        target_sym = resolve_symbol(path_buf);
+                        if (!target_sym) {
+                            // Try mangled lookup by converting '.' and ':' to '_'
+                            for (int i = 0; path_buf[i] != '\0'; i++) {
+                                if (path_buf[i] == '.' || path_buf[i] == ':') {
+                                    path_buf[i] = '_';
+                                }
+                            }
+                            target_sym = resolve_symbol(path_buf);
+                        }
+                    }
+                }
+                bool is_c_call = (target_sym != NULL && target_sym->is_c_native == 1);
+
                 int total_arg_count = 0;
                 int target_reg = allocate_register();
                 int table_reg  = -1; // Cached for method calls to push 'self' last
@@ -677,7 +698,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 // =========================================================================
                 if (node->as.call.is_method_call) {
                     emit_asm("    ; --- Evaluating method target and caching implicit 'self' ---\n");
-                    
+
                     ASTNode *table_get_node = node->as.call.target;
                     table_reg   = allocate_register();
                     int key_reg = allocate_register();
@@ -686,12 +707,12 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     generate_asm(table_get_node->as.table_get.table_expr, table_reg);
                     generate_asm(table_get_node->as.table_get.key, key_reg);
 
-                    // Attempt intrinsic property read first[cite: 25]
+                    // Attempt intrinsic property read first
                     if (!try_emit_table_get_intrinsic(table_get_node->as.table_get.table_expr,
                                                       table_get_node->as.table_get.key,
-                                                      target_reg)) 
+                                                      target_reg))
                     {
-                        // Perform lookup on a clean stack BEFORE pushing call arguments[cite: 25]
+                        // Perform lookup on a clean stack BEFORE pushing call arguments
                         emit_asm("PUSH R%d ; Arg1: Table Pointer for method lookup\n", table_reg);
                         emit_asm("PUSH R%d ; Arg2: Key\n", key_reg);
                         emit_asm("CALL __builtin_table_get\n");
@@ -702,11 +723,13 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     unlock_register(key_reg);
                     // NOTE: table_reg remains LOCKED so argument evaluations won't clobber it!
                 } else {
-                    // Standard function call: resolve target function pointer directly[cite: 25]
-                    generate_asm(node->as.call.target, target_reg);
+                    if (!is_c_call) {
+                        // Standard function call: resolve target function pointer directly
+                        generate_asm(node->as.call.target, target_reg);
+                    }
                 }
 
-				// =========================================================================
+                // =========================================================================
                 // STEP 2: EVALUATE & PUSH EXPLICIT ARGUMENTS RIGHT-TO-LEFT (STANDARD ABI)
                 // =========================================================================
                 int explicit_arg_count = 0;
@@ -716,26 +739,30 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     curr = curr->next;
                 }
 
-				// --- CALCULATE AND PUSH MISSING ARGUMENTS AS NIL ---
+                // --- CALCULATE AND PUSH MISSING ARGUMENTS ---
                 // Total arguments provided = explicit args + 1 (if implicit 'self' is passed)
                 int actual_passed_count = explicit_arg_count + (node->as.call.is_method_call ? 1 : 0);
                 int expected_arity = get_expected_arity(node->as.call.target);
-                
+
                 if (expected_arity > actual_passed_count) {
                     int missing_args = expected_arity - actual_passed_count;
-                    emit_asm("    ; --- Padding %d omitted argument(s) with Nil (0xFFC00000) ---\n", missing_args);
-                    
-                    // 1. Allocate a scratch register to hold our Nil immediate
+                    emit_asm("    ; --- Padding %d omitted argument(s) with %s ---\n",
+                             missing_args, is_c_call ? "0 (C ABI)" : "Nil (0xFFC00000)");
+
+                    // 1. Allocate scratch register for immediate padding value
                     int pad_reg = allocate_register();
-                    emit_asm("MOV R%d, 0xFFC00000 ; Load Nil constant for padding\n", pad_reg);
-                    
-                    // 2. Because we push right-to-left, trailing missing args are pushed first!
+                    if (is_c_call) {
+                        emit_asm("MOV R%d, 0 ; Load unboxed 0 for C ABI default\n", pad_reg);
+                    } else {
+                        emit_asm("MOV R%d, 0xFFC00000 ; Load Nil constant for padding\n", pad_reg);
+                    }
+
+                    // 2. Trailing missing args are pushed first (Right-to-Left ABI)
                     for (int i = 0; i < missing_args; i++) {
                         emit_asm("PUSH R%d ; Pad omitted argument\n", pad_reg);
-                        total_arg_count++; // Increment so stack cleanup removes these later!
+                        total_arg_count++;
                     }
-                    
-                    // 3. Return the register to the pool now that the values are safely on the stack
+
                     unlock_register(pad_reg);
                 }
                 // ---------------------------------------------------
@@ -758,6 +785,13 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     for (int i = explicit_arg_count - 1; i >= 0; i--) {
                         int arg_reg = allocate_register();
                         generate_asm(arg_array[i], arg_reg);
+
+                        if (is_c_call) {
+                            emit_asm("    ; --- Unbox Lua value for C ABI ---\n");
+                            // Strip upper 10 tag bits so C receives a clean 22-bit raw int/float/pointer
+                            emit_asm("AND R%d, 0x003FFFFF ; Strip NaN tag bits\n", arg_reg);
+                        }
+
                         emit_asm("PUSH R%d\n", arg_reg);
                         unlock_register(arg_reg);
                         total_arg_count++;
@@ -779,21 +813,37 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 // =========================================================================
                 // STEP 4: EXECUTE TAIL-CALL VALIDATION & CLEAN UP STACK
                 // =========================================================================
-                if (target_reg != 0) {
-                    emit_asm("MOV R0, R%d ; Prepare boxed target for validation\n", target_reg);
-                }
-                unlock_register(target_reg);
+                if (is_c_call) {
+                    unlock_register(target_reg); // Unused on direct C calls, free immediately
+                    emit_asm("    ; --- Direct C ABI Call ---\n");
+                    emit_asm("CALL _%s ; Call Vircon32 C symbol directly\n", target_sym->name);
 
-                emit_asm("CALL __builtin_exec ; Validate tag and tail-call execute\n");
+                    if (total_arg_count > 0) {
+                        emit_asm("IADD SP, %d ; C ABI caller-cleanup\n", total_arg_count);
+                    }
 
-                // Clean up argument words from the stack frame[cite: 25]
-                if (total_arg_count > 0) {
-                    emit_asm("IADD SP, %d ; Clean up call arguments\n", total_arg_count);
-                }
-                
-                // Store return value if required by the expression[cite: 25]
-                if (dest_reg != 0) {
-                    emit_asm("MOV R%d, R0 ; Store return value\n", dest_reg);
+                    if (dest_reg != 0) {
+                        emit_asm("    ; --- Box C return value back to Lua Float ---\n");
+                        emit_asm("MOV R%d, R0\n", dest_reg);
+                        emit_asm("OR R%d, 0x7FF00000 ; Apply default Lua Number tag\n", dest_reg);
+                    }
+                } else {
+                    if (target_reg != 0) {
+                        emit_asm("MOV R0, R%d ; Prepare boxed target for validation\n", target_reg);
+                    }
+                    unlock_register(target_reg);
+
+                    emit_asm("CALL __builtin_exec ; Validate tag and tail-call execute\n");
+
+                    // Clean up argument words from the stack frame
+                    if (total_arg_count > 0) {
+                        emit_asm("IADD SP, %d ; Clean up call arguments\n", total_arg_count);
+                    }
+
+                    // Store return value if required by the expression
+                    if (dest_reg != 0) {
+                        emit_asm("MOV R%d, R0 ; Store return value\n", dest_reg);
+                    }
                 }
                 break;
             }
