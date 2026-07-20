@@ -292,6 +292,26 @@ int   try_emit_call_intrinsic (ASTNode *node, int  dest_reg)
         emit_system_wait_intrinsic ();
         return (1);
     }
+    if (strcmp (func_name, "math.abs")          == 0)
+	{
+		;
+		// load variable value into register, run `FABS` on it, return result
+	}
+	if (strcmp (func_name, "math.floor")        == 0)
+	{
+		;
+		// load variable value into register, run `FLR` on it, return result
+	}
+	if (strcmp (func_name, "math.ceil")         == 0)
+	{
+		;
+		// load variable value into register, run `CEIL` on it, return result
+	}
+	if (strcmp (func_name, "math.sqrt")         == 0)
+	{
+		;
+		// load variable value into register, calculate sqrt, return result
+	}
 
     return (0); // Not handled here
 }
