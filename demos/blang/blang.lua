@@ -1,7 +1,9 @@
 --#title "BLANG!"
 --#version "0.5"
 
--- THIS CODE COMPILES BUT DOES NOT YET WORK. CPU AT 100%, BLACK SCREEN
+--
+-- BLANG! A lua demo utilizing tables and table method calls (OOPish)
+--
 
 -- 1. Initialize global tables at the root scope
 player  = { }
@@ -39,7 +41,7 @@ function init()
     player.v             = 0   -- velocity
 
     -- 3. Initialize an array of 4 enemies with distinct velocities and starting positions
---[[    index = 1
+    index = 1
     while index <= 4 do
         enemies[index] = { }
         enemies[index].r  = 80 + (index * 2)     -- assign slightly different visual regions
@@ -49,18 +51,18 @@ function init()
         enemies[index].yv   = (index > 2)      and 2 or -2 -- alternate vertical directions
         enemies[index].draw = player.draw       -- attach our OOP draw method to the enemy!
         index = index + 1
-    end--]]
+    end
 
     ioports.gpu.clear("black") -- initial clear screen
 
     -- Draw player and enemies at initial positions
     player:draw()
-	--[[
+	
     index = 1
     while index <= 4 do
         enemies[index]:draw()
         index = index + 1
-    end--]]
+    end
 end
 
 function game_loop()
@@ -101,7 +103,7 @@ function game_loop()
     player:draw()
 
     -- --- ENEMY PONG-STYLE MOVEMENT & REFLECTION ---
-	--[[
+	
     index = 1
     while index <= 4 do
         e = enemies[index]
@@ -123,5 +125,5 @@ function game_loop()
         -- Render enemy using default drawing (or "zoom", "rotate", "rotozoom")
         e:draw() 
         index = index + 1
-    end--]]
+    end
 end
