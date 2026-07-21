@@ -5,6 +5,9 @@
 -- BLANG! A lua demo utilizing tables and table method calls (OOPish)
 --
 
+-- ISSUE: enemies no longer rendering. Something broke when I upgraded
+-- ioports.gpu.draw() instrinsic in src/intrinsics.c
+
 -- 1. Initialize global tables at the root scope
 player  = { }
 enemies = { }
@@ -125,7 +128,8 @@ function game_loop()
         end
 
         -- Render enemy using default drawing (or "zoom", "rotate", "rotozoom")
-        e:draw() 
+		__asm__("__debug:")
+        e:draw("draw") 
         index = index + 1
     end
 end
