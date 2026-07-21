@@ -404,12 +404,12 @@ void emit_truthy_jump(int reg, const char *target_label)
 
     // 1. If it IS Nil, it's not truthy -> jump to evaluate right operand
     emit_asm("MOV R%d, R%d ; Copy to scratch register\n", scratch_reg, reg);
-    emit_asm("IEQ R%d, 0xFFC00000 ; Is it Nil?\n", scratch_reg);
+    emit_asm("IEQ R%d, BOXED_NIL ; Is it Nil?\n", scratch_reg);
     emit_asm("JT R%d, %s ; If Nil, do not short-circuit\n", scratch_reg, eval_right_label);
 
     // 2. If it IS False, it's not truthy -> jump to evaluate right operand
     emit_asm("MOV R%d, R%d ; Copy to scratch register\n", scratch_reg, reg);
-    emit_asm("IEQ R%d, 0xFFC00001 ; Is it False?\n", scratch_reg);
+    emit_asm("IEQ R%d, BOXED_FALSE ; Is it False?\n", scratch_reg);
     emit_asm("JT R%d, %s ; If False, do not short-circuit\n", scratch_reg, eval_right_label);
 
     // 3. If we survived both checks, the value is TRUTHY! Short-circuit!
@@ -425,14 +425,14 @@ void emit_truthy_jump(int reg, const char *target_label)
 void  emit_falsy_jump (int  reg, const char *target_label)
 {
     int  scratch_reg  = allocate_register ();
-    // 1. Test against canonical Nil (0xFFC00000)
+    // 1. Test against canonical Nil (BOXED_NIL)
     emit_asm("MOV R%d, R%d ; Copy condition to scratch register\n", scratch_reg, reg);
-    emit_asm("IEQ R%d, 0xFFC00000 ; Destructive test: Is it Nil?\n", scratch_reg);
+    emit_asm("IEQ R%d, BOXED_NIL ; Destructive test: Is it Nil?\n", scratch_reg);
     emit_asm("JT R%d, %s ; If Nil (falsy), jump to target\n", scratch_reg, target_label);
 
-    // 2. Test against Boolean False (0xFFC00001)
+    // 2. Test against Boolean False (BOXED_FALSE)
     emit_asm("MOV R%d, R%d ; Copy condition to scratch register\n", scratch_reg, reg);
-    emit_asm("IEQ R%d, 0xFFC00001 ; Destructive test: Is it False?\n", scratch_reg);
+    emit_asm("IEQ R%d, BOXED_FALSE ; Destructive test: Is it False?\n", scratch_reg);
     emit_asm("JT R%d, %s ; If False (falsy), jump to target\n", scratch_reg, target_label);
 
     unlock_register (scratch_reg);
@@ -441,7 +441,20 @@ void  emit_falsy_jump (int  reg, const char *target_label)
 int   emit_variable_map (void)
 {
     int  lines_printed       = 2;
-    fprintf(out(), "%%define heap_pointer 0\n");
+    fprintf (out(), "%%define  V32_CART_PAGE   0x20000000\n");
+    fprintf (out(), "%%define  NAN_VALUE       0x7F800000\n");
+    fprintf (out(), "%%define  BOXED_DATA      0xFFC00000 ; common bitmask to indicate boxed data\n");
+    fprintf (out(), "%%define  BOXED_TABLE     0x7F800000 ; bitmask for boxed lua table (RAM)\n");
+    fprintf (out(), "%%define  BOXED_ROMSTRING 0x7FC00000 ; bitmank for boxed lua string literal (ROM)\n");
+    fprintf (out(), "%%define  BOXED_FUNCTION  0xFF800000 ; bitmask for boxed lua function (ROM)\n");
+    fprintf (out(), "%%define  BOXED_RAMSTRING 0xFFC00000 ; starting at offset 4\n");
+    fprintf (out(), "%%define  BOXED_NIL       0xFFC00000\n");
+    fprintf (out(), "%%define  BOXED_FALSE     0xFFC00001\n");
+    fprintf (out(), "%%define  BOXED_BOOLEAN   0xFFC00001\n");
+    fprintf (out(), "%%define  BOXED_TRUE      0xFFC00002\n");
+    fprintf (out(), "%%define  BOXED_TOMBSTONE 0xFFC00003 ; future feature\n");
+    fprintf (out(), "%%define  BOXED_PAYLOAD   0x003FFFFF\n");
+    fprintf (out(), "%%define  heap_pointer    0\n");
     
     SymbolNode *curr = global_scope ? global_scope->symbols : NULL;
     while (curr != NULL)
@@ -587,7 +600,7 @@ void emit_table_set_literal(int table_reg, const char *property_name, int value_
     // 3. Load and Box Key as ROM String, then Push (Arg 2 -> [BP+3])
     int scratch = allocate_register();
     emit_asm("MOV  R%d, __string_%d", scratch, string_id);
-    emit_asm("OR   R%d, 0x7FC00000 ; Box key as ROM String", scratch);
+    emit_asm("OR   R%d, BOXED_ROMSTRING ; Box key as ROM String", scratch);
     emit_asm("PUSH R%d             ; Arg 2: Property Key", scratch);
     unlock_register(scratch);
 
@@ -612,7 +625,7 @@ void emit_table_get_literal(int table_reg, const char *property_name)
     // 3. Load and Box Key as ROM String, then Push (Arg 2)
     int scratch = allocate_register();
     emit_asm("MOV  R%d, __string_%d", scratch, string_id);
-    emit_asm("OR   R%d, 0x7FC00000 ; Box key as ROM String", scratch);
+    emit_asm("OR   R%d, BOXED_ROMSTRING ; Box key as ROM String", scratch);
     emit_asm("PUSH R%d             ; Arg 2: Property Key", scratch);
     unlock_register(scratch);
 

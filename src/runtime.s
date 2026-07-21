@@ -6,6 +6,23 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; =====================================================================================
+;; SECTION 0: DEFINES
+;; =====================================================================================
+;;  V32_CART_PAGE   0x20000000
+;;  NAN_VALUE       0x7F800000
+;;  BOXED_DATA      0xFFC00000 ; common bitmask to indicate boxed data
+;;  BOXED_TABLE     0x7F800000 ; bitmask for boxed lua table (RAM)
+;;  BOXED_ROMSTRING 0x7FC00000 ; bitmank for boxed lua string literal (ROM)
+;;  BOXED_FUNCTION  0xFF800000 ; bitmask for boxed lua function (ROM)
+;;  BOXED_STRING    0xFFC00000 ; starting at offset 4
+;;  BOXED_NIL       0xFFC00000
+;;  BOXED_FALSE     0xFFC00001
+;;  BOXED_BOOLEAN   0xFFC00001
+;;  BOXED_TRUE      0xFFC00002
+;;  BOXED_TOMBSTONE 0xFFC00003 ; future feature
+;;  BOXED_PAYLOAD   0x003FFFFF
+
+;; =====================================================================================
 ;; SECTION 1: MEMORY MANAGEMENT & ERROR HANDLING
 ;; =====================================================================================
 
@@ -59,8 +76,8 @@ __oom_handler:
 __builtin_exec:
     ; 1. Isolate and validate the NaN-box tag bits
     MOV R1, R0
-    AND R1, 0xFFC00000          ; Isolate upper tag bits (adjust if your tag mask differs)
-    IEQ R1, 0xFF800000          ; Is this tagged as a boxed function pointer?
+    AND R1, BOXED_DATA          ; Isolate upper tag bits (adjust if your tag mask differs)
+    IEQ R1, BOXED_FUNCTION          ; Is this tagged as a boxed function pointer?
     JT  R1, __exec_valid            ; If valid, jump to unboxing and execution
 
     ; 2. Tag validation failed! We attempted to call nil, a number, or a table.
@@ -68,8 +85,8 @@ __builtin_exec:
 
 __exec_valid:
     ; 3. Unbox the address and restore the Vircon32 memory page bit
-    AND R0, 0x003FFFFF          ; Strip NaN-box tag bits
-    OR  R0, 0x20000000          ; Restore Vircon32 code memory page bit
+    AND R0, BOXED_PAYLOAD          ; Strip NaN-box tag bits
+    OR  R0, V32_CART_PAGE          ; Restore Vircon32 code memory page bit
     
     ; 4. The Tail-Call Jump!
     ; We do NOT use CALL R0 here. Because the original call site executed 
@@ -134,7 +151,7 @@ __builtin_table_new:
     MOV  [R0+3], R1          ; hash part pointer = null 
     
     ;; 3. AUDITED: Box the raw data heap address as a Lua Table! 
-    OR   R0, 0x7F800000 
+    OR   R0, BOXED_TABLE 
     
     MOV  SP, BP
     POP  BP
@@ -164,20 +181,20 @@ __builtin_table_get:
     ;; --- 1. STRICT TABLE TYPE VALIDATION ---
     ;; Ensure R1 is actually a Table before touching memory!
     MOV  R4, R1
-    AND  R4, 0xFF800000      ; Isolate upper tag bits
-    IEQ  R4, 0x7F800000      ; Is it tagged as a Table?
+    AND  R4, BOXED_DATA      ; Isolate upper tag bits
+    IEQ  R4, BOXED_TABLE      ; Is it tagged as a Table?
     JF   R4, __runtime_error_not_table ; Trap if indexing a non-table!
 
     ;; --- OPTIMIZATION: EARLY UNBOXING ---
     ;; Strip tag immediately! R1 is now permanently the raw RAM heap address.
     ;; This eliminates all redundant unboxing instructions in subsequent branches.
-    AND  R1, 0x003FFFFF
+    AND  R1, BOXED_PAYLOAD
 
     ;; --- 2. FAST-PATH VALIDATION (O(1) Contiguous Array Read) ---
     ;; FAST-PATH CHECK 1: Is Key an unboxed IEEE Float?
     MOV  R3, R2
-    AND  R3, 0x7F800000      ; Isolate exponent bits
-    IEQ  R3, 0x7F800000      ; Are all exponent bits 1s? (If so, it's tagged/NaN)
+    AND  R3, NAN_VALUE      ; Isolate exponent bits
+    IEQ  R3, NAN_VALUE      ; Are all exponent bits 1s? (If so, it's tagged/NaN)
     JT   R3, __table_get_fallback
 
     ;; FAST-PATH CHECK 2: Convert float to integer & verify no fractional part
@@ -253,7 +270,7 @@ __table_get_found:
     JMP  __table_get_done
 
 __table_get_not_found:
-    MOV  R0, 0xFFC00000      ; Key does not exist -> Return canonical Lua Nil!
+    MOV  R0, BOXED_NIL      ; Key does not exist -> Return canonical Lua Nil!
 
 __table_get_done:
     ;; --- Callee-Restore: Pop 7 working registers in reverse order (LIFO) ---
@@ -295,19 +312,19 @@ __builtin_table_set:
     ;; --- 1. STRICT TABLE TYPE VALIDATION ---
     ;; Ensure R1 is actually a Table before touching memory!
     MOV  R4, R1
-    AND  R4, 0xFF800000      ; Isolate upper tag bits
-    IEQ  R4, 0x7F800000      ; Is it tagged as a Table?
+    AND  R4, BOXED_DATA      ; Isolate upper tag bits
+    IEQ  R4, BOXED_TABLE      ; Is it tagged as a Table?
     JF   R4, __runtime_error_not_table ; Trap if indexing a non-table!
 
     ;; --- OPTIMIZATION: EARLY UNBOXING ---
     ;; Strip tag immediately! R1 is now permanently the raw RAM heap address.
-    AND  R1, 0x003FFFFF
+    AND  R1, BOXED_PAYLOAD
 
     ;; --- 2. FAST-PATH VALIDATION (O(1) Contiguous Array Write) ---
     ;; FAST-PATH CHECK 1: Is Key an unboxed IEEE Float?
     MOV  R4, R2
-    AND  R4, 0x7F800000      ; Isolate exponent bits
-    IEQ  R4, 0x7F800000      ; Are all exponent bits 1s? (If so, it's tagged/NaN)
+    AND  R4, NAN_VALUE      ; Isolate exponent bits
+    IEQ  R4, NAN_VALUE      ; Are all exponent bits 1s? (If so, it's tagged/NaN)
     JT   R4, __table_set_fallback
 
     ;; FAST-PATH CHECK 2: Convert float to integer & verify no fractional part
@@ -500,20 +517,20 @@ __runtime_error_hash_overflow:
 
 ;; ===================================================================================
 ;; Internal Helper: __unbox_string
-;; Input:  R0 = NaN-boxed String (0x7F800000 for RAM, 0x7FC00000 for ROM)
+;; Input:  R0 = NaN-boxed String (RAM or ROM)
 ;; Output: R0 = Raw Vircon32 Hardware Memory Address (Page bit applied if ROM)
 ;; Clobbers: R1
 ;; ===================================================================================
 __unbox_string:
     MOV R1, R0
     AND R1, 0x80000000          ; Check Bit 31 (1 = RAM String, 0 = ROM String)
-    AND R0, 0x003FFFFF          ; Strip the entire NaN tag (Leaves 22-bit offset)
+    AND R0, BOXED_PAYLOAD       ; Strip the entire NaN tag (Leaves 22-bit offset)
 
     INE R1, 0                   ; If Bit 31 is non-zero, it is a RAM string
     JT  R1, __unbox_string_end  ; Jump to end (RAM addresses start at 0x00000000)
 
     ;; It is a ROM string: Apply Vircon32 Cartridge Page Bit (Bit 29)
-    OR  R0, 0x20000000
+    OR  R0, V32_CART_PAGE
 
 __unbox_string_end:
     RET
@@ -598,8 +615,8 @@ __strcat_finish:
     MOV  R3, 0
     MOV  [R5], R3            ; Write Null terminator
 
-    ;; Apply RAM Heap String Tag (0xFFC00000)
-    OR   R0, 0xFFC00000      ; BOX: R0 untouched since Step 3, holds new string base!
+    ;; Apply RAM Heap String Tag (BOXED_RAMSTRING)
+    OR   R0, BOXED_RAMSTRING      ; BOX: R0 untouched since Step 3, holds new string base!
 
     MOV  SP, BP
     POP  BP
@@ -626,30 +643,30 @@ __builtin_print:
 __print_check_tag:
     ;; 3. SAFETY COERCION LAYER: Check for ROM vs RAM String tags
     MOV  R4, R3              ; Copy target value to scratch register R4
-    AND  R4, 0xFFC00000      ; Isolate upper 10 bits (Tag)
+    AND  R4, BOXED_DATA      ; Isolate upper 10 bits (Tag)
 
-    IEQ  R4, 0x7FC00000      ; Is it a ROM String Literal?
+    IEQ  R4, BOXED_ROMSTRING      ; Is it a ROM String Literal?
     JT   R4, __print_unbox_rom
 
     ;; Check if it's a RAM Heap String (Tag 0xFFC0xxxx with address >= 4)
-    IEQ  R4, 0xFFC00000      ; Does it have the RAM String / Primitive tag?
+    IEQ  R4, BOXED_RAMSTRING      ; Does it have the RAM String / Primitive tag?
     JF   R4, __print_coerce  ; If neither string tag, coerce!
 
-    ;; It has tag 0xFFC00000. Make sure it's not Nil (0), False (1), or True (2)!
+    ;; It is BOXED_DATA. Make sure it's not Nil (0), False (1), or True (2)!
     MOV  R4, R3
-    AND  R4, 0x003FFFFF      ; Isolate payload
+    AND  R4, BOXED_PAYLOAD      ; Isolate payload
     ILT  R4, 4               ; Is payload < 4 (Nil/False/True)?
     JT   R4, __print_coerce  ; If < 4, it's a boolean/nil -> coerce!
 
 __print_unbox_ram:
     ;; 4a. Unbox RAM String: Keep raw 22-bit heap address (4MW limit)
-    AND  R3, 0x003FFFFF      ; Isolate 22-bit raw RAM heap pointer
+    AND  R3, BOXED_PAYLOAD      ; Isolate 22-bit raw RAM heap pointer
     JMP  __print_dispatch
 
 __print_unbox_rom:
     ;; 4b. Unbox ROM String: Isolate offset and add ROM page bit
-    AND  R3, 0x003FFFFF      ; Isolate up to 27-bit raw ROM offset
-    OR   R3, 0x20000000      ; Restore Vircon32 CART page bit
+    AND  R3, BOXED_PAYLOAD      ; Isolate up to 27-bit raw ROM offset
+    OR   R3, V32_CART_PAGE      ; Restore Vircon32 CART page bit
 
 __print_dispatch:
     ;; 5. Dispatch Unboxed Pointer to BIOS
@@ -736,26 +753,26 @@ __builtin_eq:
 
     ;; Validate LEFT Operand is a String (Tag 0x7FC0... or 0xFFC0... with payload >= 4)
     MOV  R3, R1
-    AND  R3, 0xFFC00000
-    IEQ  R3, 0x7FC00000
+    AND  R3, BOXED_DATA
+    IEQ  R3, BOXED_ROMSTRING
     JT   R3, __eq_left_valid
-    IEQ  R3, 0xFFC00000
+    IEQ  R3, BOXED_RAMSTRING
     JF   R3, __eq_return_false
     MOV  R3, R1
-    AND  R3, 0x003FFFFF
+    AND  R3, BOXED_PAYLOAD
     ILT  R3, 4
     JT   R3, __eq_return_false
 
 __eq_left_valid:
     ;; Validate RIGHT Operand is a String
     MOV  R3, R2
-    AND  R3, 0xFFC00000
-    IEQ  R3, 0x7FC00000
+    AND  R3, BOXED_DATA
+    IEQ  R3, BOXED_ROMSTRING
     JT   R3, __eq_right_valid
-    IEQ  R3, 0xFFC00000
+    IEQ  R3, BOXED_RAMSTRING
     JF   R3, __eq_return_false
     MOV  R3, R2
-    AND  R3, 0x003FFFFF
+    AND  R3, BOXED_PAYLOAD
     ILT  R3, 4
     JT   R3, __eq_return_false
 
@@ -788,11 +805,11 @@ __eq_strcmp_loop:
     JMP  __eq_strcmp_loop
 
 __eq_return_true:
-    MOV  R0, 0xFFC00002          ; Return boxed Boolean True
+    MOV  R0, BOXED_TRUE          ; Return boxed Boolean True
     RET
 
 __eq_return_false:
-    MOV  R0, 0xFFC00001          ; Return boxed Boolean False
+    MOV  R0, BOXED_FALSE          ; Return boxed Boolean False
     RET
 
 ;; -------------------------------------------------------------------------------------
@@ -845,47 +862,47 @@ __builtin_tostring:
     MOV  R1, [BP+2]          ; Load argument from Base Pointer
 
     MOV  R3, R1
-    AND  R3, 0xFFC00000
+    AND  R3, BOXED_DATA
 
     ;; Pass through ROM Strings unchanged
-    IEQ  R3, 0x7FC00000
+    IEQ  R3, BOXED_ROMSTRING
     JT   R3, __tostring_passthrough
 
     ;; Check for RAM Strings
-    IEQ  R3, 0xFFC00000
+    IEQ  R3, BOXED_RAMSTRING
     JF   R3, __tostring_check_primitives
 
     MOV  R4, R1
-    AND  R4, 0x003FFFFF
+    AND  R4, BOXED_PAYLOAD
     IGE  R4, 4
     JT   R4, __tostring_passthrough  ; It is a RAM String: return unchanged!
 
 __tostring_check_primitives:
     ;; Add these three explicit checks:
     MOV  R6, R1
-    IEQ  R6, 0xFFC00000
+    IEQ  R6, BOXED_NIL
     JT   R6, __tostring_nil
     MOV  R6, R1
-    IEQ  R6, 0xFFC00001
+    IEQ  R6, BOXED_FALSE
     JT   R6, __tostring_false
     MOV  R6, R1
-    IEQ  R6, 0xFFC00002
+    IEQ  R6, BOXED_TRUE
     JT   R6, __tostring_true
 
     ;; Existing tag checks follow...
     MOV  R2, R1
-    AND  R2, 0xFFC00000
+    AND  R2, BOXED_DATA
 
     MOV  R3, R2 
-    IEQ  R3, 0x7FC00000      ; Is it already a String? 
+    IEQ  R3, BOXED_ROMSTRING      ; Is it already a String? 
     JT   R3, __tostring_passthrough 
     
     MOV  R3, R2 
-    IEQ  R3, 0x7F800000      ; Is it a Table? 
+    IEQ  R3, BOXED_TABLE      ; Is it a Table? 
     JT   R3, __tostring_table 
     
     MOV  R3, R2 
-    IEQ  R3, 0xFF800000      ; Is it a Function? 
+    IEQ  R3, BOXED_FUNCTION      ; Is it a Function? 
     JT   R3, __tostring_function 
     
     ;; 3. Fallback: It must be a standard IEEE 754 Float! 
@@ -894,23 +911,23 @@ __tostring_check_primitives:
     CALL __builtin_ftoa 
     IADD SP, 1 
     
-    ;; Box as RAM Heap String (0xFFC00000) instead of ROM (0x7FC00000)
-    OR   R0, 0xFFC00000      ; Box raw pointer as RAM String 
+    ;; Box as RAM String instead of ROM String
+    OR   R0, BOXED_RAMSTRING      ; Box raw pointer as RAM String 
     JMP  __tostring_done
 
 __tostring_nil:
     MOV  R0, __const_str_nil ; Load address of static "nil" string 
-    OR   R0, 0x7FC00000      ; Box as String 
+    OR   R0, BOXED_ROMSTRING      ; Box as String 
     JMP  __tostring_done
 
 __tostring_false:
     MOV  R0, __const_str_false ; Load address of static "false" string 
-    OR   R0, 0x7FC00000      ; Box as String 
+    OR   R0, BOXED_ROMSTRING      ; Box as String 
     JMP  __tostring_done
 
 __tostring_true:
     MOV  R0, __const_str_true ; Load address of static "true" string 
-    OR   R0, 0x7FC00000      ; Box as String 
+    OR   R0, BOXED_ROMSTRING      ; Box as String 
     JMP  __tostring_done
 
 __tostring_passthrough:
@@ -939,7 +956,7 @@ __format_table_address:
     MOV  BP, SP
 
     MOV  R0, __const_str_table
-    OR   R0, 0x7FC00000      ; Box raw pointer as a valid Lua String
+    OR   R0, BOXED_ROMSTRING      ; Box raw pointer as a valid Lua String
 
     MOV  SP, BP
     POP  BP
@@ -950,7 +967,7 @@ __format_function_address:
     MOV  BP, SP
 
     MOV  R0, __const_str_function
-    OR   R0, 0x7FC00000      ; Box raw pointer as a valid Lua String
+    OR   R0, BOXED_ROMSTRING      ; Box raw pointer as a valid Lua String
 
     MOV  SP, BP
     POP  BP
@@ -1026,7 +1043,7 @@ __ftoa_terminate:
     MOV  [R3], R6            ; Write null-terminator word at the end of string
     
     ;; Note: R0 still holds the raw heap base pointer from __malloc. 
-    ;; __builtin_tostring will apply the 0x7FC00000 String tag to R0!
+    ;; __builtin_tostring will apply the BOXED_ROMSTRING String tag to R0!
     MOV  SP, BP
     POP  BP
     RET

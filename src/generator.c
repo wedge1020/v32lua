@@ -547,19 +547,19 @@ void  generate_asm (ASTNode *node, int  dest_reg)
 
                     // 1. Check if Nil or False using scratch register
                     emit_asm("MOV R%d, R%d\n", scratch_reg, dest_reg);
-                    emit_asm("IEQ R%d, 0xFFC00000 ; Is Nil?\n", scratch_reg);
+                    emit_asm("IEQ R%d, BOXED_NIL ; Is Nil?\n", scratch_reg);
                     emit_asm("JT  R%d, %s\n", scratch_reg, to_true_label);
                     emit_asm("MOV R%d, R%d\n", scratch_reg, dest_reg);
-                    emit_asm("IEQ R%d, 0xFFC00001 ; Is False?\n", scratch_reg);
+                    emit_asm("IEQ R%d, BOXED_FALSE ; Is False?\n", scratch_reg);
                     emit_asm("JT  R%d, %s\n", scratch_reg, to_true_label);
 
-                    // 2. If truthy, return VAL_FALSE (0xFFC00001)
-                    emit_asm("MOV R%d, 0xFFC00001 ; Return False\n", dest_reg);
+                    // 2. If truthy, return BOXED_FALSE
+                    emit_asm("MOV R%d, BOXED_FALSE ; Return False\n", dest_reg);
                     emit_asm("JMP %s\n", end_label);
 
-                    // 3. If falsy, return VAL_TRUE (0xFFC00002)
+                    // 3. If falsy, return BOXED_TRUE
                     emit_asm("%s:\n", to_true_label);
-                    emit_asm("MOV R%d, 0xFFC00002 ; Return True\n", dest_reg);
+                    emit_asm("MOV R%d, BOXED_TRUE ; Return True\n", dest_reg);
                     emit_asm("%s:\n", end_label);
                     unlock_register (scratch_reg);
                 }
@@ -581,13 +581,13 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 if (node->as.mult_assign.is_local && node->as.mult_assign.values_head == NULL) {
                     while (curr_tgt != NULL) {
                         if (curr_tgt->type == NODE_IDENTIFIER) {
-                            // Register local symbol and initialize to canonical Nil (0xFFC00000)
+                            // Register local symbol and initialize to canonical Nil (BOXED_NIL)
                             SymbolNode *sym = register_local(curr_tgt->as.id.name);
                             char access_str[128];
                             get_variable_access_string(sym->name, access_str);
 
                             emit_asm("    ;; Bare local '%s' initialized to nil", sym->name);
-                            emit_asm("MOV %s, 0xFFC00000", access_str);
+                            emit_asm("MOV %s, BOXED_NIL", access_str);
                         }
                         curr_tgt = curr_tgt->next;
                     }
@@ -604,7 +604,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                         curr_val = curr_val->next;
                     } else {
                         // Lua rule: If values run out, remaining targets are assigned nil
-                        emit_asm("MOV R%d, 0xFFC00000 ; Pad missing value with Nil", val_reg);
+                        emit_asm("MOV R%d, BOXED_NIL ; Pad missing value with Nil", val_reg);
                     }
 
                     // Assign evaluated value to the target
@@ -754,7 +754,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     if (is_c_call) {
                         emit_asm("MOV R%d, 0 ; Load unboxed 0 for C ABI default\n", pad_reg);
                     } else {
-                        emit_asm("MOV R%d, 0xFFC00000 ; Load Nil constant for padding\n", pad_reg);
+                        emit_asm("MOV R%d, BOXED_NIL ; Load Nil constant for padding\n", pad_reg);
                     }
 
                     // 2. Trailing missing args are pushed first (Right-to-Left ABI)
@@ -852,7 +852,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 emit_asm ("    ;; Load and box address of the mangled function\n");
                 emit_asm ("MOV R%d, __function_%s\n", dest_reg, node -> as.func_ptr.mangled_name);
                 // AUDITED: Apply Function NaN tag (Bit 31=1, Bit 22=0)
-                emit_asm ("OR R%d, 0xFF800000 ; Box as Function\n", dest_reg);
+                emit_asm ("OR R%d, BOXED_FUNCTION ; Box as Function\n", dest_reg);
                 break;
             }
 
@@ -1063,7 +1063,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                         emit_asm ("MOV R%d, R0\n", dest_reg);
                     }
                     // Box the 0/1 result from equality checking into a NaN boolean!
-                    emit_asm ("IADD R%d, 0xFFC00001 ; Box as Lua Boolean (False/True)\n", dest_reg);
+                    emit_asm ("IADD R%d, BOXED_BOOLEAN ; Box as Lua Boolean (False/True)\n", dest_reg);
                 }
                 else
                 {
@@ -1074,8 +1074,8 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                         case OP_GE:  emit_asm ("FGE R%d, R%d\n", dest_reg, right_reg); break;
                         default: break;
                     }
-                    // AUDITED: Box raw 0/1 hardware comparison result into 0xFFC00001/0xFFC00002!
-                    emit_asm ("IADD R%d, 0xFFC00001 ; Box as Lua Boolean (False/True)\n", dest_reg);
+                    // AUDITED: Box raw 0/1 hardware comparison result into BOXED_FALSE/BOXED_TRUE!
+                    emit_asm ("IADD R%d, BOXED_BOOLEAN ; Box as Lua Boolean (False/True)\n", dest_reg);
                 }
                 unlock_register (right_reg);
                 break;
@@ -1090,7 +1090,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 emit_asm ("MOV R%d, __string_%d\n", dest_reg, string_id);
                 
                 // Apply the NaN-box String Tag (Base NaN + Bit 22)
-                emit_asm ("OR R%d, 0x7FC00000 ; Box as ROM String\n", dest_reg);
+                emit_asm ("OR R%d, BOXED_ROMSTRING ; Box as ROM String\n", dest_reg);
                 break;
             }
 
