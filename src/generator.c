@@ -789,7 +789,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                         if (is_c_call) {
                             emit_asm("    ; --- Unbox Lua value for C ABI ---\n");
                             // Strip upper 10 tag bits so C receives a clean 22-bit raw int/float/pointer
-                            emit_asm("AND R%d, 0x003FFFFF ; Strip NaN tag bits\n", arg_reg);
+                            emit_asm("AND R%d, BOXED_PAYLOAD ; Strip NaN tag bits\n", arg_reg);
                         }
 
                         emit_asm("PUSH R%d\n", arg_reg);
@@ -1294,7 +1294,7 @@ void generate_global_setup (ASTNode *node)
         emit_asm ("MOV R0, %d ; heap start", next_ram_address);
     else
         emit_asm ("MOV R0, 4  ; heap start (minimum bound, for nil/false/true)");
-    emit_asm ("MOV [heap_pointer], R0");
+    emit_asm ("MOV [HEAP_POINTER], R0");
 
     if (node != NULL)
     {

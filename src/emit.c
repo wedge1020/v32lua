@@ -233,7 +233,7 @@ void emit_runtime_init(FILE *out) {
     fprintf(out, "    ; --- v32lua Heap Base Initialization ---\n");
     fprintf(out, "    ; FFI Reserved Offset: %d words (%d KB)\n",
             heap_start_addr, (heap_start_addr * 4) / 1024);
-    fprintf(out, "    MOV [heap_pointer], %d\n", heap_start_addr);
+    fprintf(out, "    MOV [HEAP_POINTER], %d\n", heap_start_addr);
 }
 
 void  emit_cart_xml (const char *input_filename, int  verbose)
@@ -443,10 +443,12 @@ int   emit_variable_map (void)
     int  lines_printed       = 2;
     fprintf (out(), "%%define  V32_CART_PAGE   0x20000000\n");
     fprintf (out(), "%%define  NAN_VALUE       0x7F800000\n");
+    fprintf (out(), "%%define  BOXED_CATEGORY  0x80000000 ; RAM(1), ROM(0)\n");
+    fprintf (out(), "%%define  BOXED_TYPE      0x00400000 ; TABLE/FUNCTION (0), STRING (1)\n");
     fprintf (out(), "%%define  BOXED_DATA      0xFFC00000 ; common bitmask to indicate boxed data\n");
-    fprintf (out(), "%%define  BOXED_TABLE     0x7F800000 ; bitmask for boxed lua table (RAM)\n");
+    fprintf (out(), "%%define  BOXED_FUNCTION  0x7F800000 ; bitmask for boxed lua function (ROM)\n");
     fprintf (out(), "%%define  BOXED_ROMSTRING 0x7FC00000 ; bitmank for boxed lua string literal (ROM)\n");
-    fprintf (out(), "%%define  BOXED_FUNCTION  0xFF800000 ; bitmask for boxed lua function (ROM)\n");
+    fprintf (out(), "%%define  BOXED_TABLE     0xFF800000 ; bitmask for boxed lua table (RAM)\n");
     fprintf (out(), "%%define  BOXED_RAMSTRING 0xFFC00000 ; starting at offset 4\n");
     fprintf (out(), "%%define  BOXED_NIL       0xFFC00000\n");
     fprintf (out(), "%%define  BOXED_FALSE     0xFFC00001\n");
@@ -454,7 +456,7 @@ int   emit_variable_map (void)
     fprintf (out(), "%%define  BOXED_TRUE      0xFFC00002\n");
     fprintf (out(), "%%define  BOXED_TOMBSTONE 0xFFC00003 ; future feature\n");
     fprintf (out(), "%%define  BOXED_PAYLOAD   0x003FFFFF\n");
-    fprintf (out(), "%%define  heap_pointer    0\n");
+    fprintf (out(), "%%define  HEAP_POINTER    0\n");
     
     SymbolNode *curr = global_scope ? global_scope->symbols : NULL;
     while (curr != NULL)

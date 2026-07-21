@@ -148,10 +148,10 @@ primitive identifiers:
 | Type                 | Tag Mask     | Payload Meaning | Description                  |
 | -------------------- | ------------ | --------------- | ---------------------------- |
 | **Float**            | none         | unboxed float   | standard 32-bit float        |
-| **Table**            | `0x7F800000` | RAM data offset | pointer to table structures  |
 | **ROM String**       | `0x7FC00000` | ROM offset      | string data in CART ROM      |
+| **Function Pointer** | `0x7F800000` | ROM code offset | function addresses in ROM    |
+| **Table**            | `0xFF800000` | RAM data offset | pointer to table structures  |
 | **RAM String**       | `0xFFC00000` | RAM offset      | malloc'ed string data in RAM |
-| **Function Pointer** | `0xFF800000` | ROM code offset | function addresses in ROM    |
 | **Nil**              | `0xFFC00000` | `0x0`           | The canonical Lua `nil`      |
 | **False**            | `0xFFC00001` | `0x1`           | Boolean `false`              |
 | **True**             | `0xFFC00002` | `0x2`           | Boolean `true`               |
@@ -195,7 +195,7 @@ cartridge   page  bit   (`OR   0x20000000`)  to   properly  address   the
 
 When  executing  a  boxed  function  pointer  via  `__builtin_exec`,  the
 compiler isolates the upper bits with `AND 0xFF800000` and validates that
-they match the function tag `0xFF800000`.
+they match the function tag `0x7F800000`.
 
 If validation succeeds, the runtime strips the NaN tag (`AND 0x003FFFFF`)
 and  restores the  Vircon32 code  memory  page bit  (`OR 0x20000000`)  to

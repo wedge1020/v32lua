@@ -10,16 +10,18 @@
 ;; =====================================================================================
 ;;  V32_CART_PAGE   0x20000000
 ;;  NAN_VALUE       0x7F800000
-;;  BOXED_DATA      0xFFC00000 ; common bitmask to indicate boxed data
-;;  BOXED_TABLE     0x7F800000 ; bitmask for boxed lua table (RAM)
-;;  BOXED_ROMSTRING 0x7FC00000 ; bitmank for boxed lua string literal (ROM)
-;;  BOXED_FUNCTION  0xFF800000 ; bitmask for boxed lua function (ROM)
-;;  BOXED_STRING    0xFFC00000 ; starting at offset 4
+;;  BOXED_CATEGORY  0x80000000 // sign bit used for RAM (1) vs ROM (0)
+;;  BOXED_TYPE      0x00400000 // quiet-NaN used for TABLE/FUNCTION (0) vs STRING (1)
+;;  BOXED_DATA      0xFFC00000 // common bitmask to indicate boxed data
+;;  BOXED_FUNCTION  0x7F800000 // bitmask for boxed lua function (ROM)
+;;  BOXED_ROMSTRING 0x7FC00000 // bitmank for boxed lua string literal (ROM)
+;;  BOXED_TABLE     0xFF800000 // bitmask for boxed lua table (RAM)
+;;  BOXED_RAMSTRING 0xFFC00000 // starting at offset 4 (includes nil/false/true)
 ;;  BOXED_NIL       0xFFC00000
 ;;  BOXED_FALSE     0xFFC00001
-;;  BOXED_BOOLEAN   0xFFC00001
+;;  BOXED_BOOLEAN   0xFFC00001 // mathing our way to true/false
 ;;  BOXED_TRUE      0xFFC00002
-;;  BOXED_TOMBSTONE 0xFFC00003 ; future feature
+;;  BOXED_TOMBSTONE 0xFFC00003 // future feature
 ;;  BOXED_PAYLOAD   0x003FFFFF
 
 ;; =====================================================================================
@@ -27,7 +29,7 @@
 ;; =====================================================================================
 
 ;; -------------------------------------------------------------------------------------
-;; Memory Allocator: Carves out raw word blocks from heap_pointer
+;; Memory Allocator: Carves out raw word blocks from HEAP_POINTER
 ;; Incoming Stack: [BP+2] = Number of words requested
 ;; Returns: R0 = Raw pointer to allocated memory (or 0 if Out-Of-Memory)
 ;; -------------------------------------------------------------------------------------
@@ -36,11 +38,11 @@ __malloc:
     MOV  BP, SP
     
     MOV  R1, [BP+2]          ; R1 = Requested size in words
-    MOV  R0, [heap_pointer]  ; R0 = Address of new allocation block
+    MOV  R0, [HEAP_POINTER]  ; R0 = Address of new allocation block
     
     ;; Calculate potential new heap top
     MOV  R2, R0
-    IADD R2, R1              ; R2 = Potential new heap_pointer
+    IADD R2, R1              ; R2 = Potential new HEAP_POINTER
     
     ;; Stack Collision Check: SP grows down, Heap grows up!
     ;; We maintain a 1024-word safety buffer between Heap and Stack.
@@ -51,7 +53,7 @@ __malloc:
     JT   R6, __malloc_oom    ; If Heap >= SafeBoundary, allocation fails!
     
     ;; Success: Commit new heap top and return base address in R0
-    MOV  [heap_pointer], R2
+    MOV  [HEAP_POINTER], R2
     JMP  __malloc_done
     
 __malloc_oom:
@@ -523,7 +525,7 @@ __runtime_error_hash_overflow:
 ;; ===================================================================================
 __unbox_string:
     MOV R1, R0
-    AND R1, 0x80000000          ; Check Bit 31 (1 = RAM String, 0 = ROM String)
+    AND R1, BOXED_CATEGORY      ; Check Bit 31 (1 = RAM String, 0 = ROM String)
     AND R0, BOXED_PAYLOAD       ; Strip the entire NaN tag (Leaves 22-bit offset)
 
     INE R1, 0                   ; If Bit 31 is non-zero, it is a RAM string
@@ -575,15 +577,15 @@ __strcat_len_right:
 
     ;; --- 3. Allocate Memory on Heap ---
 __strcat_alloc:
-    MOV  R0, [heap_pointer]  ; R0 = New string base (raw pointer)
+    MOV  R0, [HEAP_POINTER]  ; R0 = New string base (raw pointer)
     MOV  R5, R0              ; R5 = Write head
 
-    ;; Advance heap_pointer = old_heap + left_len + right_len + 1
+    ;; Advance HEAP_POINTER = old_heap + left_len + right_len + 1
     MOV  R6, R0
     IADD R6, R2
     IADD R6, R4
     IADD R6, 1
-    MOV  [heap_pointer], R6
+    MOV  [HEAP_POINTER], R6
 
     ;; --- 4. Copy Left String to Heap ---
     MOV  R1, R7              ; Restore cached unboxed Left pointer
