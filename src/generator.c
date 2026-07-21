@@ -185,13 +185,23 @@ int check_needs_stack (ASTNode *node)
 
     switch (node -> type) {
         case NODE_FOR_NUMERIC:
-        case NODE_FUNCTION_CALL:
         case NODE_CONCAT:
         case NODE_TABLE_SET:
         case NODE_TABLE_GET:
         case NODE_ASM:
         case NODE_RAWASM:
             return (1);
+
+        case NODE_FUNCTION_CALL: {
+            // If it's a compile-time intrinsic like hex(), it doesn't need stack space!
+            if (node -> as.call.target -> type == NODE_IDENTIFIER) {
+                const char *name = node -> as.call.target -> as.id.name;
+                if (strcmp (name, "hex") == 0) {
+                    return 0; // Leaf intrinsic: no stack required
+                }
+            }
+            return (1); // Standard function call: stack required
+        }
 
         case NODE_IDENTIFIER:
             if (node->as.id.name && strcmp(node->as.id.name, "self") == 0) return (1);
@@ -572,9 +582,9 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 break;
             }
                              
-            case NODE_MULTIPLE_ASSIGNMENT: {
-                ASTNode *curr_tgt = node -> as.mult_assign.targets_head;
-                ASTNode *curr_val = node -> as.mult_assign.values_head;
+			case NODE_MULTIPLE_ASSIGNMENT: {
+                ASTNode *curr_tgt = node->as.mult_assign.targets_head;
+                ASTNode *curr_val = node->as.mult_assign.values_head;
                 int      val_reg  = -1;
 
                 // --- Intercept Bare Local Declarations (e.g., "local x, y") ---
@@ -596,6 +606,26 @@ void  generate_asm (ASTNode *node, int  dest_reg)
 
                 // --- Standard & Multiple Assignment Evaluation ---
                 while (curr_tgt != NULL) {
+                    // =========================================================================
+                    // 1. ATTEMPT HARDWARE INTRINSIC FIRST (Immediate Folding / Lazy Evaluation)
+                    // =========================================================================
+                    // Only check if we are targeting a table property AND have a valid value node
+                    if (curr_tgt->type == NODE_TABLE_GET && curr_val != NULL) {
+                        if (try_emit_table_set_intrinsic(curr_tgt->as.table_get.table_expr,
+                                                         curr_tgt->as.table_get.key,
+                                                         curr_val))
+                        {
+                            // Intrinsic successfully emitted (either folded to immediate or 
+                            // evaluated on-demand)! Advance pointers and skip standard allocation.
+                            curr_tgt = curr_tgt->next;
+                            curr_val = curr_val->next;
+                            continue;
+                        }
+                    }
+
+                    // =========================================================================
+                    // 2. STANDARD EVALUATION (Identifiers, Fallback Dynamic Tables, or Nils)
+                    // =========================================================================
                     val_reg = allocate_register();
 
                     if (curr_val != NULL) {
@@ -616,32 +646,23 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                         get_variable_access_string(curr_tgt->as.id.name, access_str);
                         emit_asm("MOV %s, R%d", access_str, val_reg);
                     }
-                    else if (curr_tgt -> type == NODE_TABLE_GET)
+                    else if (curr_tgt->type == NODE_TABLE_GET)
                     {
-                        // 1. Attempt to intercept as a hardware I/O intrinsic first!
-                        if (try_emit_table_set_intrinsic (curr_tgt->as.table_get.table_expr,
-                                                          curr_tgt->as.table_get.key,
-                                                          val_reg))
-                        {
-                            // Intrinsic successfully emitted! Skip dynamic heap allocation entirely.
-                            continue;
-                        }
+                        // Fallback: Dynamic heap table assignment (table[key] = value)
+                        int table_reg = allocate_register();
+                        int key_reg   = allocate_register();
 
-                        // 2. Fallback: Dynamic heap table assignment (table[key] = value)
-                        int  table_reg  = allocate_register ();
-                        int  key_reg    = allocate_register ();
+                        generate_asm(curr_tgt->as.table_get.table_expr, table_reg);
+                        generate_asm(curr_tgt->as.table_get.key, key_reg);
 
-                        generate_asm (curr_tgt->as.table_get.table_expr, table_reg);
-                        generate_asm (curr_tgt->as.table_get.key, key_reg);
+                        emit_asm("PUSH R%d ; Push Table Pointer", table_reg);
+                        emit_asm("PUSH R%d ; Push Key", key_reg);
+                        emit_asm("PUSH R%d ; Push Value", val_reg);
+                        emit_asm("CALL __builtin_table_set");
+                        emit_asm("IADD SP, 3 ; Clean up stack");
 
-                        emit_asm ("PUSH R%d ; Push Table Pointer", table_reg);
-                        emit_asm ("PUSH R%d ; Push Key", key_reg);
-                        emit_asm ("PUSH R%d ; Push Value", val_reg);
-                        emit_asm ("CALL __builtin_table_set");
-                        emit_asm ("IADD SP, 3 ; Clean up stack");
-
-                        unlock_register (table_reg);
-                        unlock_register (key_reg);
+                        unlock_register(table_reg);
+                        unlock_register(key_reg);
                     }
 
                     unlock_register(val_reg);
@@ -661,7 +682,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 break;
             }
 
-			case NODE_FUNCTION_CALL: {
+            case NODE_FUNCTION_CALL: {
 
                 // 1. HARDWARE & BUILTIN INTRINSIC INTERCEPT
                 if (try_emit_call_intrinsic(node, dest_reg)) {
@@ -1123,35 +1144,36 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 break;
             }
 
-            case NODE_TABLE_SET: {
-                int  val_reg        = allocate_register ();
-                generate_asm (node -> as.table_set.value, val_reg);
+			case NODE_TABLE_SET: {
+				// 1. Attempt to emit as a hardware intrinsic FIRST, passing only the AST node!
+				if (try_emit_table_set_intrinsic(node->as.table_set.table_expr,
+												 node->as.table_set.key,
+												 node->as.table_set.value))
+				{
+					// Intrinsic handled the emission (either via immediate or on-demand register)!
+					break;
+				}
 
-                // Try hardware intrinsic first
-                if (!try_emit_table_set_intrinsic (node -> as.table_set.table_expr, 
-                                                   node -> as.table_set.key, 
-                                                   val_reg))
-                {
-                    // Fallback to dynamic table set
-                    int  table_reg  = allocate_register ();
-                    int  key_reg    = allocate_register ();
+				// 2. Fallback: Dynamic heap assignment (table[key] = value)
+				int val_reg   = allocate_register();
+				int table_reg = allocate_register();
+				int key_reg   = allocate_register();
 
-                    generate_asm (node -> as.table_set.table_expr, table_reg);
-                    generate_asm (node -> as.table_set.key, key_reg);
+				generate_asm(node->as.table_set.value, val_reg);
+				generate_asm(node->as.table_set.table_expr, table_reg);
+				generate_asm(node->as.table_set.key, key_reg);
 
-                    emit_asm ("PUSH R%d ; table pointer", table_reg);
-                    emit_asm ("PUSH R%d ; key",           key_reg);
-                    emit_asm ("PUSH R%d ; value",         val_reg);
-                    emit_asm ("CALL __builtin_table_set ; store key-value pair in table");
-                    emit_asm ("IADD SP, 3 ; clean up stack arguments");
+				emit_asm("PUSH R%d ; table pointer", table_reg);
+				emit_asm("PUSH R%d ; key",           key_reg);
+				emit_asm("PUSH R%d ; value",         val_reg);
+				emit_asm("CALL __builtin_table_set ; store key-value pair in table");
+				emit_asm("IADD SP, 3 ; clean up stack arguments");
 
-                    unlock_register (table_reg);
-                    unlock_register (key_reg);
-                }
-
-                unlock_register (val_reg);
-                break;
-            }
+				unlock_register(val_reg);
+				unlock_register(table_reg);
+				unlock_register(key_reg);
+				break;
+			}
 
             case NODE_TABLE_GET: {
                 // 1. Attempt hardware intrinsic read directly into dest_reg

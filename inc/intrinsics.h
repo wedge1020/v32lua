@@ -25,7 +25,8 @@ extern const IOPortMap ioports[];
 bool emit_gpu_draw_intrinsic      (ASTNode    *, int);
 int  try_emit_action_intrinsic    (const char *, int);
 int  try_emit_call_intrinsic      (ASTNode    *, int);
-int  try_emit_table_set_intrinsic (ASTNode    *, ASTNode *, int);
+int  try_emit_table_set_intrinsic (ASTNode    *, ASTNode *, ASTNode *);
 int  try_emit_table_get_intrinsic (ASTNode    *, ASTNode *, int);
+bool is_raw_integer_expression    (ASTNode    *);
 
 #endif

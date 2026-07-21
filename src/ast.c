@@ -233,3 +233,50 @@ ASTNode *make_node_table_set (ASTNode *table_expr, ASTNode *key_expr, ASTNode *v
     node->as.table_set.value = value_expr;
     return node;
 }
+
+// Returns true if the node is a compile-time literal that can be used as an immediate operand.
+bool try_get_immediate_operand(ASTNode *node, char *imm_buffer, size_t buf_size)
+{
+    if (node == NULL) return false;
+
+    // CASE 1: The node is a function call like hex("0xFF000000")
+    if (node->type == NODE_FUNCTION_CALL)
+    {
+        // 1. Verify the target is an identifier named "hex"
+        if (node->as.call.target != NULL &&
+            node->as.call.target->type == NODE_IDENTIFIER &&
+            strcmp(node->as.call.target->as.id.name, "hex") == 0)
+        {
+            // 2. Step inside the call's argument list to get the actual literal
+            ASTNode *arg = node->as.call.args_head;
+
+            if (arg != NULL && arg->type == NODE_STRING)
+            {
+                // Correctly extract from the ARGUMENT's string union!
+                snprintf(imm_buffer, buf_size, "%s", arg->as.string_val.value);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // CASE 2: The node is already a raw string AST node
+    if (node->type == NODE_STRING && is_raw_integer_expression(node))
+    {
+        snprintf(imm_buffer, buf_size, "%s", node->as.string_val.value);
+        return true;
+    }
+
+    // CASE 3: BONUS! Fold whole integer number literals (e.g., ioports.gpu.clear = 0)
+    // If your Vircon32 hardware ports accept plain integer immediates:
+    if (node->type == NODE_NUMBER)
+    {
+        // Check if the float has no fractional component (e.g., 0.0, 1.0, 255.0)
+        if (node->as.number.val == (int)node->as.number.val) {
+            snprintf(imm_buffer, buf_size, "%d", (int)node->as.number.val);
+            return true;
+        }
+    }
+
+    return false;
+}

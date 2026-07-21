@@ -142,6 +142,14 @@ char *process_string_literal (const char *text, int  len)
                             return (TOKEN_IDENTIFIER); 
                         }
 
+0x[0-9a-fA-F]+          {
+                            // Parse hex string as 32-bit unsigned integer
+                            unsigned long val = strtoul(yytext, NULL, 16);
+                            // Store in your existing double AST payload
+                            yylval.number_val = (double) val;
+                            return (TOKEN_NUMBER);
+                        }
+
 [0-9]+(\.[0-9]+)?       { 
                             yylval.number_val  = atof (yytext); 
                             return (TOKEN_NUMBER); 
