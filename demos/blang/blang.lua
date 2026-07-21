@@ -17,23 +17,37 @@ function draw(object, mode)
     ioports.gpu.region   = object.r   -- set the region
     ioports.gpu.x        = object.x   -- set drawing point X
     ioports.gpu.y        = object.y   -- set drawing point Y
-	ioports.gpu.draw(mode)
-    
-    -- Evaluate mode at runtime and invoke the intrinsic with static literals!
-	--[[
-    if (mode == "zoom") then
-        ioports.gpu.draw("zoom")      -- Emits: OUT GPU_Command, GPUCommand_DrawRegionZoomed
-    elseif (mode == "rotate") then
-        ioports.gpu.draw("rotate")    -- Emits: OUT GPU_Command, GPUCommand_DrawRegionRotated
-    elseif (mode == "rotozoom") then
-        ioports.gpu.draw("rotozoom")  -- Emits: OUT GPU_Command, GPUCommand_DrawRegionRotozoomed
-    else
-        ioports.gpu.draw()            -- Emits: OUT GPU_Command, GPUCommand_DrawRegion (Handles nil or "draw")
-    end --]]
+
+	--
+	-- until I fully fix ioports.gpu.draw(), a nil argument needs to be
+	-- adapted to the desired (default) action
+	--
+	if (mode == nil) then
+		ioports.gpu.draw("zoom")
+	else
+		ioports.gpu.draw(mode)
+	end
 end
 
 function player:draw(mode)
     draw(self, mode)
+end
+
+function player:undraw(object)
+    -- missing the stack again: a 0x003FFFFD or whatever is being loaded
+	-- into R3 when a table tag is expected, this will result in table_get
+	-- to bail out with a HLT
+	--
+	-- last time this happened, the compiler's parameter logic was off by one,
+	-- and was fixed. The method for player draw() works fine, but undraw()
+	-- is specifically having an issue. WHY???
+    ioports.gpu.region    = object.r   -- set the region
+    ioports.gpu.x         = object.x   -- set drawing point X
+    ioports.gpu.y         = object.y   -- set drawing point Y
+	current               = ioports.gpu.multiply
+	ioports.gpu.multiply  = 255
+	ioports.gpu.draw()
+	ioports.gpu.multiply  = current
 end
 
 function init()
@@ -55,6 +69,7 @@ function init()
         enemies[index].xv   = (index % 2 == 0) and 3 or -3 -- alternate horizontal directions
         enemies[index].yv   = (index > 2)      and 2 or -2 -- alternate vertical directions
         enemies[index].draw = player.draw       -- attach our OOP draw method to the enemy!
+        enemies[index].undraw = player.undraw       -- attach our OOP draw method to the enemy!
         index = index + 1
     end
 
@@ -113,6 +128,9 @@ function game_loop()
     while index <= 4 do
         e = enemies[index]
         
+		__rawasm__("__debug:")
+		e.undraw(e)
+
         -- Apply velocity vectors to position
         e.x = e.x + e.xv
         e.y = e.y + e.yv
@@ -128,8 +146,7 @@ function game_loop()
         end
 
         -- Render enemy using default drawing (or "zoom", "rotate", "rotozoom")
-		__asm__("__debug:")
-        e:draw("draw") 
+        e:draw() 
         index = index + 1
     end
 end

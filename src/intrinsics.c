@@ -16,7 +16,7 @@ const IOPortMap ioports[] = {
     { "ioports.rng.seed",      "RNG_CurrentValue",         IOPORT_WRITE,                IOPORT_TYPE_INTEGER },
     { "ioports.gpu.pixels",    "GPU_RemainingPixels",      IOPORT_READ,                 IOPORT_TYPE_INTEGER },
     { "ioports.gpu.bgcolor",   "GPU_ClearColor",           IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
-    { "ioports.gpu.multcolor", "GPU_MultiplyColor",        IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
+    { "ioports.gpu.multiply",  "GPU_MultiplyColor",        IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
     { "ioports.gpu.blending",  "GPU_ActiveBlending",       IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
     { "ioports.gpu.texture",   "GPU_SelectedTexture",      IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
     { "ioports.gpu.region",    "GPU_SelectedRegion",       IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
