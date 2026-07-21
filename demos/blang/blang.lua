@@ -22,11 +22,13 @@ function draw(object, mode)
 	-- until I fully fix ioports.gpu.draw(), a nil argument needs to be
 	-- adapted to the desired (default) action
 	--
+	--[[
 	if (mode == nil) then
-		ioports.gpu.draw("zoom")
+		ioports.gpu.draw("draw")
 	else
 		ioports.gpu.draw(mode)
-	end
+	end--]]
+	__rawasm__("OUT GPU_Command, GPUCommand_DrawRegionZoomed")
 end
 
 function player:draw(mode)
@@ -68,6 +70,9 @@ function init()
         enemies[index].y  = 50  * index          -- stagger initial Y positions down screen
         enemies[index].xv   = (index % 2 == 0) and 3 or -3 -- alternate horizontal directions
         enemies[index].yv   = (index > 2)      and 2 or -2 -- alternate vertical directions
+		enemies[index].sx   = index
+		enemies[index].sy   = index
+		enemies[index].sd   = -1.0
         enemies[index].draw = player.draw       -- attach our OOP draw method to the enemy!
         enemies[index].undraw = player.undraw       -- attach our OOP draw method to the enemy!
         index = index + 1
@@ -76,11 +81,11 @@ function init()
     ioports.gpu.clear("black") -- initial clear screen
 
     -- Draw player and enemies at initial positions
-    player:draw()
+    player:draw("zoom")
 	
     index = 1
     while index <= 4 do
-        enemies[index]:draw()
+        enemies[index]:draw("zoom")
         index = index + 1
     end
 end
@@ -99,28 +104,42 @@ function game_loop()
     if (left >  0) then
         player.r = 60
         player.x = player.x - player.v
+		if (player.x <  -8) then
+			player.x  = 638
+		end
     end
 
     right = ioports.inp.right
     if (right >  0) then
         player.r = 62
         player.x = player.x + player.v
+		if (player.x >  638) then
+			player.x  = 0
+		end
     end
 
     up = ioports.inp.up
     if (up >  0) then
         player.r = 94
         player.y = player.y - player.v
+		if (player.y <  -10) then
+			player.y  = 358
+		end
     end
 
     down = ioports.inp.down
     if (down >  0) then
         player.r = 86
         player.y = player.y + player.v
+		if (player.y >  358) then
+			player.y  = 0
+		end
     end
 
     -- Draw Player
-    player:draw()
+	ioports.gpu.scaleX  = 1.0
+	ioports.gpu.scaleY  = 1.0
+    player:draw("draw")
 
     -- --- ENEMY PONG-STYLE MOVEMENT & REFLECTION ---
 	
@@ -128,8 +147,36 @@ function game_loop()
     while index <= 4 do
         e = enemies[index]
         
-		__rawasm__("__debug:")
-		e.undraw(e)
+		ioports.gpu.region    = e.r   -- set the region
+		ioports.gpu.x         = e.x   -- set drawing point X
+		ioports.gpu.y         = e.y   -- set drawing point Y
+		current               = ioports.gpu.multiply
+		ioports.gpu.multiply  = 65535
+		ioports.gpu.draw("zoom")
+		ioports.gpu.multiply  = current
+		-- e.undraw(e)
+
+		if (e.sd == 1) then
+			if (e.sx < 4.0) then
+				e.sx  = e.sx + (e.sd * 0.10)
+			else
+				e.sd  = e.sd * -1
+			end
+
+			if (e.sy < 4.0) then
+				e.sy  = e.sy + (e.sd * 0.10)
+			end
+		else
+			if (e.sx > 0.5) then
+				e.sx  = e.sx + (e.sd * 0.10)
+			else
+				e.sd  = e.sd * -1
+			end
+
+			if (e.sy > 0.5) then
+				e.sy  = e.sy + (e.sd * 0.10)
+			end
+		end
 
         -- Apply velocity vectors to position
         e.x = e.x + e.xv
@@ -146,7 +193,10 @@ function game_loop()
         end
 
         -- Render enemy using default drawing (or "zoom", "rotate", "rotozoom")
-        e:draw() 
+		__rawasm__("__debug:")
+		ioports.gpu.scaleX  = e.sx
+		ioports.gpu.scaleY  = e.sy
+        e:draw("zoom") 
         index = index + 1
     end
 end
