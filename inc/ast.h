@@ -20,7 +20,7 @@ struct cart_resource
 //
 typedef struct astnode {
     NodeType type;
-	int  line_number;
+    int  line_number;
     struct astnode* next; // Sibling pointer for statements in a block
 
     union {
@@ -29,13 +29,13 @@ typedef struct astnode {
             struct astnode* body;
         } while_loop;
 
-		struct {
-			char* index_name;          // The loop variable name (e.g., "i")
-			struct astnode* start_expr;
-			struct astnode* stop_expr;
-			struct astnode* step_expr; // Can be NULL (defaults to 1.0)
-			struct astnode* body;
-		} for_numeric;
+        struct {
+            char* index_name;          // The loop variable name (e.g., "i")
+            struct astnode* start_expr;
+            struct astnode* stop_expr;
+            struct astnode* step_expr; // Can be NULL (defaults to 1.0)
+            struct astnode* body;
+        } for_numeric;
 
         struct
         {
@@ -76,6 +76,10 @@ typedef struct astnode {
             struct astnode *right;
             Operator operator;
         } binary;
+
+        struct {
+            bool val;
+        } boolean;
 
         struct {
             struct astnode *operand;
@@ -140,6 +144,8 @@ ASTNode *make_node_method_def   (ASTNode *, const char *, int , ASTNode *, ASTNo
 ASTNode *make_node_table_constructor (void);
 ASTNode *make_node_table_get (ASTNode *, ASTNode *);
 ASTNode *make_node_table_set (ASTNode *, ASTNode *, ASTNode *);
+ASTNode *make_node_boolean (bool);
+ASTNode *make_node_nil (void);
 bool     try_get_immediate_operand (ASTNode *, char *, size_t);
 
 #endif

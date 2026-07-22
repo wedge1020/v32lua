@@ -38,6 +38,7 @@ char *mangle_method_name (const char *table_name, const char *method_name);
 %token TOKEN_FUNCTION TOKEN_ASM TOKEN_RAWASM TOKEN_RETURN TOKEN_AND TOKEN_OR
 %token TOKEN_EQ TOKEN_NEQ TOKEN_LE TOKEN_GE TOKEN_LT TOKEN_GT TOKEN_CONCAT
 %token TOKEN_LOCAL TOKEN_DO TOKEN_NOT TOKEN_LEN UNARY_MINUS
+%token TOKEN_TRUE TOKEN_FALSE TOKEN_NIL
 
 %type <ast_node> statement statement_list stat_list expr function_def return_stmt
 %type <ast_node> table_constructor function_call else_branch prefix_expr
@@ -401,6 +402,9 @@ expr:
     | expr '*' expr     { $$ = make_node_binary (NODE_MUL, $1, $3); }
     | expr '/' expr     { $$ = make_node_binary (NODE_DIV, $1, $3); }
     | expr '%' expr     { $$ = make_node_binary (NODE_MOD, $1, $3); }
+    | TOKEN_TRUE  { $$ = make_node_boolean (true);  }
+    | TOKEN_FALSE { $$ = make_node_boolean (false); }
+	| TOKEN_NIL   { $$ = make_node_nil ();          }
     | TOKEN_LEN expr    { $$ = make_node_unary  (OP_LEN,   $2);     }
     | '-' expr %prec UNARY_MINUS { $$ = make_node_unary (OP_UNM, $2); }
     | TOKEN_NOT expr             { $$ = make_node_unary (OP_NOT, $2); }

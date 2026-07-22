@@ -582,7 +582,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 break;
             }
                              
-			case NODE_MULTIPLE_ASSIGNMENT: {
+            case NODE_MULTIPLE_ASSIGNMENT: {
                 ASTNode *curr_tgt = node->as.mult_assign.targets_head;
                 ASTNode *curr_val = node->as.mult_assign.values_head;
                 int      val_reg  = -1;
@@ -1033,6 +1033,21 @@ void  generate_asm (ASTNode *node, int  dest_reg)
             }
             */
 
+            case NODE_BOOLEAN:
+                if (node -> as.boolean.val)
+                {
+                    emit_asm ("MOV R%d, BOXED_TRUE ; literal true\n",   dest_reg);
+                }
+                else
+                {
+                    emit_asm ("MOV R%d, BOXED_FALSE ; literal false\n", dest_reg);
+                }
+                break;
+
+			case NODE_NIL:
+				emit_asm ("MOV R%d, BOXED_NIL; the lua nil\n", dest_reg);
+				break;
+
             case NODE_AND: {
                 int label_id = get_next_label();
                 const char *ctx = get_current_function_name(); // Fetch context
@@ -1144,36 +1159,36 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 break;
             }
 
-			case NODE_TABLE_SET: {
-				// 1. Attempt to emit as a hardware intrinsic FIRST, passing only the AST node!
-				if (try_emit_table_set_intrinsic(node->as.table_set.table_expr,
-												 node->as.table_set.key,
-												 node->as.table_set.value))
-				{
-					// Intrinsic handled the emission (either via immediate or on-demand register)!
-					break;
-				}
+            case NODE_TABLE_SET: {
+                // 1. Attempt to emit as a hardware intrinsic FIRST, passing only the AST node!
+                if (try_emit_table_set_intrinsic(node->as.table_set.table_expr,
+                                                 node->as.table_set.key,
+                                                 node->as.table_set.value))
+                {
+                    // Intrinsic handled the emission (either via immediate or on-demand register)!
+                    break;
+                }
 
-				// 2. Fallback: Dynamic heap assignment (table[key] = value)
-				int val_reg   = allocate_register();
-				int table_reg = allocate_register();
-				int key_reg   = allocate_register();
+                // 2. Fallback: Dynamic heap assignment (table[key] = value)
+                int val_reg   = allocate_register();
+                int table_reg = allocate_register();
+                int key_reg   = allocate_register();
 
-				generate_asm(node->as.table_set.value, val_reg);
-				generate_asm(node->as.table_set.table_expr, table_reg);
-				generate_asm(node->as.table_set.key, key_reg);
+                generate_asm(node->as.table_set.value, val_reg);
+                generate_asm(node->as.table_set.table_expr, table_reg);
+                generate_asm(node->as.table_set.key, key_reg);
 
-				emit_asm("PUSH R%d ; table pointer", table_reg);
-				emit_asm("PUSH R%d ; key",           key_reg);
-				emit_asm("PUSH R%d ; value",         val_reg);
-				emit_asm("CALL __builtin_table_set ; store key-value pair in table");
-				emit_asm("IADD SP, 3 ; clean up stack arguments");
+                emit_asm("PUSH R%d ; table pointer", table_reg);
+                emit_asm("PUSH R%d ; key",           key_reg);
+                emit_asm("PUSH R%d ; value",         val_reg);
+                emit_asm("CALL __builtin_table_set ; store key-value pair in table");
+                emit_asm("IADD SP, 3 ; clean up stack arguments");
 
-				unlock_register(val_reg);
-				unlock_register(table_reg);
-				unlock_register(key_reg);
-				break;
-			}
+                unlock_register(val_reg);
+                unlock_register(table_reg);
+                unlock_register(key_reg);
+                break;
+            }
 
             case NODE_TABLE_GET: {
                 // 1. Attempt hardware intrinsic read directly into dest_reg

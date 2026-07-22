@@ -109,6 +109,9 @@ char *process_string_literal (const char *text, int  len)
 "return"                { return TOKEN_RETURN;   }
 "and"                   { return TOKEN_AND;      }
 "or"                    { return TOKEN_OR;       }
+"true"                  { return TOKEN_TRUE;     }
+"false"                 { return TOKEN_FALSE;    }
+"nil"                   { return TOKEN_NIL;      }
 
 "=="                    { return TOKEN_EQ;       }
 "~="                    { return TOKEN_NEQ;      }

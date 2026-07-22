@@ -12,7 +12,7 @@ ASTNode *make_node (NodeType type)
     ASTNode* n = (ASTNode*)calloc(1, sizeof(ASTNode));
     n->type = type;
     n->next = NULL;
-	n->line_number = yylineno;
+    n->line_number = yylineno;
     return n;
 }
 
@@ -153,7 +153,7 @@ ASTNode *make_node_unary (Operator  op, ASTNode *operand)
 
 void generate_binary_op (ASTNode* node)
 {
-	if (node->type == NODE_CONCAT) {
+    if (node->type == NODE_CONCAT) {
         // --- Step 1: Evaluate Left Operand ---
         // Generates assembly for left child and leaves result in R0 (register index 0)
         generate_asm(node->as.binary.left, 0);
@@ -232,6 +232,18 @@ ASTNode *make_node_table_set (ASTNode *table_expr, ASTNode *key_expr, ASTNode *v
     node->as.table_set.key = key_expr;
     node->as.table_set.value = value_expr;
     return node;
+}
+
+ASTNode *make_node_boolean (bool  value)
+{
+    ASTNode *node           = make_node (NODE_BOOLEAN);
+    node -> as.boolean.val  = value;
+    return (node);
+}
+
+ASTNode *make_node_nil (void)
+{
+    return (make_node (NODE_NIL));
 }
 
 // Returns true if the node is a compile-time literal that can be used as an immediate operand.
