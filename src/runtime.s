@@ -650,6 +650,9 @@ __print_check_tag:
     IEQ  R4, BOXED_ROMSTRING      ; Is it a ROM String Literal?
     JT   R4, __print_unbox_rom
 
+    MOV  R4, R3              ; Copy target value to scratch register R4
+    AND  R4, BOXED_DATA      ; Isolate upper 10 bits (Tag)
+
     ;; Check if it's a RAM Heap String (Tag 0xFFC0xxxx with address >= 4)
     IEQ  R4, BOXED_RAMSTRING      ; Does it have the RAM String / Primitive tag?
     JF   R4, __print_coerce  ; If neither string tag, coerce!
@@ -758,8 +761,12 @@ __builtin_eq:
     AND  R3, BOXED_DATA
     IEQ  R3, BOXED_ROMSTRING
     JT   R3, __eq_left_valid
+
+    MOV  R3, R1
+    AND  R3, BOXED_DATA
     IEQ  R3, BOXED_RAMSTRING
     JF   R3, __eq_return_false
+
     MOV  R3, R1
     AND  R3, BOXED_PAYLOAD
     ILT  R3, 4
@@ -771,6 +778,8 @@ __eq_left_valid:
     AND  R3, BOXED_DATA
     IEQ  R3, BOXED_ROMSTRING
     JT   R3, __eq_right_valid
+    MOV  R3, R2
+    AND  R3, BOXED_DATA
     IEQ  R3, BOXED_RAMSTRING
     JF   R3, __eq_return_false
     MOV  R3, R2
@@ -870,6 +879,9 @@ __builtin_tostring:
     IEQ  R3, BOXED_ROMSTRING
     JT   R3, __tostring_passthrough
 
+    MOV  R3, R1
+    AND  R3, BOXED_DATA
+
     ;; Check for RAM Strings
     IEQ  R3, BOXED_RAMSTRING
     JF   R3, __tostring_check_primitives
@@ -884,20 +896,23 @@ __tostring_check_primitives:
     MOV  R6, R1
     IEQ  R6, BOXED_NIL
     JT   R6, __tostring_nil
+
     MOV  R6, R1
     IEQ  R6, BOXED_FALSE
     JT   R6, __tostring_false
+
     MOV  R6, R1
     IEQ  R6, BOXED_TRUE
     JT   R6, __tostring_true
 
-    ;; Existing tag checks follow...
-    MOV  R2, R1
-    AND  R2, BOXED_DATA
-
-    MOV  R3, R2 
-    IEQ  R3, BOXED_ROMSTRING      ; Is it already a String? 
-    JT   R3, __tostring_passthrough 
+; redundant. if that proves the case. remove this
+;    ;; Existing tag checks follow...
+;    MOV  R2, R1
+;    AND  R2, BOXED_DATA
+;
+;    MOV  R3, R2 
+;    IEQ  R3, BOXED_ROMSTRING      ; Is it already a String? 
+;    JT   R3, __tostring_passthrough 
     
     MOV  R3, R2 
     IEQ  R3, BOXED_TABLE      ; Is it a Table? 
