@@ -10,8 +10,9 @@ right                           = 3
 frames                          = 0
 
 function init()
-	local x                     = 0
-	local y                     = 0
+
+	x                           = 0
+	y                           = 0
 
 	--
 	-- set the texture
@@ -24,7 +25,7 @@ function init()
 	region_id                   = 0
 
 	--
-	-- define all the textures on the 128x128 sprite sheet
+	-- define all the textures on the 128x88 sprite sheet
 	--
 	row                         = 0
 	while (row                 <  11) do
@@ -34,6 +35,7 @@ function init()
 
 			x                   = col * 8
 			y                   = row * 8
+
 
 			ioports.gpu.minX    = x
 			ioports.gpu.hotX    = x
@@ -61,9 +63,10 @@ function game_loop()
 	-- attempt some low quality animation
 	--
 	if (frames                 >= 30) and (secondframe == false) then
-		player.tile             = player.tile + 1
+		adjust                  = 1
 		secondframe             = true
 	else
+		adjust                  = 0
 		secondframe             = false
 	end
 
@@ -75,38 +78,37 @@ function game_loop()
 	--
 	-- display our player (using spr()!)
 	--
-	ioports.gpu.region          = player.tile
-	spr (player.tile, player.x, player.y, 1, 1, player.xflip, false)
+	--ioports.gpu.region          = player.tile
+	tile                        = player.tile + adjust
+	spr (tile, player.x, player.y, 1, 1, player.xflip, false)
 
 	--
 	-- input checks
 	--
-	status  = btn (up)
-	if (status == true) then
+	if btn(up) then
 		player.tile             = 82
 		player.y                = player.y - 1
 		player.xflip            = false
 		player.yflip            = false
 	end
 
-	status  = btn (down)
-	if (status == true) then
+	if btn(down) then
 		player.tile             = 80
 		player.y                = player.y + 1
 		player.xflip            = false
 		player.yflip            = false
 	end
 
-	status  = btn (left)
-	if (status == true) then
+	if btn(left) then
 		player.tile             = 84
 		player.x                = player.x - 1
 		player.xflip            = false
 		player.yflip            = false
 	end
 
-	status  = btn (right)
-	if (status == true) then
+	--status  = btn(right)
+	--if (status == true) then
+	if btn(right) then
 		player.tile             = 84
 		player.x                = player.x + 1
 		player.xflip            = true
@@ -117,13 +119,6 @@ function game_loop()
 	-- 60 frames a second
 	--
 	frames                      = (frames + 1) % 60
-
-	if frames == 0 then
-		player.tile             = player.tile + 2 
-		if player.tile         >= 86 then
-			player.tile         = 80
-		end
-	end
 
 	print (0,     0,   "player.x: ")
 	print (100,   0,   player.x)
@@ -143,9 +138,6 @@ function game_loop()
 	print (100, 140,   ioports.gpu.maxY)
 	print (0,   160,   "tile:     ")
 	print (100, 160,   player.tile)
-	print (0,   180,   "btn(up):  ")
-	state = btn(up,0)
-	print (100, 180,   state)
 	print (0,   200,   "frames:   ")
 	print (100, 200,   frames)
 end
