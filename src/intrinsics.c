@@ -599,6 +599,11 @@ int   try_emit_call_intrinsic (ASTNode *node, int  dest_reg)
         emit_asm("IADD SP, 2 ; Clean up btn() arguments");
         // Result is left in R0 (standard calling convention)
 
+		if (dest_reg != 0)
+		{
+            emit_asm("MOV R%d, R0 ; Transfer return value to allocated AST register\n", dest_reg);
+        }
+
         return (1);
     }
 
