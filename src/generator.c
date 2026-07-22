@@ -1098,11 +1098,18 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     } else {
                         emit_asm ("MOV R%d, R0\n", dest_reg);
                     }
+
+					// if __builtin_eq boxes values for us, we don't need to rebox, commenting this out:
                     // Box the 0/1 result from equality checking into a NaN boolean!
-                    emit_asm ("IADD R%d, BOXED_BOOLEAN ; Box as Lua Boolean (False/True)\n", dest_reg);
+                    //emit_asm ("IADD R%d, BOXED_BOOLEAN ; Box as Lua Boolean (False/True)\n", dest_reg);
                 }
                 else
                 {
+					// For magnitude comparisons (<, <=, >, >=), strip NaN tags
+					// if comparing boxed booleans/numbers against numbers:
+					emit_asm ("AND R%d, BOXED_PAYLOAD ; Strip NaN tag if present\n", dest_reg);
+					emit_asm ("AND R%d, BOXED_PAYLOAD ; Strip NaN tag if present\n", right_reg);
+
                     switch (node -> as.binary.operator) {
                         case OP_LT:  emit_asm ("FLT R%d, R%d\n", dest_reg, right_reg); break;
                         case OP_LE:  emit_asm ("FLE R%d, R%d\n", dest_reg, right_reg); break;

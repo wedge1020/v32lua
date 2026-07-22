@@ -1177,41 +1177,43 @@ _set_scale_x:
 
     MOV   R1, 3.0
     MOV   R2, [BP+8]        ; flip_y
-    INE   R2, BOXED_TRUE    ; R2 not used elsewhere, can be destroyed
+    INE   R2, BOXED_TRUE
     JT    R2, _set_scale_y
     MOV   R1, -3.0
 
 _set_scale_y:
     OUT   GPU_DrawingScaleY, R1
 
-    ;; --- 2. Prepare Loop Limits ---
-    ;; Convert Float 'w' and 'h' arguments to integers
+    ;; --- 2. Prepare Loop Limits & Convert ALL Floats to Integers ---
     MOV   R1, [BP+5]
-	MOV   R5, R1            ; R5 = R1
-    CFI   R5                ; R5 = width limit (cols)
+    MOV   R5, R1            ; R5 = w
+    CFI   R5                ; Convert float 'w' to integer limit (cols)
     MOV   R1, [BP+6]
-	MOV   R6, R1            ; R6 = R1
-    CFI   R6                ; R6 = height limit (rows)
+    MOV   R6, R1            ; R6 = h
+    CFI   R6                ; Convert float 'h' to integer limit (rows)
 
     MOV   R7, [BP+2]        ; R7 = Base sprite 'n'
+    CFI   R7                ; [FIX 1] Convert float 'n' to integer!
     MOV   R8, [BP+3]        ; R8 = Base 'x'
+    CFI   R8                ; [FIX 1] Convert float 'x' to integer!
     MOV   R9, [BP+4]        ; R9 = Base 'y'
+    CFI   R9                ; [FIX 1] Convert float 'y' to integer!
 
     ;; Initialize Row Counter
     MOV   R4, 0             ; R4 = row
 
 _row_loop_start:
-	MOV   R1, R4                ; preserve R4 from destructive comparison
+    MOV   R1, R4            ; preserve R4 from destructive comparison
     IGE   R1, R6
-    JT    R1, _end_spr          ; If row >= h, we are done
+    JT    R1, _end_spr      ; If row >= h, we are done
 
     ;; Initialize Col Counter
-    MOV   R3, 0                 ; R3 = col
+    MOV   R3, 0             ; R3 = col
 
 _col_loop_start:
-	MOV   R1, R3                ; preserve R3 from destructive comparison
-    IGT   R1, R5
-    JT    R1, _row_loop_end     ; If col >= w, move to next row
+    MOV   R1, R3            ; preserve R3 from destructive comparison
+    IGE   R1, R5            ; [FIX 2] Changed IGT to IGE! (If col >= w, move to next row)
+    JT    R1, _row_loop_end
 
     ;; --- 3. Calculate Target Region ID ---
     ;; region = n + col + (row * 16)
@@ -1233,8 +1235,9 @@ _col_loop_start:
     JMP   _set_x
 
 _calc_flip_x:
-    ;; Flipped X = base_x + (w - col) * 8
+    ;; [FIX 3] Flipped X = base_x + (w - 1 - col) * 8
     MOV   R1, R5
+    ISUB  R1, 1             ; Subtract 1 for zero-indexed grid mirroring
     ISUB  R1, R3
     IMUL  R1, 8
     IADD  R1, R8
@@ -1254,8 +1257,9 @@ _set_x:
     JMP   _set_y
 
 _calc_flip_y:
-    ;; Flipped Y = base_y + (h - row) * 8
+    ;; [FIX 3] Flipped Y = base_y + (h - 1 - row) * 8
     MOV   R1, R6
+    ISUB  R1, 1             ; Subtract 1 for zero-indexed grid mirroring
     ISUB  R1, R4
     IMUL  R1, 8
     IADD  R1, R9
