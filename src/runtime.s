@@ -752,6 +752,10 @@ __strcmp_equal:
 ;; Incoming Stack: [BP+3] = Left_Val, [BP+2] = Right_Val 
 ;; -------------------------------------------------------------------------------------
 __builtin_eq:
+
+	MOV  R1, [BP+3]
+	MOV  R2, [BP+2]
+
     ;; Fast-path: If bitwise identical, they are strictly equal
     IEQ  R1, R2
     JT   R1, __eq_return_true
@@ -1303,25 +1307,27 @@ __builtin_btn:
 
     ;; --- 1. Select Gamepad ---
     MOV   R1, [BP+3]
+	CFI   R1
     ;; (Optional: FTOI R1, R1 if your numbers are floats)
     OUT   INP_SelectedGamepad, R1
 
     ;; --- 2. Evaluate Button ID ---
     MOV   R2, [BP+2]
+	CFI   R2 ; convert button ID to int
 
     ;; Compare and jump to specific hardware port read
 	MOV   R1, R2
     IEQ   R1, 0
-    JT    R1, _btn_left
-	MOV   R1, R2
-    IEQ   R1, 1
-    JT    R1, _btn_right
-	MOV   R1, R2
-    IEQ   R1, 2
     JT    R1, _btn_up
 	MOV   R1, R2
-    IEQ   R1, 3
+    IEQ   R1, 1
     JT    R1, _btn_down
+	MOV   R1, R2
+    IEQ   R1, 2
+    JT    R1, _btn_left
+	MOV   R1, R2
+    IEQ   R1, 3
+    JT    R1, _btn_right
 	MOV   R1, R2
     IEQ   R1, 4
     JT    R1, _btn_a
