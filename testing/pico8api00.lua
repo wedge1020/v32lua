@@ -1,4 +1,4 @@
---#title "pico-8 API spr() test"
+--#title "pico-8 API spr() and btn() test"
 --#texture sprites "textures/pico8apitest.png"
 --#version "0.3"
 
@@ -81,29 +81,32 @@ function game_loop()
 	--
 	-- input checks
 	--
-	if (btn (up, 0)) then
+	status  = btn (up)
+	if (status == true) then
 		player.tile             = 82
 		player.y                = player.y - 1
 		player.xflip            = false
 		player.yflip            = false
 	end
 
-	if (btn (down, 0)) then
+	status  = btn (down)
+	if (status == true) then
 		player.tile             = 80
 		player.y                = player.y + 1
 		player.xflip            = false
 		player.yflip            = false
 	end
 
-	if (btn (left, 0)) then
+	status  = btn (left)
+	if (status == true) then
 		player.tile             = 84
 		player.x                = player.x - 1
 		player.xflip            = false
 		player.yflip            = false
 	end
 
-	state = btn(right,0)
-	if (btn(right,0)) then
+	status  = btn (right)
+	if (status == true) then
 		player.tile             = 84
 		player.x                = player.x + 1
 		player.xflip            = true
