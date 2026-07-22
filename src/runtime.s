@@ -1129,7 +1129,344 @@ __bios_print_done:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-;; SECTION 6: ROM DATA & STRING CONSTANTS
+;; SECTION 6: PICO-8 API LAYER
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; __builtin_spr (Multi-Tile Loop & Flip Support)
+;;
+;; Stack layout relative to BP:
+;; [BP+2]: n (Region ID)
+;; [BP+3]: x
+;; [BP+4]: y
+;; [BP+5]: w (Scale X / Grid Width as Float)
+;; [BP+6]: h (Scale Y / Grid Height as Float)
+;; [BP+7]: flip_x (Boolean)
+;; [BP+8]: flip_y (Boolean)
+;;
+;; NOTE on Initializing the Vircon32 Regions
+;;
+;; To  guarantee this  works flawlessly,  the region  initialization must
+;; define  regions   0  through  255  sequentially   from  left-to-right,
+;; top-to-bottom across your main 128x128 PICO-8 texture.
+;;
+;; Width & Height: Every region must be explicitly defined as exactly 8x8
+;; pixels.
+;;
+;; Hot-spot: Every  region's hot-spot  MUST be  configured as  (0,0) (the
+;; top-left corner). If the hot-spot  defaults to the center, the flipped
+;; offset  math (w  - col)  *  8 will  push  the sprites  heavily out  of
+;; alignment.
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_spr:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; --- 1. Set Global Scales & Flip Flags ---
+    MOV   R1, 1.0
+    MOV   R2, [BP+7]        ; flip_x
+    INE   R2, BOXED_TRUE
+    JT    R2, _set_scale_x
+    MOV   R1, -1.0
+_set_scale_x:
+    OUT   GPU_DrawingScaleX, R1
+
+    MOV   R1, 1.0
+    MOV   R2, [BP+8]        ; flip_y
+    INE   R2, BOXED_TRUE    ; R2 not used elsewhere, can be destroyed
+    JT    R2, _set_scale_y
+    MOV   R1, -1.0
+
+_set_scale_y:
+    OUT   GPU_DrawingScaleY, R1
+
+    ;; --- 2. Prepare Loop Limits ---
+    ;; Convert Float 'w' and 'h' arguments to integers
+    MOV   R1, [BP+5]
+	MOV   R5, R1            ; R5 = R1
+    CFI   R5                ; R5 = width limit (cols)
+    MOV   R1, [BP+6]
+	MOV   R6, R1            ; R6 = R1
+    CFI   R6                ; R6 = height limit (rows)
+
+    MOV   R7, [BP+2]        ; R7 = Base sprite 'n'
+    MOV   R8, [BP+3]        ; R8 = Base 'x'
+    MOV   R9, [BP+4]        ; R9 = Base 'y'
+
+    ;; Initialize Row Counter
+    MOV   R4, 0             ; R4 = row
+
+_row_loop_start:
+	MOV   R1, R4                ; preserve R4 from destructive comparison
+    IGE   R1, R6
+    JT    R1, _end_spr          ; If row >= h, we are done
+
+    ;; Initialize Col Counter
+    MOV   R3, 0                 ; R3 = col
+
+_col_loop_start:
+	MOV   R1, R3                ; preserve R3 from destructive comparison
+    IGT   R1, R5
+    JT    R1, _row_loop_end     ; If col >= w, move to next row
+
+    ;; --- 3. Calculate Target Region ID ---
+    ;; region = n + col + (row * 16)
+    MOV   R1, R4
+    IMUL  R1, 16
+    IADD  R1, R3
+    IADD  R1, R7
+    OUT   GPU_SelectedRegion, R1
+
+    ;; --- 4. Calculate X Coordinate ---
+    MOV   R1, [BP+7]        ; check flip_x
+    IEQ   R1, BOXED_TRUE
+    JT    R1, _calc_flip_x
+
+    ;; Normal X = base_x + (col * 8)
+    MOV   R1, R3
+    IMUL  R1, 8
+    IADD  R1, R8
+    JMP   _set_x
+
+_calc_flip_x:
+    ;; Flipped X = base_x + (w - col) * 8
+    MOV   R1, R5
+    ISUB  R1, R3
+    IMUL  R1, 8
+    IADD  R1, R8
+
+_set_x:
+    OUT   GPU_DrawingPointX, R1
+
+    ;; --- 5. Calculate Y Coordinate ---
+    MOV   R1, [BP+8]        ; check flip_y
+    IEQ   R1, BOXED_TRUE
+    JT    R1, _calc_flip_y
+
+    ;; Normal Y = base_y + (row * 8)
+    MOV   R1, R4
+    IMUL  R1, 8
+    IADD  R1, R9
+    JMP   _set_y
+
+_calc_flip_y:
+    ;; Flipped Y = base_y + (h - row) * 8
+    MOV   R1, R6
+    ISUB  R1, R4
+    IMUL  R1, 8
+    IADD  R1, R9
+
+_set_y:
+    OUT   GPU_DrawingPointY, R1
+
+    ;; --- 6. Issue Draw Command ---
+    OUT   GPU_Command, GPUCommand_DrawRegionZoomed
+
+    ;; --- 7. Inner Loop Iteration ---
+    IADD  R3, 1             ; col++
+    JMP   _col_loop_start
+
+_row_loop_end:
+    ;; --- 8. Outer Loop Iteration ---
+    IADD  R4, 1             ; row++
+    JMP   _row_loop_start
+
+_end_spr:
+    ;; --- 9. Cleanup ---
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; __builtin_btn: approximating the PICO-8 'btn()' function
+;;
+;; Stack layout relative to BP:
+;; [BP+2]: i (Button ID 0-5)
+;; [BP+3]: p (Player ID 0-3)
+;;
+;; Returns BOXED_TRUE or BOXED_FALSE in R0
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_btn:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; --- 1. Select Gamepad ---
+    MOV   R1, [BP+3]
+    ;; (Optional: FTOI R1, R1 if your numbers are floats)
+    OUT   INP_SelectedGamepad, R1
+
+    ;; --- 2. Evaluate Button ID ---
+    MOV   R2, [BP+2]
+
+    ;; Compare and jump to specific hardware port read
+	MOV   R1, R2
+    IEQ   R1, 0
+    JT    R1, _btn_left
+	MOV   R1, R2
+    IEQ   R1, 1
+    JT    R1, _btn_right
+	MOV   R1, R2
+    IEQ   R1, 2
+    JT    R1, _btn_up
+	MOV   R1, R2
+    IEQ   R1, 3
+    JT    R1, _btn_down
+	MOV   R1, R2
+    IEQ   R1, 4
+    JT    R1, _btn_a
+	MOV   R1, R2
+    IEQ   R1, 5
+    JT    R1, _btn_b
+
+    ;; If invalid button ID, return false
+    JMP   _btn_false
+
+_btn_left:
+    IN    R2, INP_GamepadLeft
+    JMP   _btn_eval
+_btn_right:
+    IN    R2, INP_GamepadRight
+    JMP   _btn_eval
+_btn_up:
+    IN    R2, INP_GamepadUp
+    JMP   _btn_eval
+_btn_down:
+    IN    R2, INP_GamepadDown
+    JMP   _btn_eval
+_btn_a:
+    IN    R2, INP_GamepadButtonA
+    JMP   _btn_eval
+_btn_b:
+    IN    R2, INP_GamepadButtonB
+
+_btn_eval:
+    ;; Vircon32 returns 1 for pressed, 0 for not pressed
+    IGE   R2, 1
+    JT    R2, _btn_true
+
+_btn_false:
+    MOV   R0, BOXED_FALSE
+    JMP   _btn_end
+
+_btn_true:
+    MOV   R0, BOXED_TRUE
+
+_btn_end:
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; __builtin_btnp: approximating the PICO-8 'btnp()' function
+;;
+;; Stack layout relative to BP:
+;; [BP+2]: i (Button ID 0-5)
+;; [BP+3]: p (Player ID 0-3)
+;;
+;; Returns BOXED_TRUE or BOXED_FALSE in R0
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_btnp:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; --- 1. Select Gamepad ---
+    MOV   R1, [BP+3]
+    OUT   INP_SelectedGamepad, R1
+
+    ;; --- 2. Evaluate Button ID ---
+    MOV   R2, [BP+2]
+
+    ;; Compare and jump to specific hardware port read
+    MOV   R1, R2
+    IEQ   R1, 0
+    JT    R1, _btnp_left
+    MOV   R1, R2
+    IEQ   R1, 1
+    JT    R1, _btnp_right
+    MOV   R1, R2
+    IEQ   R1, 2
+    JT    R1, _btnp_up
+    MOV   R1, R2
+    IEQ   R1, 3
+    JT    R1, _btnp_down
+    MOV   R1, R2
+    IEQ   R1, 4
+    JT    R1, _btnp_a
+    MOV   R1, R2
+    IEQ   R1, 5
+    JT    R1, _btnp_b
+
+    JMP   _btnp_false
+
+_btnp_left:
+    IN    R2, INP_GamepadLeft
+    JMP   _btnp_eval
+_btnp_right:
+    IN    R2, INP_GamepadRight
+    JMP   _btnp_eval
+_btnp_up:
+    IN    R2, INP_GamepadUp
+    JMP   _btnp_eval
+_btnp_down:
+    IN    R2, INP_GamepadDown
+    JMP   _btnp_eval
+_btnp_a:
+    IN    R2, INP_GamepadButtonA
+    JMP   _btnp_eval
+_btnp_b:
+    IN    R2, INP_GamepadButtonB
+
+_btnp_eval:
+    ;; R2 now contains Frames Held (>0) or Frames Released (<=0)
+
+    ;; Condition A: Is button not pressed?
+    MOV   R1, R2
+    ILT   R1, 1
+    JT    R1, _btnp_false   ; If < 1, return false
+
+    ;; Condition B: Initial Press (Frame 1)
+    MOV   R1, R2
+    IEQ   R1, 1
+    JT    R1, _btnp_true    ; If exactly 1, return true
+
+    ;; Condition C: Delay Phase (Frames 2-14)
+    MOV   R1, R2
+    ILT   R1, 15
+    JT    R1, _btnp_false   ; If < 15 (and > 1), return false
+
+    ;; Condition D: Autorepeat Phase (Frames 15+)
+    ;; Logic: (FramesHeld - 15) % 4 == 0
+    MOV   R1, R2
+    ISUB  R1, 15            ; Shift down by 15 frames
+    IMOD  R1, 4             ; Modulo 4
+    IEQ   R1, 0             ; Is remainder 0?
+    JT    R1, _btnp_true    ; If yes, return true
+
+_btnp_false:
+    MOV   R0, BOXED_FALSE
+    JMP   _btnp_end
+
+_btnp_true:
+    MOV   R0, BOXED_TRUE
+
+_btnp_end:
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; SECTION 7: ROM DATA & STRING CONSTANTS
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

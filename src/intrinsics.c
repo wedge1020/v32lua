@@ -445,31 +445,161 @@ int   try_emit_call_intrinsic (ASTNode *node, int  dest_reg)
         emit_system_halt_intrinsic ();
         return (1);
     }
+
     if ((strcmp (func_name, "system.wait")      == 0) ||
         (strcmp (func_name, "ioports.gpu.sync") == 0))
     {
         emit_system_wait_intrinsic ();
         return (1);
     }
+
     if (strcmp (func_name, "math.abs")          == 0)
     {
         ;
         // load variable value into register, run `FABS` on it, return result
     }
+
     if (strcmp (func_name, "math.floor")        == 0)
     {
         ;
         // load variable value into register, run `FLR` on it, return result
     }
+
     if (strcmp (func_name, "math.ceil")         == 0)
     {
         ;
         // load variable value into register, run `CEIL` on it, return result
     }
+
     if (strcmp (func_name, "math.sqrt")         == 0)
     {
         ;
         // load variable value into register, calculate sqrt, return result
+    }
+
+    if (strcmp (func_name, "spr")               == 0)
+    {
+        emit_asm ("    ; --- PICO-8 spr() Intrinsic ---");
+
+        // 1. Count provided arguments
+        int      arg_count                       = 0;
+        ASTNode *curr                            = node->as.call.args_head;
+        ASTNode *args[7]                         = { NULL };
+        while ((curr                            != NULL) &&
+               (arg_count                       <  7))
+        {
+            args[arg_count++]                    = curr;
+            curr                                 = curr -> next;
+        }
+
+        // 2. Push right-to-left (standard ABI)
+        // Signature: n(0), x(1), y(2), w(3), h(4), flip_x(5), flip_y(6)
+
+        // Arg 6: flip_y (Default: false)
+        int  reg                                 = allocate_register ();
+        if (arg_count                           >  6)
+        {
+            generate_asm (args[6], reg);
+            emit_asm ("PUSH R%d ; Arg 7: flip_y", reg);
+        }
+        else
+        {
+            emit_asm ("MOV R%d, BOXED_FALSE ; pad flip_y");
+            emit_asm ("PUSH R%d", reg);
+        }
+        unlock_register (reg);
+
+        // Arg 5: flip_x (Default: false)
+        reg                                      = allocate_register ();
+        if (arg_count                           >  5)
+        {
+            generate_asm (args[5], reg);
+            emit_asm ("PUSH R%d ; Arg 6: flip_x", reg);
+        }
+        else
+        {
+            emit_asm ("MOV R%d, BOXED_FALSE ; pad flip_x");
+            emit_asm ("PUSH R%d", reg);
+        }
+        unlock_register (reg);
+
+        // Arg 4 & 3: h & w (Default: 1.0)
+        for (int i  = 4; i >= 3; i--)
+        {
+            if (arg_count > i) {
+                int reg = allocate_register();
+                generate_asm(args[i], reg);
+                emit_asm("PUSH R%d ; Arg %d: %s", reg, i+1, i == 4 ? "h" : "w");
+                unlock_register(reg);
+            } else {
+                int reg = allocate_register();
+                emit_asm("MOV R%d, 1.000000 ; Pad %s default", reg, i == 4 ? "h" : "w");
+                emit_asm("PUSH R%d", reg);
+                unlock_register(reg);
+            }
+        }
+
+        // Arg 2, 1, 0: y, x, n (Required)
+        for (int i = 2; i >= 0; i--) {
+            int reg = allocate_register();
+            if (arg_count > i) {
+                generate_asm(args[i], reg);
+            } else {
+                emit_asm("MOV R%d, BOXED_NIL ; Missing required arg!", reg);
+            }
+            emit_asm("PUSH R%d ; Arg %d", reg, i+1);
+            unlock_register(reg);
+        }
+
+        // 3. Call the runtime subroutine and clean up 7 arguments
+        emit_asm ("CALL __builtin_spr");
+        emit_asm ("IADD SP, 7 ; Clean up spr() arguments");
+
+        return (1);
+    }
+
+	if (strcmp (func_name, "btn") == 0) {
+        emit_asm("    ; --- PICO-8 btn() Intrinsic ---");
+
+        int arg_count = 0;
+        ASTNode *curr = node->as.call.args_head;
+        ASTNode *args[2] = { NULL };
+        while (curr != NULL && arg_count < 2) {
+            args[arg_count++] = curr;
+            curr = curr->next;
+        }
+
+        // Arg 1: Player ID (Default: 0)
+        if (arg_count > 1) {
+            int reg = allocate_register();
+            generate_asm(args[1], reg);
+            emit_asm("PUSH R%d ; Arg 2: Player ID", reg);
+            unlock_register(reg);
+        } else {
+            int reg = allocate_register();
+            emit_asm("MOV R%d, 0.000000 ; Default Player 0", reg);
+            emit_asm("PUSH R%d", reg);
+            unlock_register(reg);
+        }
+
+        // Arg 0: Button ID (Required for explicit check, or Nil for bitfield)
+        if (arg_count > 0) {
+            int reg = allocate_register();
+            generate_asm(args[0], reg);
+            emit_asm("PUSH R%d ; Arg 1: Button ID", reg);
+            unlock_register(reg);
+        } else {
+            int reg = allocate_register();
+            emit_asm("MOV R%d, BOXED_NIL ; Trigger bitfield mode", reg);
+            emit_asm("PUSH R%d", reg);
+            unlock_register(reg);
+        }
+
+        emit_asm("CALL __builtin_btn");
+        emit_asm("IADD SP, 2 ; Clean up btn() arguments");
+        // Result is left in R0 (standard calling convention)
+
+        return (1);
     }
 
     return (0); // Not handled here
