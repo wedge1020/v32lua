@@ -1167,19 +1167,19 @@ __builtin_spr:
     MOV   BP, SP
 
     ;; --- 1. Set Global Scales & Flip Flags ---
-    MOV   R1, 1.0
+    MOV   R1, 3.0
     MOV   R2, [BP+7]        ; flip_x
     INE   R2, BOXED_TRUE
     JT    R2, _set_scale_x
-    MOV   R1, -1.0
+    MOV   R1, -3.0
 _set_scale_x:
     OUT   GPU_DrawingScaleX, R1
 
-    MOV   R1, 1.0
+    MOV   R1, 3.0
     MOV   R2, [BP+8]        ; flip_y
     INE   R2, BOXED_TRUE    ; R2 not used elsewhere, can be destroyed
     JT    R2, _set_scale_y
-    MOV   R1, -1.0
+    MOV   R1, -3.0
 
 _set_scale_y:
     OUT   GPU_DrawingScaleY, R1

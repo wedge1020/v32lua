@@ -4,11 +4,10 @@
 
 player                          = { }
 up                              = 0
-down                            = 0
-left                            = 0
-right                           = 0
+down                            = 1
+left                            = 2
+right                           = 3
 frames                          = 0
-adj                             = 0
 
 function init()
 	local x                     = 0
@@ -28,20 +27,20 @@ function init()
 	-- define all the textures on the 128x128 sprite sheet
 	--
 	row                         = 0
-	while (row                 <  16) do
+	while (row                 <  11) do
 		col                     = 0
 		while (col             <  16) do
 			ioports.gpu.region  = region_id
 
-			x                   = (row * col) + (col * 8) -- left
-			y                   = (row * col) + (row * 8) -- top
+			x                   = col * 8
+			y                   = row * 8
 
 			ioports.gpu.minX    = x
 			ioports.gpu.hotX    = x
 			ioports.gpu.minY    = y
 			ioports.gpu.hotY    = y
-			ioports.gpu.maxX    = x + 8
-			ioports.gpu.maxY    = y + 8
+			ioports.gpu.maxX    = x + 7
+			ioports.gpu.maxY    = y + 7
 
 			col                 = col + 1
 			region_id           = region_id + 1
@@ -61,10 +60,11 @@ function game_loop()
 	--
 	-- attempt some low quality animation
 	--
-	if (frames                 >= 30) then
-		adj                     = 1
+	if (frames                 >= 30) and (secondframe == false) then
+		player.tile             = player.tile + 1
+		secondframe             = true
 	else
-		adj                     = 0
+		secondframe             = false
 	end
 
 	--
@@ -76,33 +76,34 @@ function game_loop()
 	-- display our player (using spr()!)
 	--
 	ioports.gpu.region          = player.tile
-	spr (player.tile + adj, player.x, player.y, 1.0, 1.0, player.xflip, player.yflip)
+	spr (player.tile, player.x, player.y, 1, 1, player.xflip, false)
 
 	--
 	-- input checks
 	--
-	if (btn (up)) then
+	if (btn (up, 0)) then
 		player.tile             = 82
 		player.y                = player.y - 1
 		player.xflip            = false
 		player.yflip            = false
 	end
 
-	if (btn (down)) then
+	if (btn (down, 0)) then
 		player.tile             = 80
 		player.y                = player.y + 1
 		player.xflip            = false
 		player.yflip            = false
 	end
 
-	if (btn (left)) then
+	if (btn (left, 0)) then
 		player.tile             = 84
 		player.x                = player.x - 1
 		player.xflip            = false
 		player.yflip            = false
 	end
 
-	if (btn (right)            == true) then
+	state = btn(right,0)
+	if (btn(right,0)) then
 		player.tile             = 84
 		player.x                = player.x + 1
 		player.xflip            = true
@@ -113,6 +114,13 @@ function game_loop()
 	-- 60 frames a second
 	--
 	frames                      = (frames + 1) % 60
+
+	if frames == 0 then
+		player.tile             = player.tile + 2 
+		if player.tile         >= 86 then
+			player.tile         = 80
+		end
+	end
 
 	print (0,     0,   "player.x: ")
 	print (100,   0,   player.x)
@@ -133,7 +141,7 @@ function game_loop()
 	print (0,   160,   "tile:     ")
 	print (100, 160,   player.tile)
 	print (0,   180,   "btn(up):  ")
-	state = btn(up)
+	state = btn(up,0)
 	print (100, 180,   state)
 	print (0,   200,   "frames:   ")
 	print (100, 200,   frames)
