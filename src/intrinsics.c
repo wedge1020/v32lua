@@ -165,6 +165,90 @@ static void emit_gpu_blending_intrinsic (ASTNode *node, int  dest_reg)
     }
 }
 
+void  emit_gpu_draw_intrinsic (ASTNode *node)
+{
+    ASTNode *arg_mode = node->as.call.args_head;
+
+    emit_asm("    ;; --- Intrinsic: ioports.gpu.draw(mode) ---\n");
+
+    // CASE A: No argument provided at all (Fold to default)
+    if (arg_mode == NULL) {
+        emit_asm("OUT GPU_Command, GPUCommand_DrawRegion\n");
+        return;
+    }
+
+    // CASE B: Static String Literal (Fold directly to string constant)
+    if (arg_mode->type == NODE_STRING) {
+        const char* val = arg_mode->as.string_val.value;
+
+        if (strcmp(val, "draw") == 0) {
+            emit_asm("OUT GPU_Command, GPUCommand_DrawRegion\n");
+        } else if (strcmp(val, "zoom") == 0) {
+            emit_asm("OUT GPU_Command, GPUCommand_DrawRegionZoomed\n");
+        } else if (strcmp(val, "rotate") == 0) {
+            emit_asm("OUT GPU_Command, GPUCommand_DrawRegionRotated\n");
+        } else if (strcmp(val, "rotozoom") == 0) {
+            emit_asm("OUT GPU_Command, GPUCommand_DrawRegionRotozoomed\n");
+        } else {
+            // Fallback for invalid/unrecognized string literals
+            emit_asm("OUT GPU_Command, GPUCommand_DrawRegion\n");
+        }
+        return;
+    }
+
+    // CASE C: Static Number Literal (Fold directly to string constant)
+    if (arg_mode->type == NODE_NUMBER) {
+        int cmd = (int)arg_mode->as.number.val;
+
+        if (cmd == 1) {
+            emit_asm("OUT GPU_Command, GPUCommand_DrawRegionZoomed\n");
+        } else if (cmd == 2) {
+            emit_asm("OUT GPU_Command, GPUCommand_DrawRegionRotated\n");
+        } else if (cmd == 3) {
+            emit_asm("OUT GPU_Command, GPUCommand_DrawRegionRotozoomed\n");
+        } else {
+            // Treats 0 and any invalid numbers as standard draw
+            emit_asm("OUT GPU_Command, GPUCommand_DrawRegion\n");
+        }
+        return;
+    }
+
+    // CASE D: Dynamic Variable (Requires Runtime Nil-Check and Registers)
+    int mode_reg = allocate_register();
+    generate_asm(arg_mode, mode_reg);
+
+    int label_id = get_next_label();
+    const char *ctx = get_current_function_name();
+
+    char is_nil_label[128], end_label[128];
+    snprintf(is_nil_label, sizeof(is_nil_label), "__%s_gpu_draw_nil_%d", ctx, label_id);
+    snprintf(end_label, sizeof(end_label), "__%s_gpu_draw_end_%d", ctx, label_id);
+
+    int scratch = allocate_register();
+
+    // Check for runtime Nil
+    emit_asm("MOV R%d, R%d\n", scratch, mode_reg);
+    emit_asm("IEQ R%d, BOXED_NIL ; Check for runtime nil\n", scratch);
+    emit_asm("JT R%d, %s ; If nil, jump to default fallback\n", scratch, is_nil_label);
+
+    // Not Nil: Cast dynamic float mode to integer
+    emit_asm("CFI R%d\n", mode_reg);
+    emit_asm("JMP %s\n", end_label);
+
+    // Nil Fallback: Load 0 (Draw)
+    emit_asm("%s:\n", is_nil_label);
+    emit_asm("MOV R%d, 0 ; Runtime nil -> Default to draw (0)\n", mode_reg);
+
+    emit_asm("%s:\n", end_label);
+
+    // Dispatch the resolved dynamic integer to the GPU Command port
+    emit_asm("OUT GPU_Command, R%d ; Trigger GPU operation with dynamic mode\n", mode_reg);
+
+    unlock_register(scratch);
+    unlock_register(mode_reg);
+}
+
+/*
 bool emit_gpu_draw_intrinsic(ASTNode *node, int dest_reg) {
     char path_buf[256] = {0};
 
@@ -296,7 +380,7 @@ bool emit_gpu_draw_intrinsic(ASTNode *node, int dest_reg) {
 
     unlock_register(mode_reg);
     return true;
-}
+}*/
 
 void emit_gpu_clear_intrinsic(ASTNode *node, int dest_reg) {
     emit_asm ("    ;; --- Intrinsic: ioports.gpu.clear() ---\n");
@@ -386,7 +470,7 @@ int   try_emit_call_intrinsic (ASTNode *node, int  dest_reg)
     }
     if (strcmp (func_name, "ioports.gpu.draw")  == 0)
     {
-        emit_gpu_draw_intrinsic (node, dest_reg);
+        emit_gpu_draw_intrinsic (node);
         return (1);
     }
     if (strcmp (func_name, "ioports.gpu.blending")  == 0)
