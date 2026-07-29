@@ -623,6 +623,10 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
                 emit_spu_cmd_intrinsic(node, dest_reg);
                 handled = true;
             }
+			else if (strcmp(func_name, "ioports.gpu.sync") == 0) {
+				emit_system_wait_intrinsic();
+				handled = true;
+			}
 
             if (handled) {
                 return 1;
@@ -685,7 +689,7 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     }
 
     // system.wait / ioports.gpu.sync
-    if (strcmp(func_name, "system.wait") == 0 || strcmp(func_name, "ioports.gpu.sync") == 0) {
+    if (strcmp(func_name, "system.wait") == 0 ) {
         emit_system_wait_intrinsic();
         return 1;
     }
