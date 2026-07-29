@@ -572,14 +572,21 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         return 0; // Dynamic call, not an intrinsic
     }
 
-    // Check if this is an ioports method call (e.g., ioports.gpu.clear())
+    // =========================================================================
+    // IOPorts Method Validation (e.g., ioports.gpu.clear())
+    // =========================================================================
     if (strncmp(func_name, "ioports.", 8) == 0) {
-        // Extract category.method
         char* dot_pos = strchr(func_name, '.');
         if (dot_pos) {
+            // SAFE: Extract category with bounds checking
             char category[64];
-            strncpy(category, func_name + 8, dot_pos - (func_name + 8));
-            category[dot_pos - (func_name + 8)] = '\0';
+            int cat_len = (int)(dot_pos - (func_name + 8));
+            if (cat_len >= (int)sizeof(category)) cat_len = sizeof(category) - 1;
+            if (cat_len > 0) {
+                snprintf(category, sizeof(category), "%.*s", cat_len, func_name + 8);
+            } else {
+                category[0] = '\0';
+            }
 
             // Validate category
             if (!is_valid_ioports_category(category)) {
@@ -595,12 +602,13 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
                 return 0;
             }
 
-            // Validate specific method
+            // SAFE: Extract method with bounds checking
             char method[64];
-            strcpy(method, dot_pos + 1);
+            snprintf(method, sizeof(method), "%s", dot_pos + 1);
 
             bool handled = false;
 
+            // Handle known ioports methods
             if (strcmp(func_name, "ioports.gpu.clear") == 0) {
                 emit_gpu_clear_intrinsic(node, dest_reg);
                 handled = true;
@@ -626,82 +634,110 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         }
     }
 
-    // Handle non-ioports intrinsics (print, hex, btn, etc.)
+    // =========================================================================
+    // Non-ioports Intrinsics
+    // =========================================================================
+
+    // print(x, y, value)
     if (strcmp(func_name, "print") == 0) {
         emit_print_intrinsic(node);
         return 1;
     }
 
-    // =========================================================================
-    // INTRINSIC: hex("0x...") -> Direct 32-bit Word Load
-    // =========================================================================
-    if (strcmp (func_name, "hex")                  == 0)
-    {
-        ASTNode *arg  = node -> as.call.args_head;
+    // printf()
+    if (strcmp(func_name, "printf") == 0) {
+		if (emit_printf_intrinsic(node, dest_reg)) {
+			return 1;
+		}
+    }
 
-        // 1. Strict Compile-Time Argument Validation
+    // hex("0x...")
+    if (strcmp(func_name, "hex") == 0) {
+        ASTNode *arg = node->as.call.args_head;
+
         if (!arg || arg->type != NODE_STRING || arg->next != NULL) {
-            compiler_error (ERR_SYNTAX, node->line_number,
-                           "hex() intrinsic expects exactly one string literal argument (e.g., hex(\"0xFF800000\"))");
+            compiler_error(ERR_SYNTAX, node->line_number,
+                "hex() intrinsic expects exactly one string literal argument (e.g., hex(\"0xFF800000\"))");
         }
 
-        const char *hex_str = arg -> as.string_val.value;
-
-        // 2. Parse Hexadecimal String to Raw 32-Bit Integer
+        const char *hex_str = arg->as.string_val.value;
         char *end_ptr = NULL;
-        unsigned long raw_val = strtoul (hex_str, &end_ptr, 16);
+        unsigned long raw_val = strtoul(hex_str, &end_ptr, 16);
 
-        // Ensure the entire string was consumed and contains valid hex characters
         if (*end_ptr != '\0' || end_ptr == hex_str) {
             compiler_error(ERR_SYNTAX, node->line_number,
-                           "Invalid hexadecimal literal passed to hex(): '%s'", hex_str);
+                "Invalid hexadecimal literal passed to hex(): '%s'", hex_str);
         }
 
-        // 3. Emit Direct Vircon32 Assembly
-        // If dest_reg is 0 (value ignored by caller), we emit nothing!
         if (dest_reg != 0) {
             emit_asm("    ;; Intrinsic: hex(\"%s\") -> direct 32-bit word load\n", hex_str);
             emit_asm("MOV R%d, 0x%08lX\n", dest_reg, raw_val);
         }
 
-        return (1); // Signal to codegen that the call was fully resolved
+        return 1;
     }
 
-    if (strcmp (func_name, "system.halt")       == 0)
-    {
-        emit_system_halt_intrinsic ();
+    // system.halt
+    if (strcmp(func_name, "system.halt") == 0) {
+        emit_system_halt_intrinsic();
+        return 1;
+    }
+
+    // system.wait / ioports.gpu.sync
+    if (strcmp(func_name, "system.wait") == 0 || strcmp(func_name, "ioports.gpu.sync") == 0) {
+        emit_system_wait_intrinsic();
+        return 1;
+    }
+
+    // btn()
+    if (strcmp(func_name, "btn") == 0) {
+        emit_asm("    ; --- PICO-8 btn() Intrinsic ---");
+
+        int arg_count = 0;
+        ASTNode *curr = node->as.call.args_head;
+        ASTNode *args[2] = { NULL };
+        while (curr != NULL && arg_count < 2) {
+            args[arg_count++] = curr;
+            curr = curr->next;
+        }
+
+        // Arg 1: Player ID (Default: 0)
+        if (arg_count > 1) {
+            int reg = allocate_register();
+            generate_asm(args[1], reg);
+            emit_asm("PUSH R%d ; Arg 2: Player ID", reg);
+            unlock_register(reg);
+        } else {
+            int reg = allocate_register();
+            emit_asm("MOV R%d, 0.000000 ; Default Player 0", reg);
+            emit_asm("PUSH R%d", reg);
+            unlock_register(reg);
+        }
+
+        // Arg 0: Button ID (Required for explicit check, or Nil for bitfield)
+        if (arg_count > 0) {
+            int reg = allocate_register();
+            generate_asm(args[0], reg);
+            emit_asm("PUSH R%d ; Arg 1: Button ID", reg);
+            unlock_register(reg);
+        } else {
+            int reg = allocate_register();
+            emit_asm("MOV R%d, BOXED_NIL ; Trigger bitfield mode", reg);
+            emit_asm("PUSH R%d", reg);
+            unlock_register(reg);
+        }
+
+        emit_asm("CALL __builtin_btn");
+        emit_asm("IADD SP, 2 ; Clean up btn() arguments");
+        // Result is left in R0 (standard calling convention)
+
+        if (dest_reg != 0)
+        {
+            emit_asm("MOV R%d, R0 ; Transfer return value to allocated AST register\n", dest_reg);
+        }
+
         return (1);
-    }
-
-    if ((strcmp (func_name, "system.wait")      == 0) ||
-        (strcmp (func_name, "ioports.gpu.sync") == 0))
-    {
-        emit_system_wait_intrinsic ();
-        return (1);
-    }
-
-    if (strcmp (func_name, "math.abs")          == 0)
-    {
-        ;
-        // load variable value into register, run `FABS` on it, return result
-    }
-
-    if (strcmp (func_name, "math.floor")        == 0)
-    {
-        ;
-        // load variable value into register, run `FLR` on it, return result
-    }
-
-    if (strcmp (func_name, "math.ceil")         == 0)
-    {
-        ;
-        // load variable value into register, run `CEIL` on it, return result
-    }
-
-    if (strcmp (func_name, "math.sqrt")         == 0)
-    {
-        ;
-        // load variable value into register, calculate sqrt, return result
+        return 1;
     }
 
     if (strcmp (func_name, "spr")               == 0)
@@ -785,63 +821,16 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         return (1);
     }
 
-    if (strcmp (func_name, "btn") == 0) {
-        emit_asm("    ; --- PICO-8 btn() Intrinsic ---");
-
-        int arg_count = 0;
-        ASTNode *curr = node->as.call.args_head;
-        ASTNode *args[2] = { NULL };
-        while (curr != NULL && arg_count < 2) {
-            args[arg_count++] = curr;
-            curr = curr->next;
-        }
-
-        // Arg 1: Player ID (Default: 0)
-        if (arg_count > 1) {
-            int reg = allocate_register();
-            generate_asm(args[1], reg);
-            emit_asm("PUSH R%d ; Arg 2: Player ID", reg);
-            unlock_register(reg);
-        } else {
-            int reg = allocate_register();
-            emit_asm("MOV R%d, 0.000000 ; Default Player 0", reg);
-            emit_asm("PUSH R%d", reg);
-            unlock_register(reg);
-        }
-
-        // Arg 0: Button ID (Required for explicit check, or Nil for bitfield)
-        if (arg_count > 0) {
-            int reg = allocate_register();
-            generate_asm(args[0], reg);
-            emit_asm("PUSH R%d ; Arg 1: Button ID", reg);
-            unlock_register(reg);
-        } else {
-            int reg = allocate_register();
-            emit_asm("MOV R%d, BOXED_NIL ; Trigger bitfield mode", reg);
-            emit_asm("PUSH R%d", reg);
-            unlock_register(reg);
-        }
-
-        emit_asm("CALL __builtin_btn");
-        emit_asm("IADD SP, 2 ; Clean up btn() arguments");
-        // Result is left in R0 (standard calling convention)
-
-        if (dest_reg != 0)
-        {
-            emit_asm("MOV R%d, R0 ; Transfer return value to allocated AST register\n", dest_reg);
-        }
-
-        return (1);
-    }
-
-    return (0); // Not handled here
+    return 0; // Not an intrinsic
 }
 
 // Returns 1 if hardware intrinsic was emitted, 0 if dynamic table fallback is required.
 int try_emit_table_set_intrinsic(ASTNode *table_expr, ASTNode *key_expr, ASTNode *val_node) {
     char base_path[256] = {0};
 
-    if (!resolve_static_path(table_expr, base_path) || key_expr->type != NODE_STRING) {
+	// FIX: Add NULL checks for key_expr and val_node
+    if (!resolve_static_path(table_expr, base_path) || 
+        key_expr == NULL || key_expr->type != NODE_STRING || val_node == NULL) {
         return 0;
     }
 
@@ -914,9 +903,9 @@ int try_emit_table_set_intrinsic(ASTNode *table_expr, ASTNode *key_expr, ASTNode
 int try_emit_table_get_intrinsic(ASTNode *table_expr, ASTNode *key_expr, int dest_reg) {
     char base_path[256];
 
-    // 1. Resolve the static namespace path
-    if (!resolve_static_path(table_expr, base_path) ||
-        key_expr->type != NODE_STRING) {
+	// FIX: Add NULL check for key_expr
+    if (!resolve_static_path(table_expr, base_path) || 
+        key_expr == NULL || key_expr->type != NODE_STRING) {
         return 0;  // Not a static table access, continue normally
     }
 
