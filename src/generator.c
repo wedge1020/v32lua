@@ -1332,7 +1332,7 @@ void generate_global_setup (ASTNode *node)
 {
     // 1. Emit the section header and entry label
     emit_asm ("\n; --- Global Variable & Runtime Initialization ---\n");
-    emit_asm ("__init_globals:\n");
+    emit_asm ("__global_scope_initialization:\n");
     emit_asm ("PUSH BP\n");
     emit_asm ("MOV BP, SP\n");
     if (next_ram_address >= 4)
@@ -1441,7 +1441,7 @@ void generate_program (ASTNode *head)
     // 3. EMIT COMPILED CODE ENTRY VECTOR
     // =========================================================================
     emit_asm (";; --- Compiled Code Entry Vector ---\n");
-    emit_asm ("CALL __init_globals  ; Run top-level setups first\n");
+    emit_asm ("CALL __global_scope_initialization  ; Run top-level setups first\n");
     
     // If init() exists, execute it immediately after global variable setup
     if (has_init)
