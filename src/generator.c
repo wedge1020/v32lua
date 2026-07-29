@@ -389,10 +389,10 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     snprintf(pos_lbl, sizeof(pos_lbl), "__%s_for_pos_%d", ctx, label_id);
                     snprintf(chk_lbl, sizeof(chk_lbl), "__%s_for_chk_%d", ctx, label_id);
 
-                    emit_asm("FGE R%step, 0.000000");
-                    emit_asm("JT R%step, %s", pos_lbl);
-                    emit_asm("FLT R%d, R%d", r_idx, r_lim);
-                    emit_asm("JMP %s", chk_lbl);
+                    emit_asm("FGE R%d, 0.000000", r_step);
+                    emit_asm("JT R%d, %s", r_step, pos_lbl);
+                    emit_asm("FLT R%d, R%d", r_idx, r_lim); // this seems pointless
+                    emit_asm("JMP %s", chk_lbl); // considering this unconditional jump
                     
                     emit_asm("%s:\n", pos_lbl);
                     emit_asm("FGT R%d, R%d", r_idx, r_lim);
@@ -997,6 +997,25 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 break;
             }
 
+			case NODE_MOD: {
+				generate_asm(node->as.binary.left, dest_reg);
+				int right_reg = allocate_register();
+				generate_asm(node->as.binary.right, right_reg);
+
+				// Cast to integers for modulo (Lua % uses integer division)
+				emit_asm("CFI R%d ; Cast left to int\n", dest_reg);
+				emit_asm("CFI R%d ; Cast right to int\n", right_reg);
+
+				// Perform integer modulo
+				emit_asm("IMOD R%d, R%d\n", dest_reg, right_reg);
+
+				// Cast result back to float (Lua numbers are floats)
+				emit_asm("CIF R%d ; Cast result back to float\n", dest_reg);
+
+				unlock_register(right_reg);
+				break;
+			}
+			/*
             case NODE_MOD: {
                 // OPTIMIZATION (-O1): x % 1.0 -> x
                 if ((o_optflag                                >= 1) &&
@@ -1013,7 +1032,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 emit_asm ("FMOD R%d, R%d\n", dest_reg, right_reg);
                 unlock_register (right_reg);
                 break;
-            }
+            }*/
 
             /*
             case NODE_MOD: {
@@ -1104,7 +1123,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
 
 					// if __builtin_eq boxes values for us, we don't need to rebox, commenting this out:
                     // Box the 0/1 result from equality checking into a NaN boolean!
-                    //emit_asm ("IADD R%d, BOXED_BOOLEAN ; Box as Lua Boolean (False/True)\n", dest_reg);
+                    emit_asm ("IADD R%d, BOXED_BOOLEAN ; Box as Lua Boolean (False/True)\n", dest_reg);
                 }
                 else
                 {

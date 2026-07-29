@@ -14,6 +14,7 @@ int global_label_counter = 0;
 void init_global_scope(void) {
     if (global_scope != NULL) return;
     global_scope = (ScopeNode*)calloc(1, sizeof(ScopeNode));
+    global_scope->local_offset_counter = 1;  // ← ADD THIS LINE
     current_scope = global_scope;
 }
 
