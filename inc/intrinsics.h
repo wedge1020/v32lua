@@ -18,7 +18,8 @@ typedef struct {
     int         type;
 } IOPortMap;
 
-extern const IOPortMap ioports[];
+extern const IOPortMap  ioports[];
+extern const char      *valid_ioports_categories[];
 
 // Returns 1 if the node was an intrinsic and assembly was emitted; 0 otherwise.
 //

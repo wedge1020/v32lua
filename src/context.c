@@ -351,20 +351,31 @@ int add_string_literal(const char* str) {
 
 typedef struct LoopContextNode {
     int loop_id;
+    LoopType loop_type;  // NEW: Track loop type
     struct LoopContextNode* next;
 } LoopContextNode;
 
 static LoopContextNode* loop_stack_head = NULL;
 
-void push_loop(int id) {
+// Modified push_loop to accept loop type
+void push_loop(int id, LoopType type) {
     LoopContextNode* new_node = (LoopContextNode*)malloc(sizeof(LoopContextNode));
     if (new_node == NULL) {
         compiler_error(ERR_INTERNAL, -1, "Out of memory allocating loop context");
     }
-    
+
     new_node->loop_id = id;
+    new_node->loop_type = type;  // Store the loop type
     new_node->next = loop_stack_head;
     loop_stack_head = new_node;
+}
+
+// New function to get current loop type
+LoopType current_loop_type(void) {
+    if (loop_stack_head == NULL) {
+        return -1;
+    }
+    return loop_stack_head->loop_type;
 }
 
 void pop_loop(void) {

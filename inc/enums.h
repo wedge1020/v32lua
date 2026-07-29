@@ -62,4 +62,9 @@ typedef enum
     ERR_INTERNAL
 } ErrorType;
 
+typedef enum {
+    LOOP_TYPE_WHILE,
+    LOOP_TYPE_FOR_NUMERIC
+} LoopType;
+
 #endif

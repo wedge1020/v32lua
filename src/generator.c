@@ -288,7 +288,8 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 char end_label[128];
                 snprintf(end_label, sizeof(end_label), "__%s_while_end_%d", ctx, label_id);
 
-                push_loop (label_id);
+				push_loop(label_id, LOOP_TYPE_WHILE);  // Pass loop type
+
                 emit_asm ("__%s_while_start_%d:\n", ctx, label_id);
                 
                 generate_asm (node -> as.while_loop.condition, cond_reg);
@@ -361,7 +362,8 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 unlock_register(scratch);
 
                 // 2. Setup Loop Break Tracking
-                push_loop(label_id);
+				push_loop(label_id, LOOP_TYPE_FOR_NUMERIC);  // Pass loop type
+
                 emit_asm("%s:\n", start_label);
 
                 // 3. OPTIMIZED Loop Conditional Check
@@ -425,16 +427,17 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 break;
             }
             case NODE_BREAK: {
-                int  current_id  = current_loop ();
-                if (current_id  == -1)
-                {
-                    fprintf (stderr, "Compiler Runtime Error: 'break' declaration found outside loop.\n");
-                    exit (1);
-                }
+				int current_id = current_loop();
+				if (current_id == -1) {
+					fprintf(stderr, "Compiler Runtime Error: 'break' declaration found outside loop.\n");
+					exit(1);
+				}
 
-                emit_asm("JMP __%s_while_end_%d\n", get_current_function_name (), current_id);
-                break;
-            }
+				LoopType type = current_loop_type();
+				const char* prefix = (type == LOOP_TYPE_FOR_NUMERIC) ? "for" : "while";
+				emit_asm("JMP __%s_%s_end_%d\n", get_current_function_name(), prefix, current_id);
+				break;
+			}
 
             case NODE_IF: {
                 int         cond_reg  = allocate_register ();

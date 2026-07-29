@@ -8,9 +8,9 @@ const IOPortMap ioports[] = {
     { "system.date",           "TIM_CurrentDate",          IOPORT_READ,                 IOPORT_TYPE_INTEGER },
     { "ioports.tim.time",      "TIM_CurrentTime",          IOPORT_READ,                 IOPORT_TYPE_INTEGER },
     { "system.time",           "TIM_CurrentTime",          IOPORT_READ,                 IOPORT_TYPE_INTEGER },
-    { "ioports.time.frames",   "TIM_FrameCounter",         IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "ioports.tim.frames",    "TIM_FrameCounter",         IOPORT_READ,                 IOPORT_TYPE_INTEGER },
     { "system.frames",         "TIM_FrameCounter",         IOPORT_READ,                 IOPORT_TYPE_INTEGER },
-    { "ioports.time.cycles",   "TIM_CycleCounter",         IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "ioports.tim.cycles",    "TIM_CycleCounter",         IOPORT_READ,                 IOPORT_TYPE_INTEGER },
     { "system.cycles",         "TIM_CycleCounter",         IOPORT_READ,                 IOPORT_TYPE_INTEGER },
     { "ioports.rng.value",     "RNG_CurrentValue",         IOPORT_READ,                 IOPORT_TYPE_INTEGER },
     { "ioports.rng.seed",      "RNG_CurrentValue",         IOPORT_WRITE,                IOPORT_TYPE_INTEGER },
@@ -65,6 +65,46 @@ const IOPortMap ioports[] = {
     { "ioports.mem.connec",    "MEM_Connected",            IOPORT_READ,                 IOPORT_TYPE_BOOLEAN },
     { NULL, NULL, 0, 0 } // Sentinel
 };
+
+// ============================================================================
+// --- Intrinsic Path Validation ---
+// ============================================================================
+
+const char *valid_ioports_categories[] = {
+    "tim", "rng", "gpu", "spu", "inp", "car", "mem", NULL
+};
+
+bool is_valid_ioports_category (const char *category)
+{
+    for (int  index = 0; valid_ioports_categories[index] != NULL; index++)
+    {
+        if (strcmp (category, valid_ioports_categories[index]) == 0)
+        {
+            return (true);
+        }
+    }
+    return (false);
+}
+
+static void validate_ioports_path(const char* base_path, const char* key, int line_num) {
+    // Extract category from base_path (e.g., "tim" from "ioports.tim")
+    if (strncmp(base_path, "ioports.", 8) == 0) {
+        char* category = (char*)base_path + 8;
+
+        // Check if category is valid
+        if (!is_valid_ioports_category(category)) {
+            char available[256] = "";
+            for (int i = 0; valid_ioports_categories[i] != NULL; i++) {
+                strcat(available, valid_ioports_categories[i]);
+                if (valid_ioports_categories[i+1] != NULL) {
+                    strcat(available, ", ");
+                }
+            }
+            compiler_error(ERR_SEMANTIC, line_num,
+                "Unknown ioports category '%s'. Available categories: %s", category, available);
+        }
+    }
+}
 
 static void  emit_spu_cmd_intrinsic (ASTNode *node, int  dest_reg)
 {
@@ -526,38 +566,70 @@ bool is_raw_integer_expression (ASTNode *node) {
     return (false);
 }
 
-int   try_emit_call_intrinsic (ASTNode *node, int  dest_reg)
-{
-    char  func_name[256] = {0};
-    if (!resolve_static_path (node -> as.call.target, func_name))
-    {
-        return (0); // Dynamic call, not an intrinsic
+int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
+    char func_name[256] = {0};
+    if (!resolve_static_path(node->as.call.target, func_name)) {
+        return 0; // Dynamic call, not an intrinsic
     }
 
-    if (strcmp (func_name, "print")             == 0)
-    {
-        emit_print_intrinsic (node);
-        return (1);
+    // Check if this is an ioports method call (e.g., ioports.gpu.clear())
+    if (strncmp(func_name, "ioports.", 8) == 0) {
+        // Extract category.method
+        char* dot_pos = strchr(func_name, '.');
+        if (dot_pos) {
+            char category[64];
+            strncpy(category, func_name + 8, dot_pos - (func_name + 8));
+            category[dot_pos - (func_name + 8)] = '\0';
+
+            // Validate category
+            if (!is_valid_ioports_category(category)) {
+                char available[256] = "";
+                for (int i = 0; valid_ioports_categories[i] != NULL; i++) {
+                    strcat(available, valid_ioports_categories[i]);
+                    if (valid_ioports_categories[i+1] != NULL) {
+                        strcat(available, ", ");
+                    }
+                }
+                compiler_error(ERR_SEMANTIC, node->line_number,
+                    "Unknown ioports category '%s'. Available categories: %s", category, available);
+                return 0;
+            }
+
+            // Validate specific method
+            char method[64];
+            strcpy(method, dot_pos + 1);
+
+            bool handled = false;
+
+            if (strcmp(func_name, "ioports.gpu.clear") == 0) {
+                emit_gpu_clear_intrinsic(node, dest_reg);
+                handled = true;
+            } else if (strcmp(func_name, "ioports.gpu.draw") == 0) {
+                emit_gpu_draw_intrinsic(node);
+                handled = true;
+            } else if (strcmp(func_name, "ioports.gpu.blending") == 0) {
+                emit_gpu_blending_intrinsic(node, dest_reg);
+                handled = true;
+            } else if (strcmp(func_name, "ioports.spu.command") == 0) {
+                emit_spu_cmd_intrinsic(node, dest_reg);
+                handled = true;
+            }
+
+            if (handled) {
+                return 1;
+            }
+
+            // Category valid but method not found
+            compiler_error(ERR_SEMANTIC, node->line_number,
+                "Unknown ioports method '%s'", func_name);
+            return 0;
+        }
     }
-    if (strcmp (func_name, "ioports.gpu.draw")  == 0)
-    {
-        emit_gpu_draw_intrinsic (node);
-        return (1);
-    }
-    if (strcmp (func_name, "ioports.gpu.blending")  == 0)
-    {
-        emit_gpu_blending_intrinsic (node, dest_reg);
-        return (1);
-    }
-    if (strcmp (func_name, "ioports.gpu.clear") == 0)
-    {
-        emit_gpu_clear_intrinsic (node, dest_reg);
-        return (1);
-    }
-    if (strcmp (func_name, "ioports.spu.command")  == 0)
-    {
-        emit_spu_cmd_intrinsic (node, dest_reg);
-        return (1);
+
+    // Handle non-ioports intrinsics (print, hex, btn, etc.)
+    if (strcmp(func_name, "print") == 0) {
+        emit_print_intrinsic(node);
+        return 1;
     }
 
     // =========================================================================
@@ -713,7 +785,7 @@ int   try_emit_call_intrinsic (ASTNode *node, int  dest_reg)
         return (1);
     }
 
-	if (strcmp (func_name, "btn") == 0) {
+    if (strcmp (func_name, "btn") == 0) {
         emit_asm("    ; --- PICO-8 btn() Intrinsic ---");
 
         int arg_count = 0;
@@ -754,8 +826,8 @@ int   try_emit_call_intrinsic (ASTNode *node, int  dest_reg)
         emit_asm("IADD SP, 2 ; Clean up btn() arguments");
         // Result is left in R0 (standard calling convention)
 
-		if (dest_reg != 0)
-		{
+        if (dest_reg != 0)
+        {
             emit_asm("MOV R%d, R0 ; Transfer return value to allocated AST register\n", dest_reg);
         }
 
@@ -765,62 +837,51 @@ int   try_emit_call_intrinsic (ASTNode *node, int  dest_reg)
     return (0); // Not handled here
 }
 
-// Notice: 'int val_reg' has been removed from the function signature!
-int try_emit_table_set_intrinsic(ASTNode *table_expr, ASTNode *key_expr, ASTNode *val_node)
-{
+// Returns 1 if hardware intrinsic was emitted, 0 if dynamic table fallback is required.
+int try_emit_table_set_intrinsic(ASTNode *table_expr, ASTNode *key_expr, ASTNode *val_node) {
     char base_path[256] = {0};
 
-    if (!resolve_static_path(table_expr, base_path) || key_expr->type != NODE_STRING)
-    {
+    if (!resolve_static_path(table_expr, base_path) || key_expr->type != NODE_STRING) {
         return 0;
     }
+
+    // Validate ioports path structure
+    validate_ioports_path(base_path, key_expr->as.string_val.value, yylineno);
 
     char full_path[512];
     snprintf(full_path, sizeof(full_path), "%s.%s", base_path, key_expr->as.string_val.value);
 
-    for (int i = 0; ioports[i].lua_path != NULL; i++)
-    {
-        if (strcmp(full_path, ioports[i].lua_path) == 0)
-        {
-            if ((ioports[i].mode & IOPORT_WRITE) != IOPORT_WRITE)
-            {
+    for (int i = 0; ioports[i].lua_path != NULL; i++) {
+        if (strcmp(full_path, ioports[i].lua_path) == 0) {
+            if ((ioports[i].mode & IOPORT_WRITE) != IOPORT_WRITE) {
                 compiler_error(ERR_SEMANTIC, yylineno, "%s: port cannot be written to", full_path);
             }
 
             bool is_raw = is_raw_integer_expression(val_node);
 
-            // ==========================================================
-            // PATH A: IMMEDIATE OPERAND FOLDING (Zero Registers Used!)
-            // ==========================================================
+            // Handle immediate operands or allocate register for value
             char imm_str[64];
-            if (is_raw && try_get_immediate_operand(val_node, imm_str, sizeof(imm_str)))
-            {
+            if (is_raw && try_get_immediate_operand(val_node, imm_str, sizeof(imm_str))) {
                 emit_asm("    ;; --- Intrinsic: Direct Immediate Hardware Write (%s) ---\n", full_path);
                 emit_asm("OUT %s, %s\n", ioports[i].asm_port, imm_str);
                 return 1;
             }
 
-            // ==========================================================
-            // PATH B: ON-DEMAND REGISTER EVALUATION (Variables / Floats)
-            // ==========================================================
+            // On-demand register evaluation
             int val_reg = allocate_register();
             generate_asm(val_node, val_reg);
 
             int needs_cast = !is_raw && (ioports[i].type & (IOPORT_TYPE_INTEGER | IOPORT_TYPE_BOOLEAN));
             int out_reg = val_reg;
 
-            if (needs_cast)
-            {
+            if (needs_cast) {
                 out_reg = allocate_register();
                 emit_asm("MOV R%d, R%d ; Copy value for hardware type cast\n", out_reg, val_reg);
 
-                if ((ioports[i].type & IOPORT_TYPE_INTEGER) == IOPORT_TYPE_INTEGER)
-                {
+                if ((ioports[i].type & IOPORT_TYPE_INTEGER) == IOPORT_TYPE_INTEGER) {
                     emit_asm("    ;; --- Intrinsic: Cast Lua Float to Hardware Integer ---\n");
                     emit_asm("CFI R%d\n", out_reg);
-                }
-                else if ((ioports[i].type & IOPORT_TYPE_BOOLEAN) == IOPORT_TYPE_BOOLEAN)
-                {
+                } else if ((ioports[i].type & IOPORT_TYPE_BOOLEAN) == IOPORT_TYPE_BOOLEAN) {
                     emit_asm("    ;; --- Intrinsic: Cast Lua Float to Hardware Boolean ---\n");
                     emit_asm("CFB R%d\n", out_reg);
                 }
@@ -831,8 +892,7 @@ int try_emit_table_set_intrinsic(ASTNode *table_expr, ASTNode *key_expr, ASTNode
             }
             emit_asm("OUT %s, R%d\n", ioports[i].asm_port, out_reg);
 
-            if (needs_cast)
-            {
+            if (needs_cast) {
                 unlock_register(out_reg);
             }
             unlock_register(val_reg);
@@ -841,150 +901,101 @@ int try_emit_table_set_intrinsic(ASTNode *table_expr, ASTNode *key_expr, ASTNode
         }
     }
 
-    return 0;
-}
-
-/*
-// Returns 1 if hardware intrinsic was emitted, 0 if dynamic table fallback is required.
-int try_emit_table_set_intrinsic(ASTNode *table_expr, ASTNode *key_expr, ASTNode *val_node, int val_reg)
-{
-    char base_path[256] = {0};
-
-    // 1. Resolve the static namespace path (e.g., "ioports.gpu")
-    // Ensure the key is a string node before proceeding
-    if (!resolve_static_path(table_expr, base_path) ||
-        key_expr->type != NODE_STRING)
-    {
-        return 0;
-    }
-
-    // 2. Build the full path: base_path.key (e.g., "ioports.gpu.multiply")
-    char full_path[512];
-    snprintf(full_path, sizeof(full_path), "%s.%s", base_path, key_expr->as.string_val.value);
-
-    // 3. Scan the internal IOPortMap table for a match
-    for (int i = 0; ioports[i].lua_path != NULL; i++)
-    {
-        if (strcmp(full_path, ioports[i].lua_path) == 0)
-        {
-            // Verify hardware port write permissions
-            if ((ioports[i].mode & IOPORT_WRITE) != IOPORT_WRITE)
-            {
-                compiler_error(ERR_SEMANTIC, yylineno, "%s: port cannot be written to", full_path);
-            }
-
-            // 4. Determine if hardware casting is needed
-            // If the expression is already a raw integer (like hex()), suppress casting!
-            bool is_raw = is_raw_integer_expression(val_node);
-            int needs_cast = !is_raw && (ioports[i].type & (IOPORT_TYPE_INTEGER | IOPORT_TYPE_BOOLEAN));
-
-            int out_reg = val_reg;
-            if (needs_cast)
-            {
-                // Allocate a temporary scratch register to protect the original val_reg from mutation
-                out_reg = allocate_register();
-                emit_asm("MOV R%d, R%d ; Copy value for hardware type cast\n", out_reg, val_reg);
-            }
-
-            // 5. Apply Vircon32 hardware casting instructions ONLY if casting is needed
-            if (needs_cast)
-            {
-                if ((ioports[i].type & IOPORT_TYPE_INTEGER) == IOPORT_TYPE_INTEGER)
-                {
-                    emit_asm("    ;; --- Intrinsic: Cast Lua Float to Hardware Integer ---\n");
-                    emit_asm("CFI R%d\n", out_reg);
-                }
-                else if ((ioports[i].type & IOPORT_TYPE_BOOLEAN) == IOPORT_TYPE_BOOLEAN)
-                {
-                    emit_asm("    ;; --- Intrinsic: Cast Lua Float to Hardware Boolean ---\n");
-                    emit_asm("CFB R%d\n", out_reg);
-                }
-            }
-
-            // 6. Emit the OUT instruction using the mapped assembly port name
-            if (is_raw) {
-                emit_asm("    ;; --- Intrinsic: Direct Raw Hardware Write (%s) ---\n", full_path);
-            }
-            emit_asm("OUT %s, R%d\n", ioports[i].asm_port, out_reg);
-
-            // Clean up scratch register if we used one
-            if (needs_cast)
-            {
-                unlock_register(out_reg);
-            }
-
-            return 1;
-        }
+    // Category was valid but property not found - emit specific error
+    if (strncmp(base_path, "ioports.", 8) == 0) {
+        compiler_error(ERR_SEMANTIC, yylineno,
+            "Unknown ioports property '%s.%s'", base_path, key_expr->as.string_val.value);
     }
 
     // Not a hardware port; fall back to dynamic heap table assignment
     return 0;
-}*/
+}
 
-// Returns 1 if hardware intrinsic was emitted, 0 if dynamic table fallback is required.
-int try_emit_table_get_intrinsic(ASTNode *table_expr, ASTNode *key_expr, int dest_reg)
-{
-    char base_path[256] = {0};
+int try_emit_table_get_intrinsic(ASTNode *table_expr, ASTNode *key_expr, int dest_reg) {
+    char base_path[256];
 
-    // 1. Resolve the static namespace path (e.g., "ioports.gpu")
-    // Ensure the key is a string node before proceeding
+    // 1. Resolve the static namespace path
     if (!resolve_static_path(table_expr, base_path) ||
-        key_expr->type != NODE_STRING)
-    {
-        return (0);
+        key_expr->type != NODE_STRING) {
+        return 0;  // Not a static table access, continue normally
     }
 
-    // 2. Build the full path: base_path.key (e.g., "ioports.gpu.x")
-    char full_path[512];
-    snprintf(full_path, sizeof(full_path), "%s.%s", base_path, key_expr->as.string_val.value);
+    // 2. Check if this is an ioports path
+    if (strncmp(base_path, "ioports.", 8) == 0) {
+        // Extract the category (e.g., "tim" from "ioports.tim")
+        char* category = base_path + 8;  // Skip "ioports."
 
-    // 3. Scan the internal IOPortMap table for a match
-    for (int i = 0; ioports[i].lua_path != NULL; i++)
-    {
-        if (strcmp(full_path, ioports[i].lua_path) == 0)
-        {
-            // Verify hardware port read permissions
-            if ((ioports[i].mode & IOPORT_READ) != IOPORT_READ)
-            {
-                compiler_error(ERR_SEMANTIC, yylineno, "%s: port cannot be read from", full_path);
+        // Check if category is valid
+        if (!is_valid_ioports_category(category)) {
+            // List available categories for helpful error
+            char available[256] = "";
+            for (int i = 0; valid_ioports_categories[i] != NULL; i++) {
+                strcat(available, valid_ioports_categories[i]);
+                if (valid_ioports_categories[i+1] != NULL) {
+                    strcat(available, ", ");
+                }
             }
+            compiler_error(ERR_SEMANTIC, yylineno,
+                "Unknown ioports category '%s'. Available: %s", category, available);
+            return 0;
+        }
 
-            // 4. Handle custom action delegation (e.g., ioports.inp.inputs -> emit_get_gamepad_inputs_intrinsic)
-            if ((ioports[i].mode & IOPORT_ACTION) == IOPORT_ACTION)
-            {
-                try_emit_action_intrinsic(ioports[i].asm_port, dest_reg);
-                return (1);
-            }
+        // Build full path
+        char full_path[512];
+        snprintf(full_path, sizeof(full_path), "%s.%s", base_path, key_expr->as.string_val.value);
 
-            // 5. Emit direct Vircon32 hardware IN instruction if a destination register is provided
-            if (dest_reg != 0)
-            {
-                if ((ioports[i].type & IOPORT_TYPE_INTEGER) == IOPORT_TYPE_INTEGER)
-                {
-                    emit_asm("    ;; --- Intrinsic: Read Hardware Integer (%s) ---\n", full_path);
-                    emit_asm("    IN R%d, %s\n", dest_reg, ioports[i].asm_port);
-                    emit_asm("    CIF R%d ; Cast hardware int to Lua float\n", dest_reg);
-                }
-                else if ((ioports[i].type & IOPORT_TYPE_BOOLEAN) == IOPORT_TYPE_BOOLEAN)
-                {
-                    emit_asm("    ;; --- Intrinsic: Read Hardware Boolean (%s) ---\n", full_path);
-                    emit_asm("    IN R%d, %s\n", dest_reg, ioports[i].asm_port);
-                    emit_asm("    CIF R%d ; Cast hardware bool to Lua float\n", dest_reg);
+		// Scan the internal IOPortMap table for a match
+		for (int i = 0; ioports[i].lua_path != NULL; i++)
+		{
+			if (strcmp(full_path, ioports[i].lua_path) == 0)
+			{
+				// Verify hardware port read permissions
+				if ((ioports[i].mode & IOPORT_READ) != IOPORT_READ)
+				{
+					compiler_error(ERR_SEMANTIC, yylineno, "%s: port cannot be read from", full_path);
+				}
 
-                    // NOTE: If your NaN-boxing overhaul requires explicit boolean type tags
-                    // instead of raw 0.0/1.0 floats, apply your bitwise tag mask here!
-                    // e.g., emit_asm("    OR R%d, 0xFFFA0000 ; Apply boolean NaN tag\n", dest_reg);
-                }
-                else
-                {
-                    // Default: IOPORT_TYPE_FLOAT (No casting required!)
-                    emit_asm("    ;; --- Intrinsic: Read Hardware Float (%s) ---\n", full_path);
-                    emit_asm("    IN R%d, %s\n", dest_reg, ioports[i].asm_port);
-                }
+				// 4. Handle custom action delegation (e.g., ioports.inp.inputs -> emit_get_gamepad_inputs_intrinsic)
+				if ((ioports[i].mode & IOPORT_ACTION) == IOPORT_ACTION)
+				{
+					try_emit_action_intrinsic(ioports[i].asm_port, dest_reg);
+					return (1);
+				}
+
+				// 5. Emit direct Vircon32 hardware IN instruction if a destination register is provided
+				if (dest_reg != 0)
+				{
+					if ((ioports[i].type & IOPORT_TYPE_INTEGER) == IOPORT_TYPE_INTEGER)
+					{
+						emit_asm("    ;; --- Intrinsic: Read Hardware Integer (%s) ---\n", full_path);
+						emit_asm("    IN R%d, %s\n", dest_reg, ioports[i].asm_port);
+						emit_asm("    CIF R%d ; Cast hardware int to Lua float\n", dest_reg);
+					}
+					else if ((ioports[i].type & IOPORT_TYPE_BOOLEAN) == IOPORT_TYPE_BOOLEAN)
+					{
+						emit_asm("    ;; --- Intrinsic: Read Hardware Boolean (%s) ---\n", full_path);
+						emit_asm("    IN R%d, %s\n", dest_reg, ioports[i].asm_port);
+						emit_asm("    CIF R%d ; Cast hardware bool to Lua float\n", dest_reg);
+
+						// NOTE: If your NaN-boxing overhaul requires explicit boolean type tags
+						// instead of raw 0.0/1.0 floats, apply your bitwise tag mask here!
+						// e.g., emit_asm("    OR R%d, 0xFFFA0000 ; Apply boolean NaN tag\n", dest_reg);
+					}
+					else
+					{
+						// Default: IOPORT_TYPE_FLOAT (No casting required!)
+						emit_asm("    ;; --- Intrinsic: Read Hardware Float (%s) ---\n", full_path);
+						emit_asm("    IN R%d, %s\n", dest_reg, ioports[i].asm_port);
+					}
+				}
             }
 
             return (1);
         }
+        // Category was valid but property not found
+        compiler_error(ERR_SEMANTIC, yylineno,
+            "Unknown ioports property '%s.%s'", base_path, key_expr->as.string_val.value);
+        return 0;
     }
 
     // Not a hardware port; fall back to dynamic heap table lookup

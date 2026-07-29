@@ -78,7 +78,8 @@ void        push_function_context        (const char *);
 void        pop_function_context         (void);
 void        pop_scope                    (void);
 void        push_scope                   (void);
-void        push_loop                    (int);
+LoopType    current_loop_type            (void);
+void        push_loop                    (int,          LoopType);
 void        pop_loop                     (void);
 int         current_loop                 (void);
 
