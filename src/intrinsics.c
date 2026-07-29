@@ -576,7 +576,8 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     // IOPorts Method Validation (e.g., ioports.gpu.clear())
     // =========================================================================
     if (strncmp(func_name, "ioports.", 8) == 0) {
-        char* dot_pos = strchr(func_name, '.');
+		// FIX: Find the dot AFTER "ioports." (separates category from method)
+        char* dot_pos = strchr(func_name + 8, '.');
         if (dot_pos) {
             // SAFE: Extract category with bounds checking
             char category[64];
