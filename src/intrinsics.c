@@ -138,6 +138,77 @@ static void  emit_print_intrinsic (ASTNode *node)
     unlock_register (reg_x);
 }
 
+// Returns true if the node was successfully intercepted and processed as a printf intrinsic.
+bool emit_printf_intrinsic(ASTNode *node, int dest_reg)
+{
+    // 1. Validate that this is a function call node[cite: 8]
+    if (node == NULL || node->type != NODE_FUNCTION_CALL) {
+        return false;
+    }
+
+    // 2. Verify the target is specifically an identifier named "printf"[cite: 8]
+    if (node->as.call.target == NULL ||
+        node->as.call.target->type != NODE_IDENTIFIER ||
+        strcmp(node->as.call.target->as.id.name, "printf") != 0)
+    {
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: printf ---");
+
+    // 3. Count the provided explicit arguments[cite: 8]
+    int explicit_arg_count = 0;
+    ASTNode *curr = node->as.call.args_head;
+    while (curr != NULL) {
+        explicit_arg_count++;
+        curr = curr->next;
+    }
+
+    if (explicit_arg_count > 0) {
+        // 4. Buffer arguments into an array for Right-to-Left traversal (Standard C ABI)[cite: 8]
+        ASTNode **arg_array = (ASTNode **)malloc(sizeof(ASTNode *) * explicit_arg_count);
+        if (arg_array == NULL) {
+            compiler_error(ERR_INTERNAL, -1, "Out of memory allocating printf argument buffer");
+        }
+
+        curr = node->as.call.args_head;
+        for (int i = 0; i < explicit_arg_count; i++) {
+            arg_array[i] = curr;
+            curr = curr->next;
+        }
+
+        emit_asm("    ; --- Pushing printf arguments Right-to-Left ---");
+
+        // 5. Evaluate and push arguments in reverse order[cite: 8]
+        for (int i = explicit_arg_count - 1; i >= 0; i--) {
+            int arg_reg = allocate_register();
+
+            // Generate assembly for the argument and leave the result in arg_reg[cite: 8]
+            generate_asm(arg_array[i], arg_reg);
+
+            emit_asm("PUSH R%d ; Push argument", arg_reg);
+            unlock_register(arg_reg);
+        }
+
+        free(arg_array);
+    }
+
+    // 6. Invoke the runtime library's variadic builtin routine[cite: 8]
+    emit_asm("CALL __builtin_printf");
+
+    // 7. Clean up the stack frame (Caller cleanup)[cite: 8]
+    if (explicit_arg_count > 0) {
+        emit_asm("IADD SP, %d ; Clean up printf arguments", explicit_arg_count);
+    }
+
+    // 8. Capture the return value if the expression requires it[cite: 8]
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R0 ; Store return value", dest_reg);
+    }
+
+    return true;
+}
+
 static void emit_gpu_blending_intrinsic (ASTNode *node, int  dest_reg)
 {
     emit_asm ("    ;; --- Intrinsic: ioports.gpu.blending() ---\n");

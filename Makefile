@@ -15,7 +15,8 @@ clean:
 
 # Pass the install target down to the src directory
 install:
-	$(MAKE) -C src install
+	#$(MAKE) -C src install
+	/bin/cp -f bin/v32lua /home/$(USER)/bin/
 
 # Run the test compilations. 
 # We explicitly depend on the compiler binary ('src/compiler') being built first!
