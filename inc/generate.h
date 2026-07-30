@@ -20,6 +20,7 @@ extern char  g_current_label[256]; // Captures a label for the current line
 extern FILE *temp_debug_stream; // Temporary buffer for tracking debug lines
 
 FILE *out (void);
+FILE *active_out_stream;
 void  set_output_stream(FILE* stream);
 void  close_output_stream(void);
 void  trim_spaces (char *);

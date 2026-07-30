@@ -11,7 +11,7 @@ char g_current_label[256];      // Adjust buffer size to match your project's or
 FILE *temp_debug_stream = NULL;
 
 // Private to this module; cannot be accidentally modified by other files
-static FILE *active_out_stream = NULL;
+FILE *active_out_stream = NULL;
 
 /* Sets the target stream for compilation output */
 void  set_output_stream (FILE* stream)
@@ -60,7 +60,11 @@ void trim_spaces(char *str) {
 // Recursively flattens an AST chain like table_get(table_get("ioports", "gpu"), "clear")
 // into a flat C string "ioports.gpu.clear". Returns 1 if successful, 0 if dynamic.
 int resolve_static_path(ASTNode* node, char* path_buffer) {
-    if (!node) return 0;
+    if (!node)
+	{
+		fprintf (stderr, "[resolve_static_path] node is NULL\n");
+		return 0;
+	}
 
     if (node->type == NODE_IDENTIFIER) {
         strcpy(path_buffer, node->as.id.name);

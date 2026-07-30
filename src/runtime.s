@@ -691,15 +691,19 @@ __print_dispatch:
 
 __print_coerce:
     ;; Target is a Float, Boolean, Nil, Table, or Function.
-    PUSH  R1                  ; ADD THIS: Preserve X coordinate
-    PUSH  R2                  ; ADD THIS: Preserve Y coordinate
+    PUSH  R1                  ; Preserve X coordinate
+    PUSH  R2                  ; Preserve Y coordinate
     PUSH  R3                  ; Push non-string value as argument
     CALL  __builtin_tostring  ; R0 now holds a Tagged String (ROM or RAM!)
-    IADD  SP, 1               ; Clean up argument from stack
-    MOV   R3, R0              ; Replace target R3 with the new String pointer
-    POP   R2                  ; ADD THIS: Restore Y coordinate
-    POP   R1                  ; ADD THIS: Restore X coordinate
-    JMP   __print_check_tag   ; Loop back to safely unbox the new string!
+
+    ;; [FIX]: Pop the argument off the stack safely into a dead scratch register
+    ;; instead of manually adjusting SP, keeping the stack balanced for R2/R1 pops.
+    POP   R3
+    MOV   R3, R0              ; Move the newly generated string pointer to R3
+
+    POP   R2                  ; Safely restore Y coordinate
+    POP   R1                  ; Safely restore X coordinate
+    JMP   __print_check_tag   ; Loop back to safely unbox and print the new string!
 
 ;; =====================================================================================
 ;; SECTION 4: CORE OPERATORS & TYPE UTILITIES
@@ -751,10 +755,15 @@ __strcmp_equal:
 ;; Universal Equality (==): Returns raw integer 1 (true) or 0 (false) in R0 
 ;; Incoming Stack: [BP+3] = Left_Val, [BP+2] = Right_Val 
 ;; -------------------------------------------------------------------------------------
+;; Universal Equality (==): Returns raw integer 1 (true) or 0 (false) in R0
+;; Incoming Stack: [BP+3] = Left_Val, [BP+2] = Right_Val
+;; -------------------------------------------------------------------------------------
 __builtin_eq:
+    PUSH BP
+    MOV  BP, SP
 
-	MOV  R1, [BP+3]
-	MOV  R2, [BP+2]
+    MOV  R1, [BP+3]
+    MOV  R2, [BP+2]
 
     ;; Fast-path: If bitwise identical, they are strictly equal
     IEQ  R1, R2
@@ -782,10 +791,12 @@ __eq_left_valid:
     AND  R3, BOXED_DATA
     IEQ  R3, BOXED_ROMSTRING
     JT   R3, __eq_right_valid
+
     MOV  R3, R2
     AND  R3, BOXED_DATA
     IEQ  R3, BOXED_RAMSTRING
     JF   R3, __eq_return_false
+
     MOV  R3, R2
     AND  R3, BOXED_PAYLOAD
     ILT  R3, 4
@@ -821,10 +832,14 @@ __eq_strcmp_loop:
 
 __eq_return_true:
     MOV  R0, BOXED_TRUE          ; Return boxed Boolean True
+    MOV  SP, BP                  ; Stack Restore
+    POP  BP
     RET
 
 __eq_return_false:
-    MOV  R0, BOXED_FALSE          ; Return boxed Boolean False
+    MOV  R0, BOXED_FALSE         ; Return boxed Boolean False
+    MOV  SP, BP                  ; Stack Restore
+    POP  BP
     RET
 
 ;; -------------------------------------------------------------------------------------
@@ -896,44 +911,32 @@ __builtin_tostring:
     JT   R4, __tostring_passthrough  ; It is a RAM String: return unchanged!
 
 __tostring_check_primitives:
-    ;; Add these three explicit checks:
+    ;; Check for nil/false/true
     MOV  R6, R1
     IEQ  R6, BOXED_NIL
     JT   R6, __tostring_nil
-
     MOV  R6, R1
     IEQ  R6, BOXED_FALSE
     JT   R6, __tostring_false
-
     MOV  R6, R1
     IEQ  R6, BOXED_TRUE
     JT   R6, __tostring_true
 
-; redundant. if that proves the case. remove this
-;    ;; Existing tag checks follow...
-;    MOV  R2, R1
-;    AND  R2, BOXED_DATA
-;
-;    MOV  R3, R2 
-;    IEQ  R3, BOXED_ROMSTRING      ; Is it already a String? 
-;    JT   R3, __tostring_passthrough 
-    
-    MOV  R3, R2 
-    IEQ  R3, BOXED_TABLE      ; Is it a Table? 
-    JT   R3, __tostring_table 
-    
-    MOV  R3, R2 
-    IEQ  R3, BOXED_FUNCTION      ; Is it a Function? 
-    JT   R3, __tostring_function 
-    
-    ;; 3. Fallback: It must be a standard IEEE 754 Float! 
-    ;; In __builtin_tostring float fallback:
-    PUSH R1 
-    CALL __builtin_ftoa 
-    IADD SP, 1 
-    
-    ;; Box as RAM String instead of ROM String
-    OR   R0, BOXED_RAMSTRING      ; Box raw pointer as RAM String 
+    ;; Check for Table/Function (optional - remove if you don't need them)
+    MOV  R3, R1
+    AND  R3, BOXED_DATA
+    IEQ  R3, BOXED_TABLE
+    JT   R3, __tostring_table
+    MOV  R3, R1                 ; this was missing, adding
+    AND  R3, BOXED_DATA         ; this was missing, adding
+    IEQ  R3, BOXED_FUNCTION
+    JT   R3, __tostring_function
+
+    ;; Fall through: It's a float
+    PUSH R1
+    CALL __builtin_ftoa
+    IADD SP, 1
+    OR   R0, BOXED_RAMSTRING
     JMP  __tostring_done
 
 __tostring_nil:
@@ -995,79 +998,242 @@ __format_function_address:
     RET
 
 ;; -------------------------------------------------------------------------------------
-;; Built-in: Float to ASCII (Whole Integer Fast-Path)
+;; Built-in: Float to ASCII (Full Floating Point Support)
 ;; Incoming Stack: [BP+2] = Raw IEEE Float
-;; Returns: R0 = Raw Heap Pointer to null-terminated ASCII string (Unboxed)
+;; Returns: R0 = Raw Heap Pointer to null-terminated ASCII string
+;; -------------------------------------------------------------------------------------
+;; -------------------------------------------------------------------------------------
+;; Built-in: Float to ASCII (Full Floating Point Support - Audited & Fixed)
+;; Incoming Stack: [BP+2] = Raw IEEE Float
+;; Returns: R0 = Raw Heap Pointer to null-terminated ASCII string
+;; -------------------------------------------------------------------------------------
+;; -------------------------------------------------------------------------------------
+;; Built-in: Float to ASCII (Full Floating Point Support - Audited & Fixed)
+;; Incoming Stack: [BP+2] = Raw IEEE Float
+;; Returns: R0 = Raw Heap Pointer to null-terminated ASCII string
 ;; -------------------------------------------------------------------------------------
 __builtin_ftoa:
     PUSH BP
     MOV  BP, SP
-    
-    ;; Allocate a 16-word character buffer on the heap for the string
-    MOV  R0, 16
+
+    MOV  R3, [BP+2]      ; Get float value
+    PUSH R3              ; Save it
+
+    MOV  R0, 32
     PUSH R0
-    CALL __malloc            ; R0 = Base address of new string buffer
+    CALL __malloc
     IADD SP, 1
+    MOV  R8, R0          ; R8 = buffer start
+    MOV  R9, R8          ; R9 = write pointer
 
-    MOV  R1, [BP+2]          ; R1 = Float value
-    CFI  R1                  ; Convert Float to Integer (in-place)
-    
-    MOV  R2, R0              ; R2 = Start of buffer
-    MOV  R3, R0              ; R3 = End of string pointer (will advance)
-    
-    ;; Handle zero explicitly
-    MOV  R4, R1
-    INE  R4, 0               ; Overwrites R4, preserving R1
-    JT   R4, __ftoa_extract_loop
-    MOV  R4, '0'
-    MOV  [R3], R4
-    IADD R3, 1
-    JMP  __ftoa_terminate
+    POP  R3              ; Restore float
 
-__ftoa_extract_loop:
-    MOV  R5, R1
-    IEQ  R5, 0               ; If quotient is 0, we are done extracting digits
-    JT   R5, __ftoa_reverse_init
-    
-    MOV  R4, R1              ; R4 = Current number
-    IMOD R4, 10              ; R4 = Remainder (Digit 0-9)
-    IADD R4, '0'             ; Convert integer digit to ASCII character word
-    MOV  [R3], R4            ; Store character in buffer (in reverse order!)
-    IADD R3, 1               ; Advance buffer pointer
-    
-    IDIV R1, 10              ; Divide number by 10 for next iteration
-    JMP  __ftoa_extract_loop
+    MOV  R4, R3          ; Work copy
+    FLT  R4, 0.0
+    JF   R4, __ftoa_positive
+    MOV  R5, 45          ; ASCII '-'
+    MOV  [R9], R5
+    IADD R9, 1
+    FABS R3
 
-;; Digits were extracted backwards (e.g., 123 stored as '3','2','1'). Reverse them!
-__ftoa_reverse_init:
-    MOV  R4, R3
-    ISUB R4, 1               ; R4 = Right pointer (last character)
-    MOV  R5, R2              ; R5 = Left pointer (first character)
+__ftoa_positive:
+    MOV  R5, R3          
+    CFI  R5              
+    MOV  R4, R5          
+    CIF  R4              
 
+    MOV  R7, R9          ; Save digit start
+    INE  R5, 0
+    JF   R5, __ftoa_write_zero
+
+__ftoa_extract_int:
+    MOV  R10, R5
+    IEQ  R10, 0
+    JT   R10, __ftoa_write_zero  ; JT (not TB), jump to write '0'
+    IMOD R10, 10
+    IADD R10, 0x30
+    MOV  [R9], R10
+    IADD R9, 1
+    IDIV R5, 10
+    JMP  __ftoa_extract_int
+
+__ftoa_write_zero:
+    MOV  R10, 0x30
+    MOV  [R9], R10
+    IADD R9, 1
+
+__ftoa_reverse_int:
+    MOV  R13, R9         ; [FIX 1] Save the true end-of-string pointer!
+    ISUB R9, 1
+    MOV  R10, R7
 __ftoa_reverse_loop:
-    MOV  R6, R5              ; Copy left pointer R5 to scratch R6
-    IGE  R6, R4              ; Test R6 instead of R5!
-    JT   R6, __ftoa_terminate
-
-    ;; Swap characters at [R5] and [R4]
-    MOV  R6, [R5]
-    MOV  R7, [R4]
-    MOV  [R5], R7
-    MOV  [R4], R6
-
-    IADD R5, 1               ; Move Left pointer inward
-    ISUB R4, 1               ; Move Right pointer inward
+    IGE  R10, R9
+    JT   R10, __ftoa_check_fraction
+    MOV  R11, [R10]
+    MOV  R12, [R9]
+    MOV  [R10], R12
+    MOV  [R9], R11
+    IADD R10, 1
+    ISUB R9, 1
     JMP  __ftoa_reverse_loop
 
-__ftoa_terminate:
-    MOV  R6, 0
-    MOV  [R3], R6            ; Write null-terminator word at the end of string
+__ftoa_check_fraction:
+    MOV  R9, R13         ; [FIX 1] Restore the true write head!
+    MOV  R10, R3          
+    MOV  R11, R10
+    FSUB R11, R4         
+    MOV  R12, 0.000001
+    FLT  R11, R12
+    JF   R11, __ftoa_done
+
+    MOV  R12, 46         ; ASCII '.'
+    MOV  [R9], R12
+    IADD R9, 1
+
+    MOV  R12, 1000000.0
+    FMUL R11, R12
+    CFI  R11
+
+    MOV  R14, R9         ; [FIX 2] Save the start of the fractional digits
+    MOV  R12, 6
+__ftoa_extract_frac:
+    MOV  R13, R11
+    IMOD R13, 10
+    IADD R13, 0x30
+    MOV  [R9], R13
+    IADD R9, 1
+    IDIV R11, 10
+    ISUB R12, 1
+    IGT  R12, 0
+    JT   R12, __ftoa_extract_frac
     
-    ;; Note: R0 still holds the raw heap base pointer from __malloc. 
-    ;; __builtin_tostring will apply the BOXED_ROMSTRING String tag to R0!
+    ;; [FIX 2] Reverse the fractional digits (Right-to-Left -> Left-to-Right)
+    MOV  R13, R9         ; Save the true end-of-string pointer again
+    ISUB R9, 1
+    MOV  R10, R14        ; R10 = Start of fraction
+__ftoa_reverse_frac_loop:
+    IGE  R10, R9
+    JT   R10, __ftoa_frac_done
+    MOV  R11, [R10]
+    MOV  R12, [R9]
+    MOV  [R10], R12
+    MOV  [R9], R11
+    IADD R10, 1
+    ISUB R9, 1
+    JMP  __ftoa_reverse_frac_loop
+
+__ftoa_frac_done:
+    MOV  R9, R13         ; Restore the true write head
+    
+__ftoa_done:
+    MOV  R10, 0          ; Null terminator
+    MOV  [R9], R10
+    MOV  R0, R8          
     MOV  SP, BP
     POP  BP
     RET
+
+;__builtin_ftoa:
+;    PUSH BP
+;    MOV  BP, SP
+;
+;    MOV  R3, [BP+2]      ; Get float value
+;    PUSH R3              ; Save it
+;
+;    MOV  R0, 32
+;    PUSH R0
+;    CALL __malloc
+;    IADD SP, 1
+;    MOV  R8, R0          ; R8 = buffer start (use R8!)
+;    MOV  R9, R8          ; R9 = write pointer
+;
+;    POP  R3              ; Restore float
+;
+;    MOV  R4, R3          ; Work copy
+;    FLT  R4, 0.0
+;    JF   R4, __ftoa_positive
+;    MOV  R5, 45
+;    MOV  [R9], R5
+;    IADD R9, 1
+;    FABS R3
+;
+;__ftoa_positive:
+;    MOV  R5, R3          ; R5 = float value (MUST copy first!)
+;    CFI  R5              ; R5 = integer part (STAYS INTEGER)
+;    MOV  R4, R5          ; R4 = integer part as integer
+;    CIF  R4              ; R4 = integer part as float (for subtraction)
+;
+;    MOV  R7, R9          ; Save digit start
+;    INE  R5, 0
+;    JF   R5, __ftoa_write_zero
+;
+;__ftoa_extract_int:
+;    MOV  R10, R5         ; R5 = integer
+;    IEQ  R10, 0
+;    JT   R10, __ftoa_reverse_int
+;    IMOD R10, 10
+;    IADD R10, 0x30
+;    MOV  [R9], R10
+;    IADD R9, 1
+;    IDIV R5, 10
+;    JMP  __ftoa_extract_int
+;
+;__ftoa_write_zero:
+;    MOV  R10, 0x30
+;    MOV  [R9], R10
+;    IADD R9, 1
+;
+;__ftoa_reverse_int:
+;    ISUB R9, 1
+;    MOV  R10, R7
+;__ftoa_reverse_loop:
+;    IGE  R10, R9
+;    JT   R10, __ftoa_check_fraction
+;    MOV  R11, [R10]
+;    MOV  R12, [R9]
+;    MOV  [R10], R12
+;    MOV  [R9], R11
+;    IADD R10, 1
+;    ISUB R9, 1
+;    JMP  __ftoa_reverse_loop
+;
+;__ftoa_check_fraction:
+;    MOV  R10, R3          ; Original float
+;    MOV  R11, R10
+;    FSUB R11, R4          ; R11 = fractional (R4 = int-as-float)
+;    MOV  R12, 0.000001
+;    FLT  R11, R12
+;    JF   R11, __ftoa_done
+;
+;    MOV  R12, 46
+;    MOV  [R9], R12
+;    IADD R9, 1
+;
+;    MOV  R12, 1000000.0
+;    FMUL R11, R12
+;    CFI  R11
+;
+;    MOV  R12, 6
+;__ftoa_extract_frac:
+;    MOV  R13, R11
+;    IMOD R13, 10
+;    IADD R13, 0x30
+;    MOV  [R9], R13
+;    IADD R9, 1
+;    IDIV R11, 10
+;    ISUB R12, 1
+;    IGT  R12, 0
+;    JT   R12, __ftoa_extract_frac
+;    IGT  R11, 0
+;    JT   R11, __ftoa_extract_frac
+;
+;__ftoa_done:
+;    MOV  R10, 0
+;    MOV  [R9], R10
+;    MOV  R0, R8           ; Return buffer
+;    MOV  SP, BP
+;    POP  BP
+;    RET
 
 ;; -------------------------------------------------------------------------------------
 ;; Built-in: Unary Minus (-x) -> Flips IEEE-754 Sign Bit 
