@@ -48,7 +48,7 @@ void  emit_print_intrinsic (ASTNode *node)
 
     // 6. Fire the printing routine and tear down the stack frame
     emit_asm ("CALL __builtin_print\n");    
-    emit_asm ("ISUB SP, 3 ; Clean up x, y, and string from the stack\n");
+    emit_asm ("IADD SP, 3 ; Clean up x, y, and string from the stack\n");
 
     // 7. Unlock registers back to the compiler pool
     unlock_register (reg_val);
