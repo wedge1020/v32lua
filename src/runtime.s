@@ -1049,7 +1049,7 @@ __ftoa_positive:
 __ftoa_extract_int:
     MOV  R10, R5
     IEQ  R10, 0
-    JT   R10, __ftoa_write_zero  ; JT (not TB), jump to write '0'
+    JT   R10, __ftoa_reverse_int  ; <-- CHANGE: Jump directly to reverse, don't write '0'
     IMOD R10, 10
     IADD R10, 0x30
     MOV  [R9], R10
