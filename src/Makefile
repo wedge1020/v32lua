@@ -12,8 +12,18 @@ CLIBS = -lm
 TARGET = ../bin/v32lua
 
 # --- Object Files ---
-# Add runtime_embed.o to your object list
-OBJS = parser.tab.o lex.yy.o main.o context.o intrinsics.o ffi.o optimize.o generator.o ast.o emit.o internals.o register.o runtime_embed.o
+
+# Core sources
+CORE_SRCS = parser.tab.o lex.yy.o main.o context.o ffi.o optimize.o generator.o ast.o emit.o internals.o register.o runtime_embed.o
+
+# Peephole modules - automatically include all .c files in peephole/
+INTRINSICS_DIR = intrinsics
+INTRINSICS_SRCS := $(wildcard $(INTRINSICS_DIR)/*.c)
+INTRINSICS_OBJS := $(INTRINSICS_SRCS:$(INTRINSICS_DIR)/%.c=$(INTRINSICS_DIR)/%.o)
+
+# All sources
+SRCS = $(CORE_SRCS) $(INTRINSICS_SRCS)
+OBJS = $(SRCS:.c=.o)
 
 # --- Build Rules ---
 all: $(TARGET)
