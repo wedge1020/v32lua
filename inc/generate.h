@@ -18,9 +18,9 @@ extern int   g_temp_asm_line;  // Tracks current relative line inside the temp b
 extern int   g_current_lua_line;  // Tracks active source line being evaluated
 extern char  g_current_label[256]; // Captures a label for the current line
 extern FILE *temp_debug_stream; // Temporary buffer for tracking debug lines
+extern FILE *active_out_stream;
 
 FILE *out (void);
-FILE *active_out_stream;
 void  set_output_stream(FILE* stream);
 void  close_output_stream(void);
 void  trim_spaces (char *);
