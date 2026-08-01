@@ -1127,7 +1127,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
 
 					// if __builtin_eq boxes values for us, we don't need to rebox, commenting this out:
                     // Box the 0/1 result from equality checking into a NaN boolean!
-                    emit_asm ("IADD R%d, BOXED_BOOLEAN ; Box as Lua Boolean (False/True)\n", dest_reg);
+                    //emit_asm ("IADD R%d, BOXED_BOOLEAN ; Box as Lua Boolean (False/True)\n", dest_reg);
                 }
                 else
                 {
