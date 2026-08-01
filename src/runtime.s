@@ -634,7 +634,9 @@ __builtin_print:
 
     ;; 1. Initialize GPU Texture/Region state
     IN   R5, GPU_SelectedTexture ; Save current texture
+	PUSH R5
     IN   R6, GPU_SelectedRegion  ; Save current region
+	PUSH R6
     OUT  GPU_SelectedTexture, -1 ; Set BIOS font texture
 
     ;; 2. Load Parameters
@@ -682,6 +684,8 @@ __print_dispatch:
     IADD SP, 3               ; Clean up arguments from stack
 
     ;; 6. Restore previous GPU texture and region
+	POP  R6
+	POP  R5
     OUT  GPU_SelectedTexture, R5 ; Restore previous texture
     OUT  GPU_SelectedRegion, R6  ; Restore previous region
 
@@ -694,10 +698,10 @@ __print_coerce:
     PUSH  R5                  ; Save GPU_SelectedTexture
     PUSH  R2                  ; Preserve Y coordinate
     PUSH  R1                  ; Preserve X coordinate
-    PUSH  R3                  ; Push non-string value as argument (now at [BP+2])
+    PUSH  R3                  ; Push non-string value as argument
     CALL  __builtin_tostring  ; R0 = Tagged String result
 
-    IADD SP, 1               ; Clean up argument (R3)
+    POP  R3                  ; Discard the argument (was pushed before CALL)
     POP  R1                  ; Restore X
     POP  R2                  ; Restore Y
     POP  R5                  ; Restore GPU_SelectedTexture
@@ -927,6 +931,7 @@ __tostring_check_primitives:
     AND  R3, BOXED_DATA
     IEQ  R3, BOXED_TABLE
     JT   R3, __tostring_table
+
     MOV  R3, R1                 ; this was missing, adding
     AND  R3, BOXED_DATA         ; this was missing, adding
     IEQ  R3, BOXED_FUNCTION
@@ -1000,129 +1005,163 @@ __format_function_address:
 ;; -------------------------------------------------------------------------------------
 ;; Built-in: Float to ASCII (Full Floating Point Support)
 ;; Incoming Stack: [BP+2] = Raw IEEE Float
+;; Note: any NaN-boxed value tag stripped by caller
 ;; Returns: R0 = Raw Heap Pointer to null-terminated ASCII string
+;; Registers used: R0-R13 only (R14/BP and R15/SP are NEVER used as general-purpose)
 ;; -------------------------------------------------------------------------------------
 __builtin_ftoa:
     PUSH BP
     MOV  BP, SP
 
-    ; --- FIX 1: Preserve float value in R4 (safe from __malloc) ---
-    MOV  R4, [BP+2]      ; Get float value into R4 (R4 is not clobbered by __malloc)
+    ;; --- Unbox the float value first ---
+    MOV  R3, [BP+2]          ; R3 = value from stack
+    ;AND  R3, BOXED_PAYLOAD    ; Strip tag: R3 = raw IEEE-754 float
 
+    ;; --- Rest of your implementation continues unchanged ---
     MOV  R0, 32
     PUSH R0
     CALL __malloc
     IADD SP, 1
-    MOV  R8, R0          ; R8 = buffer start
-    MOV  R9, R8          ; R9 = write pointer
+    MOV  R8, R0
+    MOV  R9, R8
 
-    ; --- Restore float value to R3 for processing ---
-    MOV  R3, R4          ; Copy float value to R3
+    ;; --- Handle sign ---
+    MOV  R3, [BP+2]          ; R3 = value from stack
+    MOV  R4, R3              ; Copy to R4 for sign check
+    FLT  R4, 0.0             ; Compare R4 with 0.0
+    JF   R4, __ftoa_positive ; Jump if positive (R4 >= 0.0)
 
-    ; --- Original sign handling (unchanged) ---
-    MOV  R4, R3          ; Work copy
-    FLT  R4, 0.0
-    JF   R4, __ftoa_positive
-    MOV  R5, 45          ; ASCII '-'
+    ;; Negative: write '-' and use absolute value
+    MOV  R5, 45              ; ASCII '-'
     MOV  [R9], R5
     IADD R9, 1
-    FABS R3
-
-__ftoa_positive:
-    MOV  R5, R3
-    CFI  R5
-    MOV  R4, R5
-    CIF  R4
-
-    MOV  R7, R9          ; Save digit start
-    INE  R5, 0
-    JF   R5, __ftoa_write_zero
-
-__ftoa_extract_int:
-    MOV  R10, R5
-    IEQ  R10, 0
-    JT   R10, __ftoa_reverse_int
-    IMOD R10, 10
-    IADD R10, 0x30
-    MOV  [R9], R10
-    IADD R9, 1
-    IDIV R5, 10
+    FABS R3                  ; R3 = |float value|
     JMP  __ftoa_extract_int
 
-__ftoa_write_zero:
-    MOV  R10, 0x30
-    MOV  [R9], R10
+__ftoa_positive:
+    ;; --- Extract integer part ---
+__ftoa_extract_int:
+    MOV  R4, R3              ; Copy float to R4
+    CFI  R4                  ; Convert to integer in R4 (truncates towards zero)
+	MOV  R8, R4              ; back up original integer part into R8
+
+    ;; Check if integer part is zero
+    MOV  R5, R4
+    INE  R5, 0
+    JT   R5, __ftoa_write_int_digits
+
+    ;; Integer part is zero: write single '0'
+    MOV  R5, 48              ; ASCII '0'
+    MOV  [R9], R5
+    IADD R9, 1
+    MOV  R7, R9              ; R7 = start of integer digits (points to '0')
+    JMP  __ftoa_check_fraction
+
+__ftoa_write_int_digits:
+    MOV  R7, R9              ; R7 = start of integer digits (save for reversal)
+
+    ;; Extract digits in reverse order (LSB first)
+__ftoa_int_loop:
+    MOV  R5, R4              ; Copy current integer value
+    INE  R5, 0               ; Check if we've extracted all digits
+    JF   R5, __ftoa_reverse_int
+
+    ;; Get next digit (LSB)
+    MOV  R6, R4
+    IMOD R6, 10              ; R6 = R4 % 10
+    IADD R6, 48              ; Convert to ASCII
+    MOV  [R9], R6            ; Write digit
     IADD R9, 1
 
+    ;; Divide by 10 for next iteration
+    IDIV R4, 10
+    JMP  __ftoa_int_loop
+
+    ;; Reverse integer digits (they were written LSB first)
 __ftoa_reverse_int:
-    MOV  R13, R9         ; Save the true end-of-string pointer
-    ISUB R9, 1
-    MOV  R10, R7
-__ftoa_reverse_loop:
-    IGE  R10, R9
-    JT   R10, __ftoa_check_fraction
-    MOV  R11, [R10]
-    MOV  R12, [R9]
-    MOV  [R10], R12
-    MOV  [R9], R11
+    MOV  R10, R7             ; R10 = start of digits
+    MOV  R11, R9
+    ISUB R11, 1              ; R11 = end of digits (last digit written)
+__ftoa_reverse_int_loop:
+    MOV  R5,  R10
+    IGE  R5, R11
+    JT   R5, __ftoa_check_fraction
+
+    ;; Swap [R10] and [R11]
+    MOV  R12, [R10]
+    MOV  R13, [R11]
+    MOV  [R10], R13
+    MOV  [R11], R12
+
     IADD R10, 1
-    ISUB R9, 1
-    JMP  __ftoa_reverse_loop
+    ISUB R11, 1
+    JMP  __ftoa_reverse_int_loop
 
+    ;; --- Check if there's a fractional part ---
 __ftoa_check_fraction:
-    MOV  R9, R13         ; Restore the true write head
-    MOV  R10, R3
-    MOV  R11, R10
-    FSUB R11, R4
-    MOV  R12, 0.000001
-    FLT  R11, R12
-    JF   R11, __ftoa_done
+    MOV  R5, R3              ; Original float
+    MOV  R6, R8              ; Integer part (as float)
+    CIF  R6                  ; Convert integer back to float
+    FSUB R5, R6              ; R5 = fractional part
 
-    MOV  R12, 46         ; ASCII '.'
+    ;; If fractional part is very small, we're done
+    MOV  R6, 0.000001
+    FLT  R5, R6
+    JT   R5, __ftoa_done
+
+    ;; Write decimal point
+    MOV  R6, 46              ; ASCII '.'
+    MOV  [R9], R6
+    IADD R9, 1
+
+    ;; Scale fractional part to integer (6 decimal places)
+    MOV  R6, 1000000.0
+    FMUL R5, R6              ; R5 = fractional * 1,000,000
+    CFI  R5                  ; Convert to integer
+
+    ;; Save start of fractional digits for reversal
+    MOV  R1, R9              ; R1 = start of fractional digits
+
+    ;; Extract fractional digits (LSB first, will reverse later)
+    MOV  R6, 6               ; Counter for 6 digits
+__ftoa_extract_frac:
+    MOV  R12, R5
+    IMOD R12, 10             ; R12 = R5 % 10
+    IADD R12, 48            ; Convert to ASCII
     MOV  [R9], R12
     IADD R9, 1
 
-    MOV  R12, 1000000.0
-    FMUL R11, R12
-    CFI  R11
+    IDIV R5, 10
+    ISUB R6, 1
+    IGT  R6, 0
+    JT   R6, __ftoa_extract_frac
 
-    ; --- FIX 2: Use R1 instead of R14 (BP) and R6 (GPU state) ---
-    MOV  R1, R9          ; Save start of fractional digits in R1
-    MOV  R12, 6
-__ftoa_extract_frac:
-    MOV  R13, R11
-    IMOD R13, 10
-    IADD R13, 0x30
-    MOV  [R9], R13
-    IADD R9, 1
-    IDIV R11, 10
-    ISUB R12, 1
-    IGT  R12, 0
-    JT   R12, __ftoa_extract_frac
-
-    MOV  R13, R9         ; Save the true end-of-string pointer
-    ISUB R9, 1
-    MOV  R10, R1         ; R10 = Start of fraction (was R14)
+    ;; Reverse fractional digits
+    MOV  R10, R1             ; R10 = start of fractional digits
+    MOV  R11, R9
+    ISUB R11, 1              ; R11 = end of fractional digits
 __ftoa_reverse_frac_loop:
-    IGE  R10, R9
-    JT   R10, __ftoa_frac_done
-    MOV  R11, [R10]
-    MOV  R12, [R9]
-    MOV  [R10], R12
-    MOV  [R9], R11
+    IGE  R10, R11
+    JT   R10, __ftoa_done
+
+    ;; Swap [R10] and [R11]
+    MOV  R12, [R10]
+    MOV  R13, [R11]
+    MOV  [R10], R13
+    MOV  [R11], R12
+
     IADD R10, 1
-    ISUB R9, 1
+    ISUB R11, 1
     JMP  __ftoa_reverse_frac_loop
 
-__ftoa_frac_done:
-    MOV  R9, R13         ; Restore the true write head
-
+    ;; --- Null-terminate and return ---
 __ftoa_done:
     MOV  R10, 0
-    MOV  [R9], R10
-    MOV  R0, R8
-    MOV  SP, BP
-    POP  BP
+    MOV  [R9], R10           ; Null terminator
+
+    MOV  R0, R11             ; Return buffer pointer
+    MOV  SP, BP              ; Restore stack pointer
+    POP  BP                  ; Restore base pointer
     RET
 
 ;; -------------------------------------------------------------------------------------
@@ -1363,31 +1402,31 @@ __builtin_btn:
 
     ;; --- 1. Select Gamepad ---
     MOV   R1, [BP+3]
-	CFI   R1
+    CFI   R1
     ;; (Optional: FTOI R1, R1 if your numbers are floats)
     OUT   INP_SelectedGamepad, R1
 
     ;; --- 2. Evaluate Button ID ---
     MOV   R2, [BP+2]
-	CFI   R2 ; convert button ID to int
+    CFI   R2 ; convert button ID to int
 
     ;; Compare and jump to specific hardware port read
-	MOV   R1, R2
+    MOV   R1, R2
     IEQ   R1, 0
     JT    R1, _btn_up
-	MOV   R1, R2
+    MOV   R1, R2
     IEQ   R1, 1
     JT    R1, _btn_down
-	MOV   R1, R2
+    MOV   R1, R2
     IEQ   R1, 2
     JT    R1, _btn_left
-	MOV   R1, R2
+    MOV   R1, R2
     IEQ   R1, 3
     JT    R1, _btn_right
-	MOV   R1, R2
+    MOV   R1, R2
     IEQ   R1, 4
     JT    R1, _btn_a
-	MOV   R1, R2
+    MOV   R1, R2
     IEQ   R1, 5
     JT    R1, _btn_b
 
