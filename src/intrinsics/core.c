@@ -102,6 +102,24 @@ void validate_ioports_path(const char* base_path, const char* key, int line_num)
             }
             compiler_error(ERR_SEMANTIC, line_num,
                 "Unknown ioports category '%s'. Available categories: %s", category, available);
+            return;
+        }
+
+        // Build full path and validate property exists in the ioports table
+        char full_path[512];
+        snprintf(full_path, sizeof(full_path), "%s.%s", base_path, key);
+
+        bool found = false;
+        for (int i = 0; ioports[i].lua_path != NULL; i++) {
+            if (strcmp(full_path, ioports[i].lua_path) == 0) {
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            compiler_error(ERR_SEMANTIC, line_num,
+                "Unknown ioports property '%s.%s'", base_path, key);
         }
     }
 }
@@ -405,97 +423,3 @@ int try_emit_table_get_intrinsic(ASTNode *table_expr, ASTNode *key_expr, int des
 
     return 0; // Not a hardware port; fallback to dynamic lookup
 }
-
-/*
-int try_emit_table_get_intrinsic(ASTNode *table_expr, ASTNode *key_expr, int dest_reg) {
-    char base_path[256];
-
-    // FIX: Add NULL check for key_expr
-    if (!resolve_static_path(table_expr, base_path) || 
-        key_expr == NULL || key_expr->type != NODE_STRING) {
-        return 0;  // Not a static table access, continue normally
-    }
-
-    // 2. Check if this is an ioports path
-    if (strncmp(base_path, "ioports.", 8) == 0) {
-        // Extract the category (e.g., "tim" from "ioports.tim")
-        char* category = base_path + 8;  // Skip "ioports."
-
-        // Check if category is valid
-        if (!is_valid_ioports_category(category)) {
-            // List available categories for helpful error
-            char available[256] = "";
-            for (int i = 0; valid_ioports_categories[i] != NULL; i++) {
-                strcat(available, valid_ioports_categories[i]);
-                if (valid_ioports_categories[i+1] != NULL) {
-                    strcat(available, ", ");
-                }
-            }
-            compiler_error(ERR_SEMANTIC, yylineno,
-                "Unknown ioports category '%s'. Available: %s", category, available);
-            return 0;
-        }
-
-        // Build full path
-        char full_path[512];
-        snprintf(full_path, sizeof(full_path), "%s.%s", base_path, key_expr->as.string_val.value);
-
-		fprintf (stderr, "[table_get_intrinsic] full_path: '%s'\n", full_path);
-        // Scan the internal IOPortMap table for a match
-        for (int i = 0; ioports[i].lua_path != NULL; i++)
-        {
-            if (strcmp(full_path, ioports[i].lua_path) == 0)
-            {
-                // Verify hardware port read permissions
-                if ((ioports[i].mode & IOPORT_READ) != IOPORT_READ)
-                {
-                    compiler_error(ERR_SEMANTIC, yylineno, "%s: port cannot be read from", full_path);
-                }
-
-                // 4. Handle custom action delegation (e.g., ioports.inp.inputs -> emit_get_gamepad_inputs_intrinsic)
-                if ((ioports[i].mode & IOPORT_ACTION) == IOPORT_ACTION)
-                {
-                    try_emit_action_intrinsic(ioports[i].asm_port, dest_reg);
-                    return (1);
-                }
-
-                // 5. Emit direct Vircon32 hardware IN instruction if a destination register is provided
-                if (dest_reg != 0)
-                {
-                    if ((ioports[i].type & IOPORT_TYPE_INTEGER) == IOPORT_TYPE_INTEGER)
-                    {
-                        emit_asm("    ;; --- Intrinsic: Read Hardware Integer (%s) ---\n", full_path);
-                        emit_asm("    IN R%d, %s\n", dest_reg, ioports[i].asm_port);
-                        emit_asm("    CIF R%d ; Cast hardware int to Lua float\n", dest_reg);
-                    }
-                    else if ((ioports[i].type & IOPORT_TYPE_BOOLEAN) == IOPORT_TYPE_BOOLEAN)
-                    {
-                        emit_asm("    ;; --- Intrinsic: Read Hardware Boolean (%s) ---\n", full_path);
-                        emit_asm("    IN R%d, %s\n", dest_reg, ioports[i].asm_port);
-                        emit_asm("    CIF R%d ; Cast hardware bool to Lua float\n", dest_reg);
-
-                        // NOTE: If your NaN-boxing overhaul requires explicit boolean type tags
-                        // instead of raw 0.0/1.0 floats, apply your bitwise tag mask here!
-                        // e.g., emit_asm("    OR R%d, 0xFFFA0000 ; Apply boolean NaN tag\n", dest_reg);
-                    }
-                    else
-                    {
-                        // Default: IOPORT_TYPE_FLOAT (No casting required!)
-                        emit_asm("    ;; --- Intrinsic: Read Hardware Float (%s) ---\n", full_path);
-                        emit_asm("    IN R%d, %s\n", dest_reg, ioports[i].asm_port);
-                    }
-                }
-            }
-
-            return (1);
-        }
-        // Category was valid but property not found
-        compiler_error(ERR_SEMANTIC, yylineno,
-            "Unknown ioports property '%s.%s'", base_path, key_expr->as.string_val.value);
-        return 0;
-    }
-
-    // Not a hardware port; fall back to dynamic heap table lookup
-    return (0);
-}
-*/

@@ -29,7 +29,7 @@ OBJS = $(SRCS:.c=.o)
 all: $(TARGET)
 
 $(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $^
+	$(CC) $(CFLAGS) -o $@ $^ $(CLIBS)
 
 parser.tab.c parser.tab.h: parser.y
 	$(YACC) -d parser.y -t
@@ -41,10 +41,9 @@ lex.yy.c: lexer.l parser.tab.h
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# Rule for Assembly files (handles our .incbin wrapper)
 # Rule for Assembly files (instructs assembler to disable executable stack requirement)
 %.o: %.S
-	$(CC) $(CFLAGS) -Wa,--noexecstack -c $< -o $@ $(CLIBS)
+	$(CC) $(CFLAGS) -Wa,--noexecstack -c $< -o $@
 
 # --- Monolithic Source Generation Rule ---
 monofile:

@@ -690,17 +690,17 @@ __print_dispatch:
     RET
 
 __print_coerce:
-    ;; Target is a Float, Boolean, Nil, Table, or Function.
     PUSH  R1                  ; Preserve X coordinate
     PUSH  R2                  ; Preserve Y coordinate
     PUSH  R3                  ; Push non-string value as argument
+    PUSH  R5                  ; [NEW] Save GPU_SelectedTexture
+    PUSH  R6                  ; [NEW] Save GPU_SelectedRegion
     CALL  __builtin_tostring  ; R0 now holds a Tagged String (ROM or RAM!)
 
-    ;; [FIX]: Pop the argument off the stack safely into a dead scratch register
-    ;; instead of manually adjusting SP, keeping the stack balanced for R2/R1 pops.
+    POP   R6                  ; [NEW] Restore GPU_SelectedRegion
+    POP   R5                  ; [NEW] Restore GPU_SelectedTexture
     POP   R3
     MOV   R3, R0              ; Move the newly generated string pointer to R3
-
     POP   R2                  ; Safely restore Y coordinate
     POP   R1                  ; Safely restore X coordinate
     JMP   __print_check_tag   ; Loop back to safely unbox and print the new string!
@@ -1002,22 +1002,12 @@ __format_function_address:
 ;; Incoming Stack: [BP+2] = Raw IEEE Float
 ;; Returns: R0 = Raw Heap Pointer to null-terminated ASCII string
 ;; -------------------------------------------------------------------------------------
-;; -------------------------------------------------------------------------------------
-;; Built-in: Float to ASCII (Full Floating Point Support - Audited & Fixed)
-;; Incoming Stack: [BP+2] = Raw IEEE Float
-;; Returns: R0 = Raw Heap Pointer to null-terminated ASCII string
-;; -------------------------------------------------------------------------------------
-;; -------------------------------------------------------------------------------------
-;; Built-in: Float to ASCII (Full Floating Point Support - Audited & Fixed)
-;; Incoming Stack: [BP+2] = Raw IEEE Float
-;; Returns: R0 = Raw Heap Pointer to null-terminated ASCII string
-;; -------------------------------------------------------------------------------------
 __builtin_ftoa:
     PUSH BP
     MOV  BP, SP
 
-    MOV  R3, [BP+2]      ; Get float value
-    PUSH R3              ; Save it
+    ; --- FIX 1: Preserve float value in R4 (safe from __malloc) ---
+    MOV  R4, [BP+2]      ; Get float value into R4 (R4 is not clobbered by __malloc)
 
     MOV  R0, 32
     PUSH R0
@@ -1026,8 +1016,10 @@ __builtin_ftoa:
     MOV  R8, R0          ; R8 = buffer start
     MOV  R9, R8          ; R9 = write pointer
 
-    POP  R3              ; Restore float
+    ; --- Restore float value to R3 for processing ---
+    MOV  R3, R4          ; Copy float value to R3
 
+    ; --- Original sign handling (unchanged) ---
     MOV  R4, R3          ; Work copy
     FLT  R4, 0.0
     JF   R4, __ftoa_positive
@@ -1037,10 +1029,10 @@ __builtin_ftoa:
     FABS R3
 
 __ftoa_positive:
-    MOV  R5, R3          
-    CFI  R5              
-    MOV  R4, R5          
-    CIF  R4              
+    MOV  R5, R3
+    CFI  R5
+    MOV  R4, R5
+    CIF  R4
 
     MOV  R7, R9          ; Save digit start
     INE  R5, 0
@@ -1049,7 +1041,7 @@ __ftoa_positive:
 __ftoa_extract_int:
     MOV  R10, R5
     IEQ  R10, 0
-    JT   R10, __ftoa_reverse_int  ; <-- CHANGE: Jump directly to reverse, don't write '0'
+    JT   R10, __ftoa_reverse_int
     IMOD R10, 10
     IADD R10, 0x30
     MOV  [R9], R10
@@ -1063,7 +1055,7 @@ __ftoa_write_zero:
     IADD R9, 1
 
 __ftoa_reverse_int:
-    MOV  R13, R9         ; [FIX 1] Save the true end-of-string pointer!
+    MOV  R13, R9         ; Save the true end-of-string pointer
     ISUB R9, 1
     MOV  R10, R7
 __ftoa_reverse_loop:
@@ -1078,10 +1070,10 @@ __ftoa_reverse_loop:
     JMP  __ftoa_reverse_loop
 
 __ftoa_check_fraction:
-    MOV  R9, R13         ; [FIX 1] Restore the true write head!
-    MOV  R10, R3          
+    MOV  R9, R13         ; Restore the true write head
+    MOV  R10, R3
     MOV  R11, R10
-    FSUB R11, R4         
+    FSUB R11, R4
     MOV  R12, 0.000001
     FLT  R11, R12
     JF   R11, __ftoa_done
@@ -1094,7 +1086,8 @@ __ftoa_check_fraction:
     FMUL R11, R12
     CFI  R11
 
-    MOV  R14, R9         ; [FIX 2] Save the start of the fractional digits
+    ; --- FIX 2: Use R1 instead of R14 (BP) and R6 (GPU state) ---
+    MOV  R1, R9          ; Save start of fractional digits in R1
     MOV  R12, 6
 __ftoa_extract_frac:
     MOV  R13, R11
@@ -1106,11 +1099,10 @@ __ftoa_extract_frac:
     ISUB R12, 1
     IGT  R12, 0
     JT   R12, __ftoa_extract_frac
-    
-    ;; [FIX 2] Reverse the fractional digits (Right-to-Left -> Left-to-Right)
-    MOV  R13, R9         ; Save the true end-of-string pointer again
+
+    MOV  R13, R9         ; Save the true end-of-string pointer
     ISUB R9, 1
-    MOV  R10, R14        ; R10 = Start of fraction
+    MOV  R10, R1         ; R10 = Start of fraction (was R14)
 __ftoa_reverse_frac_loop:
     IGE  R10, R9
     JT   R10, __ftoa_frac_done
@@ -1124,116 +1116,14 @@ __ftoa_reverse_frac_loop:
 
 __ftoa_frac_done:
     MOV  R9, R13         ; Restore the true write head
-    
+
 __ftoa_done:
-    MOV  R10, 0          ; Null terminator
+    MOV  R10, 0
     MOV  [R9], R10
-    MOV  R0, R8          
+    MOV  R0, R8
     MOV  SP, BP
     POP  BP
     RET
-
-;__builtin_ftoa:
-;    PUSH BP
-;    MOV  BP, SP
-;
-;    MOV  R3, [BP+2]      ; Get float value
-;    PUSH R3              ; Save it
-;
-;    MOV  R0, 32
-;    PUSH R0
-;    CALL __malloc
-;    IADD SP, 1
-;    MOV  R8, R0          ; R8 = buffer start (use R8!)
-;    MOV  R9, R8          ; R9 = write pointer
-;
-;    POP  R3              ; Restore float
-;
-;    MOV  R4, R3          ; Work copy
-;    FLT  R4, 0.0
-;    JF   R4, __ftoa_positive
-;    MOV  R5, 45
-;    MOV  [R9], R5
-;    IADD R9, 1
-;    FABS R3
-;
-;__ftoa_positive:
-;    MOV  R5, R3          ; R5 = float value (MUST copy first!)
-;    CFI  R5              ; R5 = integer part (STAYS INTEGER)
-;    MOV  R4, R5          ; R4 = integer part as integer
-;    CIF  R4              ; R4 = integer part as float (for subtraction)
-;
-;    MOV  R7, R9          ; Save digit start
-;    INE  R5, 0
-;    JF   R5, __ftoa_write_zero
-;
-;__ftoa_extract_int:
-;    MOV  R10, R5         ; R5 = integer
-;    IEQ  R10, 0
-;    JT   R10, __ftoa_reverse_int
-;    IMOD R10, 10
-;    IADD R10, 0x30
-;    MOV  [R9], R10
-;    IADD R9, 1
-;    IDIV R5, 10
-;    JMP  __ftoa_extract_int
-;
-;__ftoa_write_zero:
-;    MOV  R10, 0x30
-;    MOV  [R9], R10
-;    IADD R9, 1
-;
-;__ftoa_reverse_int:
-;    ISUB R9, 1
-;    MOV  R10, R7
-;__ftoa_reverse_loop:
-;    IGE  R10, R9
-;    JT   R10, __ftoa_check_fraction
-;    MOV  R11, [R10]
-;    MOV  R12, [R9]
-;    MOV  [R10], R12
-;    MOV  [R9], R11
-;    IADD R10, 1
-;    ISUB R9, 1
-;    JMP  __ftoa_reverse_loop
-;
-;__ftoa_check_fraction:
-;    MOV  R10, R3          ; Original float
-;    MOV  R11, R10
-;    FSUB R11, R4          ; R11 = fractional (R4 = int-as-float)
-;    MOV  R12, 0.000001
-;    FLT  R11, R12
-;    JF   R11, __ftoa_done
-;
-;    MOV  R12, 46
-;    MOV  [R9], R12
-;    IADD R9, 1
-;
-;    MOV  R12, 1000000.0
-;    FMUL R11, R12
-;    CFI  R11
-;
-;    MOV  R12, 6
-;__ftoa_extract_frac:
-;    MOV  R13, R11
-;    IMOD R13, 10
-;    IADD R13, 0x30
-;    MOV  [R9], R13
-;    IADD R9, 1
-;    IDIV R11, 10
-;    ISUB R12, 1
-;    IGT  R12, 0
-;    JT   R12, __ftoa_extract_frac
-;    IGT  R11, 0
-;    JT   R11, __ftoa_extract_frac
-;
-;__ftoa_done:
-;    MOV  R10, 0
-;    MOV  [R9], R10
-;    MOV  R0, R8           ; Return buffer
-;    MOV  SP, BP
-;    POP  BP
-;    RET
 
 ;; -------------------------------------------------------------------------------------
 ;; Built-in: Unary Minus (-x) -> Flips IEEE-754 Sign Bit 
