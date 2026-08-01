@@ -690,20 +690,20 @@ __print_dispatch:
     RET
 
 __print_coerce:
-    PUSH  R1                  ; Preserve X coordinate
+    PUSH  R6                  ; Save GPU_SelectedRegion
+    PUSH  R5                  ; Save GPU_SelectedTexture
     PUSH  R2                  ; Preserve Y coordinate
-    PUSH  R3                  ; Push non-string value as argument
-    PUSH  R5                  ; [NEW] Save GPU_SelectedTexture
-    PUSH  R6                  ; [NEW] Save GPU_SelectedRegion
-    CALL  __builtin_tostring  ; R0 now holds a Tagged String (ROM or RAM!)
+    PUSH  R1                  ; Preserve X coordinate
+    PUSH  R3                  ; Push non-string value as argument (now at [BP+2])
+    CALL  __builtin_tostring  ; R0 = Tagged String result
 
-    POP   R6                  ; [NEW] Restore GPU_SelectedRegion
-    POP   R5                  ; [NEW] Restore GPU_SelectedTexture
-    POP   R3
-    MOV   R3, R0              ; Move the newly generated string pointer to R3
-    POP   R2                  ; Safely restore Y coordinate
-    POP   R1                  ; Safely restore X coordinate
-    JMP   __print_check_tag   ; Loop back to safely unbox and print the new string!
+    IADD SP, 1               ; Clean up argument (R3)
+    POP  R1                  ; Restore X
+    POP  R2                  ; Restore Y
+    POP  R5                  ; Restore GPU_SelectedTexture
+    POP  R6                  ; Restore GPU_SelectedRegion
+    MOV  R3, R0              ; Move result to R3
+    JMP  __print_check_tag
 
 ;; =====================================================================================
 ;; SECTION 4: CORE OPERATORS & TYPE UTILITIES
