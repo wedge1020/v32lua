@@ -61,10 +61,10 @@ void trim_spaces(char *str) {
 // into a flat C string "ioports.gpu.clear". Returns 1 if successful, 0 if dynamic.
 int resolve_static_path(ASTNode* node, char* path_buffer) {
     if (!node)
-	{
-		fprintf (stderr, "[resolve_static_path] node is NULL\n");
-		return 0;
-	}
+    {
+        fprintf (stderr, "[resolve_static_path] node is NULL\n");
+        return 0;
+    }
 
     if (node->type == NODE_IDENTIFIER) {
         strcpy(path_buffer, node->as.id.name);
@@ -262,15 +262,19 @@ int check_needs_stack (ASTNode *node)
     return check_needs_stack (node -> next);
 }
 
-void  generate_block (ASTNode *head)
-{
-    ASTNode *current   = head;
-    while (current    != NULL)
-    {
-        int  temp_reg  = allocate_register();
-        generate_asm (current, temp_reg);
-        unlock_register (temp_reg);
-        current        = current -> next; // Move to the next sibling statement
+void generate_block(ASTNode *head) {
+    ASTNode *current = head;
+    while (current != NULL) {
+        // Only allocate if the statement needs a result register
+        if (current->type != NODE_BREAK && current->type != NODE_RETURN) {
+            int temp_reg = allocate_register();
+            generate_asm(current, temp_reg);
+            unlock_register(temp_reg);
+        } else {
+            // Statements that don't produce values
+            generate_asm(current, 0);  // Pass 0 to indicate no dest_reg needed
+        }
+        current = current->next;
     }
 }
 
@@ -292,7 +296,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 char end_label[128];
                 snprintf(end_label, sizeof(end_label), "__%s_while_end_%d", ctx, label_id);
 
-				push_loop(label_id, LOOP_TYPE_WHILE);  // Pass loop type
+                push_loop(label_id, LOOP_TYPE_WHILE);  // Pass loop type
 
                 emit_asm ("__%s_while_start_%d:\n", ctx, label_id);
                 
@@ -366,13 +370,17 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 unlock_register(scratch);
 
                 // 2. Setup Loop Break Tracking
-				push_loop(label_id, LOOP_TYPE_FOR_NUMERIC);  // Pass loop type
+                push_loop(label_id, LOOP_TYPE_FOR_NUMERIC);  // Pass loop type
 
                 emit_asm("%s:\n", start_label);
 
                 // 3. OPTIMIZED Loop Conditional Check
                 int r_idx = allocate_register();
                 int r_lim = allocate_register();
+
+                ensure_in_register(r_idx);
+                ensure_in_register(r_lim);
+
                 emit_asm("MOV R%d, %s", r_idx, access_index);
                 emit_asm("MOV R%d, %s", r_lim, access_limit);
 
@@ -417,6 +425,8 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 int r_st   = allocate_register();
                 emit_asm("MOV R%d, %s", r_calc, access_index);
                 emit_asm("MOV R%d, %s", r_st, access_step);
+                ensure_in_register(r_calc);
+                ensure_in_register(r_st);
                 emit_asm("FADD R%d, R%d ; float index += float step", r_calc, r_st);
                 emit_asm("MOV %s, R%d", access_index, r_calc);
                 unlock_register(r_calc);
@@ -431,17 +441,17 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 break;
             }
             case NODE_BREAK: {
-				int current_id = current_loop();
-				if (current_id == -1) {
-					fprintf(stderr, "Compiler Runtime Error: 'break' declaration found outside loop.\n");
-					exit(1);
-				}
+                int current_id = current_loop();
+                if (current_id == -1) {
+                    fprintf(stderr, "Compiler Runtime Error: 'break' declaration found outside loop.\n");
+                    exit(1);
+                }
 
-				LoopType type = current_loop_type();
-				const char* prefix = (type == LOOP_TYPE_FOR_NUMERIC) ? "for" : "while";
-				emit_asm("JMP __%s_%s_end_%d\n", get_current_function_name(), prefix, current_id);
-				break;
-			}
+                LoopType type = current_loop_type();
+                const char* prefix = (type == LOOP_TYPE_FOR_NUMERIC) ? "for" : "while";
+                emit_asm("JMP __%s_%s_end_%d\n", get_current_function_name(), prefix, current_id);
+                break;
+            }
 
             case NODE_IF: {
                 int         cond_reg  = allocate_register ();
@@ -489,20 +499,16 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 bool has_params = (node->as.function_def.params != NULL);
                 bool body_needs_stack = check_needs_stack(node->as.function_def.body);
 
-                bool omit_frame_pointer = (o_optflag >= 1) && !body_needs_stack && (num_locals == 0) && !has_params;
+				emit_asm("PUSH BP\n");
+				emit_asm("MOV BP, SP\n");
 
-                if (!omit_frame_pointer) {
-                    emit_asm("PUSH BP\n");
-                    emit_asm("MOV BP, SP\n");
+				int total_stack = num_locals + MAX_SPILL_SLOTS;
+				if (total_stack > 0) {
+					emit_asm("ISUB SP, %d ; Reserve stack for locals + spills\n", total_stack);
+				}
 
-                    if (num_locals > 0) {
-                        emit_asm("    ;; Reserve stack space for %d local variable(s)\n", num_locals);
-                        emit_asm("ISUB SP, %d\n", num_locals);
-                    }
-                } else {
-                    emit_asm("    ;; OPTIMIZATION (-O1): Frame pointer omitted (Leaf Function)\n");
-                }
-
+				// ✅ CRITICAL FIX: Initialize spill slots AFTER local variables
+				reset_spill_slots(-(num_locals + 1));  // ✅ Initialize spill slots AFTER locals
                 push_scope();
 
                 // =============================================================
@@ -525,10 +531,8 @@ void  generate_asm (ASTNode *node, int  dest_reg)
 
                 // --- Function Epilogue ---
                 emit_asm("__%s_return:\n", func_name);
-                if (!omit_frame_pointer) {
-                    emit_asm("MOV SP, BP\n");
-                    emit_asm("POP BP\n");
-                }
+				emit_asm("MOV SP, BP\n");
+				emit_asm("POP BP\n");
                 emit_asm("RET\n");
                 emit_asm("\n");
 
@@ -561,6 +565,8 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     snprintf(to_true_label, sizeof(to_true_label), "__%s_not_true_%d", ctx, label_id); // Prefix added
                     snprintf(end_label, sizeof(end_label), "__%s_not_end_%d", ctx, label_id);         // Prefix added
                     int  scratch_reg  = allocate_register ();
+
+                    ensure_in_register(dest_reg);  // Reload dest_reg if it was spilled by allocate_register()
 
                     // 1. Check if Nil or False using scratch register
                     emit_asm("MOV R%d, R%d\n", scratch_reg, dest_reg);
@@ -643,6 +649,8 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                         // Lua rule: If values run out, remaining targets are assigned nil
                         emit_asm("MOV R%d, BOXED_NIL ; Pad missing value with Nil", val_reg);
                     }
+
+                    ensure_in_register(val_reg);
 
                     // Assign evaluated value to the target
                     if (curr_tgt->type == NODE_IDENTIFIER) {
@@ -735,6 +743,9 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     generate_asm(table_get_node->as.table_get.table_expr, table_reg);
                     generate_asm(table_get_node->as.table_get.key, key_reg);
 
+                    ensure_in_register(table_reg);
+                    ensure_in_register(key_reg);
+
                     // Attempt intrinsic property read first
                     if (!try_emit_table_get_intrinsic(table_get_node->as.table_get.table_expr,
                                                       table_get_node->as.table_get.key,
@@ -785,6 +796,8 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                         emit_asm("MOV R%d, BOXED_NIL ; Load Nil constant for padding\n", pad_reg);
                     }
 
+                    ensure_in_register(pad_reg);
+
                     // 2. Trailing missing args are pushed first (Right-to-Left ABI)
                     for (int i = 0; i < missing_args; i++) {
                         emit_asm("PUSH R%d ; Pad omitted argument\n", pad_reg);
@@ -819,6 +832,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                             // Strip upper 10 tag bits so C receives a clean 22-bit raw int/float/pointer
                             emit_asm("AND R%d, BOXED_PAYLOAD ; Strip NaN tag bits\n", arg_reg);
                         }
+                        ensure_in_register(arg_reg);
 
                         emit_asm("PUSH R%d\n", arg_reg);
                         unlock_register(arg_reg);
@@ -910,154 +924,83 @@ void  generate_asm (ASTNode *node, int  dest_reg)
             }
 
             case NODE_ADD: {
-                // OPTIMIZATION (-O1): x + 0.0 -> x
-                if ((o_optflag                                >= 1) &&
-                    (node -> as.binary.right -> type          == NODE_NUMBER) &&
-                    (node -> as.binary.right -> as.number.val == 0.0))
-                {
-                    generate_asm (node -> as.binary.left, dest_reg);
-                    break;
-                }
-
-                // OPTIMIZATION (-O1): 0.0 + x -> x
-                if ((o_optflag                                >= 1) &&
-                    (node -> as.binary.left -> type           == NODE_NUMBER) &&
-                    (node -> as.binary.left -> as.number.val  == 0.0))
-                {
-                    generate_asm (node -> as.binary.right, dest_reg);
-                    break;
-                }
-
                 generate_asm (node -> as.binary.left, dest_reg);
-                int  right_reg                                 = allocate_register ();
+                int  right_reg  = allocate_register();  // May spill another value
                 generate_asm (node -> as.binary.right, right_reg);
-                emit_asm ("FADD R%d, R%d\n", dest_reg, right_reg);
-                unlock_register (right_reg);
+
+                // Ensure both are in registers (load from stack if spilled)
+                ensure_in_register (dest_reg);
+                ensure_in_register (right_reg);
+
+                emit_asm("FADD R%d, R%d\n", dest_reg, right_reg);
+                unlock_register(right_reg);
                 break;
             }
 
             case NODE_MUL: {
-                // OPTIMIZATION (-O1): x * 1.0 -> x
-                if ((o_optflag                                >= 1) &&
-                    (node -> as.binary.right -> type          == NODE_NUMBER) &&
-                    (node -> as.binary.right -> as.number.val == 1.0))
-                {
-                    generate_asm (node -> as.binary.left, dest_reg);
-                    break;
-                }
-
-                // OPTIMIZATION (-O1): x * 0.0 -> 0.0 (Assuming left operand has no function call side effects)
-                if ((o_optflag                                >= 1) &&
-                    (node -> as.binary.right -> type          == NODE_NUMBER) &&
-                    (node -> as.binary.right -> as.number.val == 0.0))
-                {
-                    if (!check_needs_stack (node -> as.binary.left)) {
-                        emit_asm ("MOV R%d, 0.000000 ; Optimized multiplication by zero\n", dest_reg);
-                        break;
-                    }
-                }
-
                 generate_asm (node -> as.binary.left, dest_reg);
-                int  right_reg                                 = allocate_register ();
+                int  right_reg  = allocate_register ();
                 generate_asm (node -> as.binary.right, right_reg);
+
+                // Ensure both are in registers (load from stack if spilled)
+                ensure_in_register (dest_reg);
+                ensure_in_register (right_reg);
+
                 emit_asm ("FMUL R%d, R%d\n", dest_reg, right_reg);
                 unlock_register (right_reg);
                 break;
             }
 
             case NODE_SUB: {
-                // OPTIMIZATION (-O1): x - 0.0 -> x
-                if ((o_optflag                                >= 1) &&
-                    (node -> as.binary.right -> type          == NODE_NUMBER) &&
-                    (node -> as.binary.right -> as.number.val == 0.0))
-                {
-                    generate_asm (node -> as.binary.left, dest_reg);
-                    break;
-                }
-
                 generate_asm (node -> as.binary.left, dest_reg);
-                int  right_reg                                 = allocate_register ();
+                int  right_reg  = allocate_register ();
                 generate_asm (node -> as.binary.right, right_reg);
+
+                // Ensure both are in registers (load from stack if spilled)
+                ensure_in_register (dest_reg);
+                ensure_in_register (right_reg);
+
                 emit_asm ("FSUB R%d, R%d\n", dest_reg, right_reg);
                 unlock_register (right_reg);
                 break;
             }
         
             case NODE_DIV: {
-                // OPTIMIZATION (-O1): x / 1.0 -> x
-                if ((o_optflag                                >= 1) &&
-                    (node -> as.binary.right -> type          == NODE_NUMBER) &&
-                    (node -> as.binary.right -> as.number.val == 1.0))
-                {
-                    generate_asm (node -> as.binary.left, dest_reg);
-                    break;
-                }
-
                 generate_asm (node -> as.binary.left, dest_reg);
-                int  right_reg                                 = allocate_register ();
+                int  right_reg  = allocate_register ();
                 generate_asm (node -> as.binary.right, right_reg);
+
+                // Ensure both are in registers (load from stack if spilled)
+                ensure_in_register (dest_reg);
+                ensure_in_register (right_reg);
+
                 emit_asm ("FDIV R%d, R%d\n", dest_reg, right_reg);
                 unlock_register (right_reg);
                 break;
             }
 
-			case NODE_MOD: {
-				generate_asm(node->as.binary.left, dest_reg);
-				int right_reg = allocate_register();
-				generate_asm(node->as.binary.right, right_reg);
-
-				// Cast to integers for modulo (Lua % uses integer division)
-				emit_asm("CFI R%d ; Cast left to int\n", dest_reg);
-				emit_asm("CFI R%d ; Cast right to int\n", right_reg);
-
-				// Perform integer modulo
-				emit_asm("IMOD R%d, R%d\n", dest_reg, right_reg);
-
-				// Cast result back to float (Lua numbers are floats)
-				emit_asm("CIF R%d ; Cast result back to float\n", dest_reg);
-
-				unlock_register(right_reg);
-				break;
-			}
-			/*
             case NODE_MOD: {
-                // OPTIMIZATION (-O1): x % 1.0 -> x
-                if ((o_optflag                                >= 1) &&
-                    (node -> as.binary.right -> type          == NODE_NUMBER) &&
-                    (node -> as.binary.right -> as.number.val == 1.0))
-                {
-                    generate_asm (node -> as.binary.left, dest_reg);
-                    break;
-                }
-
                 generate_asm (node -> as.binary.left, dest_reg);
-                int  right_reg                                 = allocate_register ();
+                int  right_reg  = allocate_register();
                 generate_asm (node -> as.binary.right, right_reg);
-                emit_asm ("FMOD R%d, R%d\n", dest_reg, right_reg);
-                unlock_register (right_reg);
-                break;
-            }*/
 
-            /*
-            case NODE_MOD: {
-                generate_asm (node->as.binary.left, dest_reg);
-                int right_reg = allocate_register ();
-                generate_asm (node->as.binary.right, right_reg);
-                
-                // Convert both IEEE floats to integers in-place
-                emit_asm ("CFI R%d ; Cast left operand to int for modulo\n", dest_reg);
-                emit_asm ("CFI R%d ; Cast right operand to int for modulo\n", right_reg);
-                
-                // Perform hardware integer modulo
+                // Ensure both are in registers (load from stack if spilled)
+                ensure_in_register (dest_reg);
+                ensure_in_register (right_reg);
+
+                // Cast to integers for modulo (Lua % uses integer division)
+                emit_asm ("CFI R%d ; Cast left to int\n", dest_reg);
+                emit_asm ("CFI R%d ; Cast right to int\n", right_reg);
+
+                // Perform integer modulo
                 emit_asm ("IMOD R%d, R%d\n", dest_reg, right_reg);
-                
-                // Convert the remainder back to a standard Lua float
-                emit_asm ("CIF R%d ; Cast remainder back to float\n", dest_reg);
-                
+
+                // Cast result back to float (Lua numbers are floats)
+                emit_asm ("CIF R%d ; Cast result back to float\n", dest_reg);
+
                 unlock_register (right_reg);
                 break;
             }
-            */
 
             case NODE_BOOLEAN:
                 if (node -> as.boolean.val)
@@ -1070,9 +1013,9 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 }
                 break;
 
-			case NODE_NIL:
-				emit_asm ("MOV R%d, BOXED_NIL; the lua nil\n", dest_reg);
-				break;
+            case NODE_NIL:
+                emit_asm ("MOV R%d, BOXED_NIL; the lua nil\n", dest_reg);
+                break;
 
             case NODE_AND: {
                 int label_id = get_next_label();
@@ -1111,6 +1054,9 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 generate_asm (node -> as.binary.left, dest_reg);
                 int right_reg = allocate_register ();
                 generate_asm (node -> as.binary.right, right_reg);
+
+                ensure_in_register (dest_reg);
+                ensure_in_register (right_reg);
                 
                 if (node -> as.binary.operator == OP_EQ || node -> as.binary.operator == OP_NEQ) {
                     emit_asm ("PUSH R%d\n", dest_reg);
@@ -1125,17 +1071,9 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                         emit_asm ("MOV R%d, R0\n", dest_reg);
                     }
 
-					// if __builtin_eq boxes values for us, we don't need to rebox, commenting this out:
-                    // Box the 0/1 result from equality checking into a NaN boolean!
-                    //emit_asm ("IADD R%d, BOXED_BOOLEAN ; Box as Lua Boolean (False/True)\n", dest_reg);
                 }
                 else
                 {
-					// For magnitude comparisons (<, <=, >, >=), strip NaN tags
-					// if comparing boxed booleans/numbers against numbers:
-					//emit_asm ("AND R%d, BOXED_PAYLOAD ; Strip NaN tag if present\n", dest_reg);
-					//emit_asm ("AND R%d, BOXED_PAYLOAD ; Strip NaN tag if present\n", right_reg);
-
                     switch (node -> as.binary.operator) {
                         case OP_LT:  emit_asm ("FLT R%d, R%d\n", dest_reg, right_reg); break;
                         case OP_LE:  emit_asm ("FLE R%d, R%d\n", dest_reg, right_reg); break;
@@ -1143,8 +1081,6 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                         case OP_GE:  emit_asm ("FGE R%d, R%d\n", dest_reg, right_reg); break;
                         default: break;
                     }
-                    // AUDITED: Box raw 0/1 hardware comparison result into BOXED_FALSE/BOXED_TRUE!
-					//emit_asm ("CFI R%d ; convert to float\n", dest_reg);
                     emit_asm ("IADD R%d, BOXED_BOOLEAN ; Box as Lua Boolean (False/True)\n", dest_reg);
                 }
                 unlock_register (right_reg);
@@ -1172,6 +1108,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 
                 int right_reg = allocate_register();
                 generate_asm (node -> as.binary.right, right_reg);
+                ensure_in_register (right_reg);
                 emit_asm ("PUSH R%d\n", right_reg);
                 unlock_register(right_reg);
                 
@@ -1212,6 +1149,10 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 generate_asm(node->as.table_set.table_expr, table_reg);
                 generate_asm(node->as.table_set.key, key_reg);
 
+                ensure_in_register(val_reg);
+                ensure_in_register(table_reg);
+                ensure_in_register(key_reg);
+
                 emit_asm("PUSH R%d ; table pointer", table_reg);
                 emit_asm("PUSH R%d ; key",           key_reg);
                 emit_asm("PUSH R%d ; value",         val_reg);
@@ -1238,6 +1179,9 @@ void  generate_asm (ASTNode *node, int  dest_reg)
 
                 generate_asm(node->as.table_get.table_expr, table_reg);
                 generate_asm(node->as.table_get.key, key_reg);
+
+                ensure_in_register(table_reg);
+                ensure_in_register(key_reg);
 
                 emit_asm ("PUSH R%d ; Arg1: Table Pointer", table_reg);
                 emit_asm ("PUSH R%d ; Arg2: Key", key_reg);
