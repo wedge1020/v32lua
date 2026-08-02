@@ -1,4 +1,6 @@
 # --- Base Project Makefile ---
+TARGET = v32lua
+ARCH = $(shell uname -m)
 
 .PHONY: all clean install tests
 
@@ -13,22 +15,36 @@ clean:
 	$(MAKE) -C testing clean
 	$(MAKE) -C demos clean
 
-# Pass the install target down to the src directory
-install:
-	#$(MAKE) -C src install
-	/bin/cp -f bin/v32lua /home/$(USER)/bin/
+install: bin/$(TARGET)
+	@if [ -d ~/bin/bin.$(ARCH) ]; then \
+		echo "Installing $(TARGET) to ~/bin/bin.$(ARCH)/"; \
+		install -m 755 bin/$(TARGET) ~/bin/bin.$(ARCH)/$(TARGET); \
+	elif [ -d ~/bin ]; then \
+		echo "Installing $(TARGET) to ~/bin/"; \
+		install -m 755 bin/$(TARGET) ~/bin/$(TARGET); \
+	else \
+		@echo "Skipping: neither ~/bin/bin.$(ARCH) nor ~/bin exist"; \
+	fi
+
+sysinstall: bin/$(TARGET)
+	@if [ -d /usr/local/bin ]; then \
+		echo "Installing $(TARGET) to /usr/local/bin/"; \
+		install -m 755 $(TARGET) /usr/local/bin/$(TARGET); \
+	else \
+		@echo "Skipping: /usr/local/bin does not exist"; \
+	fi
 
 # Run the test compilations. 
 # We explicitly depend on the compiler binary ('src/compiler') being built first!
-tests: bin/v32lua
+tests: bin/$(TARGET)
 	$(MAKE) -C testing
 
 # Checkmassembler outputs
 # We explicitly depend on the compiler binary ('src/compiler') being built first!
-asmcheck: bin/v32lua
+asmcheck: bin/$(TARGET)
 	$(MAKE) -C testing asmcheck
 
-demos: bin/v32lua
+demos: bin/$(TARGET)
 	$(MAKE) -C demos
 
 monofiles:
