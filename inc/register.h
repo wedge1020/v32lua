@@ -12,6 +12,9 @@
 #define NUM_GPRS 14
 #define MAX_SPILL_SLOTS 64  // Arbitrary limit for spilled values
 
+// Track which registers should NOT be spilled
+static int register_pinned[NUM_GPRS] = {0};
+
 // Track spilled values: which register → which stack slot
 extern int spill_slot_for_reg[NUM_GPRS];
 

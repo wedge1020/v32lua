@@ -502,13 +502,14 @@ void  generate_asm (ASTNode *node, int  dest_reg)
 				emit_asm("PUSH BP\n");
 				emit_asm("MOV BP, SP\n");
 
+				reset_spill_slots(-(num_locals + 1));
 				int total_stack = num_locals + NUM_GPRS;
 				if (total_stack > 0) {
 					emit_asm("ISUB SP, %d ; Reserve stack for locals + spills\n", total_stack);
 				}
 
 				// ✅ CRITICAL FIX: Initialize spill slots AFTER local variables
-				reset_spill_slots(-(num_locals + NUM_GPRS));  // ✅ Initialize spill slots AFTER locals
+				//reset_spill_slots(-(num_locals + NUM_GPRS));  // ✅ Initialize spill slots AFTER locals
                 push_scope();
 
                 // =============================================================
@@ -728,6 +729,8 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 int total_arg_count = 0;
                 int target_reg = allocate_register();
                 int table_reg  = -1; // Cached for method calls to push 'self' last
+				// 🔒 PIN target_reg (prevents spilling during argument handling)
+				register_pinned[target_reg] = 1;
 
                 // =========================================================================
                 // STEP 1: RESOLVE THE TARGET FUNCTION POINTER & CACHE 'SELF'
@@ -760,11 +763,16 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     }
 
                     unlock_register(key_reg);
+
+					spill_register(table_reg);
+                    spill_register(target_reg);
                     // NOTE: table_reg remains LOCKED so argument evaluations won't clobber it!
                 } else {
                     if (!is_c_call) {
                         // Standard function call: resolve target function pointer directly
                         generate_asm(node->as.call.target, target_reg);
+						// ✅ FIX: Explicitly spill target_reg
+                        spill_register(target_reg);
                     }
                 }
 
@@ -848,6 +856,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 if (node->as.call.is_method_call) {
                     emit_asm("    ; --- Pushing implicit 'self' last (Top of argument stack) ---\n");
 					ensure_in_register(table_reg);
+
                     emit_asm("PUSH R%d ; Arg 1: self\n", table_reg);
                     unlock_register(table_reg);
                     total_arg_count++;
@@ -871,9 +880,14 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                         emit_asm("OR R%d, 0x7FF00000 ; Apply default Lua Number tag\n", dest_reg);
                     }
                 } else {
-                    if (target_reg != 0) {
-                        emit_asm("MOV R0, R%d ; Prepare boxed target for validation\n", target_reg);
-                    }
+					// 🔓 UNPIN target_reg
+					register_pinned[target_reg] = 0;
+
+					// ✅ Reload if it was spilled before pinning
+					if (target_reg != 0) {
+						ensure_in_register(target_reg);
+						emit_asm("MOV R0, R%d ; Prepare boxed target for validation\n", target_reg);
+					}
                     unlock_register(target_reg);
 
                     emit_asm("CALL __builtin_exec ; Validate tag and tail-call execute\n");

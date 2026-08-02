@@ -44,10 +44,10 @@ void spill_register(int reg) {
 int ensure_in_register(int reg) {
     if (reg < 0 || reg >= NUM_GPRS) return -1;
 
-    if (spill_slot_for_reg[reg] != 0) {
+    if (spill_slot_for_reg[reg] > 0) {  // > 0 = valid spill slot (not pinned)
         emit_load_from_spill(reg, spill_slot_for_reg[reg]);
-        spill_slot_for_reg[reg] = 0;  // No longer spilled
-        register_inventory[reg] = 1;  // Mark as in-use
+        spill_slot_for_reg[reg] = 0;
+        register_inventory[reg] = 1;
     }
     return reg;
 }
@@ -69,14 +69,14 @@ int allocate_register(void) {
         }
     }
 
-    // 2. No free registers - spill the highest-numbered active register
-    for (int i = NUM_GPRS - 1; i >= 1; i--) {
-        if (register_inventory[i] && spill_slot_for_reg[i] == 0) {
-            spill_register(i);
-            register_inventory[i] = 1;  // Re-lock for new use
-            return i;
-        }
-    }
+	// In the spill path:
+	for (int i = NUM_GPRS - 1; i >= 1; i--) {
+		if (register_inventory[i] && spill_slot_for_reg[i] == 0 && !register_pinned[i]) {
+			spill_register(i);
+			register_inventory[i] = 1;
+			return i;
+		}
+	}
 
     compiler_error(ERR_INTERNAL, -1, "Register inventory exhausted (no spill candidates)!");
     return -1;
