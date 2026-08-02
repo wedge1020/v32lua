@@ -1123,6 +1123,8 @@ __ftoa_check_fraction:
     MOV  [R9], R6
     IADD R9, 1
 
+    MOV  R5, R3              ; Original float
+
     ;; Scale fractional part to integer (6 decimal places)
     MOV  R6, 1000000.0
     FMUL R5, R6              ; R5 = fractional * 1,000,000
