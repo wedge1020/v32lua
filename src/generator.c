@@ -378,14 +378,14 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 int r_idx = allocate_register();
                 int r_lim = allocate_register();
 
-                ensure_in_register(r_idx);
-                ensure_in_register(r_lim);
-
                 emit_asm("MOV R%d, %s", r_idx, access_index);
                 emit_asm("MOV R%d, %s", r_lim, access_limit);
 
                 if (is_static_step) {
                     // Fast Path: We know the direction at compile time!
+					ensure_in_register(r_idx);
+					ensure_in_register(r_lim);
+
                     if (static_step_val >= 0.0) {
                         emit_asm("FGT R%d, R%d ; Check if index > limit", r_idx, r_lim);
                     } else {
@@ -396,6 +396,9 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     // Slow Path: Dynamic step requires runtime sign check
                     int r_step = allocate_register();
                     emit_asm("MOV R%d, %s", r_step, access_step);
+
+					ensure_in_register(r_idx);
+					ensure_in_register(r_lim);
                     
                     char pos_lbl[128], chk_lbl[128];
                     snprintf(pos_lbl, sizeof(pos_lbl), "__%s_for_pos_%d", ctx, label_id);
@@ -496,9 +499,6 @@ void  generate_asm (ASTNode *node, int  dest_reg)
 
                 // --- OPTIMIZATION: Check eligibility for Frame Pointer Omission ---
                 int num_locals = count_function_locals(node->as.function_def.body);
-                bool has_params = (node->as.function_def.params != NULL);
-                bool body_needs_stack = check_needs_stack(node->as.function_def.body);
-
 				emit_asm("PUSH BP\n");
 				emit_asm("MOV BP, SP\n");
 
@@ -847,6 +847,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 // =========================================================================
                 if (node->as.call.is_method_call) {
                     emit_asm("    ; --- Pushing implicit 'self' last (Top of argument stack) ---\n");
+					ensure_in_register(table_reg);
                     emit_asm("PUSH R%d ; Arg 1: self\n", table_reg);
                     unlock_register(table_reg);
                     total_arg_count++;

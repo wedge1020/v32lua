@@ -79,7 +79,7 @@ int allocate_register(void) {
             // This register is in use and not already spilled
             spill_register(i);
             register_inventory[i] = 1;  // Re-lock it for new use
-			spill_slot_for_reg[i] = 0;
+			//spill_slot_for_reg[i] = 0;
             return i;
         }
     }
