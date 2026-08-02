@@ -502,13 +502,13 @@ void  generate_asm (ASTNode *node, int  dest_reg)
 				emit_asm("PUSH BP\n");
 				emit_asm("MOV BP, SP\n");
 
-				int total_stack = num_locals + MAX_SPILL_SLOTS;
+				int total_stack = num_locals + NUM_GPRS;
 				if (total_stack > 0) {
 					emit_asm("ISUB SP, %d ; Reserve stack for locals + spills\n", total_stack);
 				}
 
 				// ✅ CRITICAL FIX: Initialize spill slots AFTER local variables
-				reset_spill_slots(-(num_locals + 1));  // ✅ Initialize spill slots AFTER locals
+				reset_spill_slots(-(num_locals + NUM_GPRS));  // ✅ Initialize spill slots AFTER locals
                 push_scope();
 
                 // =============================================================
