@@ -1114,16 +1114,15 @@ __ftoa_check_fraction:
     FSUB R5, R6              ; R5 = precise fractional part
 
     ;; If fractional part is very small, we're done
+	MOV  R4, R5              ; ← Backup fractional part to R4
     MOV  R6, 0.000001
-    FLT  R5, R6
-    JT   R5, __ftoa_done
+    FLT  R4, R6
+    JT   R4, __ftoa_done
 
     ;; Write decimal point
     MOV  R6, 46              ; ASCII '.'
     MOV  [R9], R6
     IADD R9, 1
-
-    MOV  R5, R3              ; Original float
 
     ;; Scale fractional part to integer (6 decimal places)
     MOV  R6, 1000000.0
@@ -1144,8 +1143,9 @@ __ftoa_extract_frac:
 
     IDIV R5, 10
     ISUB R6, 1
-    IGT  R6, 0
-    JT   R6, __ftoa_extract_frac
+	MOV  R4, R6
+    IGT  R4, 0
+    JT   R4, __ftoa_extract_frac
 
     ;; Reverse fractional digits
     MOV  R10, R1             ; R10 = start of fractional digits
