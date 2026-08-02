@@ -1004,32 +1004,36 @@ __format_function_address:
 
 ;; -------------------------------------------------------------------------------------
 ;; Built-in: Float to ASCII (Full Floating Point Support)
-;; Incoming Stack: [BP+2] = Raw IEEE Float
-;; Note: any NaN-boxed value tag stripped by caller
+;; Incoming Stack: [BP+2] = Raw IEEE754 Float
 ;; Returns: R0 = Raw Heap Pointer to null-terminated ASCII string
-;; Registers used: R0-R13 only (R14/BP and R15/SP are NEVER used as general-purpose)
+;; Registers: R0-R13 (R14/BP and R15/SP preserved)
 ;; -------------------------------------------------------------------------------------
 __builtin_ftoa:
     PUSH BP
     MOV  BP, SP
 
-    ;; --- Unbox the float value first ---
-    MOV  R3, [BP+2]          ; R3 = value from stack
-    ;AND  R3, BOXED_PAYLOAD    ; Strip tag: R3 = raw IEEE-754 float
-
-    ;; --- Rest of your implementation continues unchanged ---
+    ;; --- Allocate buffer (32 bytes for integer + fractional + null) ---
     MOV  R0, 32
     PUSH R0
     CALL __malloc
     IADD SP, 1
-    MOV  R8, R0
-    MOV  R9, R8
+
+    ;; 1. Trap OOM to prevent HEAP_POINTER corruption at address 0
+    MOV  R4, R0
+    IEQ  R4, 0
+    JT   R4, __oom_handler
+
+    ;; 2. R2 is unused in this routine. Use it to safely lock in the base pointer.
+    MOV  R2, R0
+    MOV  R9, R2              ; R9 = write head
+
+    ;; --- Unbox the float value first ---
+    MOV  R3, [BP+2]          ; R3 = value from stack
 
     ;; --- Handle sign ---
-    MOV  R3, [BP+2]          ; R3 = value from stack
     MOV  R4, R3              ; Copy to R4 for sign check
-    FLT  R4, 0.0             ; Compare R4 with 0.0
-    JF   R4, __ftoa_positive ; Jump if positive (R4 >= 0.0)
+    FLT  R4, 0.0
+    JF   R4, __ftoa_positive
 
     ;; Negative: write '-' and use absolute value
     MOV  R5, 45              ; ASCII '-'
@@ -1042,11 +1046,11 @@ __ftoa_positive:
     ;; --- Extract integer part ---
 __ftoa_extract_int:
     MOV  R4, R3              ; Copy float to R4
-    CFI  R4                  ; Convert to integer in R4 (truncates towards zero)
-	MOV  R8, R4              ; back up original integer part into R8
+    CFI  R4                  ; Convert to integer in R4 (truncates toward zero)
+    MOV  R7, R4              ; Use R7 for integer value
 
     ;; Check if integer part is zero
-    MOV  R5, R4
+    MOV  R5, R7
     INE  R5, 0
     JT   R5, __ftoa_write_int_digits
 
@@ -1054,38 +1058,39 @@ __ftoa_extract_int:
     MOV  R5, 48              ; ASCII '0'
     MOV  [R9], R5
     IADD R9, 1
-    MOV  R7, R9              ; R7 = start of integer digits (points to '0')
+    MOV  R6, R9              ; R6 = start of integer digits (points to '0')
     JMP  __ftoa_check_fraction
 
 __ftoa_write_int_digits:
-    MOV  R7, R9              ; R7 = start of integer digits (save for reversal)
+    MOV  R6, R9              ; R6 = start of integer digits (save for reversal)
 
     ;; Extract digits in reverse order (LSB first)
 __ftoa_int_loop:
-    MOV  R5, R4              ; Copy current integer value
-    INE  R5, 0               ; Check if we've extracted all digits
+    MOV  R5, R7              ; Copy current integer value
+    INE  R5, 0
     JF   R5, __ftoa_reverse_int
 
     ;; Get next digit (LSB)
-    MOV  R6, R4
-    IMOD R6, 10              ; R6 = R4 % 10
-    IADD R6, 48              ; Convert to ASCII
-    MOV  [R9], R6            ; Write digit
+    MOV  R5, R7
+    IMOD R5, 10
+    IADD R5, 48              ; Convert to ASCII
+    MOV  [R9], R5
     IADD R9, 1
 
     ;; Divide by 10 for next iteration
-    IDIV R4, 10
+    IDIV R7, 10              ; R7 is consumed here
     JMP  __ftoa_int_loop
 
     ;; Reverse integer digits (they were written LSB first)
 __ftoa_reverse_int:
-    MOV  R10, R7             ; R10 = start of digits
+    MOV  R10, R6             ; R10 = start of digits
     MOV  R11, R9
-    ISUB R11, 1              ; R11 = end of digits (last digit written)
+    ISUB R11, 1              ; R11 = end of digits
 __ftoa_reverse_int_loop:
-    MOV  R5,  R10
-    IGE  R5, R11
-    JT   R5, __ftoa_check_fraction
+    ;; 3. Protect R10 from destructive comparison!
+    MOV  R4, R10
+    IGE  R4, R11
+    JT   R4, __ftoa_check_fraction
 
     ;; Swap [R10] and [R11]
     MOV  R12, [R10]
@@ -1097,12 +1102,16 @@ __ftoa_reverse_int_loop:
     ISUB R11, 1
     JMP  __ftoa_reverse_int_loop
 
-    ;; --- Check if there's a fractional part ---
 __ftoa_check_fraction:
+    ;; --- Check if there's a fractional part ---
     MOV  R5, R3              ; Original float
-    MOV  R6, R8              ; Integer part (as float)
-    CIF  R6                  ; Convert integer back to float
-    FSUB R5, R6              ; R5 = fractional part
+
+    ;; 4. R7 was destroyed by the division loop!
+    ;; Re-extract the integer safely from the original float.
+    MOV  R6, R3
+    CFI  R6                  ; Convert to int
+    CIF  R6                  ; Cast back to float
+    FSUB R5, R6              ; R5 = precise fractional part
 
     ;; If fractional part is very small, we're done
     MOV  R6, 0.000001
@@ -1126,8 +1135,8 @@ __ftoa_check_fraction:
     MOV  R6, 6               ; Counter for 6 digits
 __ftoa_extract_frac:
     MOV  R12, R5
-    IMOD R12, 10             ; R12 = R5 % 10
-    IADD R12, 48            ; Convert to ASCII
+    IMOD R12, 10
+    IADD R12, 48
     MOV  [R9], R12
     IADD R9, 1
 
@@ -1139,10 +1148,12 @@ __ftoa_extract_frac:
     ;; Reverse fractional digits
     MOV  R10, R1             ; R10 = start of fractional digits
     MOV  R11, R9
-    ISUB R11, 1              ; R11 = end of fractional digits
+    ISUB R11, 1
 __ftoa_reverse_frac_loop:
-    IGE  R10, R11
-    JT   R10, __ftoa_done
+    ;; 5. Protect R10 from destructive comparison again!
+    MOV  R4, R10
+    IGE  R4, R11
+    JT   R4, __ftoa_done
 
     ;; Swap [R10] and [R11]
     MOV  R12, [R10]
@@ -1159,9 +1170,10 @@ __ftoa_done:
     MOV  R10, 0
     MOV  [R9], R10           ; Null terminator
 
-    MOV  R0, R11             ; Return buffer pointer
-    MOV  SP, BP              ; Restore stack pointer
-    POP  BP                  ; Restore base pointer
+    ;; Return the securely preserved base pointer
+    MOV  R0, R2
+    MOV  SP, BP
+    POP  BP
     RET
 
 ;; -------------------------------------------------------------------------------------
