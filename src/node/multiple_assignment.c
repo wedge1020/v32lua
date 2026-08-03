@@ -50,6 +50,8 @@ void  node_multiple_assignment (ASTNode *node)
         // =========================================================================
         val_reg = allocate_register();
 
+		register_pinned[val_reg] = 1;
+
         // ✅ Value register used immediately for assignment
         mark_register_live(val_reg, 1);
 
@@ -79,6 +81,9 @@ void  node_multiple_assignment (ASTNode *node)
             int table_reg = allocate_register();
             int key_reg   = allocate_register();
 
+			register_pinned[table_reg] = 1;
+			register_pinned[key_reg] = 1;
+
             generate_asm(curr_tgt->as.table_get.table_expr, table_reg);
             generate_asm(curr_tgt->as.table_get.key, key_reg);
 
@@ -88,9 +93,14 @@ void  node_multiple_assignment (ASTNode *node)
             emit_asm("CALL __builtin_table_set");
             emit_asm("IADD SP, 3 ; Clean up stack");
 
+			register_pinned[table_reg] = 0;
+			register_pinned[key_reg] = 0;
+
             unlock_register(table_reg);
             unlock_register(key_reg);
         }
+
+		register_pinned[val_reg] = 0;
 
         unlock_register(val_reg);
         curr_tgt = curr_tgt->next;

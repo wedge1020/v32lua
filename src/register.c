@@ -155,7 +155,9 @@ int allocate_register(void) {
     spill_register(best_candidate);
     register_inventory[best_candidate] = 1;
     spill_slot_for_reg[best_candidate] = 0;
-    register_use_distance[best_candidate] = 0;
+	// ✅ FIX: Set to large value instead of 0 to prevent immediate reuse
+	register_use_distance[best_candidate] = 10000;  // Or any value > existing distances
+    //register_use_distance[best_candidate] = 0; // bug
 
     return best_candidate;
 }
