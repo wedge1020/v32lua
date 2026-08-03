@@ -28,6 +28,11 @@ void  node_table_set (ASTNode *node)
     int  table_reg  = allocate_register ();
     int  key_reg    = allocate_register ();
 
+	// ✅ NEW: Pin registers to prevent reuse by function calls
+    register_pinned[val_reg] = 1;
+    register_pinned[table_reg] = 1;
+    register_pinned[key_reg] = 1;
+
     // ✅ All used immediately for table operation
     mark_register_live (val_reg,   2);
     mark_register_live (table_reg, 2);
@@ -46,6 +51,11 @@ void  node_table_set (ASTNode *node)
     emit_asm ("PUSH R%d ; value",         val_reg);
     emit_asm ("CALL __builtin_table_set ; store key-value pair in table");
     emit_asm ("IADD SP, 3 ; clean up stack arguments");
+
+	// ✅ NEW: Unpin registers
+    register_pinned[val_reg] = 0;
+    register_pinned[table_reg] = 0;
+    register_pinned[key_reg] = 0;
 
     unlock_register (val_reg);
     unlock_register (table_reg);
