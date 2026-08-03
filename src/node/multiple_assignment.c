@@ -48,9 +48,7 @@ void  node_multiple_assignment (ASTNode *node)
         // =========================================================================
         // 2. STANDARD EVALUATION (Identifiers, Fallback Dynamic Tables, or Nils)
         // =========================================================================
-        val_reg = allocate_register();
-
-		register_pinned[val_reg] = 1;
+        val_reg = allocate_pinned_register();
 
         // ✅ Value register used immediately for assignment
         mark_register_live(val_reg, 1);
@@ -78,11 +76,8 @@ void  node_multiple_assignment (ASTNode *node)
         else if (curr_tgt->type == NODE_TABLE_GET)
         {
             // Fallback: Dynamic heap table assignment (table[key] = value)
-            int table_reg = allocate_register();
-            int key_reg   = allocate_register();
-
-			register_pinned[table_reg] = 1;
-			register_pinned[key_reg] = 1;
+            int table_reg = allocate_pinned_register();
+            int key_reg   = allocate_pinned_register();
 
             generate_asm(curr_tgt->as.table_get.table_expr, table_reg);
             generate_asm(curr_tgt->as.table_get.key, key_reg);
@@ -93,16 +88,11 @@ void  node_multiple_assignment (ASTNode *node)
             emit_asm("CALL __builtin_table_set");
             emit_asm("IADD SP, 3 ; Clean up stack");
 
-			register_pinned[table_reg] = 0;
-			register_pinned[key_reg] = 0;
-
-            unlock_register(table_reg);
-            unlock_register(key_reg);
+            unlock_pinned_register(table_reg);
+            unlock_pinned_register(key_reg);
         }
 
-		register_pinned[val_reg] = 0;
-
-        unlock_register(val_reg);
+        unlock_pinned_register(val_reg);
         curr_tgt = curr_tgt->next;
     }
 }
