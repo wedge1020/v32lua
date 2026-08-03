@@ -19,7 +19,7 @@ echo "/////////////////////////////////////////////////////" >> v32lua.c
 echo                                                         >> v32lua.c
 echo '#include "v32lua.h"'                                   >> v32lua.c
 echo                                                         >> v32lua.c
-for src in `/bin/ls -1 src/*.c`; do
+for src in `/bin/ls -1 src/*.c src/intrinsics/*.c src/node/*.c`; do
 	echo "// =========================================="     >> v32lua.c
 	file=$(echo "${src}" | cut -d '/' -f2)
 	echo "// ${file}"                                        >> v32lua.c

@@ -18,14 +18,9 @@ void  emit_print_intrinsic (ASTNode *node)
     }
 
     // 2. Allocate registers and evaluate each argument expression
-    int reg_x = allocate_register();
-    int reg_y = allocate_register();
-    int reg_val = allocate_register();
-
-	// ✅ NEW: Pin registers to prevent reuse by generate_asm()
-	register_pinned[reg_x] = 1;
-	register_pinned[reg_y] = 1;
-	register_pinned[reg_val] = 1;
+    int reg_x = allocate_pinned_register();
+    int reg_y = allocate_pinned_register();
+    int reg_val = allocate_pinned_register();
 
     generate_asm(arg_x, reg_x);
     generate_asm(arg_y, reg_y);
@@ -54,15 +49,10 @@ void  emit_print_intrinsic (ASTNode *node)
     emit_asm ("CALL __builtin_print\n");    
     emit_asm ("IADD SP, 3 ; Clean up x, y, and string from the stack\n");
 
-	// ✅ NEW: Unpin before unlocking
-	register_pinned[reg_x] = 0;
-	register_pinned[reg_y] = 0;
-	register_pinned[reg_val] = 0;
-
     // 7. Unlock registers back to the compiler pool
-    unlock_register (reg_val);
-    unlock_register (reg_y);
-    unlock_register (reg_x);
+    unlock_pinned_register (reg_val);
+    unlock_pinned_register (reg_y);
+    unlock_pinned_register (reg_x);
 }
 
 // Returns true if the node was successfully intercepted and processed as a printf intrinsic.

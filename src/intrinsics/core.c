@@ -325,6 +325,7 @@ int try_emit_table_set_intrinsic(ASTNode *table_expr, ASTNode *key_expr, ASTNode
 
             // On-demand register evaluation
             int val_reg = allocate_register();
+			register_pinned[val_reg] = 1;
             generate_asm(val_node, val_reg);
 
             int needs_cast = !is_raw && (ioports[i].type & (IOPORT_TYPE_INTEGER | IOPORT_TYPE_BOOLEAN));
@@ -332,6 +333,7 @@ int try_emit_table_set_intrinsic(ASTNode *table_expr, ASTNode *key_expr, ASTNode
 
             if (needs_cast) {
                 out_reg = allocate_register();
+				register_pinned[out_reg] = 1;
                 emit_asm("MOV R%d, R%d ; Copy value for hardware type cast\n", out_reg, val_reg);
 
                 if ((ioports[i].type & IOPORT_TYPE_INTEGER) == IOPORT_TYPE_INTEGER) {
@@ -349,8 +351,10 @@ int try_emit_table_set_intrinsic(ASTNode *table_expr, ASTNode *key_expr, ASTNode
             emit_asm("OUT %s, R%d\n", ioports[i].asm_port, out_reg);
 
             if (needs_cast) {
+				register_pinned[out_reg] = 0;
                 unlock_register(out_reg);
             }
+			register_pinned[val_reg] = 0;
             unlock_register(val_reg);
 
             return 1;

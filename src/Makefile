@@ -50,6 +50,12 @@ lex.yy.c: lexer.l parser.tab.h
 %.o: %.S
 	$(CC) $(CFLAGS) -Wa,--noexecstack -c $< -o $@
 
+context:
+	@cp -v runtime.s runtime.s.txt
+	@cp -v Makefile  Makefile.txt
+	@cp -v lexer.l   lexer.l.txt
+	@cp -v parser.y  parser.y.txt
+
 # --- Monolithic Source Generation Rule ---
 monofile:
 	@rm -f ../monolithic_source.c
@@ -71,6 +77,6 @@ monofile:
 	@echo "Successfully generated consolidated file: ../monolithic_source.c"
 
 clean:
-	rm -f $(TARGET) $(OBJS) parser.tab.c parser.tab.h lex.yy.c ../monolithic_source.c
+	rm -f $(TARGET) $(OBJS) parser.tab.c parser.tab.h lex.yy.c ../monolithic_source.c *.txt
 
 .PHONY: all clean monorule

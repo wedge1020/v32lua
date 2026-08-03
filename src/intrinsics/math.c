@@ -23,6 +23,7 @@ bool emit_math_floor_intrinsic(ASTNode *node, int dest_reg)
     emit_asm("    ;; --- Intrinsic: math.floor(x) ---\n");
 
     int arg_reg = allocate_register();
+	register_pinned[arg_reg] = 1;
     generate_asm(arg, arg_reg);
     emit_asm("FLR R%d ; Floor the value\n", arg_reg);
 
@@ -30,6 +31,7 @@ bool emit_math_floor_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("MOV R%d, R%d ; Transfer result to dest_reg\n", dest_reg, arg_reg);
     }
 
+	register_pinned[arg_reg] = 0;
     unlock_register(arg_reg);
     return true;
 }
@@ -58,6 +60,8 @@ bool emit_math_sqrt_intrinsic(ASTNode *node, int dest_reg)
 
     int arg_reg = allocate_register();
     int tmp_reg = allocate_register();
+	register_pinned[arg_reg] = 1;
+	register_pinned[tmp_reg] = 1;
     generate_asm(arg, arg_reg);
 
     // Compute sqrt(x) = x^0.5
@@ -68,6 +72,8 @@ bool emit_math_sqrt_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("MOV R%d, R%d ; Transfer result\n", dest_reg, arg_reg);
     }
 
+	register_pinned[arg_reg] = 0;
+	register_pinned[tmp_reg] = 0;
     unlock_register(tmp_reg);
     unlock_register(arg_reg);
     return true;

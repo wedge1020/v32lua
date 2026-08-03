@@ -161,3 +161,16 @@ int allocate_register(void) {
 
     return best_candidate;
 }
+
+int   allocate_pinned_register (void)
+{
+    int  reg              = allocate_register ();
+    register_pinned[reg]  = 1;
+    return (reg);
+}
+
+void  unlock_pinned_register (int  reg)
+{
+    register_pinned[reg]  = 0;
+    unlock_register (reg);
+}
