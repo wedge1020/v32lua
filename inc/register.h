@@ -13,13 +13,16 @@
 #define MAX_SPILL_SLOTS 64  // Arbitrary limit for spilled values
 
 // Track which registers should NOT be spilled
-static int register_pinned[NUM_GPRS] = {0};
+extern int  register_pinned[NUM_GPRS];
 
 // Track spilled values: which register → which stack slot
-extern int spill_slot_for_reg[NUM_GPRS];
+extern int  spill_slot_for_reg[NUM_GPRS];
 
 // Track next available stack slot (negative offset from BP)
-extern int next_spill_slot;
+extern int  next_spill_slot;
+extern int  register_inventory[];
+extern int  register_use_distance[NUM_GPRS];
+extern int  base_spill_frame_offset;
 
 ////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -32,5 +35,6 @@ int   allocate_register  (void);
 void  spill_register     (int);  // Spill a register to stack
 int   ensure_in_register (int);  // Load if spilled
 void  reset_spill_slots  (int);  // per-function spilling
+void  mark_register_live (int,  int);
 
 #endif

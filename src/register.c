@@ -1,50 +1,67 @@
+// ============================================================================
+// register.c - Liveness-Aware Register Allocator
+// ============================================================================
+
 #include "v32lua.h"
 #include "emit.h"
 
-// Register inventory and spill tracking
-static int register_inventory[NUM_GPRS] = { 1, 0 };
-int spill_slot_for_reg[NUM_GPRS] = {0};  // Tracks whether register is currently spilled
+// Register state
+int  register_inventory[NUM_GPRS]     = { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+int  register_pinned[NUM_GPRS]        = { 0 };
+int  spill_slot_for_reg[NUM_GPRS]     = { 0 };
+int  register_use_distance[NUM_GPRS]  = { 0 };
+int  base_spill_frame_offset          = -1;
 
-// Base offset in stack frame where register spill slots begin
-static int base_spill_frame_offset = -1;
+// ============================================================================
+// Spill Management
+// ============================================================================
 
-// Initialize or reset spill frame layout at function entry
-void reset_spill_slots(int start_slot) {
-    base_spill_frame_offset = start_slot; // e.g., -(num_locals + 1)
-    for (int i = 0; i < NUM_GPRS; i++) {
-        spill_slot_for_reg[i] = 0;
+static int   get_register_spill_slot (int  reg)
+{
+    return (base_spill_frame_offset - reg - 1);
+}
+
+static void  emit_load_from_spill (int  reg, int  slot)
+{
+    emit_asm ("MOV R%d, [BP %d] ; REGSPILL: Load from spill slot\n", reg, slot);
+}
+
+static void  emit_store_to_spill (int  reg, int  slot)
+{
+    emit_asm ("MOV [BP %d], R%d ; REGSPILL: Store to spill slot\n", slot, reg);
+}
+
+void  reset_spill_slots (int  start_slot)
+{
+    base_spill_frame_offset           = start_slot;
+    for (int index                    = 0;
+		 index                       <  NUM_GPRS;
+		 index                        = index + 1)
+	{
+        spill_slot_for_reg[index]     = 0;
+        register_use_distance[index]  = 0;
     }
 }
 
-// Compute the fixed, dedicated stack slot for a given register
-static int get_register_spill_slot(int reg) {
-    // Each register gets its own permanent slot relative to BP
-    // e.g., base_spill_frame_offset - reg
-    return base_spill_frame_offset - reg;
-}
-
-static void emit_load_from_spill(int reg, int slot) {
-    emit_asm("MOV R%d, [BP %d] ; REGSPILL: Load spilled value from dedicated slot\n", reg, slot);
-}
-
-static void emit_store_to_spill(int reg, int slot) {
-    emit_asm("MOV [BP %d], R%d ; REGSPILL: Store value to dedicated slot\n", slot, reg);
-}
+// ============================================================================
+// Core Operations
+// ============================================================================
 
 void spill_register(int reg) {
     if (reg < 0 || reg >= NUM_GPRS) return;
+    if (register_pinned[reg]) return;
 
     int slot = get_register_spill_slot(reg);
     spill_slot_for_reg[reg] = slot;
-
     emit_store_to_spill(reg, slot);
-    register_inventory[reg] = 0; // Mark register as free
+    register_inventory[reg] = 0;
 }
 
+// FIXED: Check for non-zero instead of > 0
 int ensure_in_register(int reg) {
     if (reg < 0 || reg >= NUM_GPRS) return -1;
 
-    if (spill_slot_for_reg[reg] > 0) {  // > 0 = valid spill slot (not pinned)
+    if (spill_slot_for_reg[reg] != 0) {
         emit_load_from_spill(reg, spill_slot_for_reg[reg]);
         spill_slot_for_reg[reg] = 0;
         register_inventory[reg] = 1;
@@ -52,150 +69,93 @@ int ensure_in_register(int reg) {
     return reg;
 }
 
-int is_register_locked(int reg) {
-    if (reg >= 0 && reg < NUM_GPRS) {
-        return register_inventory[reg];
-    }
-    return 0;
+void lock_register(int reg) {
+    if (reg >= 0 && reg < NUM_GPRS) register_inventory[reg] = 1;
 }
 
+void unlock_register(int reg) {
+    if (reg >= 0 && reg < NUM_GPRS) {
+        register_inventory[reg] = 0;
+        register_use_distance[reg] = 0; // Clear liveness
+    }
+}
+
+int is_register_locked(int reg) {
+    return (reg >= 0 && reg < NUM_GPRS) ? register_inventory[reg] : 0;
+}
+
+// ============================================================================
+// Liveness Tracking
+// ============================================================================
+
+void mark_register_live(int reg, int distance) {
+    if (reg >= 0 && reg < NUM_GPRS) {
+        register_use_distance[reg] = distance;
+    }
+}
+
+void update_register_live(int reg) {
+    if (reg >= 0 && reg < NUM_GPRS && register_use_distance[reg] > 0) {
+        register_use_distance[reg]--;
+    }
+}
+
+// ============================================================================
+// Intelligent Allocation with Liveness
+// ============================================================================
+
 int allocate_register(void) {
-    // 1. Try to find an unlocked, free register
+    // Phase 1: Free register
     for (int i = 1; i < NUM_GPRS; i++) {
-        if (!register_inventory[i]) {
+        if (!register_inventory[i] && !register_pinned[i]) {
             register_inventory[i] = 1;
             spill_slot_for_reg[i] = 0;
+            register_use_distance[i] = 0;
             return i;
         }
     }
 
-	// In the spill path:
-	for (int i = NUM_GPRS - 1; i >= 1; i--) {
-		if (register_inventory[i] && spill_slot_for_reg[i] == 0 && !register_pinned[i]) {
-			spill_register(i);
-			register_inventory[i] = 1;
-			return i;
-		}
-	}
-
-    compiler_error(ERR_INTERNAL, -1, "Register inventory exhausted (no spill candidates)!");
-    return -1;
-}
-
-void unlock_register(int reg) {
-    if (reg >= 0 && reg < NUM_GPRS) {
-        register_inventory[reg] = 0;
-    }
-}
-
-/*
-
-#include "v32lua.h"
-#include "emit.h"  // For emit_asm()
-
-// ============================================================================
-// --- Register Inventory Implementation ---
-// ============================================================================
-
-// Existing inventory
-static int register_inventory[NUM_GPRS] = { 1, 0 };
-
-// Spill tracking
-int spill_slot_for_reg[NUM_GPRS] = {0};  // 0 = not spilled
-int next_spill_slot = -1;  // Stack grows downward from BP
-
-// Emit load/store helpers
-static void emit_load_from_spill (int  reg, int  slot) {
-    emit_asm ("MOV R%d, [BP %d] ; Load spilled value from stack\n", reg, slot);
-}
-
-static void emit_store_to_spill (int  reg, int  slot) {
-    emit_asm ("MOV [BP %d], R%d ; Store value to spill slot\n", slot, reg);
-}
-
-// Spill a register to stack
-void spill_register(int reg) {
-    if (reg < 0 || reg >= NUM_GPRS) return;
-
-    // Allocate a spill slot
-    int slot = next_spill_slot--;
-    spill_slot_for_reg[reg] = slot;
-
-    // Store the value to stack
-    emit_store_to_spill(reg, slot);
-
-    // Mark register as free
-    register_inventory[reg] = 0;
-}
-
-// Ensure value is in a register (load from stack if spilled)
-int ensure_in_register(int reg) {
-    if (reg < 0 || reg >= NUM_GPRS) return -1;
-
-    if (spill_slot_for_reg[reg] != 0) {
-        // Value is spilled - load it back
-        emit_load_from_spill(reg, spill_slot_for_reg[reg]);
-        spill_slot_for_reg[reg] = 0;  // No longer spilled
-        register_inventory[reg] = 1;  // Mark as in-use
-        return reg;
-    }
-
-    // Already in register
-    return reg;
-}
-
-int  is_register_locked (int  reg)
-{
-    if (reg >= 0 && reg < NUM_GPRS) {
-        return register_inventory[reg];
-    }
-    return 0;
-}
-
-// allocate_register with spilling
-int allocate_register(void) {
-    // 1. Try to find a free register
+    // Phase 2: Dead register (use_distance == 0)
     for (int i = 1; i < NUM_GPRS; i++) {
-        if (!register_inventory[i]) {
-            register_inventory[i] = 1;
-			spill_slot_for_reg[i] = 0;
+        if (register_inventory[i] && !register_pinned[i] && register_use_distance[i] == 0) {
+            spill_slot_for_reg[i] = 0;
+            register_use_distance[i] = 0;
             return i;
         }
     }
 
-    // 2. No free registers - find one to spill
-    // Strategy: Spill the register with the highest number (simplest)
-    // TODO: Better strategy - track liveness and spill least recently used
-    for (int i = NUM_GPRS - 1; i >= 1; i--) {
-        if (register_inventory[i] && spill_slot_for_reg[i] == 0) {
-            // This register is in use and not already spilled
-            spill_register(i);
-            register_inventory[i] = 1;  // Re-lock it for new use
-			//spill_slot_for_reg[i] = 0;
-            return i;
+    // Phase 3: Spill farthest-use register
+    int best_candidate = -1;
+    int max_distance = -1;
+
+    for (int i = 1; i < NUM_GPRS; i++) {
+        if (register_inventory[i] && !register_pinned[i]) {
+            if (register_use_distance[i] > max_distance) {
+                max_distance = register_use_distance[i];
+                best_candidate = i;
+            }
         }
     }
 
-    // 3. Should never reach here
-    compiler_error(ERR_INTERNAL, -1, "Register inventory exhausted (no spill candidates)!");
-    return -1;
-}
-
-// unlock_register - check if we should spill
-void unlock_register(int reg) {
-    if (reg >= 0 && reg < NUM_GPRS) {
-        // Don't actually free - just mark as available for spilling
-        // The allocator will spill it when needed
-        register_inventory[reg] = 0;
+    // Phase 4: Fallback to highest-numbered
+    if (best_candidate == -1) {
+        for (int i = NUM_GPRS - 1; i >= 1; i--) {
+            if (register_inventory[i] && !register_pinned[i]) {
+                best_candidate = i;
+                break;
+            }
+        }
     }
-}
 
-// Add this function:
-void reset_spill_slots(int start_slot) {
-    next_spill_slot = start_slot;
-    // Clear any stale spill info
-    for (int i = 0; i < NUM_GPRS; i++) {
-        spill_slot_for_reg[i] = 0;
+    if (best_candidate == -1) {
+        compiler_error(ERR_INTERNAL, -1, "Register inventory exhausted!");
+        return -1;
     }
+
+    spill_register(best_candidate);
+    register_inventory[best_candidate] = 1;
+    spill_slot_for_reg[best_candidate] = 0;
+    register_use_distance[best_candidate] = 0;
+
+    return best_candidate;
 }
-*/

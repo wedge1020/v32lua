@@ -268,6 +268,10 @@ void generate_block(ASTNode *head) {
         // Only allocate if the statement needs a result register
         if (current->type != NODE_BREAK && current->type != NODE_RETURN) {
             int temp_reg = allocate_register();
+
+			// ✅ Mark as live for this statement
+            mark_register_live (temp_reg, 1);
+
             generate_asm(current, temp_reg);
             unlock_register(temp_reg);
         } else {
@@ -299,6 +303,9 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 push_loop(label_id, LOOP_TYPE_WHILE);  // Pass loop type
 
                 emit_asm ("__%s_while_start_%d:\n", ctx, label_id);
+
+				// ✅ Used for condition check
+				mark_register_live (cond_reg, 2);
                 
                 generate_asm (node -> as.while_loop.condition, cond_reg);
                 
@@ -316,133 +323,212 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 break;
             }
 
-            case NODE_FOR_NUMERIC: {
-                int label_id = get_next_label();
-                const char *ctx = get_current_function_name();
-                
-                char start_label[128], end_label[128];
-                snprintf(start_label, sizeof(start_label), "__%s_for_start_%d", ctx, label_id);
-                snprintf(end_label, sizeof(end_label), "__%s_for_end_%d", ctx, label_id);
+			case NODE_FOR_NUMERIC: {
+				// =========================================================================
+				// NUMERIC FOR LOOP: for index = start, limit, step do ... end
+				//
+				// Strategy:
+				//   1. Evaluate loop bounds (start, limit, step) and store as stack locals
+				//   2. Generate conditional check at loop start
+				//   3. Execute loop body
+				//   4. Increment index and jump back
+				//
+				// Registers used:
+				//   - scratch: Temporary for evaluating start/limit/step expressions
+				//   - r_idx, r_lim: For loop condition comparison
+				//   - r_calc, r_st: For index increment calculation
+				//   - r_step: For dynamic step sign checking (only if step is not static)
+				// =========================================================================
 
-                // 1. Enter implicit loop scope and register stack variables
-                push_scope();
+				int label_id = get_next_label();
+				const char *ctx = get_current_function_name();
 
-                char limit_var[64], step_var[64], index_var[64];
-                snprintf(limit_var, sizeof(limit_var), "__limit_%d", label_id);
-                snprintf(step_var, sizeof(step_var), "__step_%d", label_id);
-                strcpy(index_var, node->as.for_numeric.index_name);
+				char start_label[128], end_label[128];
+				snprintf(start_label, sizeof(start_label), "__%s_for_start_%d", ctx, label_id);
+				snprintf(end_label, sizeof(end_label), "__%s_for_end_%d", ctx, label_id);
 
-                char access_limit[128], access_step[128], access_index[128];
-                int scratch = allocate_register();
+				// -------------------------------------------------------------------------
+				// STEP 1: Enter loop scope and allocate stack storage for loop variables
+				// -------------------------------------------------------------------------
+				push_scope();
 
-                // Evaluate Limit
-                generate_asm(node->as.for_numeric.stop_expr, scratch);
-                register_local(limit_var);
-                get_variable_access_string(limit_var, access_limit);
-                emit_asm("MOV %s, R%d ; Save float limit", access_limit, scratch);
+				// Generate unique names for loop control variables
+				char limit_var[64], step_var[64], index_var[64];
+				snprintf(limit_var, sizeof(limit_var), "__limit_%d", label_id);
+				snprintf(step_var, sizeof(step_var), "__step_%d", label_id);
+				strcpy(index_var, node->as.for_numeric.index_name);
 
-                // Evaluate Step & determine if we can optimize compile-time branching
-                int is_static_step = 0;
-                double static_step_val = 1.0;
+				// Access strings for stack frame references
+				char access_limit[128], access_step[128], access_index[128];
 
-                if (!node->as.for_numeric.step_expr) {
-                    is_static_step = 1;
-                    static_step_val = 1.0;
-                    emit_asm("MOV R%d, 1.000000 ; Default step", scratch);
-                } else if (node->as.for_numeric.step_expr->type == NODE_NUMBER) {
-                    // We caught a static float literal in the AST!
-                    is_static_step = 1;
-                    static_step_val = node->as.for_numeric.step_expr->as.number.val;
-                    emit_asm("MOV R%d, %f", scratch, static_step_val);
-                } else {
-                    generate_asm(node->as.for_numeric.step_expr, scratch);
-                }
-                
-                register_local(step_var);
-                get_variable_access_string(step_var, access_step);
-                emit_asm("MOV %s, R%d ; Save float step", access_step, scratch);
+				// -------------------------------------------------------------------------
+				// STEP 2: Evaluate loop bounds and store as stack locals
+				// -------------------------------------------------------------------------
+				int scratch = allocate_register();
+				// ✅ Short-lived: used for evaluating start/limit/step, then freed
+				mark_register_live(scratch, 3);
 
-                // Evaluate Index
-                generate_asm(node->as.for_numeric.start_expr, scratch);
-                register_local(index_var);
-                get_variable_access_string(index_var, access_index);
-                emit_asm("MOV %s, R%d ; Initialize float index", access_index, scratch);
-                unlock_register(scratch);
+				// Evaluate and store LIMIT
+				generate_asm(node->as.for_numeric.stop_expr, scratch);
+				register_local(limit_var);
+				get_variable_access_string(limit_var, access_limit);
+				emit_asm("MOV %s, R%d ; Save loop limit to stack", access_limit, scratch);
 
-                // 2. Setup Loop Break Tracking
-                push_loop(label_id, LOOP_TYPE_FOR_NUMERIC);  // Pass loop type
+				// Evaluate and store STEP
+				int is_static_step = 0;
+				double static_step_val = 1.0;
 
-                emit_asm("%s:\n", start_label);
+				if (!node->as.for_numeric.step_expr) {
+					// Default step of 1.0
+					is_static_step = 1;
+					static_step_val = 1.0;
+					emit_asm("MOV R%d, 1.000000 ; Default step = 1.0", scratch);
+				} else if (node->as.for_numeric.step_expr->type == NODE_NUMBER) {
+					// Compile-time constant step - optimize condition checking
+					is_static_step = 1;
+					static_step_val = node->as.for_numeric.step_expr->as.number.val;
+					emit_asm("MOV R%d, %f ; Static step value", scratch, static_step_val);
+				} else {
+					// Dynamic step expression - must evaluate at runtime
+					generate_asm(node->as.for_numeric.step_expr, scratch);
+				}
 
-                // 3. OPTIMIZED Loop Conditional Check
-                int r_idx = allocate_register();
-                int r_lim = allocate_register();
+				register_local(step_var);
+				get_variable_access_string(step_var, access_step);
+				emit_asm("MOV %s, R%d ; Save loop step to stack", access_step, scratch);
 
-                emit_asm("MOV R%d, %s", r_idx, access_index);
-                emit_asm("MOV R%d, %s", r_lim, access_limit);
+				// Evaluate and store INDEX (start value)
+				generate_asm(node->as.for_numeric.start_expr, scratch);
+				register_local(index_var);
+				get_variable_access_string(index_var, access_index);
+				emit_asm("MOV %s, R%d ; Initialize loop index", access_index, scratch);
 
-                if (is_static_step) {
-                    // Fast Path: We know the direction at compile time!
+				// Done with scratch register
+				unlock_register(scratch);
+
+				// -------------------------------------------------------------------------
+				// STEP 3: Setup loop tracking for break statements
+				// -------------------------------------------------------------------------
+				push_loop(label_id, LOOP_TYPE_FOR_NUMERIC);
+
+				// Loop start label
+				emit_asm("%s:\n", start_label);
+
+				// -------------------------------------------------------------------------
+				// STEP 4: Loop condition check
+				// -------------------------------------------------------------------------
+				int r_idx = allocate_register();
+				int r_lim = allocate_register();
+
+				// ✅ These registers are used for condition check - medium liveness
+				mark_register_live(r_idx, 5);
+				mark_register_live(r_lim, 5);
+
+				// Load index and limit from stack into registers
+				emit_asm("MOV R%d, %s", r_idx, access_index);
+				emit_asm("MOV R%d, %s", r_lim, access_limit);
+
+				if (is_static_step) {
+					// =================================================================
+					// OPTIMIZED PATH: Step direction known at compile time
+					// =================================================================
 					ensure_in_register(r_idx);
 					ensure_in_register(r_lim);
 
-                    if (static_step_val >= 0.0) {
-                        emit_asm("FGT R%d, R%d ; Check if index > limit", r_idx, r_lim);
-                    } else {
-                        emit_asm("FLT R%d, R%d ; Check if index < limit", r_idx, r_lim);
-                    }
-                    emit_asm("JT R%d, %s ; Exit loop if limit exceeded", r_idx, end_label);
-                } else {
-                    // Slow Path: Dynamic step requires runtime sign check
-                    int r_step = allocate_register();
-                    emit_asm("MOV R%d, %s", r_step, access_step);
+					if (static_step_val >= 0.0) {
+						// Positive step: loop while index <= limit
+						emit_asm("FGT R%d, R%d ; Check if index > limit (exit condition)", r_idx, r_lim);
+					} else {
+						// Negative step: loop while index >= limit
+						emit_asm("FLT R%d, R%d ; Check if index < limit (exit condition)", r_idx, r_lim);
+					}
+					emit_asm("JT R%d, %s ; Jump to end if loop condition fails", r_idx, end_label);
+				} else {
+					// =================================================================
+					// DYNAMIC PATH: Step direction determined at runtime
+					// =================================================================
+					int r_step = allocate_register();
+					// ✅ Short-lived: only used for sign check
+					mark_register_live(r_step, 3);
 
+					emit_asm("MOV R%d, %s", r_step, access_step);
 					ensure_in_register(r_idx);
 					ensure_in_register(r_lim);
-                    
-                    char pos_lbl[128], chk_lbl[128];
-                    snprintf(pos_lbl, sizeof(pos_lbl), "__%s_for_pos_%d", ctx, label_id);
-                    snprintf(chk_lbl, sizeof(chk_lbl), "__%s_for_chk_%d", ctx, label_id);
 
-                    emit_asm("FGE R%d, 0.000000", r_step);
-                    emit_asm("JT R%d, %s", r_step, pos_lbl);
-                    emit_asm("FLT R%d, R%d", r_idx, r_lim); // this seems pointless
-                    emit_asm("JMP %s", chk_lbl); // considering this unconditional jump
-                    
-                    emit_asm("%s:\n", pos_lbl);
-                    emit_asm("FGT R%d, R%d", r_idx, r_lim);
-                    
-                    emit_asm("%s:\n", chk_lbl);
-                    emit_asm("JT R%d, %s", r_idx, end_label);
-                    unlock_register(r_step);
-                }
+					char pos_lbl[128], chk_lbl[128];
+					snprintf(pos_lbl, sizeof(pos_lbl), "__%s_for_pos_%d", ctx, label_id);
+					snprintf(chk_lbl, sizeof(chk_lbl), "__%s_for_chk_%d", ctx, label_id);
 
-                unlock_register(r_idx);
-                unlock_register(r_lim);
+					// Check if step is positive or negative
+					emit_asm("FGE R%d, 0.000000 ; Check if step >= 0", r_step);
+					emit_asm("JT R%d, %s ; Jump if step is positive", r_step, pos_lbl);
 
-                // 4. Run Loop Body
-                generate_block(node->as.for_numeric.body);
+					// Negative step path: check if index < limit
+					emit_asm("FLT R%d, R%d ; index < limit?", r_idx, r_lim);
+					emit_asm("JMP %s ; Jump to check", chk_lbl);
 
-                // 5. Increment Step
-                int r_calc = allocate_register();
-                int r_st   = allocate_register();
-                emit_asm("MOV R%d, %s", r_calc, access_index);
-                emit_asm("MOV R%d, %s", r_st, access_step);
-                ensure_in_register(r_calc);
-                ensure_in_register(r_st);
-                emit_asm("FADD R%d, R%d ; float index += float step", r_calc, r_st);
-                emit_asm("MOV %s, R%d", access_index, r_calc);
-                unlock_register(r_calc);
-                unlock_register(r_st);
+					// Positive step path: check if index > limit
+					emit_asm("%s:\n", pos_lbl);
+					emit_asm("FGT R%d, R%d ; index > limit?", r_idx, r_lim);
 
-                // 6. Loop Loop Back & Clean up
-                emit_asm("JMP %s", start_label);
-                emit_asm("%s:\n", end_label);
+					// Common check: if condition is true, exit loop
+					emit_asm("%s:\n", chk_lbl);
+					emit_asm("JT R%d, %s ; Exit if condition met", r_idx, end_label);
 
-                pop_loop();
-                pop_scope();
-                break;
-            }
+					unlock_register(r_step);
+				}
+
+				// Done with condition registers
+				unlock_register(r_idx);
+				unlock_register(r_lim);
+
+				// -------------------------------------------------------------------------
+				// STEP 5: Execute loop body
+				// -------------------------------------------------------------------------
+				generate_block(node->as.for_numeric.body);
+
+				// -------------------------------------------------------------------------
+				// STEP 6: Increment index and loop back
+				// -------------------------------------------------------------------------
+				int r_calc = allocate_register();
+				int r_st = allocate_register();
+
+				// ✅ Short-lived: only used for increment calculation
+				mark_register_live(r_calc, 2);
+				mark_register_live(r_st, 2);
+
+				// Load current index and step
+				emit_asm("MOV R%d, %s", r_calc, access_index);
+				emit_asm("MOV R%d, %s", r_st, access_step);
+
+				// Ensure both are in registers (load from stack if spilled)
+				ensure_in_register(r_calc);
+				ensure_in_register(r_st);
+
+				// Increment: index = index + step
+				emit_asm("FADD R%d, R%d ; index += step", r_calc, r_st);
+
+				// Store result back to stack
+				emit_asm("MOV %s, R%d ; Update loop index on stack", access_index, r_calc);
+
+				// Clean up increment registers
+				unlock_register(r_calc);
+				unlock_register(r_st);
+
+				// Jump back to condition check
+				emit_asm("JMP %s ; Loop back to condition", start_label);
+
+				// Loop end label
+				emit_asm("%s:\n", end_label);
+
+				// -------------------------------------------------------------------------
+				// STEP 7: Clean up loop context
+				// -------------------------------------------------------------------------
+				pop_loop();
+				pop_scope();
+				break;
+			}
+
             case NODE_BREAK: {
                 int current_id = current_loop();
                 if (current_id == -1) {
@@ -463,6 +549,9 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 char        else_label[128], end_label[128];
                 snprintf(else_label, sizeof(else_label), "__%s_else_%d", ctx, label_id);
                 snprintf(end_label, sizeof(end_label), "__%s_end_if_%d", ctx, label_id);
+
+				// ✅ Used for condition check
+				mark_register_live (cond_reg, 2);
                 
                 generate_asm (node -> as.if_stmt.condition, cond_reg);
                 
@@ -567,6 +656,9 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     snprintf(end_label, sizeof(end_label), "__%s_not_end_%d", ctx, label_id);         // Prefix added
                     int  scratch_reg  = allocate_register ();
 
+					// ✅ Short-lived scratch
+					mark_register_live(scratch_reg, 2);
+
                     ensure_in_register(dest_reg);  // Reload dest_reg if it was spilled by allocate_register()
 
                     // 1. Check if Nil or False using scratch register
@@ -642,6 +734,9 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                     // =========================================================================
                     val_reg = allocate_register();
 
+					// ✅ Value register used immediately for assignment
+					mark_register_live(val_reg, 1);
+
                     if (curr_val != NULL) {
                         // Evaluate the right-hand expression into our temporary register
                         generate_asm(curr_val, val_reg);
@@ -698,212 +793,285 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 break;
             }
 
-            case NODE_FUNCTION_CALL: {
+			case NODE_FUNCTION_CALL: {
+				// =========================================================================
+				// FUNCTION CALL: f(x, y, z) or obj:method(a, b)
+				//
+				// Strategy:
+				//   1. Try hardware/builtin intrinsic first (fast path)
+				//   2. Resolve target function (direct or method call)
+				//   3. Evaluate and push arguments right-to-left (C ABI convention)
+				//   4. Push implicit 'self' for method calls (last, so it's at [BP+2])
+				//   5. Execute call and handle return value
+				//
+				// Registers used:
+				//   - target_reg: Function pointer (PINNED during arg evaluation)
+				//   - table_reg: Table for method calls (spilled after lookup)
+				//   - arg_reg: Temporary for each argument evaluation
+				//   - pad_reg: For padding missing arguments
+				// =========================================================================
 
-                // 1. HARDWARE & BUILTIN INTRINSIC INTERCEPT
-                if (try_emit_call_intrinsic(node, dest_reg)) {
-                    break; // Intrinsic handled! Skip standard Lua call generation.
-                }
+				// -------------------------------------------------------------------------
+				// STEP 0: Hardware & Builtin Intrinsic Fast Path
+				// -------------------------------------------------------------------------
+				// Check if this call can be handled as a compile-time intrinsic
+				if (try_emit_call_intrinsic(node, dest_reg)) {
+					break; // Intrinsic handled - skip standard call generation
+				}
 
-                // --- FFI INTEGRATION: Resolve symbol to check if target is a native C function ---
-                SymbolNode *target_sym = NULL;
-                if (node->as.call.target->type == NODE_IDENTIFIER) {
-                    target_sym = resolve_symbol(node->as.call.target->as.id.name);
-                } else {
-                    char path_buf[256] = {0};
-                    if (resolve_static_path(node->as.call.target, path_buf)) {
-                        target_sym = resolve_symbol(path_buf);
-                        if (!target_sym) {
-                            // Try mangled lookup by converting '.' and ':' to '_'
-                            for (int i = 0; path_buf[i] != '\0'; i++) {
-                                if (path_buf[i] == '.' || path_buf[i] == ':') {
-                                    path_buf[i] = '_';
-                                }
-                            }
-                            target_sym = resolve_symbol(path_buf);
-                        }
-                    }
-                }
-                bool is_c_call = (target_sym != NULL && target_sym->is_c_native == 1);
+				// -------------------------------------------------------------------------
+				// STEP 0.5: FFI Integration - Check for C Native Functions
+				// -------------------------------------------------------------------------
+				SymbolNode *target_sym = NULL;
 
-                int total_arg_count = 0;
-                int target_reg = allocate_register();
-                int table_reg  = -1; // Cached for method calls to push 'self' last
-				// 🔒 PIN target_reg (prevents spilling during argument handling)
+				// Resolve the target symbol
+				if (node->as.call.target->type == NODE_IDENTIFIER) {
+					// Direct function call: foo()
+					target_sym = resolve_symbol(node->as.call.target->as.id.name);
+				} else {
+					// Method or table call: obj:method() or obj.method()
+					char path_buf[256] = {0};
+					if (resolve_static_path(node->as.call.target, path_buf)) {
+						target_sym = resolve_symbol(path_buf);
+						if (!target_sym) {
+							// Try mangled lookup: convert '.' and ':' to '_'
+							for (int i = 0; path_buf[i] != '\0'; i++) {
+								if (path_buf[i] == '.' || path_buf[i] == ':') {
+									path_buf[i] = '_';
+								}
+							}
+							target_sym = resolve_symbol(path_buf);
+						}
+					}
+				}
+
+				// Determine if this is a C ABI call (FFI)
+				bool is_c_call = (target_sym != NULL && target_sym->is_c_native == 1);
+
+				// -------------------------------------------------------------------------
+				// STEP 1: Allocate and Pin Target Register
+				// -------------------------------------------------------------------------
+				int total_arg_count = 0;
+				int target_reg = allocate_register();
+				int table_reg = -1; // Only used for method calls
+
+				// 🔒 CRITICAL: Pin target_reg to prevent spilling during argument evaluation
+				//    This ensures the function pointer stays valid while we push arguments
 				register_pinned[target_reg] = 1;
 
-                // =========================================================================
-                // STEP 1: RESOLVE THE TARGET FUNCTION POINTER & CACHE 'SELF'
-                // =========================================================================
-                if (node->as.call.is_method_call) {
-                    emit_asm("    ; --- Evaluating method target and caching implicit 'self' ---\n");
+				// ✅ Mark as live for the duration of call setup
+				mark_register_live(target_reg, 10);
 
-                    ASTNode *table_get_node = node->as.call.target;
-                    table_reg   = allocate_register();
-                    int key_reg = allocate_register();
+				// -------------------------------------------------------------------------
+				// STEP 1.5: Resolve Target Function Pointer & Cache 'self'
+				// -------------------------------------------------------------------------
+				if (node->as.call.is_method_call) {
+					// Method call: obj:method() - need to resolve method and cache 'self'
+					emit_asm("    ; --- Method call: resolve target and cache 'self' ---\n");
 
-                    // Evaluate table expression ONCE into table_reg
-                    generate_asm(table_get_node->as.table_get.table_expr, table_reg);
-                    generate_asm(table_get_node->as.table_get.key, key_reg);
+					ASTNode *table_get_node = node->as.call.target;
+					table_reg = allocate_register();
+					int key_reg = allocate_register();
 
-                    ensure_in_register(table_reg);
-                    ensure_in_register(key_reg);
+					// ✅ Short-lived registers for lookup
+					mark_register_live(table_reg, 5);
+					mark_register_live(key_reg, 2);
 
-                    // Attempt intrinsic property read first
-                    if (!try_emit_table_get_intrinsic(table_get_node->as.table_get.table_expr,
-                                                      table_get_node->as.table_get.key,
-                                                      target_reg))
-                    {
-                        // Perform lookup on a clean stack BEFORE pushing call arguments
-                        emit_asm("PUSH R%d ; Arg1: Table Pointer for method lookup\n", table_reg);
-                        emit_asm("PUSH R%d ; Arg2: Key\n", key_reg);
-                        emit_asm("CALL __builtin_table_get\n");
-                        emit_asm("IADD SP, 2 ; Clean up lookup arguments\n");
-                        emit_asm("MOV R%d, R0 ; Store retrieved method function pointer\n", target_reg);
-                    }
+					// Evaluate table expression (the object)
+					generate_asm(table_get_node->as.table_get.table_expr, table_reg);
 
-                    unlock_register(key_reg);
+					// Evaluate method key
+					generate_asm(table_get_node->as.table_get.key, key_reg);
 
+					// Ensure both are in registers (may have been spilled)
+					ensure_in_register(table_reg);
+					ensure_in_register(key_reg);
+
+					// Try hardware intrinsic for table get first
+					if (!try_emit_table_get_intrinsic(
+							table_get_node->as.table_get.table_expr,
+							table_get_node->as.table_get.key,
+							target_reg)) {
+						// Fallback: Runtime table lookup
+						emit_asm("PUSH R%d ; Arg1: Table pointer for method lookup\n", table_reg);
+						emit_asm("PUSH R%d ; Arg2: Method key\n", key_reg);
+						emit_asm("CALL __builtin_table_get\n");
+						emit_asm("IADD SP, 2 ; Clean up lookup arguments\n");
+						emit_asm("MOV R%d, R0 ; Store retrieved method pointer\n", target_reg);
+					}
+
+					// Clean up key register
+					unlock_register(key_reg);
+
+					// 🟡 Spill table_reg and target_reg to free registers for argument eval
+					//    But keep them PINNED so they won't be reused
 					spill_register(table_reg);
-                    spill_register(target_reg);
-                    // NOTE: table_reg remains LOCKED so argument evaluations won't clobber it!
-                } else {
-                    if (!is_c_call) {
-                        // Standard function call: resolve target function pointer directly
-                        generate_asm(node->as.call.target, target_reg);
-						// ✅ FIX: Explicitly spill target_reg
-                        spill_register(target_reg);
-                    }
-                }
+					spill_register(target_reg);
+				} else {
+					// Direct function call: foo() or module.func()
+					if (!is_c_call) {
+						// Standard Lua function - resolve target
+						generate_asm(node->as.call.target, target_reg);
+						// ✅ Spill it now so it doesn't block register allocation
+						spill_register(target_reg);
+					}
+					// For C calls, target_reg is unused (we call by name)
+				}
 
-                // =========================================================================
-                // STEP 2: EVALUATE & PUSH EXPLICIT ARGUMENTS RIGHT-TO-LEFT (STANDARD ABI)
-                // =========================================================================
-                int explicit_arg_count = 0;
-                ASTNode *curr = node->as.call.args_head;
-                while (curr != NULL) {
-                    explicit_arg_count++;
-                    curr = curr->next;
-                }
+				// -------------------------------------------------------------------------
+				// STEP 2: Evaluate & Push Explicit Arguments (Right-to-Left)
+				// -------------------------------------------------------------------------
+				// Count explicit arguments
+				int explicit_arg_count = 0;
+				ASTNode *curr = node->as.call.args_head;
+				while (curr != NULL) {
+					explicit_arg_count++;
+					curr = curr->next;
+				}
 
-                // --- CALCULATE AND PUSH MISSING ARGUMENTS ---
-                // Total arguments provided = explicit args + 1 (if implicit 'self' is passed)
-                int actual_passed_count = explicit_arg_count + (node->as.call.is_method_call ? 1 : 0);
-                int expected_arity = get_expected_arity(node->as.call.target);
+				// --- Handle Missing Arguments (Arity Padding) ---
+				int actual_passed_count = explicit_arg_count +
+										(node->as.call.is_method_call ? 1 : 0);
+				int expected_arity = get_expected_arity(node->as.call.target);
 
-                if (expected_arity > actual_passed_count) {
-                    int missing_args = expected_arity - actual_passed_count;
-                    emit_asm("    ; --- Padding %d omitted argument(s) with %s ---\n",
-                             missing_args, is_c_call ? "0 (C ABI)" : "Nil (0xFFC00000)");
+				if (expected_arity > actual_passed_count) {
+					int missing_args = expected_arity - actual_passed_count;
+					emit_asm("    ; --- Padding %d omitted arguments ---\n",
+							 missing_args, is_c_call ? "with 0 (C ABI)" : "with Nil");
 
-                    // 1. Allocate scratch register for immediate padding value
-                    int pad_reg = allocate_register();
-                    if (is_c_call) {
-                        emit_asm("MOV R%d, 0 ; Load unboxed 0 for C ABI default\n", pad_reg);
-                    } else {
-                        emit_asm("MOV R%d, BOXED_NIL ; Load Nil constant for padding\n", pad_reg);
-                    }
+					// Allocate register for padding value
+					int pad_reg = allocate_register();
+					// ✅ Short-lived: only used for padding
+					mark_register_live(pad_reg, missing_args + 1);
 
-                    ensure_in_register(pad_reg);
+					if (is_c_call) {
+						emit_asm("MOV R%d, 0 ; C ABI default value\n", pad_reg);
+					} else {
+						emit_asm("MOV R%d, BOXED_NIL ; Lua Nil for missing args\n", pad_reg);
+					}
 
-                    // 2. Trailing missing args are pushed first (Right-to-Left ABI)
-                    for (int i = 0; i < missing_args; i++) {
-                        emit_asm("PUSH R%d ; Pad omitted argument\n", pad_reg);
-                        total_arg_count++;
-                    }
+					ensure_in_register(pad_reg);
 
-                    unlock_register(pad_reg);
-                }
-                // ---------------------------------------------------
+					// Push padding values (rightmost args first)
+					for (int i = 0; i < missing_args; i++) {
+						emit_asm("PUSH R%d ; Pad omitted argument\n", pad_reg);
+						total_arg_count++;
+					}
 
-                if (explicit_arg_count > 0) {
-                    // Collect linked list nodes into an array for reverse traversal
-                    ASTNode **arg_array = (ASTNode **)malloc(sizeof(ASTNode *) * explicit_arg_count);
-                    if (arg_array == NULL) {
-                        compiler_error(ERR_INTERNAL, -1, "Out of memory allocating argument compilation buffer");
-                    }
+					unlock_register(pad_reg);
+				}
 
-                    curr = node->as.call.args_head;
-                    for (int i = 0; i < explicit_arg_count; i++) {
-                        arg_array[i] = curr;
-                        curr = curr->next;
-                    }
+				// --- Push Explicit Arguments (Right-to-Left for C ABI) ---
+				if (explicit_arg_count > 0) {
+					// Allocate array for reverse traversal
+					ASTNode **arg_array = (ASTNode **)malloc(sizeof(ASTNode *) * explicit_arg_count);
+					if (arg_array == NULL) {
+						compiler_error(ERR_INTERNAL, -1, "Out of memory for arg buffer");
+					}
 
-                    emit_asm("    ; --- Pushing explicit arguments Right-to-Left ---\n");
-                    // Traverse backwards: Push Arg N down to Arg 1 (or Arg 2 if method call)
-                    for (int i = explicit_arg_count - 1; i >= 0; i--) {
-                        int arg_reg = allocate_register();
-                        generate_asm(arg_array[i], arg_reg);
+					// Collect arguments
+					curr = node->as.call.args_head;
+					for (int i = 0; i < explicit_arg_count; i++) {
+						arg_array[i] = curr;
+						curr = curr->next;
+					}
 
-                        if (is_c_call) {
-                            emit_asm("    ; --- Unbox Lua value for C ABI ---\n");
-                            // Strip upper 10 tag bits so C receives a clean 22-bit raw int/float/pointer
-                            emit_asm("AND R%d, BOXED_PAYLOAD ; Strip NaN tag bits\n", arg_reg);
-                        }
-                        ensure_in_register(arg_reg);
+					emit_asm("    ; --- Pushing explicit arguments Right-to-Left ---\n");
 
-                        emit_asm("PUSH R%d\n", arg_reg);
-                        unlock_register(arg_reg);
-                        total_arg_count++;
-                    }
+					// Push in reverse order: Arg N, Arg N-1, ..., Arg 1
+					for (int i = explicit_arg_count - 1; i >= 0; i--) {
+						int arg_reg = allocate_register();
+						// ✅ Short-lived: used for one argument evaluation
+						mark_register_live(arg_reg, 2);
 
-                    free(arg_array);
-                }
+						// Evaluate argument into register
+						generate_asm(arg_array[i], arg_reg);
 
-                // =========================================================================
-                // STEP 3: PUSH IMPLICIT 'SELF' LAST (GUARANTEES IT SITS AT [BP + 2])
-                // =========================================================================
-                if (node->as.call.is_method_call) {
-                    emit_asm("    ; --- Pushing implicit 'self' last (Top of argument stack) ---\n");
+						// For C ABI, unbox the Lua value
+						if (is_c_call) {
+							emit_asm("    ; --- Unbox for C ABI ---\n");
+							emit_asm("AND R%d, BOXED_PAYLOAD ; Strip NaN tag bits\n", arg_reg);
+						}
+
+						// Ensure register is loaded (may have been spilled by nested calls)
+						ensure_in_register(arg_reg);
+
+						// Push onto stack
+						emit_asm("PUSH R%d\n", arg_reg);
+						unlock_register(arg_reg);
+						total_arg_count++;
+					}
+
+					free(arg_array);
+				}
+
+				// -------------------------------------------------------------------------
+				// STEP 3: Push Implicit 'self' for Method Calls (LAST)
+				// -------------------------------------------------------------------------
+				if (node->as.call.is_method_call) {
+					emit_asm("    ; --- Pushing implicit 'self' (Top of arg stack) ---\n");
+
+					// ✅ Ensure table_reg is loaded from its spill slot
 					ensure_in_register(table_reg);
 
-                    emit_asm("PUSH R%d ; Arg 1: self\n", table_reg);
-                    unlock_register(table_reg);
-                    total_arg_count++;
-                }
+					emit_asm("PUSH R%d ; Arg 1: self\n", table_reg);
+					unlock_register(table_reg); // No longer needed
+					total_arg_count++;
+				}
 
-                // =========================================================================
-                // STEP 4: EXECUTE TAIL-CALL VALIDATION & CLEAN UP STACK
-                // =========================================================================
-                if (is_c_call) {
-                    unlock_register(target_reg); // Unused on direct C calls, free immediately
-                    emit_asm("    ; --- Direct C ABI Call ---\n");
-                    emit_asm("CALL _%s ; Call Vircon32 C symbol directly\n", target_sym->name);
+				// -------------------------------------------------------------------------
+				// STEP 4: Execute Call & Clean Up Stack
+				// -------------------------------------------------------------------------
+				if (is_c_call) {
+					// --- Direct C ABI Call ---
+					// For C calls, target_reg is unused (we call by symbol name)
+					unlock_register(target_reg);
+					register_pinned[target_reg] = 0; // Clear pin
 
-                    if (total_arg_count > 0) {
-                        emit_asm("IADD SP, %d ; C ABI caller-cleanup\n", total_arg_count);
-                    }
+					emit_asm("    ; --- Direct C ABI Call ---\n");
+					emit_asm("CALL _%s ; Call C symbol directly\n", target_sym->name);
 
-                    if (dest_reg != 0) {
-                        emit_asm("    ; --- Box C return value back to Lua Float ---\n");
-                        emit_asm("MOV R%d, R0\n", dest_reg);
-                        emit_asm("OR R%d, 0x7FF00000 ; Apply default Lua Number tag\n", dest_reg);
-                    }
-                } else {
-					// 🔓 UNPIN target_reg
+					// Caller cleanup for C ABI
+					if (total_arg_count > 0) {
+						emit_asm("IADD SP, %d ; C ABI caller cleanup\n", total_arg_count);
+					}
+
+					// Box return value back to Lua representation
+					if (dest_reg != 0) {
+						emit_asm("    ; --- Box C return value ---\n");
+						emit_asm("MOV R%d, R0\n", dest_reg);
+						emit_asm("OR R%d, 0x7FF00000 ; Apply Lua Number tag\n", dest_reg);
+					}
+				} else {
+					// --- Lua Function Call (via __builtin_exec) ---
+
+					// 🔓 UNPIN target_reg now that arguments are pushed
 					register_pinned[target_reg] = 0;
 
-					// ✅ Reload if it was spilled before pinning
+					// ✅ Reload target_reg if it was spilled during argument evaluation
 					if (target_reg != 0) {
 						ensure_in_register(target_reg);
 						emit_asm("MOV R0, R%d ; Prepare boxed target for validation\n", target_reg);
 					}
-                    unlock_register(target_reg);
 
-                    emit_asm("CALL __builtin_exec ; Validate tag and tail-call execute\n");
+					unlock_register(target_reg);
 
-                    // Clean up argument words from the stack frame
-                    if (total_arg_count > 0) {
-                        emit_asm("IADD SP, %d ; Clean up call arguments\n", total_arg_count);
-                    }
+					// Call the Lua function executor (handles tag validation & tail-call)
+					emit_asm("CALL __builtin_exec ; Validate and execute\n");
 
-                    // Store return value if required by the expression
-                    if (dest_reg != 0) {
-                        emit_asm("MOV R%d, R0 ; Store return value\n", dest_reg);
-                    }
-                }
-                break;
-            }
+					// Clean up arguments from stack
+					if (total_arg_count > 0) {
+						emit_asm("IADD SP, %d ; Clean up call arguments\n", total_arg_count);
+					}
+
+					// Store return value if caller needs it
+					if (dest_reg != 0) {
+						emit_asm("MOV R%d, R0 ; Store return value\n", dest_reg);
+					}
+				}
+
+				break;
+			}
 
             case NODE_FUNCTION_POINTER: {
                 emit_asm ("    ;; Load and box address of the mangled function\n");
@@ -941,6 +1109,10 @@ void  generate_asm (ASTNode *node, int  dest_reg)
             case NODE_ADD: {
                 generate_asm (node -> as.binary.left, dest_reg);
                 int  right_reg  = allocate_register();  // May spill another value
+
+				// ✅ Will be used immediately, short-lived
+				mark_register_live (right_reg, 1);
+
                 generate_asm (node -> as.binary.right, right_reg);
 
                 // Ensure both are in registers (load from stack if spilled)
@@ -955,6 +1127,10 @@ void  generate_asm (ASTNode *node, int  dest_reg)
             case NODE_MUL: {
                 generate_asm (node -> as.binary.left, dest_reg);
                 int  right_reg  = allocate_register ();
+
+				// ✅ Will be used immediately, short-lived
+				mark_register_live (right_reg, 1);
+
                 generate_asm (node -> as.binary.right, right_reg);
 
                 // Ensure both are in registers (load from stack if spilled)
@@ -969,6 +1145,10 @@ void  generate_asm (ASTNode *node, int  dest_reg)
             case NODE_SUB: {
                 generate_asm (node -> as.binary.left, dest_reg);
                 int  right_reg  = allocate_register ();
+
+				// ✅ Will be used immediately, short-lived
+				mark_register_live (right_reg, 1);
+
                 generate_asm (node -> as.binary.right, right_reg);
 
                 // Ensure both are in registers (load from stack if spilled)
@@ -983,6 +1163,10 @@ void  generate_asm (ASTNode *node, int  dest_reg)
             case NODE_DIV: {
                 generate_asm (node -> as.binary.left, dest_reg);
                 int  right_reg  = allocate_register ();
+
+				// ✅ Will be used immediately, short-lived
+				mark_register_live (right_reg, 1);
+
                 generate_asm (node -> as.binary.right, right_reg);
 
                 // Ensure both are in registers (load from stack if spilled)
@@ -997,6 +1181,10 @@ void  generate_asm (ASTNode *node, int  dest_reg)
             case NODE_MOD: {
                 generate_asm (node -> as.binary.left, dest_reg);
                 int  right_reg  = allocate_register();
+
+				// ✅ Will be used immediately, short-lived
+				mark_register_live (right_reg, 1);
+
                 generate_asm (node -> as.binary.right, right_reg);
 
                 // Ensure both are in registers (load from stack if spilled)
@@ -1032,38 +1220,57 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 emit_asm ("MOV R%d, BOXED_NIL; the lua nil\n", dest_reg);
                 break;
 
-            case NODE_AND: {
-                int label_id = get_next_label();
-                const char *ctx = get_current_function_name(); // Fetch context
-                char end_label[128];
-                snprintf(end_label, sizeof(end_label), "__%s_short_and_%d", ctx, label_id); // Prefix added
+			case NODE_AND: {
+				int         label_id        = get_next_label ();
+				const char *ctx             = get_current_function_name ();
+				char        end_label[128];
 
-                // 1. Evaluate Left Operand into dest_reg
-                generate_asm(node->as.binary.left, dest_reg);
-                
-                emit_falsy_jump(dest_reg, end_label);
-                
-                // 2. Otherwise, evaluate Right Operand into dest_reg
-                generate_asm(node->as.binary.right, dest_reg);    emit_asm("%s:\n", end_label);
-                break;
-            }
+				snprintf (end_label, sizeof (end_label), "__%s_short_and_%d", ctx, label_id);
 
-            case NODE_OR: {
-                int label_id = get_next_label();
-                const char *ctx = get_current_function_name(); // Fetch context
-                char end_label[128];
-                snprintf(end_label, sizeof(end_label), "__%s_short_or_%d", ctx, label_id); // Prefix added
+				// 1. Ensure dest_reg is available (may have been spilled)
+				ensure_in_register (dest_reg);
 
-                // 1. Evaluate Left Operand into dest_reg
-                generate_asm(node->as.binary.left, dest_reg);
-                
-                emit_truthy_jump(dest_reg, end_label);
-                
-                // 2. Otherwise, evaluate Right Operand into dest_reg
-                generate_asm(node->as.binary.right, dest_reg);
-                emit_asm("%s:\n", end_label);
-                break;
-            }
+				// 2. Evaluate Left Operand into dest_reg
+				generate_asm (node -> as.binary.left, dest_reg);
+
+				// 3. Short-circuit: if left is falsy, jump to end with falsy result
+				emit_falsy_jump (dest_reg, end_label);
+
+				// 4. Otherwise, evaluate Right Operand into dest_reg
+				//    dest_reg still holds left value, but we overwrite it with right
+				generate_asm (node -> as.binary.right, dest_reg);
+
+				// 5. End label
+				emit_asm ("%s:\n", end_label);
+
+				break;
+			}
+
+			case NODE_OR: {
+				int         label_id        = get_next_label ();
+				const char *ctx             = get_current_function_name ();
+				char        end_label[128];
+
+				snprintf (end_label, sizeof (end_label), "__%s_short_or_%d", ctx, label_id);
+
+				// 1. Ensure dest_reg is available (may have been spilled)
+				ensure_in_register (dest_reg);
+
+				// 2. Evaluate Left Operand into dest_reg
+				generate_asm (node -> as.binary.left, dest_reg);
+
+				// 3. Short-circuit: if left is truthy, jump to end with truthy result
+				emit_truthy_jump (dest_reg, end_label);
+
+				// 4. Otherwise, evaluate Right Operand into dest_reg
+				//    dest_reg still holds left value, but we overwrite it with right
+				generate_asm (node -> as.binary.right, dest_reg);
+
+				// 5. End label
+				emit_asm ("%s:\n", end_label);
+
+				break;
+			}
 
             case NODE_RELATIONAL: {
                 generate_asm (node -> as.binary.left, dest_reg);
@@ -1156,27 +1363,32 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 }
 
                 // 2. Fallback: Dynamic heap assignment (table[key] = value)
-                int val_reg   = allocate_register();
-                int table_reg = allocate_register();
-                int key_reg   = allocate_register();
+                int  val_reg    = allocate_register ();
+                int  table_reg  = allocate_register ();
+                int  key_reg    = allocate_register ();
 
-                generate_asm(node->as.table_set.value, val_reg);
-                generate_asm(node->as.table_set.table_expr, table_reg);
-                generate_asm(node->as.table_set.key, key_reg);
+				// ✅ All used immediately for table operation
+				mark_register_live (val_reg,   2);
+				mark_register_live (table_reg, 2);
+				mark_register_live (key_reg,   2);
 
-                ensure_in_register(val_reg);
-                ensure_in_register(table_reg);
-                ensure_in_register(key_reg);
+                generate_asm (node -> as.table_set.value,      val_reg);
+                generate_asm (node -> as.table_set.table_expr, table_reg);
+                generate_asm (node -> as.table_set.key,        key_reg);
 
-                emit_asm("PUSH R%d ; table pointer", table_reg);
-                emit_asm("PUSH R%d ; key",           key_reg);
-                emit_asm("PUSH R%d ; value",         val_reg);
-                emit_asm("CALL __builtin_table_set ; store key-value pair in table");
-                emit_asm("IADD SP, 3 ; clean up stack arguments");
+                ensure_in_register (val_reg);
+                ensure_in_register (table_reg);
+                ensure_in_register (key_reg);
 
-                unlock_register(val_reg);
-                unlock_register(table_reg);
-                unlock_register(key_reg);
+                emit_asm ("PUSH R%d ; table pointer", table_reg);
+                emit_asm ("PUSH R%d ; key",           key_reg);
+                emit_asm ("PUSH R%d ; value",         val_reg);
+                emit_asm ("CALL __builtin_table_set ; store key-value pair in table");
+                emit_asm ("IADD SP, 3 ; clean up stack arguments");
+
+                unlock_register (val_reg);
+                unlock_register (table_reg);
+                unlock_register (key_reg);
                 break;
             }
 
@@ -1191,6 +1403,10 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 // 2. Fallback: Dynamic heap table lookup
                 int table_reg = allocate_register();
                 int key_reg   = allocate_register();
+
+				// ✅ Short-lived
+				mark_register_live(table_reg, 2);
+				mark_register_live(key_reg, 2);
 
                 generate_asm(node->as.table_get.table_expr, table_reg);
                 generate_asm(node->as.table_get.key, key_reg);
