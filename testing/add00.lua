@@ -3,10 +3,10 @@ function main()
 
 	-- Test 1: Basic append
 	t = {}
-	__rawasm__("__debug:")
 	add(t, 42)
 	add(t, 43)
 	print(0, 0, "Test 1 - Append:")   -- Title
+	__rawasm__("__debug:")
 	print(0, 20, t[1])              -- Should print: 42
 	print(0, 40, t[2])              -- Should print: 43
 
