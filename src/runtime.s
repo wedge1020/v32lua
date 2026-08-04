@@ -135,29 +135,24 @@ __builtin_table_new:
     PUSH BP
     MOV  BP, SP
 
-    ;; 1. Allocate space for Table struct (4 words: flags, array_len, array_ptr, hash_ptr) 
-    MOV  R0, 4 
-    PUSH R0 
-    CALL __malloc 
-    IADD SP, 1 
-    
-    ;; Check for out-of-memory (if R0 == 0, handle OOM error) 
-    MOV  R1, R0
-    IEQ  R1, 0 
-    JT   R1, __oom_handler 
-    
-    ;; 2. Initialize table header in data memory (Stripped redundant +0 offset) 
-	MOV  [R0],   R1          ; flags / metatable pointer = nil
-	MOV  [R0+1], R1          ; array part length = 0
-	MOV  R2,     [R0]
-	OR   R2,     8           ; Store initial capacity of 8 in lower bits
-	MOV  [R0],   R2
-	MOV  [R0+2], R1          ; array part pointer = null
-	MOV  [R0+3], R1          ; hash part pointer = null
+    MOV  R0, 4
+    PUSH R0
+    CALL __malloc
+    IADD SP, 1
 
-    ;; 3. AUDITED: Box the raw data heap address as a Lua Table! 
-    OR   R0, BOXED_TABLE 
-    
+    MOV  R1, R0
+    IEQ  R1, 0
+    JT   R1, __oom_handler
+
+    ;; Initialize table header
+    MOV  R1, 0
+    MOV  [R0], R1            ; Word 0: flags = nil
+    MOV  [R0+1], R1          ; Word 1: length = 0
+    MOV  [R0+2], R1          ; Word 2: array pointer = null
+    MOV  [R0+3], R1          ; Word 3: hash pointer = null
+
+    OR   R0, BOXED_TABLE
+
     MOV  SP, BP
     POP  BP
     RET
@@ -347,8 +342,8 @@ __builtin_table_set:
     ILT  R5, 1               ; Destructive test: Is integer key < 1?
     JT   R5, __table_set_fallback ; Zero or negative keys go to fallback!
     
-    ;; FAST-PATH CHECK 4: Is Key within Array Capacity?
-    MOV  R6, [R1+1]          ; R6 = Array Capacity (from Table Header Word 1)
+    ;; FAST-PATH CHECK 4: Is Key within Length?
+    MOV  R6, [R1+1]          ; R6 = Length (from Table Header Word 1)
     MOV  R7, R4              ; Copy integer index R4 to scratch R7
     IGT  R7, R6              ; Destructive test: Is Key > Capacity?
     JT   R7, __table_set_fallback ; Out-of-bounds integers go to fallback!
@@ -540,8 +535,56 @@ __builtin_table_set_with_shift:
     MOV  R5, R1
     AND  R5, BOXED_PAYLOAD   ; R5 = Raw table header address
 
-    ;; --- Get array pointer and capacity from table header ---
+    ;; --- Get array pointer from table header ---
     MOV  R6, [R5+2]          ; R6 = Array data pointer (Word 2)
+
+    ;; --- FIX: Allocate array if it doesn't exist ---
+    MOV  R7, R6
+    IEQ  R7, 0
+    JT    R7, __set_with_shift_allocate_array
+    JMP   __set_with_shift_get_capacity
+
+__set_with_shift_allocate_array:
+    ;; Allocate initial array (start with capacity of 8)
+    PUSH R1
+    PUSH R2
+    PUSH R3
+    PUSH R4
+    PUSH R5
+    PUSH R6
+
+    MOV  R0, 8
+    PUSH R0
+    CALL __malloc
+    IADD SP, 1
+
+    POP  R6
+    POP  R5
+    POP  R4
+    POP  R3
+    POP  R2
+    POP  R1
+
+    MOV  R6, R0              ; R6 = New array pointer
+    MOV  R7, R0
+    IEQ  R7, 0
+    JT    R7, __oom_handler
+
+    ;; Store new array pointer in table header
+    MOV  [R5+2], R6
+
+    ;; Set initial capacity to 8 in flags
+    MOV  R7, [R5]
+    MOV  R8, TABLE_ARRAYSIZE
+    NOT  R8
+    AND  R7, R8              ; Clear old capacity
+    OR   R7, 8               ; Set capacity to 8
+    MOV  [R5], R7
+
+    ;; Fall through to get capacity
+
+__set_with_shift_get_capacity:
+    ;; --- Get capacity from flags ---
     MOV  R7, [R5]            ; R7 = Flags/array capacity (Word 0)
     AND  R7, TABLE_ARRAYSIZE  ; Extract capacity from lower bits
 
@@ -617,10 +660,10 @@ __set_with_shift_copy_done:
 
     ;; --- Update capacity in flags: clear old capacity, set new ---
     MOV  R6, [R5]            ; Get current flags
-	MOV  R7, TABLE_ARRAYSIZE
+    MOV  R7, TABLE_ARRAYSIZE
     NOT  R7                  ; Invert mask to clear capacity bits
     AND  R6, R7              ; Clear old capacity
-    OR   R6, R8              ; Set new capacity (stored in R8)
+    OR   R6, R8              ; Set new capacity
     MOV  [R5], R6
 
     ;; --- Update R6 to point to new array for shifting ---
@@ -1941,64 +1984,69 @@ _btnp_end:
     RET
 
 ;; -------------------------------------------------------------------------------------
-;; PICO-8 add() builtin: adds value to table at position (default: append)
+;; Pico-8 add(): Inserts value into table at position (default: append)
 ;;
-;; Incoming Stack: [BP+4] = Tagged Table Pointer, [BP+3] = Value,
-;;                 [BP+2] = Position/index (or NIL for append)
+;; Incoming Stack: [BP+4] = Tagged Table Pointer, [BP+3] = Value, [BP+2] = Index (or NIL)
 ;; Returns: R0 = inserted value
 ;; -------------------------------------------------------------------------------------
 __builtin_add:
     PUSH BP
     MOV  BP, SP
 
-    ;; --- Callee-Save ---
+    ;; --- Callee-Save: Preserve working registers ---
     PUSH R1
     PUSH R2
     PUSH R3
     PUSH R4
+    PUSH R5
 
     ;; --- Load arguments ---
-    MOV  R1, [BP+4]          ; R1 = Tagged Table Pointer
-    MOV  R2, [BP+3]          ; R2 = Value to add
-    MOV  R3, [BP+2]          ; R3 = Position (or NIL)
+    MOV  R1, [BP+2]          ; R1 = table
+    MOV  R2, [BP+3]          ; R2 = value
+    MOV  R3, [BP+4]          ; R3 = index (or NIL)
 
-    ;; --- Unbox table ---
+    ;; --- Unbox table to get raw address ---
     MOV  R4, R1
-    AND  R4, BOXED_PAYLOAD   ; R4 = Raw table header address
+    AND  R4, BOXED_PAYLOAD   ; R4 = raw table header address
 
-    ;; --- Get current array length ---
-    MOV  R0, [R4+1]          ; R0 = Current array length
+    ;; --- Get current array length from table header ---
+    MOV  R5, [R4+1]          ; R5 = current array length
 
-    ;; --- Handle default position (NIL means append) ---
-    MOV  R1, R3
-    IEQ  R1, BOXED_NIL
-    JT   R1, __add_append
+    ;; --- Handle default index (NIL = length + 1) ---
+    MOV  R4, R3
+    IEQ  R4, BOXED_NIL
+    JT   R4, __add_use_length_plus_1
+    MOV  R3, R4              ; Use provided index
+    JMP  __add_call_table_set
 
-    ;; Position was provided, use it directly
-    MOV  R3, R1              ; R3 = Position (already unboxed if it was a number)
-    JMP  __add_prepare
+__add_use_length_plus_1:
+    MOV  R3, R5
+    FADD R3, 1              ; R3 = length + 1
 
-__add_append:
-    ;; Default to length + 1
-    IADD R3, R0              ; R3 = Position = length + 1
-    IADD R3, 1               ; R3 = Position = length + 1
+__add_call_table_set:
+    ;; --- Call __builtin_table_set(table, index, value) ---
+    PUSH R1
+    PUSH R3
+    PUSH R2
+    CALL __builtin_table_set
+    IADD SP, 3
 
-__add_prepare:
-    ;; --- Push arguments for __builtin_table_set_with_shift ---
-    ;; Stack: table, position, value, current_length
-    PUSH R0                  ; Current array length
-    PUSH R2                  ; Value
-    PUSH R3                  ; Position
-    PUSH R1                  ; Tagged table pointer
+    ;; --- Update length if we appended (index == old_length + 1) ---
+    MOV  R4, R5
+    FADD R4, 1
+    IEQ  R3, R4
+    JF   R3, __add_return
 
-    ;; --- Call the shift-and-set routine ---
-    CALL __builtin_table_set_with_shift
-    IADD SP, 4               ; Clean up 4 arguments
+    ;; --- Update table length in header ---
+    FADD R5, 1
+    MOV  [R1+1], R5
 
-    ;; --- R0 already contains the inserted value (return from shift routine) ---
+__add_return:
+    ;; --- Return the inserted value ---
+    MOV  R0, R2
 
-__add_done:
     ;; --- Callee-Restore ---
+    POP  R5
     POP  R4
     POP  R3
     POP  R2

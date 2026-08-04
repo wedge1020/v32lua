@@ -44,9 +44,15 @@ tests: bin/$(TARGET)
 asmcheck: bin/$(TARGET)
 	$(MAKE) -C testing asmcheck
 
+v32check: bin/$(TARGET)
+	$(MAKE) -C testing v32check
+
 demos: bin/$(TARGET)
 	$(MAKE) -C demos
 
 monofiles:
 	scripts/monolithic_code.sh
 	$(MAKE) -C testing monofiles
+
+context:
+	$(MAKE) -C src context
