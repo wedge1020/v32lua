@@ -2019,7 +2019,7 @@ __builtin_add:
     MOV  R4, R6              ; Check original index
     IEQ  R4, BOXED_NIL
     JT   R4, __add_use_length_plus_1
-    MOV  R7, R4              ; Use provided index (already float from compiler)
+    MOV  R7, R6              ; Use provided index (already float from compiler)
     JMP  __add_prepare_call
 
 __add_use_length_plus_1:
