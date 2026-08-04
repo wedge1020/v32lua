@@ -147,9 +147,11 @@ __builtin_table_new:
     JT   R1, __oom_handler 
     
     ;; 2. Initialize table header in data memory (Stripped redundant +0 offset) 
-	MOV  [R0], R1            ; flags / metatable pointer = nil
+	MOV  [R0],   R1          ; flags / metatable pointer = nil
 	MOV  [R0+1], R1          ; array part length = 0
-	OR   [R0], 8             ; Store initial capacity of 8 in lower bits
+	MOV  R2,     [R0]
+	OR   R2,     8           ; Store initial capacity of 8 in lower bits
+	MOV  [R0],   R2
 	MOV  [R0+2], R1          ; array part pointer = null
 	MOV  [R0+3], R1          ; hash part pointer = null
 
@@ -506,7 +508,7 @@ __table_set_done:
 ;;
 ;; Incoming Stack: [BP+5] = Tagged Table Pointer, [BP+4] = Position (1-based),
 ;;                 [BP+3] = Value to insert, [BP+2] = Current array length
-;; Register Usage: R1-R11
+;; Register Usage: R1-R13
 ;; Returns: R0 = inserted value
 ;; -------------------------------------------------------------------------------------
 __builtin_table_set_with_shift:
@@ -525,6 +527,8 @@ __builtin_table_set_with_shift:
     PUSH R9
     PUSH R10
     PUSH R11
+    PUSH R12
+    PUSH R13
 
     ;; --- Load arguments ---
     MOV  R1, [BP+5]          ; R1 = Tagged Table Pointer
@@ -534,16 +538,12 @@ __builtin_table_set_with_shift:
 
     ;; --- Unbox table to get raw address ---
     MOV  R5, R1
-    AND  R5, UNBOX_MASK      ; R5 = Raw table header address
+    AND  R5, BOXED_PAYLOAD   ; R5 = Raw table header address
 
     ;; --- Get array pointer and capacity from table header ---
     MOV  R6, [R5+2]          ; R6 = Array data pointer (Word 2)
-	MOV  R7, [R5]            ; R7 = Flags/array capacity (Word 0)
-    AND  R7, TABLE_ARRAYSIZE ; Extract capacity from lower 16 bits
-
-
-    ;; --- Extract array capacity from flags ---
-    AND  R7, TABLE_ARRAYSIZE
+    MOV  R7, [R5]            ; R7 = Flags/array capacity (Word 0)
+    AND  R7, TABLE_ARRAYSIZE  ; Extract capacity from lower bits
 
     ;; --- Check if we need to reallocate ---
     IGT  R2, R7
@@ -552,13 +552,17 @@ __builtin_table_set_with_shift:
 
 __set_with_shift_reallocate:
     ;; --- Calculate new capacity (double current, or position+1, whichever is larger) ---
-    IADD R8, R7, R7          ; R8 = 2 * current capacity
-    IADD R9, R2, 1           ; R9 = position + 1 (minimum needed)
+    MOV  R8, R7
+    IADD R8, R7              ; R8 = 2 * current capacity
+
+    MOV  R9, R2
+    IADD R9, 1               ; R9 = position + 1 (minimum needed)
+
     IGT  R8, R9
     JT   R8, __set_with_shift_use_doubled
     MOV  R8, R9              ; Use position+1 if doubling isn't enough
-__set_with_shift_use_doubled:
 
+__set_with_shift_use_doubled:
     ;; --- Allocate new array ---
     PUSH R1
     PUSH R2
@@ -611,10 +615,12 @@ __set_with_shift_copy_done:
     ;; --- Update table header with new array pointer ---
     MOV  [R5+2], R8
 
-    ;; --- Update capacity in flags ---
-    MOV  R6, [R5]
-    AND  R6, ~TABLE_ARRAYSIZE
-    OR   R6, R8
+    ;; --- Update capacity in flags: clear old capacity, set new ---
+    MOV  R6, [R5]            ; Get current flags
+	MOV  R7, TABLE_ARRAYSIZE
+    NOT  R7                  ; Invert mask to clear capacity bits
+    AND  R6, R7              ; Clear old capacity
+    OR   R6, R8              ; Set new capacity (stored in R8)
     MOV  [R5], R6
 
     ;; --- Update R6 to point to new array for shifting ---
@@ -622,13 +628,14 @@ __set_with_shift_copy_done:
 
 __set_with_shift_check_shifting:
     ;; --- Check if we need to shift elements ---
-    IADD R8, R4, 1
+    MOV  R8, R4
+    IADD R8, 1
     IEQ  R2, R8
     JT   R2, __set_with_shift_no_shift
 
     ;; --- Shift elements from position to end one slot to the right ---
-    MOV  R8, R4
-    MOV  R9, R2
+    MOV  R8, R4              ; R8 = Current length (last valid index)
+    MOV  R9, R2              ; R9 = Insertion position
 
 __set_with_shift_loop:
     IGE  R9, R8
@@ -667,6 +674,8 @@ __set_with_shift_store:
 
 __set_with_shift_done:
     ;; --- Callee-Restore: Pop all working registers ---
+    POP  R13
+    POP  R12
     POP  R11
     POP  R10
     POP  R9
@@ -713,7 +722,7 @@ __builtin_table_insert:
 
     ;; --- Unbox table pointer to get raw RAM address ---
     MOV  R4, R1
-    AND  R4, UNBOX_MASK      ; Strip the boxed tag to get raw pointer
+    AND  R4, BOXED_PAYLOAD   ; Strip the boxed tag to get raw pointer
 
     ;; --- Get current array length from table header ---
     MOV  R5, [R4+1]          ; R5 = Current array length (Word 1 of header)
@@ -727,7 +736,8 @@ __builtin_table_insert:
     JMP  __insert_check_bounds
 
 __insert_append:
-    IADD R2, R5, 1          ; Position = length + 1 (append at end)
+    IADD R2, R5              ; Position = length + 1 (append at end)
+    IADD R2, 1               ; Position = length + 1 (append at end)
     JMP  __insert_prepare
 
 __insert_check_bounds:
@@ -1954,7 +1964,7 @@ __builtin_add:
 
     ;; --- Unbox table ---
     MOV  R4, R1
-    AND  R4, UNBOX_MASK      ; R4 = Raw table header address
+    AND  R4, BOXED_PAYLOAD   ; R4 = Raw table header address
 
     ;; --- Get current array length ---
     MOV  R0, [R4+1]          ; R0 = Current array length
@@ -1970,19 +1980,20 @@ __builtin_add:
 
 __add_append:
     ;; Default to length + 1
-    IADD R3, R0, 1          ; R3 = Position = length + 1
+    IADD R3, R0              ; R3 = Position = length + 1
+    IADD R3, 1               ; R3 = Position = length + 1
 
 __add_prepare:
     ;; --- Push arguments for __builtin_table_set_with_shift ---
     ;; Stack: table, position, value, current_length
-    PUSH R0                 ; Current array length
-    PUSH R2                 ; Value
-    PUSH R3                 ; Position
-    PUSH R1                 ; Tagged table pointer
+    PUSH R0                  ; Current array length
+    PUSH R2                  ; Value
+    PUSH R3                  ; Position
+    PUSH R1                  ; Tagged table pointer
 
     ;; --- Call the shift-and-set routine ---
     CALL __builtin_table_set_with_shift
-    IADD SP, 4              ; Clean up 4 arguments
+    IADD SP, 4               ; Clean up 4 arguments
 
     ;; --- R0 already contains the inserted value (return from shift routine) ---
 
