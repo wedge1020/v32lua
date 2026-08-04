@@ -1984,68 +1984,72 @@ _btnp_end:
     RET
 
 ;; -------------------------------------------------------------------------------------
-;; Pico-8 add(): Inserts value into table at position (default: append)
+;; PICO-8 add(): Adds value to table at position (default: append)
 ;;
-;; Incoming Stack: [BP+4] = Tagged Table Pointer, [BP+3] = Value, [BP+2] = Index (or NIL)
+;; Incoming Stack: [BP+2] = index/NIL, [BP+3] = value, [BP+4] = table
 ;; Returns: R0 = inserted value
+;; Register Usage: R7-R9 for arguments, R1-R6 callee-saved
 ;; -------------------------------------------------------------------------------------
 __builtin_add:
     PUSH BP
     MOV  BP, SP
 
-    ;; --- Callee-Save: Preserve working registers ---
+    ;; --- Push callee-saved registers FIRST ---
     PUSH R1
     PUSH R2
     PUSH R3
     PUSH R4
     PUSH R5
+    PUSH R6
 
-    ;; --- Load arguments ---
-    MOV  R1, [BP+2]          ; R1 = table
-    MOV  R2, [BP+3]          ; R2 = value
-    MOV  R3, [BP+4]          ; R3 = index (or NIL)
+    ;; --- Now load arguments into non-callee-saved registers ---
+    MOV  R9, [BP+2]          ; R7 = index (or NIL)
+    MOV  R8, [BP+3]          ; R8 = value
+    MOV  R7, [BP+4]          ; R9 = table
 
-    ;; --- Unbox table to get raw address ---
-    MOV  R4, R1
+    ;; --- Save original index in R6 for later length-update check ---
+    MOV  R6, R7              ; R6 = original index (NIL or explicit)
+
+    ;; --- Unbox table and get current length ---
+    MOV  R4, R9
     AND  R4, BOXED_PAYLOAD   ; R4 = raw table header address
-
-    ;; --- Get current array length from table header ---
-    MOV  R5, [R4+1]          ; R5 = current array length
+    MOV  R5, [R4+1]          ; R5 = current array length (integer)
 
     ;; --- Handle default index (NIL = length + 1) ---
-    MOV  R4, R3
+    MOV  R4, R6              ; Check original index
     IEQ  R4, BOXED_NIL
     JT   R4, __add_use_length_plus_1
-    MOV  R3, R4              ; Use provided index
-    JMP  __add_call_table_set
+    MOV  R7, R4              ; Use provided index (already float from compiler)
+    JMP  __add_prepare_call
 
 __add_use_length_plus_1:
-    MOV  R3, R5
-    FADD R3, 1              ; R3 = length + 1
+    MOV  R7, R5
+    IADD R7, 1              ; R7 = length + 1 (as integer)
+    CIF  R7                  ; Convert integer to float representation
 
-__add_call_table_set:
+__add_prepare_call:
     ;; --- Call __builtin_table_set(table, index, value) ---
-    PUSH R1
-    PUSH R3
-    PUSH R2
+    PUSH R9                  ; table
+    PUSH R7                  ; index (float)
+    PUSH R8                  ; value
     CALL __builtin_table_set
     IADD SP, 3
 
-    ;; --- Update length if we appended (index == old_length + 1) ---
-    MOV  R4, R5
-    FADD R4, 1
-    IEQ  R3, R4
-    JF   R3, __add_return
+    ;; --- Update length ONLY if original index was NIL (append case) ---
+    MOV  R4, R6
+    IEQ  R4, BOXED_NIL
+    JF   R4, __add_return
 
-    ;; --- Update table length in header ---
-    FADD R5, 1
-    MOV  [R1+1], R5
+    ;; --- Update table length in header (stored as integer) ---
+    IADD R5, 1
+    MOV  [R9+1], R5
 
 __add_return:
     ;; --- Return the inserted value ---
-    MOV  R0, R2
+    MOV  R0, R8
 
     ;; --- Callee-Restore ---
+    POP  R6
     POP  R5
     POP  R4
     POP  R3
