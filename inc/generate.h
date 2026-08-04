@@ -51,7 +51,7 @@ void  node_relational          (ASTNode *, int);
 void  node_return              (ASTNode *);
 void  node_string              (ASTNode *, int);
 void  node_sub                 (ASTNode *, int);
-void  node_table_constructor   (int);
+void  node_table_constructor   (ASTNode *, int);
 void  node_table_get           (ASTNode *, int);
 void  node_table_set           (ASTNode *);
 void  node_unary               (ASTNode *, int);

@@ -388,7 +388,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 break;
 
             case NODE_TABLE_CONSTRUCTOR:
-                node_table_constructor (dest_reg);
+                node_table_constructor(node, dest_reg);
                 break;
 
             case NODE_TABLE_SET:

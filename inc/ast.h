@@ -90,6 +90,10 @@ typedef struct astnode {
             char* value;
         } string_val;
 
+		struct {
+			struct astnode* initializers_head; // Linked list of table_set nodes
+		} table_constructor;
+
         struct {
             struct astnode* table_expr;
             struct astnode* key;
@@ -133,19 +137,19 @@ extern int yylineno;
 //
 // AST function prototypes
 //
-ASTNode *make_node (NodeType);
-ASTNode *make_node_ident (const char *);
-ASTNode *make_node_string (const char *);
-ASTNode *make_node_cart_hint (const char *);
-ASTNode *make_node_unary (Operator, ASTNode *);
-ASTNode *make_node_binary (NodeType, ASTNode *, ASTNode *);
-ASTNode *make_node_function_def (const char *, ASTNode *, ASTNode *);
-ASTNode *make_node_method_def   (ASTNode *, const char *, int , ASTNode *, ASTNode *);
-ASTNode *make_node_table_constructor (void);
-ASTNode *make_node_table_get (ASTNode *, ASTNode *);
-ASTNode *make_node_table_set (ASTNode *, ASTNode *, ASTNode *);
-ASTNode *make_node_boolean (bool);
-ASTNode *make_node_nil (void);
-bool     try_get_immediate_operand (ASTNode *, char *, size_t);
+ASTNode *make_node                   (NodeType);
+ASTNode *make_node_ident             (const char *);
+ASTNode *make_node_string            (const char *);
+ASTNode *make_node_cart_hint         (const char *);
+ASTNode *make_node_unary             (Operator,     ASTNode    *);
+ASTNode *make_node_binary            (NodeType,     ASTNode    *, ASTNode *);
+ASTNode *make_node_function_def      (const char *, ASTNode    *, ASTNode *);
+ASTNode *make_node_method_def        (ASTNode    *, const char *, int,       ASTNode *, ASTNode *);
+ASTNode *make_node_table_constructor (ASTNode    *);
+ASTNode *make_node_table_get         (ASTNode    *, ASTNode    *);
+ASTNode *make_node_table_set         (ASTNode    *, ASTNode    *, ASTNode *);
+ASTNode *make_node_boolean           (bool);
+ASTNode *make_node_nil               (void);
+bool     try_get_immediate_operand   (ASTNode    *, char       *, size_t);
 
 #endif

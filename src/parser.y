@@ -43,6 +43,8 @@ char *mangle_method_name (const char *table_name, const char *method_name);
 %type <ast_node> statement statement_list stat_list expr function_def return_stmt
 %type <ast_node> table_constructor function_call else_branch prefix_expr
 %type <ast_node> last_statement func_start while_start for_start if_start
+%type <ast_node> field
+%type <ast_node> field_list
 
 /* Operator Precedence Rules (PEMDAS + Logic Core) */
 %left TOKEN_OR
@@ -453,12 +455,42 @@ function_call:
     }
     ;
 
-table_constructor:
-    '{' '}' {
-        $$ = make_node(NODE_TABLE_CONSTRUCTOR);
+field:
+    expr {
+        // Array-style: {value} -> implicit sequential key
+        $$ = $1;
+    }
+    | expr '=' expr {
+        // Record-style: {key = value}
+        $$ = make_node_table_set(NULL, $1, $3);
+    }
+    | '[' expr ']' '=' expr {
+        // Explicit key: {[key] = value}
+        $$ = make_node_table_set(NULL, $2, $5);
     }
     ;
 
+field_list:
+    field {
+        $$ = $1;
+    }
+    | field_list ',' field {
+        // Chain fields together via next pointer
+        ASTNode* curr = $1;
+        while (curr->next) curr = curr->next;
+        curr->next = $3;
+        $$ = $1;
+    }
+    ;
+
+table_constructor:
+    '{' '}' {
+        $$ = make_node_table_constructor(NULL);
+    }
+    | '{' field_list '}' {
+        $$ = make_node_table_constructor($2);
+    }
+    ;
 %%
 
 void yyerror(const char *s) {

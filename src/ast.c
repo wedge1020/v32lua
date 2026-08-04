@@ -204,13 +204,13 @@ ASTNode *make_node_binary (NodeType  type, ASTNode *left, ASTNode *right)
     return node;
 }
 
-ASTNode *make_node_table_constructor (void)
+ASTNode *make_node_table_constructor (ASTNode *initializers_head)
 {
-    ASTNode* node = malloc(sizeof(ASTNode));
-    node->type = NODE_TABLE_CONSTRUCTOR;
-    node->next = NULL;
-    // No union data needed for an empty table!
-    return node;
+    ASTNode *node                                   = (ASTNode *) malloc (sizeof (ASTNode));
+    node -> type                                    = NODE_TABLE_CONSTRUCTOR;
+    node -> next                                    = NULL;
+    node -> as.table_constructor.initializers_head  = initializers_head;
+    return (node);
 }
 
 ASTNode *make_node_table_get (ASTNode *table_expr, ASTNode *key_expr)
