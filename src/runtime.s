@@ -1986,7 +1986,7 @@ _btnp_end:
 ;; -------------------------------------------------------------------------------------
 ;; PICO-8 add(): Adds value to table at position (default: append)
 ;;
-;; Incoming Stack: [BP+2] = index/NIL, [BP+3] = value, [BP+4] = table
+;; Incoming Stack: [BP+4] = index/NIL, [BP+3] = value, [BP+2] = table
 ;; Returns: R0 = inserted value
 ;; Register Usage: R7-R9 for arguments, R1-R6 callee-saved
 ;; -------------------------------------------------------------------------------------
@@ -2003,9 +2003,9 @@ __builtin_add:
     PUSH R6
 
     ;; --- Now load arguments into non-callee-saved registers ---
-    MOV  R9, [BP+2]          ; R7 = index (or NIL)
+    MOV  R7, [BP+4]          ; R7 = index (or NIL)
     MOV  R8, [BP+3]          ; R8 = value
-    MOV  R7, [BP+4]          ; R9 = table
+    MOV  R9, [BP+2]          ; R9 = table
 
     ;; --- Save original index in R6 for later length-update check ---
     MOV  R6, R7              ; R6 = original index (NIL or explicit)
@@ -2041,8 +2041,11 @@ __add_prepare_call:
     JF   R4, __add_return
 
     ;; --- Update table length in header (stored as integer) ---
+	MOV  R4, R9              ; R9 has the tagged header address
+    AND  R4, BOXED_PAYLOAD   ; R4 = raw table header address
+
     IADD R5, 1
-    MOV  [R9+1], R5
+    MOV  [R4+1], R5
 
 __add_return:
     ;; --- Return the inserted value ---
