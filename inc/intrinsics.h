@@ -37,8 +37,15 @@ void  emit_gpu_clear_intrinsic(ASTNode *node, int dest_reg);
 bool  emit_spu_cmd_intrinsic       (ASTNode *, int);
 bool  emit_hex_intrinsic(ASTNode *node, int dest_reg);
 void  emit_get_gamepad_inputs_intrinsic(int dest_reg);
-bool  emit_spr_intrinsic(ASTNode *node);
-bool  emit_btn_intrinsic(ASTNode *node, int dest_reg);
+
+//////////////////////////////////////////////////////////////////////////////
+//
+// pico-8 api intrinsics
+//
+bool  emit_spr_intrinsic (ASTNode *);
+bool  emit_btn_intrinsic (ASTNode *, int);
+bool  emit_add_intrinsic (ASTNode *, int);
+
 void  emit_print_intrinsic (ASTNode *node);
 bool  emit_printf_intrinsic(ASTNode *node, int dest_reg);
 void  emit_get_gamepad_inputs_intrinsic(int dest_reg);

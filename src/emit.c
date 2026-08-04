@@ -456,6 +456,7 @@ int   emit_variable_map (void)
     fprintf (out(), "%%define  BOXED_TRUE      0xFFC00002\n");
     fprintf (out(), "%%define  BOXED_TOMBSTONE 0xFFC00003 ; future feature\n");
     fprintf (out(), "%%define  BOXED_PAYLOAD   0x003FFFFF\n");
+    fprintf (out(), "%%define  TABLE_ARRAYSIZE 0x0000FFFF\n");
     fprintf (out(), "%%define  HEAP_POINTER    0\n");
     
     SymbolNode *curr = global_scope ? global_scope->symbols : NULL;
