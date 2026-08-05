@@ -1,7 +1,10 @@
 #include "v32lua.h"
 
+// In emit.c, replace all 1024-byte buffers with 8192:
+#define EMIT_BUFFER_SIZE 8192
+
 void emit_asm(const char *format, ...) {
-    char raw_buf[1024];
+    char raw_buf[EMIT_BUFFER_SIZE];
     va_list args;
     va_start(args, format);
     vsnprintf(raw_buf, sizeof(raw_buf), format, args);
@@ -31,7 +34,7 @@ void emit_asm(const char *format, ...) {
 
     // 2. PARTITIONING: Isolate the first semicolon to isolate Code from Comments
     char *comment_ptr = strchr(raw_buf, ';');
-    char code_buf[1024] = {0};
+    char code_buf[EMIT_BUFFER_SIZE] = {0};
 
     if (comment_ptr != NULL) {
         size_t code_len = comment_ptr - raw_buf;
@@ -85,11 +88,11 @@ void emit_asm(const char *format, ...) {
         }
 
         // --- PEEPHOLE OPTIMIZER (-O1) ---
-        char dest_buf[128] = {0};
-        char src_buf[128]  = {0};
+        char dest_buf[EMIT_BUFFER_SIZE] = {0};
+        char src_buf[EMIT_BUFFER_SIZE]  = {0};
 
         if (operands != NULL) {
-            char op_copy[256];
+            char op_copy[EMIT_BUFFER_SIZE];
             strncpy(op_copy, operands, sizeof(op_copy) - 1);
             char *comma = strchr(op_copy, ',');
             if (comma != NULL) {
@@ -185,14 +188,14 @@ void  emit_interpolated_asm (const char *raw_code)
     while (*p) {
         if (*p == '{') {
             p++; 
-            char var_name[256];
+            char var_name[EMIT_BUFFER_SIZE];
             int i = 0;
             while (*p && *p != '}' && i < 255) var_name[i++] = *p++;
             var_name[i] = '\0'; 
             if (*p == '}') p++; 
             
             // Format the variable and append it to our buffer
-            char formatted_var[264];
+            char formatted_var[EMIT_BUFFER_SIZE];
             sprintf(formatted_var, "[var_%s]", var_name);
             for (int j = 0; formatted_var[j] != '\0' && buf_idx < 2047; j++) {
                 buffer[buf_idx++] = formatted_var[j];
@@ -398,7 +401,7 @@ void emit_truthy_jump(int reg, const char *target_label)
 {
     int check_id = get_next_label();
     const char *ctx = get_current_function_name(); // Fetch context
-    char eval_right_label[128];
+    char eval_right_label[EMIT_BUFFER_SIZE];
     snprintf(eval_right_label, sizeof(eval_right_label), "__%s_truthy_fail_%d", ctx, check_id); // Prefix added
     int  scratch_reg  = allocate_register ();
 
@@ -501,7 +504,7 @@ void  emit_string_data_section (void)
 static void emit_embedded_asm (const char *start)
 {
     const char *cursor = start;
-    char line[1024];
+    char line[EMIT_BUFFER_SIZE];
 
     while (*cursor != '\0') {
         int i = 0;

@@ -6,48 +6,63 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-;; __builtin_tic80_init (initialize regions, TIC-80 style)
+;; __builtin_tic80_init (initialize 512 regions of 8x8 pixels)
 ;;
+;; Creates 512 regions (0-511) arranged in a 32-column × 16-row grid
+;; Each region is exactly 8×8 pixels with hotspot at (0,0)
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 __builtin_tic80_init:
     PUSH  BP
     MOV   BP, SP
 
-    OUT   GPU_SelectedTexture, 0
+    OUT   GPU_SelectedTexture, 0  ; Use texture 0 for TIC-80 sprites
 
-    MOV   R1, 0
-    MOV   R4, R1
+    MOV   R1, 0                 ; R1 = region ID (0 to 511)
+    MOV   R2, 0                 ; R2 = x position (0 to 255)
+    MOV   R3, 0                 ; R3 = y position (0 to 255)
+
 _tic80_init_loop:
+    ;; Exit when all 512 regions are initialized
     MOV   R0, R1
-
     IEQ   R0, 512
     JT    R0, _tic80_init_done
 
-    MOV   R0, R1
+    ;; Select current region
+    OUT   GPU_SelectedRegion, R1
 
-    OUT   GPU_SelectedRegion,  R0
-    OUT   GPU_RegionMinX,      R2
-    OUT   GPU_RegionMinY,      R3
-    OUT   GPU_RegionHotspotX,  R2
-    OUT   GPU_RegionHotspotY,  R3
-    IADD  R2,                  7
-    OUT   GPU_RegionMaxX,      R2
-    IADD  R2,                  7
-    OUT   GPU_RegionMaxY,      R3
+    ;; Set region bounds: 8x8 pixels (Min to Max inclusive = 8 pixels)
+    OUT   GPU_RegionMinX, R2
+    OUT   GPU_RegionMinY, R3
 
-    IADD  R1,                  1 ; advance tile ID
-    IADD  R4,                  1
+    ;; Hotspot at top-left corner (0,0) - critical for flip math
+    ;OUT   GPU_RegionHotspotX, 0
+    ;OUT   GPU_RegionHotspotY, 0
+    OUT   GPU_RegionHotspotX, R2
+    OUT   GPU_RegionHotspotY, R3
 
-    IADD  R2,                  1 ; advance to next tile
-    ISUB  R3,                  7 ; reset to top of current tile row
+    ;; MaxX = MinX + 7, MaxY = MinY + 7 (8 pixels total)
+    MOV   R4, R2
+    IADD  R4, 7
+    OUT   GPU_RegionMaxX, R4
 
-    MOV   R5,                  R4
-    IEQ   R5,                  16
-    JF    R5,                  _tic80_init_loop
+    MOV   R4, R3
+    IADD  R4, 7
+    OUT   GPU_RegionMaxY, R4
 
-    MOV   R2,                  0
-    IADD  R3,                  8
-    MOV   R4,                  0
+    ;; Advance to next region
+    IADD  R1, 1
+    IADD  R2, 8              ; Move x by 8 pixels (next column)
 
+    ;; Check if x reached 256 (32 regions × 8 pixels = 256)
+    MOV   R4, R2
+    IEQ   R4, 256
+    JF    R4, _tic80_init_loop
+
+    ;; Wrap to next row: reset x to 0, advance y by 8 pixels
+    MOV   R2, 0
+    IADD  R3, 8
     JMP   _tic80_init_loop
 
 _tic80_init_done:
@@ -71,8 +86,7 @@ _tic80_init_done:
 ;; [BP+10]: h (Grid Height as Float)
 ;;
 ;; NOTE: TIC-80 scale of 1.0 maps to Vircon32 scale of ~2.647 (45/17)
-;;       This is achieved via: final_scale = (tic80_scale * 2711) with SHL -10
-;;       Where 2711/1024 ≈ 2.64706
+;;       This is achieved via: final_scale = tic80_scale * 2.647
 ;;
 ;; NOTE on Initializing the Vircon32 Regions
 ;;
@@ -89,27 +103,24 @@ __builtin_tic80_spr:
     PUSH  BP
     MOV   BP, SP
 
-    ;; --- 1. Calculate final scale: (tic80_scale * 2711) with SHL -10 ---
+    ;; --- 1. Calculate final scale as float ---
+    ;; TIC-80 scale 1.0 -> Vircon32 scale ~2.64706 (2711/1024)
     MOV   R1, [BP+6]        ; tic80_scale (float)
-    CFI   R1                ; Convert to integer
-    MOV   R2, 2711           ; 2711/1024 ≈ 2.64706
-    IMUL  R1, R2            ; R1 = tic80_scale * 2711
-    SHL   R1, -10           ; R1 = (tic80_scale * 2711) >> 10
-    MOV   R12, R1           ; Save X scale in R12
-    MOV   R13, R1           ; Copy to R13 for Y scale
+    MOV   R2, 2.64  ; Pre-calculated float: 2711/1024
+    FMUL  R1, R2            ; R1 = tic80_scale * 2.64706 (float multiply)
+    MOV   R12, R1           ; Save X scale in R12 (as float)
+    MOV   R13, R1           ; Copy to R13 for Y scale (as float)
 
-    ;; --- 1b. Apply flip by negating scale (0 - R = -R) ---
+    ;; --- 1b. Apply flip by negating scale using FSGN ---
     MOV   R2, [BP+7]        ; flip (0-3)
-    CFI   R2
+    CFI   R2                ; Convert flip to integer for bit testing
 
     ;; Horizontal flip (bit 0): negate X scale
     AND   R3, R2
     AND   R3, 1
     IEQ   R3, 1
     JF    R3, _tic80_spr_no_flip_x
-    MOV   R3, 0
-	MOV   R12, R3
-	ISGN  R12               ; -R12
+    FSGN  R12               ; Negate float in R12
 _tic80_spr_no_flip_x:
     OUT   GPU_DrawingScaleX, R12
 
@@ -118,9 +129,7 @@ _tic80_spr_no_flip_x:
     AND   R3, 2
     IEQ   R3, 2
     JF    R3, _tic80_spr_no_flip_y
-    MOV   R3, 0
-	MOV   R13, R3
-	ISGN  R13             ; R13 = -R13
+    FSGN  R13               ; Negate float in R13
 _tic80_spr_no_flip_y:
     OUT   GPU_DrawingScaleY, R13
 
@@ -554,3 +563,49 @@ _tic80_add_return:
     POP  BP
     RET
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; __builtin_tic80_cls: Clear screen to color
+;;
+;; Stack: [BP+2] = color (palette index 0-15 or 32-bit RGBA value)
+;; Uses: R1-R4
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_cls:
+    PUSH  BP
+    MOV   BP, SP
+
+    MOV   R1, [BP+2]        ; Load color argument
+
+    ;; If color is a small integer (0-15), map to palette
+    MOV   R2, R1
+    CFI   R2                ; Convert to integer in R2
+
+    ;; Check if 0 <= R2 < 16 (palette index range)
+    ILT   R2, 0
+    JT    R2, _tic80_cls_use_direct
+    IGE   R2, 16
+    JT    R2, _tic80_cls_use_direct
+
+    ;; Palette lookup: R2 is valid index 0-15
+    ;; Each palette entry is 4 bytes, so offset = R2 * 4
+    SHL   R2, 2            ; R2 = R2 * 4
+    MOV   R3, __tic80_palette
+    IADD  R3, R2
+    MOV   R1, [R3]        ; Load 32-bit color from palette
+
+_tic80_cls_use_direct:
+    ;; R1 now contains the 32-bit RGBA color
+    OUT   GPU_ClearColor, R1
+    OUT   GPU_Command, GPUCommand_ClearScreen
+
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; ===========================================================================
+;; TIC-80 Default 16-Color Palette (32-bit RGBA)
+;; ===========================================================================
+__tic80_palette:
+integer 0xFF000000, 0xFF1D2B53, 0xFF7E2553, 0xFF008751, 0xFFAB5236, 0xFF5F574F, 0xFFC2C3C7, 0xFFFFF1E8, 0xFFFF004D, 0xFFA300FF, 0xFFFFEC27, 0xFF00E436, 0xFF29ADFF, 0xFF83769C, 0xFFFF77A8, 0xFFFFCCAA

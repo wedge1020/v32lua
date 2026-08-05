@@ -327,6 +327,13 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
 		}
     }
 
+	// TIC-80 cls()
+	if (strcmp(func_name, "cls") == 0) {
+		if (runtime_req.needs_tic80 == true) {
+			return emit_tic80_cls_intrinsic(node);
+		}
+	}
+
     // math.floor(x)
     if (strcmp(func_name, "math.floor") == 0) {
         return emit_math_floor_intrinsic(node, dest_reg);

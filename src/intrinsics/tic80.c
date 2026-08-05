@@ -16,85 +16,102 @@
  * @param node The AST node representing the function call.
  * @return     true if successfully emitted, false on error.
  */
+// Stack position -> args[] index mapping:
+// Stack: h(9), rotate(8), flip(7), scale(6), colorkey(5), y(4), x(3), id(2)
+// Args:  [0]id, [1]x, [2]y, [3]colorkey, [4]scale, [5]flip, [6]rotate, [7]w, [8]h
+
 bool emit_tic80_spr_intrinsic(ASTNode *node)
 {
     emit_asm("    ;; --- TIC-80 spr() Intrinsic ---\n");
 
-    // --- Collect up to MAX_TIC80_SPR_ARGS arguments ---
     int arg_count = 0;
     ASTNode *curr = node->as.call.args_head;
-    ASTNode *args[MAX_TIC80_SPR_ARGS] = { NULL };
-    while (curr != NULL && arg_count < MAX_TIC80_SPR_ARGS) {
+    ASTNode *args[9] = { NULL };
+    while (curr != NULL && arg_count < 9) {
         args[arg_count++] = curr;
         curr = curr->next;
     }
 
-    // --- Push arguments right-to-left (standard ABI) ---
-    // Order: h (9), rotate (8), flip (7), scale (6), colorkey (5), y (4), x (3), id (2)
+    // Stack order: h, rotate, flip, scale, colorkey, y, x, id
+    // Args order:  id, x, y, colorkey, scale, flip, rotate, w, h
 
-    // Args 9-8: h, rotate (default = 1, 0)
-    for (int i = 9; i >= 8; i--) {
+    // Map: stack_pos = 9 -> args[8] (h)
+    //      stack_pos = 8 -> args[6] (rotate)
+    //      stack_pos = 7 -> args[5] (flip)
+    //      etc.
+
+    // Args 9-8: h (arg 8), rotate (arg 6)
+    for (int stack_pos = 9; stack_pos >= 8; stack_pos--) {
+        int arg_idx = (stack_pos == 9) ? 8 : 6;  // h is args[8], rotate is args[6]
         int reg = allocate_register();
         register_pinned[reg] = 1;
-        if (arg_count > i) {
-            generate_asm(args[i], reg);
-            emit_asm("PUSH R%d ; Arg %d: %s\n", reg, i - 1, i == 9 ? "h" : "rotate");
+        if (arg_count > arg_idx) {
+            generate_asm(args[arg_idx], reg);
         } else {
-            emit_asm("MOV R%d, %s ; Default %s\n", reg, i == 9 ? "1.000000" : "0.000000", i == 9 ? "h" : "rotate");
-            emit_asm("PUSH R%d\n", reg);
+            emit_asm("MOV R%d, %s ; Default %s\n", reg,
+                     stack_pos == 9 ? "1.000000" : "0.000000",
+                     stack_pos == 9 ? "h" : "rotate");
         }
+        emit_asm("PUSH R%d ; Arg %d: %s\n", reg, stack_pos-1,
+                 stack_pos == 9 ? "h" : "rotate");
         register_pinned[reg] = 0;
         unlock_register(reg);
     }
 
-    // Args 7-6: flip, scale (default = 0, 1)
-    for (int i = 7; i >= 6; i--) {
+    // Args 7-6: flip (arg 5), scale (arg 4)
+    for (int stack_pos = 7; stack_pos >= 6; stack_pos--) {
+        int arg_idx = (stack_pos == 7) ? 5 : 4;  // flip is args[5], scale is args[4]
         int reg = allocate_register();
         register_pinned[reg] = 1;
-        if (arg_count > i) {
-            generate_asm(args[i], reg);
-            emit_asm("PUSH R%d ; Arg %d: %s\n", reg, i - 1, i == 7 ? "flip" : "scale");
+        if (arg_count > arg_idx) {
+            generate_asm(args[arg_idx], reg);
         } else {
-            emit_asm("MOV R%d, %s ; Default %s\n", reg, i == 7 ? "0.000000" : "1.000000", i == 7 ? "flip" : "scale");
-            emit_asm("PUSH R%d\n", reg);
+            emit_asm("MOV R%d, %s ; Default %s\n", reg,
+                     stack_pos == 7 ? "0.000000" : "1.000000",
+                     stack_pos == 7 ? "flip" : "scale");
         }
+        emit_asm("PUSH R%d ; Arg %d: %s\n", reg, stack_pos-1,
+                 stack_pos == 7 ? "flip" : "scale");
         register_pinned[reg] = 0;
         unlock_register(reg);
     }
 
-    // Args 5-4: colorkey, y (default = -1, required)
-    for (int i = 5; i >= 4; i--) {
+    // Args 5-4: colorkey (arg 3), y (arg 2)
+    for (int stack_pos = 5; stack_pos >= 4; stack_pos--) {
+        int arg_idx = stack_pos - 2;  // colorkey=arg[3], y=arg[2]
         int reg = allocate_register();
         register_pinned[reg] = 1;
-        if (arg_count > i) {
-            generate_asm(args[i], reg);
-        } else if (i == 5) {
+        if (arg_count > arg_idx) {
+            generate_asm(args[arg_idx], reg);
+        } else if (stack_pos == 5) {
             emit_asm("MOV R%d, -1.000000 ; Default colorkey\n", reg);
         } else {
             emit_asm("MOV R%d, BOXED_NIL ; Missing required arg!\n", reg);
         }
-        emit_asm("PUSH R%d ; Arg %d: %s\n", reg, i - 1, i == 5 ? "colorkey" : "y");
+        emit_asm("PUSH R%d ; Arg %d: %s\n", reg, stack_pos-1,
+                 stack_pos == 5 ? "colorkey" : "y");
         register_pinned[reg] = 0;
         unlock_register(reg);
     }
 
-    // Args 3-2: x, id (required)
-    for (int i = 3; i >= 2; i--) {
+    // Args 3-2: x (arg 1), id (arg 0)
+    for (int stack_pos = 3; stack_pos >= 2; stack_pos--) {
+        int arg_idx = stack_pos - 2;  // x=arg[1], id=arg[0]
         int reg = allocate_register();
         register_pinned[reg] = 1;
-        if (arg_count > (i - 2)) {
-            generate_asm(args[i - 2], reg);
+        if (arg_count > arg_idx) {
+            generate_asm(args[arg_idx], reg);
         } else {
             emit_asm("MOV R%d, BOXED_NIL ; Missing required arg!\n", reg);
         }
-        emit_asm("PUSH R%d ; Arg %d: %s\n", reg, i - 1, i == 3 ? "x" : "id");
+        emit_asm("PUSH R%d ; Arg %d: %s\n", reg, stack_pos-1,
+                 stack_pos == 3 ? "x" : "id");
         register_pinned[reg] = 0;
         unlock_register(reg);
     }
 
-    // --- Call runtime subroutine and clean up stack ---
     emit_asm("CALL __builtin_tic80_spr\n");
-    emit_asm("IADD SP, %d ; Clean up spr() arguments\n", MAX_TIC80_SPR_ARGS);
+    emit_asm("IADD SP, 9 ; Clean up spr() arguments\n");
 
     return true;
 }
@@ -296,6 +313,94 @@ bool emit_tic80_add_intrinsic(ASTNode *node, int dest_reg)
     if (dest_reg != 0) {
         emit_asm("MOV R%d, R0 ; Transfer return value (the inserted value)\n", dest_reg);
     }
+
+    return true;
+}
+
+/**
+ * TIC-80 default 16-color palette (32-bit RGBA)
+ * Colors match the official TIC-80 palette
+ */
+static const unsigned int tic80_palette[16] = {
+    0xFF000000, // 0:  black
+    0xFF1D2B53, // 1:  dark blue
+    0xFF7E2553, // 2:  dark purple
+    0xFF008751, // 3:  dark green
+    0xFFAB5236, // 4:  brown
+    0xFF5F574F, // 5:  dark gray
+    0xFFC2C3C7, // 6:  light gray
+    0xFFFFF1E8, // 7:  white
+    0xFFFF004D, // 8:  red
+    0xFFA300FF, // 9:  orange
+    0xFFFFEC27, // 10: yellow
+    0xFF00E436, // 11: light green
+    0xFF29ADFF, // 12: blue
+    0xFF83769C, // 13: lavender
+    0xFFFF77A8, // 14: pink
+    0xFFFFCCAA  // 15: light peach
+};
+
+/**
+ * Emits assembly for TIC-80 cls(color) intrinsic
+ * color can be: palette index (0-15), hex string ("0xRRGGBB"), or hex number
+ */
+bool emit_tic80_cls_intrinsic(ASTNode *node)
+{
+    emit_asm("    ;; --- TIC-80 cls() Intrinsic ---\n");
+
+    ASTNode *arg = node->as.call.args_head;
+
+    if (arg == NULL) {
+        // Default: clear to black (palette index 0)
+        emit_asm("MOV R1, 0xFF000000 ; cls() with no args = black\n");
+    }
+    else if (arg->type == NODE_NUMBER) {
+        double val = arg->as.number.val;
+        int int_val = (int)val;
+
+        // Check if it's a palette index (0-15)
+        if (int_val >= 0 && int_val < 16) {
+            emit_asm("MOV R1, 0x%.8X ; Palette index %d\n",
+                     tic80_palette[int_val], int_val);
+        } else {
+            // Treat as direct 32-bit color value
+            emit_asm("MOV R1, ");
+            generate_asm(arg, 1);
+            emit_asm("\n");
+        }
+    }
+    else if (arg->type == NODE_STRING) {
+        // Parse hex string like "0xFFFFCCCC" or "#RRGGBB"
+        const char *color_str = arg->as.string_val.value;
+        unsigned int color = 0xFF000000; // Default black if parse fails
+
+        if (color_str[0] == '0' && (color_str[1] == 'x' || color_str[1] == 'X')) {
+            if (sscanf(color_str + 2, "%x", &color) == 1) {
+                // Ensure alpha channel is set for 6-digit hex (0xRRGGBB)
+                if (strlen(color_str) == 8) { // "0xRRGGBB" is 8 chars
+                    color |= 0xFF; // Make opaque
+                }
+            }
+        }
+        // Handle CSS-style hex (#RRGGBB)
+        else if (color_str[0] == '#' && strlen(color_str) == 7) {
+            if (sscanf(color_str + 1, "%x", &color) == 1) {
+                color |= 0xFF; // Make opaque
+            }
+        }
+
+        emit_asm("MOV R1, 0x%.8X ; Hex color from string\n", color);
+    }
+    else {
+        // Dynamic expression - evaluate at runtime
+        int reg = allocate_register();
+        generate_asm(arg, reg);
+        emit_asm("MOV R1, R%d ; Color from expression\n", reg);
+        unlock_register(reg);
+    }
+
+    emit_asm("OUT GPU_ClearColor, R1\n");
+    emit_asm("OUT GPU_Command, GPUCommand_ClearScreen\n");
 
     return true;
 }
