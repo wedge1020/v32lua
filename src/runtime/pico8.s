@@ -33,7 +33,7 @@
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-__builtin_spr:
+__builtin_pico8_spr:
     PUSH  BP
     MOV   BP, SP
 
@@ -41,18 +41,18 @@ __builtin_spr:
     MOV   R1, 3.0
     MOV   R2, [BP+7]        ; flip_x
     INE   R2, BOXED_TRUE
-    JT    R2, _set_scale_x
+    JT    R2, _pico8_spr_set_scale_x
     MOV   R1, -3.0
-_set_scale_x:
+_pico8_spr_set_scale_x:
     OUT   GPU_DrawingScaleX, R1
 
     MOV   R1, 3.0
     MOV   R2, [BP+8]        ; flip_y
     INE   R2, BOXED_TRUE
-    JT    R2, _set_scale_y
+    JT    R2, _pico8_spr_set_scale_y
     MOV   R1, -3.0
 
-_set_scale_y:
+_pico8_spr_set_scale_y:
     OUT   GPU_DrawingScaleY, R1
 
     ;; --- 2. Prepare Loop Limits & Convert ALL Floats to Integers ---
@@ -73,18 +73,18 @@ _set_scale_y:
     ;; Initialize Row Counter
     MOV   R4, 0             ; R4 = row
 
-_row_loop_start:
+_pico8_spr_row_loop_start:
     MOV   R1, R4            ; preserve R4 from destructive comparison
     IGE   R1, R6
-    JT    R1, _end_spr      ; If row >= h, we are done
+    JT    R1, _pico8_spr_end_spr      ; If row >= h, we are done
 
     ;; Initialize Col Counter
     MOV   R3, 0             ; R3 = col
 
-_col_loop_start:
+_pico8_spr_col_loop_start:
     MOV   R1, R3            ; preserve R3 from destructive comparison
     IGE   R1, R5            ; (If col >= w, move to next row)
-    JT    R1, _row_loop_end
+    JT    R1, _pico8_spr_row_loop_end
 
     ;; --- 3. Calculate Target Region ID ---
     ;; region = n + col + (row * 16)
@@ -97,15 +97,15 @@ _col_loop_start:
     ;; --- 4. Calculate X Coordinate ---
     MOV   R1, [BP+7]        ; check flip_x
     IEQ   R1, BOXED_TRUE
-    JT    R1, _calc_flip_x
+    JT    R1, _pico8_spr_calc_flip_x
 
     ;; Normal X = base_x + (col * 8)
     MOV   R1, R3
     IMUL  R1, 8
     IADD  R1, R8
-    JMP   _set_x
+    JMP   _pico8_spr_set_x
 
-_calc_flip_x:
+_pico8_spr_calc_flip_x:
     ;; [FIX 3] Flipped X = base_x + (w - 1 - col) * 8
     MOV   R1, R5
     ISUB  R1, 1             ; Subtract 1 for zero-indexed grid mirroring
@@ -113,21 +113,21 @@ _calc_flip_x:
     IMUL  R1, 8
     IADD  R1, R8
 
-_set_x:
+_pico8_spr_set_x:
     OUT   GPU_DrawingPointX, R1
 
     ;; --- 5. Calculate Y Coordinate ---
     MOV   R1, [BP+8]        ; check flip_y
     IEQ   R1, BOXED_TRUE
-    JT    R1, _calc_flip_y
+    JT    R1, _pico8_spr_calc_flip_y
 
     ;; Normal Y = base_y + (row * 8)
     MOV   R1, R4
     IMUL  R1, 8
     IADD  R1, R9
-    JMP   _set_y
+    JMP   _pico8_spr_set_y
 
-_calc_flip_y:
+_pico8_spr_calc_flip_y:
     ;; [FIX 3] Flipped Y = base_y + (h - 1 - row) * 8
     MOV   R1, R6
     ISUB  R1, 1             ; Subtract 1 for zero-indexed grid mirroring
@@ -135,7 +135,7 @@ _calc_flip_y:
     IMUL  R1, 8
     IADD  R1, R9
 
-_set_y:
+_pico8_spr_set_y:
     OUT   GPU_DrawingPointY, R1
 
     ;; --- 6. Issue Draw Command ---
@@ -143,14 +143,14 @@ _set_y:
 
     ;; --- 7. Inner Loop Iteration ---
     IADD  R3, 1             ; col++
-    JMP   _col_loop_start
+    JMP   _pico8_spr_col_loop_start
 
-_row_loop_end:
+_pico8_spr_row_loop_end:
     ;; --- 8. Outer Loop Iteration ---
     IADD  R4, 1             ; row++
-    JMP   _row_loop_start
+    JMP   _pico8_spr_row_loop_start
 
-_end_spr:
+_pico8_spr_end_spr:
     ;; --- 9. Cleanup ---
     MOV   SP, BP
     POP   BP
@@ -168,7 +168,7 @@ _end_spr:
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-__builtin_btn:
+__builtin_pico8_btn:
     PUSH  BP
     MOV   BP, SP
 
@@ -185,57 +185,57 @@ __builtin_btn:
     ;; Compare and jump to specific hardware port read
     MOV   R1, R2
     IEQ   R1, 0
-    JT    R1, _btn_up
+    JT    R1, _pico8_btn_up
     MOV   R1, R2
     IEQ   R1, 1
-    JT    R1, _btn_down
+    JT    R1, _pico8_btn_down
     MOV   R1, R2
     IEQ   R1, 2
-    JT    R1, _btn_left
+    JT    R1, _pico8_btn_left
     MOV   R1, R2
     IEQ   R1, 3
-    JT    R1, _btn_right
+    JT    R1, _pico8_btn_right
     MOV   R1, R2
     IEQ   R1, 4
-    JT    R1, _btn_a
+    JT    R1, _pico8_btn_a
     MOV   R1, R2
     IEQ   R1, 5
-    JT    R1, _btn_b
+    JT    R1, _pico8_btn_b
 
     ;; If invalid button ID, return false
-    JMP   _btn_false
+    JMP   _pico8_btn_false
 
-_btn_left:
+_pico8_btn_left:
     IN    R2, INP_GamepadLeft
-    JMP   _btn_eval
-_btn_right:
+    JMP   _pico8_btn_eval
+_pico8_btn_right:
     IN    R2, INP_GamepadRight
-    JMP   _btn_eval
-_btn_up:
+    JMP   _pico8_btn_eval
+_pico8_btn_up:
     IN    R2, INP_GamepadUp
-    JMP   _btn_eval
-_btn_down:
+    JMP   _pico8_btn_eval
+_pico8_btn_down:
     IN    R2, INP_GamepadDown
-    JMP   _btn_eval
-_btn_a:
+    JMP   _pico8_btn_eval
+_pico8_btn_a:
     IN    R2, INP_GamepadButtonA
-    JMP   _btn_eval
-_btn_b:
+    JMP   _pico8_btn_eval
+_pico8_btn_b:
     IN    R2, INP_GamepadButtonB
 
-_btn_eval:
+_pico8_btn_eval:
     ;; Vircon32 returns 1 for pressed, 0 for not pressed
     IGE   R2, 1
-    JT    R2, _btn_true
+    JT    R2, _pico8_btn_true
 
-_btn_false:
+_pico8_btn_false:
     MOV   R0, BOXED_FALSE
-    JMP   _btn_end
+    JMP   _pico8_btn_end
 
-_btn_true:
+_pico8_btn_true:
     MOV   R0, BOXED_TRUE
 
-_btn_end:
+_pico8_btn_end:
     MOV   SP, BP
     POP   BP
     RET
@@ -252,7 +252,7 @@ _btn_end:
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-__builtin_btnp:
+__builtin_pico8_btnp:
     PUSH  BP
     MOV   BP, SP
 
@@ -266,60 +266,60 @@ __builtin_btnp:
     ;; Compare and jump to specific hardware port read
     MOV   R1, R2
     IEQ   R1, 0
-    JT    R1, _btnp_left
+    JT    R1, _pico8_btnp_left
     MOV   R1, R2
     IEQ   R1, 1
-    JT    R1, _btnp_right
+    JT    R1, _pico8_btnp_right
     MOV   R1, R2
     IEQ   R1, 2
-    JT    R1, _btnp_up
+    JT    R1, _pico8_btnp_up
     MOV   R1, R2
     IEQ   R1, 3
-    JT    R1, _btnp_down
+    JT    R1, _pico8_btnp_down
     MOV   R1, R2
     IEQ   R1, 4
-    JT    R1, _btnp_a
+    JT    R1, _pico8_btnp_a
     MOV   R1, R2
     IEQ   R1, 5
-    JT    R1, _btnp_b
+    JT    R1, _pico8_btnp_b
 
-    JMP   _btnp_false
+    JMP   _pico8_btnp_false
 
-_btnp_left:
+_pico8_btnp_left:
     IN    R2, INP_GamepadLeft
-    JMP   _btnp_eval
-_btnp_right:
+    JMP   _pico8_btnp_eval
+_pico8_btnp_right:
     IN    R2, INP_GamepadRight
-    JMP   _btnp_eval
-_btnp_up:
+    JMP   _pico8_btnp_eval
+_pico8_btnp_up:
     IN    R2, INP_GamepadUp
-    JMP   _btnp_eval
-_btnp_down:
+    JMP   _pico8_btnp_eval
+_pico8_btnp_down:
     IN    R2, INP_GamepadDown
-    JMP   _btnp_eval
-_btnp_a:
+    JMP   _pico8_btnp_eval
+_pico8_btnp_a:
     IN    R2, INP_GamepadButtonA
-    JMP   _btnp_eval
-_btnp_b:
+    JMP   _pico8_btnp_eval
+_pico8_btnp_b:
     IN    R2, INP_GamepadButtonB
 
-_btnp_eval:
+_pico8_btnp_eval:
     ;; R2 now contains Frames Held (>0) or Frames Released (<=0)
 
     ;; Condition A: Is button not pressed?
     MOV   R1, R2
     ILT   R1, 1
-    JT    R1, _btnp_false   ; If < 1, return false
+    JT    R1, _pico8_btnp_false   ; If < 1, return false
 
     ;; Condition B: Initial Press (Frame 1)
     MOV   R1, R2
     IEQ   R1, 1
-    JT    R1, _btnp_true    ; If exactly 1, return true
+    JT    R1, _pico8_btnp_true    ; If exactly 1, return true
 
     ;; Condition C: Delay Phase (Frames 2-14)
     MOV   R1, R2
     ILT   R1, 15
-    JT    R1, _btnp_false   ; If < 15 (and > 1), return false
+    JT    R1, _pico8_btnp_false   ; If < 15 (and > 1), return false
 
     ;; Condition D: Autorepeat Phase (Frames 15+)
     ;; Logic: (FramesHeld - 15) % 4 == 0
@@ -327,16 +327,16 @@ _btnp_eval:
     ISUB  R1, 15            ; Shift down by 15 frames
     IMOD  R1, 4             ; Modulo 4
     IEQ   R1, 0             ; Is remainder 0?
-    JT    R1, _btnp_true    ; If yes, return true
+    JT    R1, _pico8_btnp_true    ; If yes, return true
 
-_btnp_false:
+_pico8_btnp_false:
     MOV   R0, BOXED_FALSE
-    JMP   _btnp_end
+    JMP   _pico8_btnp_end
 
-_btnp_true:
+_pico8_btnp_true:
     MOV   R0, BOXED_TRUE
 
-_btnp_end:
+_pico8_btnp_end:
     MOV   SP, BP
     POP   BP
     RET
@@ -348,7 +348,7 @@ _btnp_end:
 ;; Returns: R0 = inserted value
 ;; Register Usage: R7-R9 for arguments, R1-R6 callee-saved
 ;; ---------------------------------------------------------------------------
-__builtin_add:
+__builtin_pico8_add:
     PUSH BP
     MOV  BP, SP
 
@@ -376,16 +376,16 @@ __builtin_add:
     ;; --- Handle default index (NIL = length + 1) ---
     MOV  R4, R6              ; Check original index
     IEQ  R4, BOXED_NIL
-    JT   R4, __add_use_length_plus_1
+    JT   R4, _pico8_add_use_length_plus_1
     MOV  R7, R6              ; Use provided index (already float via compiler)
-    JMP  __add_prepare_call
+    JMP  _pico8_add_prepare_call
 
-__add_use_length_plus_1:
+_pico8_add_use_length_plus_1:
     MOV  R7, R5
     IADD R7, 1              ; R7 = length + 1 (as integer)
     CIF  R7                  ; Convert integer to float representation
 
-__add_prepare_call:
+_pico8_add_prepare_call:
     ;; --- Call __builtin_table_set(table, index, value) ---
     PUSH R9                  ; table
     PUSH R7                  ; index (float)
@@ -396,7 +396,7 @@ __add_prepare_call:
     ;; --- Update length ONLY if original index was NIL (append case) ---
     MOV  R4, R6
     IEQ  R4, BOXED_NIL
-    JF   R4, __add_return
+    JF   R4, _pico8_add_return
 
     ;; --- Update table length in header (stored as integer) ---
     MOV  R4, R9              ; R9 has the tagged header address
@@ -405,7 +405,7 @@ __add_prepare_call:
     IADD R5, 1
     MOV  [R4+1], R5
 
-__add_return:
+_pico8_add_return:
     ;; --- Return the inserted value ---
     MOV  R0, R8
 

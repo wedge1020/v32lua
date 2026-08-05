@@ -74,7 +74,7 @@ bool emit_spr_intrinsic(ASTNode *node)
     }
 
     // --- Call runtime subroutine and clean up stack ---
-    emit_asm("CALL __builtin_spr\n");
+    emit_asm("CALL __builtin_pico8_spr\n");
     emit_asm("IADD SP, %d ; Clean up spr() arguments\n", MAX_SPR_ARGS);
 
     return true;
@@ -134,7 +134,7 @@ bool emit_btn_intrinsic(ASTNode *node, int dest_reg)
     unlock_register(reg);
 
     // --- Call runtime subroutine and clean up stack ---
-    emit_asm("CALL __builtin_btn\n");
+    emit_asm("CALL __builtin_pico8_btn\n");
     emit_asm("IADD SP, 2 ; Clean up btn() arguments\n");
 
     // Transfer result from R0 to dest_reg if needed
@@ -213,7 +213,7 @@ bool emit_add_intrinsic(ASTNode *node, int dest_reg)
     unlock_register(tab_reg);
 
     // --- Call runtime subroutine ---
-    emit_asm("CALL __builtin_add\n");
+    emit_asm("CALL __builtin_pico8_add\n");
 
     // --- Clean up stack (3 arguments) ---
     emit_asm("IADD SP, 3 ; Clean up add() arguments\n");
