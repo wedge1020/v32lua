@@ -195,7 +195,7 @@ void  emit_interpolated_asm (const char *raw_code)
             if (*p == '}') p++; 
             
             // Format the variable and append it to our buffer
-            char formatted_var[EMIT_BUFFER_SIZE];
+            char formatted_var[EMIT_BUFFER_SIZE+8];
             sprintf(formatted_var, "[var_%s]", var_name);
             for (int j = 0; formatted_var[j] != '\0' && buf_idx < 2047; j++) {
                 buffer[buf_idx++] = formatted_var[j];
