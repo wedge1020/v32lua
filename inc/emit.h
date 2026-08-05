@@ -1,8 +1,15 @@
 #ifndef __EMIT_H
 #define __EMIT_H
 
-// Declare the external symbol created by runtime_embed.S
-extern const char runtime_asm_start[];
+// Declare all embedded symbols
+extern const char runtime_memory_start[];
+extern const char runtime_exec_start[];
+extern const char runtime_table_start[];
+extern const char runtime_string_start[];
+extern const char runtime_print_start[];
+extern const char runtime_pico8_start[];
+extern const char runtime_tic80_start[];
+extern const char runtime_constant_start[];
 
 void  emit_cart_xml (const char *, int);
 void  emit_interpolated_asm (const char *);

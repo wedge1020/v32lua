@@ -1,0 +1,73 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; Vircon32 NaN-Boxed Routines for Lua Runtime Environment (runtime.s)
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; ===========================================================================
+;; SECTION: DEFINES
+;; ===========================================================================
+;;  V32_CART_PAGE   0x20000000
+;;  NAN_VALUE       0x7F800000
+;;  BOXED_CATEGORY  0x80000000 // sign bit used for RAM (1) vs ROM (0)
+;;  BOXED_TYPE      0x00400000 // TABLE/FUNCTION (0) vs STRING (1)
+;;  BOXED_DATA      0xFFC00000 // common bitmask to indicate boxed data
+;;  BOXED_FUNCTION  0x7F800000 // bitmask for boxed lua function (ROM)
+;;  BOXED_ROMSTRING 0x7FC00000 // bitmank for boxed lua string literal (ROM)
+;;  BOXED_TABLE     0xFF800000 // bitmask for boxed lua table (RAM)
+;;  BOXED_RAMSTRING 0xFFC00000 // starts at offset 4 (includes nil/false/true)
+;;  BOXED_NIL       0xFFC00000
+;;  BOXED_FALSE     0xFFC00001
+;;  BOXED_BOOLEAN   0xFFC00001 // mathing our way to true/false
+;;  BOXED_TRUE      0xFFC00002
+;;  BOXED_TOMBSTONE 0xFFC00003 // future feature
+;;  BOXED_PAYLOAD   0x003FFFFF
+;;  TABLE_ARRAYSIZE 0x0000FFFF
+
+;; ===========================================================================
+;; SECTION: MEMORY MANAGEMENT & ERROR HANDLING
+;; ===========================================================================
+
+;; ---------------------------------------------------------------------------
+;; Memory Allocator: Carves out raw word blocks from HEAP_POINTER
+;; Incoming Stack: [BP+2] = Number of words requested
+;; Returns: R0 = Raw pointer to allocated memory (or 0 if Out-Of-Memory)
+;; ---------------------------------------------------------------------------
+__malloc:
+    PUSH BP
+    MOV  BP, SP
+    
+    MOV  R1, [BP+2]          ; R1 = Requested size in words
+    MOV  R0, [HEAP_POINTER]  ; R0 = Address of new allocation block
+    
+    ;; Calculate potential new heap top
+    MOV  R2, R0
+    IADD R2, R1              ; R2 = Potential new HEAP_POINTER
+    
+    ;; Stack Collision Check: SP grows down, Heap grows up!
+    ;; We maintain a 1024-word safety buffer between Heap and Stack.
+    MOV  R3, SP
+    ISUB R3, 1024            ; R3 = Lowest safe memory address for stack
+    MOV  R6, R2
+    IGE  R6, R3              ; Will the new heap top collide with the stack?
+    JT   R6, __malloc_oom    ; If Heap >= SafeBoundary, allocation fails!
+    
+    ;; Success: Commit new heap top and return base address in R0
+    MOV  [HEAP_POINTER], R2
+    JMP  __malloc_done
+    
+__malloc_oom:
+    MOV  R0, 0               ; Return 0 to signal Out-Of-Memory to caller
+    
+__malloc_done:
+    MOV  SP, BP
+    POP  BP
+    RET
+
+;; ---------------------------------------------------------------------------
+;; Out-Of-Memory Handler: Safely halts execution when memory is exhausted
+;; ---------------------------------------------------------------------------
+__oom_handler:
+    ;; Note: If you implement an error print routine later, call it here!
+    HLT                      ; Halt Vircon32 CPU instantly to prevent data corruption
+    JMP  __oom_handler       ; Infinite loop safeguard in case CPU resumes

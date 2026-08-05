@@ -12,8 +12,8 @@ typedef struct SymbolNode {
     SymbolType type;
     int location;             // RAM address for globals, BP offset for locals
     int is_function;
-	int arity;
-	int is_c_native;
+    int arity;
+    int is_c_native;
     struct SymbolNode* next;
 } SymbolNode;
 
@@ -32,6 +32,25 @@ typedef struct FunctionContextNode {
     int label_counter;
     struct FunctionContextNode* next;
 } FunctionContextNode;
+
+// ============================================================================
+// --- Runtime Module Configuration ---
+// ============================================================================
+typedef struct {
+    // Core features
+    bool needs_tables;
+    bool needs_strings;
+    bool needs_exec;
+    bool needs_memory_alloc;  // Always true for heap
+	bool needs_print;
+
+    // API modes (mutually exclusive)
+    bool needs_pico8;
+    bool needs_tic80;
+
+} RuntimeRequirements;
+
+extern RuntimeRequirements runtime_req;
 
 // ============================================================================
 // --- String Literal Tracking ---

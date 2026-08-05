@@ -28,6 +28,8 @@ extern ASTNode *root_node; // Ensure your bison grammar exports the root AST nod
 extern FILE *yyin;
 extern int yydebug;
 
+RuntimeRequirements runtime_req;
+
 static void  print_version (const char *prog_name)
 {
     fprintf (stdout, "%s %s\n", prog_name, VERSION);
@@ -118,8 +120,10 @@ int  main (int  argc, char** argv)
         }
     }
 
-    g_lua_filename = input_filename;
-    g_asm_filename = output_filename;
+	runtime_req.needs_memory_alloc  = true;  // Heap always needed
+
+    g_lua_filename                  = input_filename;
+    g_asm_filename                  = output_filename;
 
     // --- Stage 1: Lexer Setup ---
     log_stage(1, "lexer", verbose);

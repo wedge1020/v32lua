@@ -494,47 +494,68 @@ void  emit_string_data_section (void)
     }
 }
 
-void  emit_runtime_library (void)
+////////////////////////////////////////////////////////////////////////////////////////
+//
+// Helper: emit contents of a binary blob through emit_asm() for consistent formatting
+//
+static void emit_embedded_asm (const char *start)
 {
-    emit_asm("\n;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\n");
-    emit_asm(";;\n");
-    emit_asm(";; Lua assembly support Runtime Library Subroutines\n");
-    emit_asm(";;\n");
-    emit_asm(";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\n");
-    emit_asm("\n");
-
-    // Point our cursor to the start of the embedded Vircon32 assembly
-    const char* cursor = runtime_asm_start;
+    const char *cursor = start;
     char line[1024];
 
-    // Read until we hit the null terminator we appended in .S
-    while (*cursor != '\0')
-    {
+    while (*cursor != '\0') {
         int i = 0;
-        
-        // Extract a single line up to the newline character or buffer capacity
-        while (*cursor != '\0' && *cursor != '\n' && i < (int)sizeof(line) - 2)
-        {
+        while (*cursor != '\0' && *cursor != '\n' && i < (int)sizeof(line) - 2) {
             line[i++] = *cursor++;
         }
-        
-        // Preserve the newline character if present
-        if (*cursor == '\n')
-        {
+        if (*cursor == '\n') {
             line[i++] = *cursor++;
         }
-        
         line[i] = '\0';
-        
-        // Pass the line through your special formatting function
-        emit_asm("%s", line);
+        emit_asm ("%s", line);  // Preserves formatting, comments
     }
+}
 
-    emit_asm("\n;;\n");
-    emit_asm(";; End of Runtime Library\n");
-    emit_asm(";;\n");
-    emit_asm(";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;");
-    emit_asm(";;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;\n");
+void  emit_runtime_library (void)
+{
+    emit_asm ("\n;; ===========================================================================");
+    emit_asm (";; v32lua Runtime Library Routines\n");
+    emit_asm (";; ===========================================================================\n");
+
+	////////////////////////////////////////////////////////////////////////////////////
+	//
+    // Always needed - core routines
+	//
+	emit_embedded_asm (runtime_memory_start);
+
+	////////////////////////////////////////////////////////////////////////////////////
+	//
+    // Conditional modules
+	//
+    if (runtime_req.needs_exec)
+		emit_embedded_asm (runtime_exec_start);
+    if (runtime_req.needs_tables)
+		emit_embedded_asm (runtime_table_start);
+    if (runtime_req.needs_strings)
+		emit_embedded_asm (runtime_string_start);
+    if (runtime_req.needs_print)
+		emit_embedded_asm (runtime_print_start);
+
+	////////////////////////////////////////////////////////////////////////////////////
+	//
+    // API bundles (all-or-nothing)
+	//
+    if (runtime_req.needs_pico8)
+		emit_embedded_asm (runtime_pico8_start);
+    if (runtime_req.needs_tic80)
+		emit_embedded_asm (runtime_tic80_start);
+
+	////////////////////////////////////////////////////////////////////////////////////
+	//
+    // Always needed - epilogue
+	//
+	emit_embedded_asm (runtime_constant_start);
+    emit_asm (";; ===========================================================================\n");
 }
 
 void emit_table_set_literal(int table_reg, const char *property_name, int value_reg)

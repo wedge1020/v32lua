@@ -1,25 +1,74 @@
-/* runtime_embed.S */
+/* =============================================================
+   Modular Runtime Embedding
+   Each section is null-terminated and independently addressable
+   ============================================================= */
+
 #ifdef __APPLE__
-.const
+    .const
 #else
-.section .rodata
+    .section .rodata
 #endif
 
-/* Handle Apple/macOS symbol naming conventions automatically */
-#ifdef __APPLE__
-    .global _runtime_asm_start
-    _runtime_asm_start:
-        .incbin "runtime.s"
-        .byte 0    /* Null terminator so C treats it as a valid string */
+/* --- Memory (always included) --- */
+.global runtime_memory_start
+runtime_memory_start:
+    .incbin "runtime/memory.s"
+    .byte 0
+.global runtime_memory_end
+runtime_memory_end:
 
-    .global _runtime_asm_end
-    _runtime_asm_end:
-#else
-    .global runtime_asm_start
-    runtime_asm_start:
-        .incbin "runtime.s"
-        .byte 0    /* Null terminator so C treats it as a valid string */
+/* --- Exec --- */
+.global runtime_exec_start
+runtime_exec_start:
+    .incbin "runtime/exec.s"
+    .byte 0
+.global runtime_exec_end
+runtime_exec_end:
 
-    .global runtime_asm_end
-    runtime_asm_end:
-#endif
+/* --- Tables --- */
+.global runtime_table_start
+runtime_table_start:
+    .incbin "runtime/table.s"
+    .byte 0
+.global runtime_table_end
+runtime_table_end:
+
+/* --- Strings --- */
+.global runtime_string_start
+runtime_string_start:
+    .incbin "runtime/string.s"
+    .byte 0
+.global runtime_string_end
+runtime_string_end:
+
+/* --- Printing --- */
+.global runtime_print_start
+runtime_print_start:
+    .incbin "runtime/print.s"
+    .byte 0
+.global runtime_print_end
+runtime_print_end:
+
+/* --- PICO-8 API (all-or-nothing) --- */
+.global runtime_pico8_start
+runtime_pico8_start:
+    .incbin "runtime/pico8.s"
+    .byte 0
+.global runtime_pico8_end
+runtime_pico8_end:
+
+/* --- TIC-80 API (all-or-nothing) --- */
+.global runtime_tic80_start
+runtime_tic80_start:
+    .incbin "runtime/tic80.s"
+    .byte 0
+.global runtime_tic80_end
+runtime_tic80_end:
+
+/* --- constants (footer) --- */
+.global runtime_constant_start
+runtime_constant_start:
+    .incbin "runtime/constant.s"
+    .byte 0
+.global runtime_constant_end
+runtime_constant_end:
