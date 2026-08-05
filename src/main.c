@@ -48,8 +48,6 @@ static void  print_usage (const char *prog_name)
     fprintf (stdout, "  -o <file>    Output file, default name is the same as input\n");
     //fprintf (stdout, "  -b           Compiles the program as a BIOS\n");
     fprintf (stdout, "  -v           Displays additional information (verbose)\n");
-    fprintf (stdout, "  -O0          Disable compiler optimizations (default)\n");
-    fprintf (stdout, "  -O1          Enable compiler optimizations\n");
     fprintf (stdout, "  -g           Outputs an additional file with debug info\n");
     fprintf (stdout, "  -w           Inhibit all warnings\n");
     //fprintf (stdout, "  -Wall        Enable all warnings\n");
@@ -86,10 +84,6 @@ int  main (int  argc, char** argv)
             o_dowarnings = 0; // disable display of compiler warnings
         } else if (strcmp(argv[i], "--verbose") == 0 || strcmp(argv[i], "-v") == 0) {
             verbose = 1;
-        } else if (strcmp(argv[i], "-O0") == 0) {
-            o_optflag                      = 0;
-        } else if (strcmp(argv[i], "-O1") == 0) {
-            o_optflag                      = 1;
         } else if (strcmp(argv[i], "--version") == 0) {
             print_version(argv[0]);
             return 0;

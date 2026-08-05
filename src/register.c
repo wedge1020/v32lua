@@ -35,9 +35,9 @@ void  reset_spill_slots (int  start_slot)
 {
     base_spill_frame_offset           = start_slot;
     for (int index                    = 0;
-		 index                       <  NUM_GPRS;
-		 index                        = index + 1)
-	{
+         index                       <  NUM_GPRS;
+         index                        = index + 1)
+    {
         spill_slot_for_reg[index]     = 0;
         register_use_distance[index]  = 0;
     }
@@ -61,7 +61,11 @@ void spill_register(int reg) {
 int ensure_in_register(int reg) {
     if (reg < 0 || reg >= NUM_GPRS) return -1;
 
-    if (spill_slot_for_reg[reg] != 0) {
+    // Only reload if register is FREE but has a spilled value.
+    // If register is ALLOCATED (inventory=1), it already holds the current value.
+    // spill_slot_for_reg != 0 with inventory=1 means:
+    //   "old value is spilled, but register now holds a new value"
+    if (register_inventory[reg] == 0 && spill_slot_for_reg[reg] != 0) {
         emit_load_from_spill(reg, spill_slot_for_reg[reg]);
         spill_slot_for_reg[reg] = 0;
         register_inventory[reg] = 1;
@@ -154,12 +158,10 @@ int allocate_register(void) {
 
     spill_register(best_candidate);
     register_inventory[best_candidate] = 1;
-    spill_slot_for_reg[best_candidate] = 0;
-	// ✅ FIX: Set to large value instead of 0 to prevent immediate reuse
-	register_use_distance[best_candidate] = 10000;  // Or any value > existing distances
-    //register_use_distance[best_candidate] = 0; // bug
+    // ✅ FIX: Set to large value instead of 0 to prevent immediate reuse
+    register_use_distance[best_candidate] = 10000;  // Or any value > existing distances
 
-    return best_candidate;
+    return (best_candidate);
 }
 
 int   allocate_pinned_register (void)
