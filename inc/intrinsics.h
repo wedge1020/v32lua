@@ -42,9 +42,17 @@ void  emit_get_gamepad_inputs_intrinsic(int dest_reg);
 //
 // pico-8 api intrinsics
 //
-bool  emit_spr_intrinsic (ASTNode *);
-bool  emit_btn_intrinsic (ASTNode *, int);
-bool  emit_add_intrinsic (ASTNode *, int);
+bool  emit_pico8_spr_intrinsic (ASTNode *);
+bool  emit_pico8_btn_intrinsic (ASTNode *, int);
+bool  emit_pico8_add_intrinsic (ASTNode *, int);
+
+//////////////////////////////////////////////////////////////////////////////
+//
+// tic80 api intrinsics
+//
+bool  emit_tic80_spr_intrinsic (ASTNode *);
+bool  emit_tic80_btn_intrinsic (ASTNode *, int);
+bool  emit_tic80_add_intrinsic (ASTNode *, int);
 
 void  emit_print_intrinsic (ASTNode *node);
 bool  emit_printf_intrinsic(ASTNode *node, int dest_reg);

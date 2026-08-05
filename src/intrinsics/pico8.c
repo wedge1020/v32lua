@@ -13,7 +13,7 @@
  * @param node The AST node representing the function call.
  * @return     true if successfully emitted, false on error.
  */
-bool emit_spr_intrinsic(ASTNode *node)
+bool emit_pico8_spr_intrinsic(ASTNode *node)
 {
     emit_asm("    ;; --- PICO-8 spr() Intrinsic ---\n");
 
@@ -92,7 +92,7 @@ bool emit_spr_intrinsic(ASTNode *node)
  * @param dest_reg The destination register for the result (0 = discard).
  * @return          true if successfully emitted, false on error.
  */
-bool emit_btn_intrinsic(ASTNode *node, int dest_reg)
+bool emit_pico8_btn_intrinsic(ASTNode *node, int dest_reg)
 {
     emit_asm("    ;; --- PICO-8 btn() Intrinsic ---\n");
 
@@ -159,7 +159,7 @@ bool emit_btn_intrinsic(ASTNode *node, int dest_reg)
  * @param dest_reg The destination register for the result (0 = discard).
  * @return          true if successfully emitted, false on error.
  */
-bool emit_add_intrinsic(ASTNode *node, int dest_reg)
+bool emit_pico8_add_intrinsic(ASTNode *node, int dest_reg)
 {
     emit_asm("    ;; --- PICO-8 add() Intrinsic ---\n");
 

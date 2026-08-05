@@ -65,19 +65,33 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
     node->as.cart_hint.resource_id = -1;
 
     // Handle API selection hint
-    if (strcmp(action, "api") == 0 && tokens >= 2) {
-        if (strcmp(param1, "pico8") == 0) {
-            runtime_req.needs_pico8 = true;
-            runtime_req.needs_tic80 = false; // Ensure mutual exclusivity
-        } else if (strcmp(param1, "tic80") == 0) {
-            runtime_req.needs_tic80 = true;
-            runtime_req.needs_pico8 = false; // Ensure mutual exclusivity
-			fprintf (stdout, "[HINT] TIC80 enabled\n");
-        }
-		runtime_req.needs_tables    = true;
-        // Store the API type for reference
-        node->as.cart_hint.value = strdup(param1);
-    }
+	if (strcmp(action, "api") == 0 && tokens >= 2) {
+		// Strip surrounding quotes from param1 if present
+		char api_name[128];
+		size_t param1_len = strlen(param1);
+
+		if (param1_len >= 2 && param1[0] == '"' && param1[param1_len-1] == '"') {
+			// Copy without quotes
+			strncpy(api_name, param1 + 1, param1_len - 2);
+			api_name[param1_len - 2] = '\0';
+		} else {
+			strncpy(api_name, param1, sizeof(api_name) - 1);
+			api_name[sizeof(api_name) - 1] = '\0';
+		}
+
+		if (strcmp(api_name, "pico8") == 0) {
+			runtime_req.needs_pico8 = true;
+			runtime_req.needs_tic80 = false;
+			runtime_req.needs_tables = true;
+		} else if (strcmp(api_name, "tic80") == 0) {
+			runtime_req.needs_tic80 = true;
+			runtime_req.needs_pico8 = false;
+			runtime_req.needs_tables = true;
+		} else {
+			compiler_error(ERR_SEMANTIC, -1, "Unknown API: %s. Use 'pico8' or 'tic80'", api_name);
+		}
+		node->as.cart_hint.value = strdup(api_name);
+	}
     else if (strcmp(action, "version") == 0 && tokens >= 2) {
         // e.g., --#version 1.1
         strncpy(cart_version, param1, sizeof(cart_version) - 1);

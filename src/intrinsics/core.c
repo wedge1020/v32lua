@@ -280,23 +280,51 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
 
     // spr()
 	if (strcmp(func_name, "spr") == 0) {
-		// Only enable PICO-8 if TIC-80 isn't already selected
-		if (!runtime_req.needs_tic80) {
-			runtime_req.needs_pico8 = true;
+		if (runtime_req.needs_pico8 == true)
+		{
+			return (emit_pico8_spr_intrinsic (node));
 		}
-		return emit_spr_intrinsic(node);
+		else if (runtime_req.needs_tic80 == true)
+		{
+			return (emit_tic80_spr_intrinsic (node));
+		}
 	}
 
     // btn()
     if (strcmp (func_name, "btn") == 0) {
-		runtime_req.needs_pico8    = true;
-        return emit_btn_intrinsic (node, dest_reg);
+		if (runtime_req.needs_pico8 == true)
+		{
+			return (emit_pico8_btn_intrinsic (node, dest_reg));
+		}
+		else if (runtime_req.needs_tic80 == true)
+		{
+			return (emit_tic80_btn_intrinsic (node, dest_reg));
+		}
     }
+
+    // btnp()
+	/*
+    if (strcmp (func_name, "btnp") == 0) {
+		if (runtime_req.needs_pico8 == true)
+		{
+			return (emit_pico8_btnp_intrinsic (node, dest_reg));
+		}
+		else if (runtime_req.needs_tic80 == true)
+		{
+			return (emit_tic80_btnp_intrinsic (node, dest_reg));
+		}
+    }*/
 
     // add()
     if (strcmp (func_name, "add") == 0) {
-		runtime_req.needs_pico8    = true;
-        return emit_add_intrinsic (node, dest_reg);
+		if (runtime_req.needs_pico8 == true)
+		{
+			return (emit_pico8_add_intrinsic (node, dest_reg));
+		}
+		else if (runtime_req.needs_tic80 == true)
+		{
+			return (emit_tic80_add_intrinsic (node, dest_reg));
+		}
     }
 
     // math.floor(x)
