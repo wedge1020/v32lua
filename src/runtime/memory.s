@@ -72,3 +72,20 @@ __oom_handler:
     HLT                      ; Halt Vircon32 CPU instantly to prevent data corruption
     JMP  __oom_handler       ; Infinite loop safeguard in case CPU resumes
 
+;; ---------------------------------------------------------------------------
+;; Built-in: Unary Minus (-x) -> Flips IEEE-754 Sign Bit 
+;; Incoming Stack: [BP+2] = Tagged Value (Expected Float) 
+;; Returns: R0 = Negated Float 
+;; ---------------------------------------------------------------------------
+__builtin_unm:
+    PUSH BP 
+    MOV  BP, SP 
+
+    MOV  R1, [BP+2]          ; R1 = Value to negate 
+    XOR  R1, 0x80000000      ; Instantly changes positive <-> negative 
+    MOV  R0, R1 
+    
+    MOV  SP, BP 
+    POP  BP 
+    RET 
+

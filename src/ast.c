@@ -53,22 +53,36 @@ void handle_compiler_directive(const char *line) {
 ASTNode *make_node_cart_hint (const char *raw_hint)
 {
     ASTNode* node = make_node(NODE_CART_HINT);
-    
+
     char action[64] = {0};
     char param1[128] = {0};
     char param2[256] = {0};
 
     // Parse commands like: texture background "filename.png"
     int tokens = sscanf(raw_hint, "%63s %127s \"%255[^\"]\"", action, param1, param2);
-    
+
     node->as.cart_hint.action = strdup(action);
     node->as.cart_hint.resource_id = -1;
 
-    if (strcmp(action, "version") == 0 && tokens >= 2) {
+    // Handle API selection hint
+    if (strcmp(action, "api") == 0 && tokens >= 2) {
+        if (strcmp(param1, "pico8") == 0) {
+            runtime_req.needs_pico8 = true;
+            runtime_req.needs_tic80 = false; // Ensure mutual exclusivity
+        } else if (strcmp(param1, "tic80") == 0) {
+            runtime_req.needs_tic80 = true;
+            runtime_req.needs_pico8 = false; // Ensure mutual exclusivity
+			fprintf (stdout, "[HINT] TIC80 enabled\n");
+        }
+		runtime_req.needs_tables    = true;
+        // Store the API type for reference
+        node->as.cart_hint.value = strdup(param1);
+    }
+    else if (strcmp(action, "version") == 0 && tokens >= 2) {
         // e.g., --#version 1.1
         strncpy(cart_version, param1, sizeof(cart_version) - 1);
         node->as.cart_hint.value = strdup(param1);
-    } 
+    }
     else if (strcmp(action, "title") == 0) {
         // e.g., --#title "My Awesome Game"
         char title_buf[128] = {0};
@@ -80,7 +94,7 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
     else if (strcmp(action, "texture") == 0 && tokens == 3) {
         // e.g., --#texture background "filename.png"
         int assigned_id = next_texture_id++;
-        
+
         node->as.cart_hint.name = strdup(param1);        // Variable name: background
         node->as.cart_hint.value = strdup(param2);       // Filename: filename.png
         node->as.cart_hint.resource_id = assigned_id;    // ID: 0, 1, 2...

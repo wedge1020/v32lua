@@ -115,6 +115,8 @@ int  main (int  argc, char** argv)
     }
 
 	runtime_req.needs_memory_alloc  = true;  // Heap always needed
+	runtime_req.needs_print         = true;
+	runtime_req.needs_strings       = true;
 
     g_lua_filename                  = input_filename;
     g_asm_filename                  = output_filename;

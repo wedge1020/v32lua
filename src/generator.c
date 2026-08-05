@@ -329,7 +329,7 @@ void  generate_asm (ASTNode *node, int  dest_reg)
 
             case NODE_FUNCTION_CALL:
                 node_function_call (node, dest_reg);
-				runtime_req.needs_exec          = true;
+                runtime_req.needs_exec          = true;
                 break;
 
             case NODE_FUNCTION_POINTER:
@@ -382,28 +382,28 @@ void  generate_asm (ASTNode *node, int  dest_reg)
 
             case NODE_STRING:
                 node_string (node, dest_reg);
-				runtime_req.needs_strings       = true;
+                runtime_req.needs_strings       = true;
                 break;
 
             case NODE_CONCAT:
                 node_concat (node, dest_reg);
-				runtime_req.needs_strings       = true;
+                runtime_req.needs_strings       = true;
                 break;
 
             case NODE_TABLE_CONSTRUCTOR:
                 node_table_constructor(node, dest_reg);
-				runtime_req.needs_tables        = true;
-				runtime_req.needs_memory_alloc  = true;
+                runtime_req.needs_tables        = true;
+                runtime_req.needs_memory_alloc  = true;
                 break;
 
             case NODE_TABLE_SET:
                 node_table_set (node);
-				runtime_req.needs_tables        = true;
+                runtime_req.needs_tables        = true;
                 break;
 
             case NODE_TABLE_GET:
                 node_table_get (node, dest_reg);
-				runtime_req.needs_tables        = true;
+                runtime_req.needs_tables        = true;
                 break;
 
             case NODE_NUMBER:
@@ -548,6 +548,14 @@ void generate_program (ASTNode *head)
     emit_asm (";; --- Compiled Code Entry Vector ---\n");
     emit_asm ("CALL __global_scope_initialization  ; Run top-level setups first\n");
     
+    // --- API Initialization: Call the appropriate region setup routine ---
+    // Only call one based on which API is enabled (mutually exclusive)
+    if (runtime_req.needs_pico8) {
+        emit_asm ("CALL __builtin_pico8_init  ; Initialize PICO-8 regions\n");
+    } else if (runtime_req.needs_tic80) {
+        emit_asm ("CALL __builtin_tic80_init  ; Initialize TIC-80 regions\n");
+    }
+
     // If init() exists, execute it immediately after global variable setup
     if (has_init)
     {

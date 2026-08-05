@@ -279,10 +279,13 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     //////////////////////////////////////////////////////////////////////////
 
     // spr()
-    if (strcmp (func_name, "spr") == 0) {
-		runtime_req.needs_pico8    = true;
-        return emit_spr_intrinsic (node);
-    }
+	if (strcmp(func_name, "spr") == 0) {
+		// Only enable PICO-8 if TIC-80 isn't already selected
+		if (!runtime_req.needs_tic80) {
+			runtime_req.needs_pico8 = true;
+		}
+		return emit_spr_intrinsic(node);
+	}
 
     // btn()
     if (strcmp (func_name, "btn") == 0) {

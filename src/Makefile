@@ -63,6 +63,7 @@ context:
 	@cp -v Makefile  Makefile.txt
 	@cp -v lexer.l   lexer.l.txt
 	@cp -v parser.y  parser.y.txt
+	@cp -v runtime_embed.S runtime_embed.S.txt
 
 # --- Monolithic Source Generation Rule ---
 monofile:
