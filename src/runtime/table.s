@@ -1,11 +1,11 @@
-;; =====================================================================================
+;; ===========================================================================
 ;; SECTION: TABLE OPERATIONS
-;; =====================================================================================
+;; ===========================================================================
 
-;; -------------------------------------------------------------------------------------
+;; ---------------------------------------------------------------------------
 ;; Core Memory Allocator: Creates a new Table struct on the heap 
 ;; Returns: R0 = Tagged Table Pointer (0x7F80....)
-;; -------------------------------------------------------------------------------------
+;; ---------------------------------------------------------------------------
 __builtin_table_new:
     PUSH BP
     MOV  BP, SP
@@ -32,11 +32,11 @@ __builtin_table_new:
     POP  BP
     RET
 
-;; -------------------------------------------------------------------------------------
+;; ---------------------------------------------------------------------------
 ;; Table Read Indexer: t[k] -> Returns Value in R0 (or Nil if not found)
 ;; Incoming Stack: [BP+3] = Tagged Table Pointer, [BP+2] = Key
 ;; Register Usage: R1-R7 (Audited: reduced from 9 registers down to 7!)
-;; -------------------------------------------------------------------------------------
+;; ---------------------------------------------------------------------------
 __builtin_table_get:
     PUSH BP
     MOV  BP, SP
@@ -62,14 +62,15 @@ __builtin_table_get:
 
     ;; --- OPTIMIZATION: EARLY UNBOXING ---
     ;; Strip tag immediately! R1 is now permanently the raw RAM heap address.
-    ;; This eliminates all redundant unboxing instructions in subsequent branches.
+    ;; This eliminates all redundant unboxing instructions in subsequent
+    ;; branches.
     AND  R1, BOXED_PAYLOAD
 
     ;; --- 2. FAST-PATH VALIDATION (O(1) Contiguous Array Read) ---
     ;; FAST-PATH CHECK 1: Is Key an unboxed IEEE Float?
     MOV  R3, R2
     AND  R3, NAN_VALUE      ; Isolate exponent bits
-    IEQ  R3, NAN_VALUE      ; Are all exponent bits 1s? (If so, it's tagged/NaN)
+    IEQ  R3, NAN_VALUE      ; Are all exponent bits 1s? (If so, it's tagged)
     JT   R3, __table_get_fallback
 
     ;; FAST-PATH CHECK 2: Convert float to integer & verify no fractional part
@@ -161,11 +162,12 @@ __table_get_done:
     POP  BP
     RET
 
-;; -------------------------------------------------------------------------------------
+;; ---------------------------------------------------------------------------
 ;; Table Write Indexer: t[k] = v -> Writes Value into Table Storage
 ;; Incoming Stack: [BP+4] = Table Pointer, [BP+3] = Key, [BP+2] = Value
-;; Register Usage: R1-R8 (Audited: reduced from 10 registers to 8, fixing R10 bug!)
-;; -------------------------------------------------------------------------------------
+;; Register Usage: R1-R8 (Audited: reduced from 10 registers to 8, fixing
+;;                 R10 bug!)
+;; ---------------------------------------------------------------------------
 __builtin_table_set:
     PUSH BP
     MOV  BP, SP
@@ -373,14 +375,15 @@ __table_set_done:
     POP  BP
     RET
 
-;; -------------------------------------------------------------------------------------
-;; Table Set With Shift: Inserts value at position, shifting elements to make room.
+;; ---------------------------------------------------------------------------
+;; Table Set With Shift: Inserts value at position, shifting elements to make
+;;                       room.
 ;;
 ;; Incoming Stack: [BP+5] = Tagged Table Pointer, [BP+4] = Position (1-based),
 ;;                 [BP+3] = Value to insert, [BP+2] = Current array length
 ;; Register Usage: R1-R13
 ;; Returns: R0 = inserted value
-;; -------------------------------------------------------------------------------------
+;; ---------------------------------------------------------------------------
 __builtin_table_set_with_shift:
     PUSH BP
     MOV  BP, SP
@@ -610,7 +613,7 @@ __set_with_shift_done:
     POP  BP
     RET
 
-;; -------------------------------------------------------------------------------------
+;; ---------------------------------------------------------------------------
 ;; Table Insert: Inserts a value at a specific position in a table array.
 ;; Shifts existing elements to make room.
 ;;
@@ -618,7 +621,7 @@ __set_with_shift_done:
 ;;                 [BP+2] = Value to insert
 ;; Register Usage: R1-R8
 ;; Returns: R0 = inserted value (for add() compatibility)
-;; -------------------------------------------------------------------------------------
+;; ---------------------------------------------------------------------------
 __builtin_table_insert:
     PUSH BP
     MOV  BP, SP
@@ -780,12 +783,13 @@ __unbox_table_valid:
 ;; ---------------------------------------------------------------------------
 __runtime_error_not_table:
     ;; Trap CPU if script attempts to index a non-table (e.g. String or
-	;; Function in ROM)
+    ;; Function in ROM)
     HLT
     JMP __runtime_error_not_table
 
 __runtime_error_hash_overflow:
     ;; Trap CPU if hash part exceeds 7 pairs (until dynamic rehashing
-	;; is implemented)
+    ;; is implemented)
     HLT
     JMP __runtime_error_hash_overflow
+

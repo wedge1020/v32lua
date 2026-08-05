@@ -51,3 +51,4 @@ __runtime_error_not_callable:
 __panic_halt:
     WAIT                        ; Yield CPU frame to prevent runaway execution
     JMP __panic_halt            ; Trap CPU in an infinite loop
+

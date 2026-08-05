@@ -71,3 +71,4 @@ __oom_handler:
     ;; Note: If you implement an error print routine later, call it here!
     HLT                      ; Halt Vircon32 CPU instantly to prevent data corruption
     JMP  __oom_handler       ; Infinite loop safeguard in case CPU resumes
+

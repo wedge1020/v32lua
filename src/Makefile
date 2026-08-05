@@ -51,7 +51,15 @@ lex.yy.c: lexer.l parser.tab.h
 	$(CC) $(CFLAGS) -Wa,--noexecstack -c $< -o $@
 
 context:
-	@cp -v runtime.s runtime.s.txt
+	@cat runtime/memory.s runtime/exec.s runtime/table.s runtime/string.s runtime/print.s runtime/pico8.s runtime/tic80.s runtime/constant.s > runtime.s.txt
+	@cp -v runtime/memory.s{,.txt}
+	@cp -v runtime/exec.s{,.txt}
+	@cp -v runtime/table.s{,.txt}
+	@cp -v runtime/string.s{,.txt}
+	@cp -v runtime/print.s{,.txt}
+	@cp -v runtime/pico8.s{,.txt}
+	@cp -v runtime/tic80.s{,.txt}
+	@cp -v runtime/constant.s{,.txt}
 	@cp -v Makefile  Makefile.txt
 	@cp -v lexer.l   lexer.l.txt
 	@cp -v parser.y  parser.y.txt
@@ -77,6 +85,6 @@ monofile:
 	@echo "Successfully generated consolidated file: ../monolithic_source.c"
 
 clean:
-	rm -f $(TARGET) $(OBJS) parser.tab.c parser.tab.h lex.yy.c ../monolithic_source.c *.txt
+	rm -f $(TARGET) $(OBJS) parser.tab.c parser.tab.h lex.yy.c ../monolithic_source.c *.txt runtime/*.txt intrinsics/*.txt node/*.txt
 
 .PHONY: all clean monorule
