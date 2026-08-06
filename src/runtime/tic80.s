@@ -95,28 +95,32 @@ __builtin_tic80_spr:
     PUSH  BP
     MOV   BP, SP
 
-    ;; ✅ FIX: Ensure correct texture and no tinting for TIC-80 sprites
+    ;; Ensure correct texture and no tinting for TIC-80 sprites
     OUT   GPU_SelectedTexture, 0
-    OUT   GPU_MultiplyColor, 0xFFFFFFFF  ; White = no color tinting
+    OUT   GPU_MultiplyColor, 0xFFFFFFFF
 
     ;; --- 1. Calculate final scale as float ---
-    ;; ✅ FIX: Use exact value 2711/1024 = 2.647060546875
     MOV   R1, [BP+6]        ; tic80_scale (float)
     MOV   R2, 2.64
     FMUL  R1, R2            ; R1 = tic80_scale * 2.647060546875
-    MOV   R12, R1           ; Save X scale in R12 (as float)
-    MOV   R13, R1           ; Copy to R13 for Y scale (as float)
+    MOV   R12, R1           ; Save X scale in R12
+    MOV   R13, R1           ; Copy to R13 for Y scale
 
-    ;; --- 1b. Apply flip by negating scale using FSGN ---
+    ;; --- NEW: Pre-calculate scaled offset (8 * scale) ---
+    MOV   R1, 8.0
+    FMUL  R1, R12           ; R1 = 8 * scale
+    MOV   R10, R1           ; Save in R10 (unused register)
+
+    ;; --- 1b. Apply flip by negating scale ---
     MOV   R2, [BP+7]        ; flip (0-3)
-    CFI   R2                ; Convert flip to integer for bit testing
+    CFI   R2
 
     ;; Horizontal flip (bit 0): negate X scale
     AND   R3, R2
     AND   R3, 1
     IEQ   R3, 1
     JF    R3, _tic80_spr_no_flip_x
-    FSGN  R12               ; Negate float in R12
+    FSGN  R12
 _tic80_spr_no_flip_x:
     OUT   GPU_DrawingScaleX, R12
 
@@ -125,29 +129,26 @@ _tic80_spr_no_flip_x:
     AND   R3, 2
     IEQ   R3, 2
     JF    R3, _tic80_spr_no_flip_y
-    FSGN  R13               ; Negate float in R13
+    FSGN  R13
 _tic80_spr_no_flip_y:
     OUT   GPU_DrawingScaleY, R13
 
-    ;; Rotation (BP+8) is ignored - Vircon32 GPU doesn't support 90° rotation
-
-    ;; --- 2. Prepare Loop Limits & Convert ALL Floats to Integers ---
-    ;; ✅ FIX: Now correctly reads w from [BP+9] and h from [BP+10]
-    MOV   R1, [BP+9]        ; w (grid width in sprites)
+    ;; --- 2. Prepare Loop Limits ---
+    MOV   R1, [BP+9]        ; w
     MOV   R5, R1
-    CFI   R5                ; R5 = w (integer, columns)
+    CFI   R5
 
-    MOV   R1, [BP+10]       ; h (grid height in sprites)
+    MOV   R1, [BP+10]       ; h
     MOV   R6, R1
-    CFI   R6                ; R6 = h (integer, rows)
+    CFI   R6
 
-    MOV   R7, [BP+2]        ; R7 = id (base sprite index)
+    MOV   R7, [BP+2]        ; id
     CFI   R7
 
-    MOV   R8, [BP+3]        ; R8 = x (base X screen position, integer)
+    MOV   R8, [BP+3]        ; x
     CFI   R8
 
-    MOV   R9, [BP+4]        ; R9 = y (base Y screen position, integer)
+    MOV   R9, [BP+4]        ; y
     CFI   R9
 
     ;; Initialize Row Counter
@@ -156,71 +157,74 @@ _tic80_spr_no_flip_y:
 _tic80_spr_row_loop_start:
     MOV   R1, R4
     IGE   R1, R6
-    JT    R1, _tic80_spr_end  ; If row >= h, we are done
+    JT    R1, _tic80_spr_end
 
-    ;; Initialize Col Counter
     MOV   R3, 0             ; R3 = col
 
 _tic80_spr_col_loop_start:
     MOV   R1, R3
     IGE   R1, R5
-    JT    R1, _tic80_spr_row_loop_end  ; If col >= w, move to next row
+    JT    R1, _tic80_spr_row_loop_end
 
     ;; --- 3. Calculate Target Region ID ---
     MOV   R1, R4
-    IMUL  R1, 16            ; 16 sprites per row (NOT 32)
-    IADD  R1, R3            ; + column offset
-    IADD  R1, R7            ; + base sprite id
+    IMUL  R1, 16
+    IADD  R1, R3
+    IADD  R1, R7
     OUT   GPU_SelectedRegion, R1
 
     ;; --- 4. Calculate X Coordinate ---
-    ;; With hotspot at top-left (texture coords), drawing at (X,Y) places
-    ;; the sprite's top-left at (X,Y) - matches TIC-80 behavior
-    MOV   R1, [BP+7]        ; flip parameter
+    MOV   R1, [BP+7]        ; flip
     CFI   R1
     AND   R11, R1
-    AND   R11, 1            ; Check horizontal flip bit (bit 0)
+    AND   R11, 1
     IEQ   R11, 1
     JT    R11, _tic80_spr_calc_flip_x
 
-    ;; Normal X = base_x + (col * 8)
+    ;; Normal X = base_x + (col * scaled_offset)
     MOV   R1, R3
-    IMUL  R1, 8             ; Each sprite is 8 pixels wide
-    IADD  R1, R8            ; Add base X
+    CIF   R1
+    FMUL  R1, R10           ; Use R10 for scaled offset
+    CFI   R1
+    IADD  R1, R8
     JMP   _tic80_spr_set_x
 
 _tic80_spr_calc_flip_x:
-    ;; Flipped X = base_x + (w - 1 - col) * 8
     MOV   R1, R5
-    ISUB  R1, 1             ; w - 1 (zero-indexed)
-    ISUB  R1, R3            ; - col
-    IMUL  R1, 8             ; * 8 pixels
-    IADD  R1, R8            ; + base_x
+    ISUB  R1, 1
+    ISUB  R1, R3
+    CIF   R1
+    FMUL  R1, R10
+    CFI   R1
+    IADD  R1, R8
 
 _tic80_spr_set_x:
     OUT   GPU_DrawingPointX, R1
 
     ;; --- 5. Calculate Y Coordinate ---
-    MOV   R1, [BP+7]        ; flip parameter
+    MOV   R1, [BP+7]        ; flip
     CFI   R1
     AND   R11, R1
-    AND   R11, 2            ; Check vertical flip bit (bit 1)
+    AND   R11, 2
     IEQ   R11, 2
     JT    R11, _tic80_spr_calc_flip_y
 
-    ;; Normal Y = base_y + (row * 8)
+    ;; Normal Y = base_y + (row * scaled_offset)
     MOV   R1, R4
-    IMUL  R1, 8             ; Each sprite is 8 pixels tall
-    IADD  R1, R9            ; Add base Y
+    CIF   R1
+    FMUL  R1, R10           ; Use R10 for scaled offset
+    CFI   R1
+    IADD  R1, R9
     JMP   _tic80_spr_set_y
 
 _tic80_spr_calc_flip_y:
-    ;; Flipped Y = base_y + (h - 1 - row) * 8
     MOV   R1, R6
-    ISUB  R1, 1             ; h - 1 (zero-indexed)
-    ISUB  R1, R4            ; - row
-    IMUL  R1, 8             ; * 8 pixels
-    IADD  R1, R9            ; + base_y
+    ISUB  R1, 1
+    ISUB  R1, R4
+    CIF   R1
+    FMUL  R1, R10
+    CFI   R1
+    IADD  R1, R9
 
 _tic80_spr_set_y:
     OUT   GPU_DrawingPointY, R1
@@ -228,17 +232,15 @@ _tic80_spr_set_y:
     ;; --- 6. Issue Draw Command ---
     OUT   GPU_Command, GPUCommand_DrawRegionZoomed
 
-    ;; --- 7. Inner Loop Iteration ---
-    IADD  R3, 1             ; col++
+    ;; --- 7. Loop ---
+    IADD  R3, 1
     JMP   _tic80_spr_col_loop_start
 
 _tic80_spr_row_loop_end:
-    ;; --- 8. Outer Loop Iteration ---
-    IADD  R4, 1             ; row++
+    IADD  R4, 1
     JMP   _tic80_spr_row_loop_start
 
 _tic80_spr_end:
-    ;; --- 9. Cleanup ---
     MOV   SP, BP
     POP   BP
     RET
@@ -603,7 +605,7 @@ _tic80_cls_use_direct:
     RET
 
 ;; ===========================================================================
-;; TIC-80 Default 16-Color Palette (32-bit RGBA)
+;; TIC-80 Default 16-Color Palette (32-bit AABBGGRR for Vircon32 GPU)
 ;; ===========================================================================
 __tic80_palette:
-integer 0xFF000000, 0xFF1D2B53, 0xFF7E2553, 0xFF008751, 0xFFAB5236, 0xFF5F574F, 0xFFC2C3C7, 0xFFFFF1E8, 0xFFFF004D, 0xFFA300FF, 0xFFFFEC27, 0xFF00E436, 0xFF29ADFF, 0xFF83769C, 0xFFFF77A8, 0xFFFFCCAA
+integer 0xFF000000, 0xFF532B1D, 0xFF53257E, 0xFF518700, 0xFF3652AB, 0xFF4F575F, 0xFFC7C3C2, 0xFFE8F1FF, 0xFF4D00FF, 0xFFFF00A3, 0xFF27ECFF, 0xFF36E400, 0xFFFFAD29, 0xFF94B0C2, 0xFF77A8FF, 0xFFAAFFCC

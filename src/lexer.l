@@ -129,6 +129,7 @@ char *process_string_literal (const char *text, int  len)
 "+"                     { return '+'; }
 "-"                     { return '-'; }
 "*"                     { return '*'; }
+"//"                    { return TOKEN_FLOORDIV; }
 "/"                     { return '/'; }
 "%"                     { return '%'; }
 "("                     { return '('; }

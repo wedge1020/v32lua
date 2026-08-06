@@ -14,7 +14,7 @@ function game_loop()
     if btn(3) then x=x+1 end
 
     cls(13)
-    spr(1,x,y,0,1,0,0,2,2)
+    spr(1+t%60//30*2,x,y,14,3,0,0,2,2)
     print(84,84,"HELLO WORLD!")
     t=t+1
 end

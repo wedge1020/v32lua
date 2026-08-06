@@ -360,6 +360,10 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 node_mod (node, dest_reg);
                 break;
 
+            case NODE_FLOORDIV:
+                node_floordiv (node, dest_reg);
+                break;
+
             case NODE_BOOLEAN:
                 node_boolean (node, dest_reg);
                 break;

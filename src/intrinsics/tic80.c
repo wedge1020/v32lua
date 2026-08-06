@@ -315,27 +315,28 @@ bool emit_tic80_add_intrinsic(ASTNode *node, int dest_reg)
 }
 
 /**
- * TIC-80 default 16-color palette (32-bit RGBA)
- * Colors match the official TIC-80 palette
+ * TIC-80 default 16-color palette (32-bit AABBGGRR for Vircon32 GPU)
+ * Colors match the official TIC-80 palette in Vircon32 format
  */
 static const unsigned int tic80_palette[16] = {
     0xFF000000, // 0:  black
-    0xFF1D2B53, // 1:  dark blue
-    0xFF7E2553, // 2:  dark purple
-    0xFF008751, // 3:  dark green
-    0xFFAB5236, // 4:  brown
-    0xFF5F574F, // 5:  dark gray
-    0xFFC2C3C7, // 6:  light gray
-    0xFFFFF1E8, // 7:  white
-    0xFFFF004D, // 8:  red
+    0xFF532B1D, // 1:  dark blue
+    0xFF53257E, // 2:  dark purple
+    0xFF518700, // 3:  dark green
+    0xFF3652AB, // 4:  brown
+    0xFF4F575F, // 5:  dark gray
+    0xFFC7C3C2, // 6:  light gray
+    0xFFE8F1FF, // 7:  white
+    0xFF4D00FF, // 8:  red
     0xFFA300FF, // 9:  orange
-    0xFFFFEC27, // 10: yellow
-    0xFF00E436, // 11: light green
+    0xFF27ECFF, // 10: yellow
+    0xFF36E400, // 11: light green
     0xFF29ADFF, // 12: blue
-    0xFF83769C, // 13: lavender
-    0xFFFF77A8, // 14: pink
-    0xFFFFCCAA  // 15: light peach
+	0xFFC2B094, // 13: cyan
+    0xFF77A8FF, // 14: pink
+    0xFFAAFFCC  // 15: light peach
 };
+   // 0xFF9C7683, // 13: lavender
 
 /**
  * Emits assembly for TIC-80 cls(color) intrinsic

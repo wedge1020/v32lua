@@ -39,6 +39,7 @@ char *mangle_method_name (const char *table_name, const char *method_name);
 %token TOKEN_EQ TOKEN_NEQ TOKEN_LE TOKEN_GE TOKEN_LT TOKEN_GT TOKEN_CONCAT
 %token TOKEN_LOCAL TOKEN_DO TOKEN_NOT TOKEN_LEN UNARY_MINUS
 %token TOKEN_TRUE TOKEN_FALSE TOKEN_NIL
+%token TOKEN_FLOORDIV
 
 %type <ast_node> statement statement_list stat_list expr function_def return_stmt
 %type <ast_node> table_constructor function_call else_branch prefix_expr
@@ -52,7 +53,7 @@ char *mangle_method_name (const char *table_name, const char *method_name);
 %left TOKEN_EQ TOKEN_NEQ TOKEN_LT TOKEN_GT TOKEN_LE TOKEN_GE
 %right TOKEN_CONCAT
 %left '+' '-'
-%left '*' '/' '%'
+%left '*' '/' '%' TOKEN_FLOORDIV
 %right TOKEN_NOT TOKEN_LEN UNARY_MINUS
 %left '['
 %left '.'
@@ -402,6 +403,7 @@ expr:
     | expr '+' expr     { $$ = make_node_binary (NODE_ADD, $1, $3); }
     | expr '-' expr     { $$ = make_node_binary (NODE_SUB, $1, $3); }
     | expr '*' expr     { $$ = make_node_binary (NODE_MUL, $1, $3); }
+	| expr TOKEN_FLOORDIV expr { $$ = make_node_binary (NODE_FLOORDIV, $1, $3); }
     | expr '/' expr     { $$ = make_node_binary (NODE_DIV, $1, $3); }
     | expr '%' expr     { $$ = make_node_binary (NODE_MOD, $1, $3); }
     | TOKEN_TRUE  { $$ = make_node_boolean (true);  }
