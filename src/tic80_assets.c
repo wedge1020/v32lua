@@ -2,17 +2,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-// =============================================================================
-// TIC-80 Asset Data Structures
-// =============================================================================
-
-typedef struct TIC80AssetData TIC80AssetData;
-struct TIC80AssetData {
-    int index;
-    char *hex_data;
-    TIC80AssetData *next;
-};
-
 // TIC80 tilesheet is 256x256 pixels (32x32 tiles of 8x8 each)
 #define TIC80_SHEET_WIDTH  256
 #define TIC80_SHEET_HEIGHT 256

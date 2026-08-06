@@ -126,13 +126,6 @@ typedef struct astnode {
     } as;
 } ASTNode;
 
-typedef struct TIC80AssetData TIC80AssetData;
-struct TIC80AssetData {
-    int index;
-    char *hex_data;
-    TIC80AssetData *next;
-};
-
 // Global state for TIC80 asset processing
 extern char *current_tic80_section;
 extern uint32_t tic80_palette[16];

@@ -433,6 +433,9 @@ void  generate_asm (ASTNode *node, int  dest_reg)
             case NODE_CART_HINT:
                 node_cart_hint (node, dest_reg);
                 break;
+
+            default:
+                break;
         }
     }
 }
@@ -518,13 +521,15 @@ void generate_program (ASTNode *head)
     // =========================================================================
     // 1. CONDITIONAL ENTRY POINT CHECKS
     // =========================================================================
-    SymbolNode *init_sym      = resolve_symbol("init");
-    SymbolNode *main_sym      = resolve_symbol("main");
-    SymbolNode *game_loop_sym = resolve_symbol("game_loop");
+    SymbolNode *init_sym         = resolve_symbol("init");
+    SymbolNode *main_sym         = resolve_symbol("main");
+    SymbolNode *game_loop_sym    = resolve_symbol("game_loop");
+	SymbolNode *tic_sym          = resolve_symbol("TIC");
 
     bool has_init      = (init_sym != NULL && init_sym->is_function == 1);
     bool has_main      = (main_sym != NULL && main_sym->is_function == 1);
     bool has_game_loop = (game_loop_sym != NULL && game_loop_sym->is_function == 1);
+	bool has_tic       = (tic_sym != NULL && tic_sym->is_function == 1);
 
     // If neither main() nor game_loop() exists, halt compilation immediately
     if (!has_main && !has_game_loop)
@@ -576,6 +581,13 @@ void generate_program (ASTNode *head)
     {
         emit_asm ("__start:\n");
         emit_asm ("CALL __function_game_loop ; Execute game loop tick\n");
+        emit_asm ("WAIT\n");
+        emit_asm ("JMP __start\n");
+    }
+    else if ((runtime_req.needs_tic80) && (has_tic))
+    {
+        emit_asm ("__start:\n");
+        emit_asm ("CALL __function_TIC ; Execute game loop tick\n");
         emit_asm ("WAIT\n");
         emit_asm ("JMP __start\n");
     }

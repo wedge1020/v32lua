@@ -514,6 +514,7 @@ tic80_section:
     ;
 
 tic80_asset_lines:
+	/* empty */ { $$ = NULL; }
     | tic80_asset_lines TOKEN_TIC80_ASSET_DATA
     {
         TIC80AssetData *data = parse_tic80_asset_line($2);  // $2 is the string

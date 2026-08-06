@@ -10,6 +10,7 @@
 #include <math.h>
 
 #include "enums.h"
+#include "tic80_assets.h"
 #include "emit.h"
 #include "ast.h"
 #include "context.h"
@@ -18,7 +19,6 @@
 #include "generate.h"
 #include "internals.h"
 #include "register.h"
-#include "tic80_assets.h"
 
 #define  VERSION      "20260806-dev"
 #define  AUTHOR       "Matthew Haas"

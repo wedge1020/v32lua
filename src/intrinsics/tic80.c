@@ -2,28 +2,34 @@
 
 #define MAX_TIC80_SPR_ARGS 9  // id, x, y, colorkey, scale, flip, rotate, w, h
 
-/**
- * TIC-80 default 16-color palette (32-bit AABBGGRR for Vircon32 GPU)
- * Colors match the official TIC-80 palette in Vircon32 format
- */
-static unsigned int tic80_palette[16] = {
-	0xFF2C1C1A,
-	0xFF5D275D,
-	0xFF533EB1,
-	0xFF577DEF,
-	0xFF75CDFF,
-	0xFF70F0A7,
-	0xFF64B738,
-	0xFF797125,
-	0xFF6F3629,
-	0xFFC95D3B,
-	0xFFF6A641,
-	0xFFF7EF73,
-	0xFFF4F4F4,
-	0xFFC2B094,
-	0xFF866C56,
-	0xFF573C33
-};
+// TIC-80 default 16-color palette (32-bit AABBGGRR for Vircon32 GPU)
+// These can be overridden by cartridge PALETTE section
+/*
+uint32_t tic80_palette[16] = {
+    0xFF2C1C1A,
+    0xFF5D275D,
+    0xFF533EB1,
+    0xFF577DEF,
+    0xFF75CDFF,
+    0xFF70F0A7,
+    0xFF64B738,
+    0xFF797125,
+    0xFF6F3629,
+    0xFFC95D3B,
+    0xFFF6A641,
+    0xFFF7EF73,
+    0xFFF4F4F4,
+    0xFFC2B094,
+    0xFF866C56,
+    0xFF573C33
+};*/
+
+// Set custom palette from cartridge (called after parsing TIC80 assets)
+void tic80_set_custom_palette(const uint32_t *new_palette) {
+    for (int i = 0; i < 16; i++) {
+        tic80_palette[i] = new_palette[i];
+    }
+}
 
 /**
  * Emits assembly for the spr() intrinsic (TIC-80 compatibility).
@@ -42,8 +48,7 @@ static unsigned int tic80_palette[16] = {
  *   [BP+9]  = w       (args[7])
  *   [BP+10] = h       (args[8])
  */
-bool emit_tic80_spr_intrinsic(ASTNode *node)
-{
+bool emit_tic80_spr_intrinsic(ASTNode *node) {
     emit_asm("    ;; --- TIC-80 spr() Intrinsic ---\n");
 
     int arg_count = 0;
@@ -54,8 +59,7 @@ bool emit_tic80_spr_intrinsic(ASTNode *node)
         curr = curr->next;
     }
 
-    // Push arguments 10-8 (h, w, rotate) instead of 9-8 (h, rotate)
-    // This ensures w (args[7]) is pushed at stack_pos=9 and h (args[8]) at stack_pos=10
+    // Push arguments 10-8 (h, w, rotate)
     for (int stack_pos = 10; stack_pos >= 8; stack_pos--) {
         int arg_idx;
         if (stack_pos == 10) arg_idx = 8;   // h (args[8])
@@ -67,7 +71,6 @@ bool emit_tic80_spr_intrinsic(ASTNode *node)
         if (arg_count > arg_idx) {
             generate_asm(args[arg_idx], reg);
         } else {
-            // Defaults: h=1.0, w=1.0, rotate=0.0
             emit_asm("MOV R%d, %s ; Default %s\n", reg,
                      stack_pos == 10 ? "1.000000" : (stack_pos == 9 ? "1.000000" : "0.000000"),
                      stack_pos == 10 ? "h" : (stack_pos == 9 ? "w" : "rotate"));
@@ -146,11 +149,10 @@ bool emit_tic80_spr_intrinsic(ASTNode *node)
  * @param dest_reg The destination register for the result (0 = discard).
  * @return          true if successfully emitted, false on error.
  */
-bool emit_tic80_btn_intrinsic(ASTNode *node, int dest_reg)
-{
+bool emit_tic80_btn_intrinsic(ASTNode *node, int dest_reg) {
     emit_asm("    ;; --- TIC-80 btn() Intrinsic ---\n");
 
-    // --- Collect up to 1 argument (button_id) ---
+    // Collect up to 1 argument (button_id)
     int arg_count = 0;
     ASTNode *curr = node->as.call.args_head;
     ASTNode *args[1] = { NULL };
@@ -159,8 +161,7 @@ bool emit_tic80_btn_intrinsic(ASTNode *node, int dest_reg)
         curr = curr->next;
     }
 
-    // --- Push arguments right-to-left (standard ABI) ---
-    // Arg 0: Button ID (required)
+    // Push arguments right-to-left (standard ABI)
     int reg = allocate_register();
     register_pinned[reg] = 1;
     if (arg_count > 0) {
@@ -172,7 +173,7 @@ bool emit_tic80_btn_intrinsic(ASTNode *node, int dest_reg)
     register_pinned[reg] = 0;
     unlock_register(reg);
 
-    // --- Call runtime subroutine and clean up stack ---
+    // Call runtime subroutine and clean up stack
     emit_asm("CALL __builtin_tic80_btn\n");
     emit_asm("IADD SP, 1 ; Clean up btn() arguments\n");
 
@@ -196,11 +197,10 @@ bool emit_tic80_btn_intrinsic(ASTNode *node, int dest_reg)
  * @param dest_reg The destination register for the result (0 = discard).
  * @return          true if successfully emitted, false on error.
  */
-bool emit_tic80_btnp_intrinsic(ASTNode *node, int dest_reg)
-{
+bool emit_tic80_btnp_intrinsic(ASTNode *node, int dest_reg) {
     emit_asm("    ;; --- TIC-80 btnp() Intrinsic ---\n");
 
-    // --- Collect up to 3 arguments (id, hold, period) ---
+    // Collect up to 3 arguments (id, hold, period)
     int arg_count = 0;
     ASTNode *curr = node->as.call.args_head;
     ASTNode *args[3] = { NULL };
@@ -209,7 +209,7 @@ bool emit_tic80_btnp_intrinsic(ASTNode *node, int dest_reg)
         curr = curr->next;
     }
 
-    // --- Push arguments right-to-left (standard ABI) ---
+    // Push arguments right-to-left (standard ABI)
     // Order: period (2), hold (1), id (0)
 
     // Arg 2: period (default = -1)
@@ -248,7 +248,7 @@ bool emit_tic80_btnp_intrinsic(ASTNode *node, int dest_reg)
     register_pinned[reg] = 0;
     unlock_register(reg);
 
-    // --- Call runtime subroutine and clean up stack ---
+    // Call runtime subroutine and clean up stack
     emit_asm("CALL __builtin_tic80_btnp\n");
     emit_asm("IADD SP, 3 ; Clean up btnp() arguments\n");
 
@@ -272,11 +272,10 @@ bool emit_tic80_btnp_intrinsic(ASTNode *node, int dest_reg)
  * @param dest_reg The destination register for the result (0 = discard).
  * @return          true if successfully emitted, false on error.
  */
-bool emit_tic80_add_intrinsic(ASTNode *node, int dest_reg)
-{
+bool emit_tic80_add_intrinsic(ASTNode *node, int dest_reg) {
     emit_asm("    ;; --- TIC-80 add() Intrinsic ---\n");
 
-    // --- Collect up to 3 arguments (table, value, index) ---
+    // Collect up to 3 arguments (table, value, index)
     int arg_count = 0;
     ASTNode *curr = node->as.call.args_head;
     ASTNode *args[3] = { NULL, NULL, NULL };
@@ -285,12 +284,12 @@ bool emit_tic80_add_intrinsic(ASTNode *node, int dest_reg)
         curr = curr->next;
     }
 
-    // --- Need at least 2 arguments: table and value ---
+    // Need at least 2 arguments: table and value
     if (arg_count < 2) {
         return false;
     }
 
-    // --- Push arguments right-to-left (standard ABI) ---
+    // Push arguments right-to-left (standard ABI)
     // Order on stack: index (or nil), value, table
 
     // Arg 2: Index (optional, default = nil which means append)
@@ -323,13 +322,13 @@ bool emit_tic80_add_intrinsic(ASTNode *node, int dest_reg)
     register_pinned[tab_reg] = 0;
     unlock_register(tab_reg);
 
-    // --- Call runtime subroutine ---
+    // Call runtime subroutine
     emit_asm("CALL __builtin_tic80_add\n");
 
-    // --- Clean up stack (3 arguments) ---
+    // Clean up stack (3 arguments)
     emit_asm("IADD SP, 3 ; Clean up add() arguments\n");
 
-    // --- Transfer return value if needed ---
+    // Transfer return value if needed
     if (dest_reg != 0) {
         emit_asm("MOV R%d, R0 ; Transfer return value (the inserted value)\n", dest_reg);
     }
@@ -337,44 +336,27 @@ bool emit_tic80_add_intrinsic(ASTNode *node, int dest_reg)
     return true;
 }
 
-// Add a setter function
-void tic80_set_custom_palette(const unsigned int *new_palette) {
-    for (int i = 0; i < 16; i++) {
-        tic80_palette[i] = new_palette[i];
-    }
-}
-
 /**
  * Emits assembly for TIC-80 cls(color) intrinsic
  * color can be: palette index (0-15), hex string ("0xRRGGBB"), or hex number
  */
-bool  emit_tic80_cls_intrinsic (ASTNode *node)
-{
-    emit_asm (";; --- TIC-80 cls() Intrinsic ---\n");
+bool emit_tic80_cls_intrinsic(ASTNode *node) {
+    emit_asm("    ;; --- TIC-80 cls() Intrinsic ---\n");
 
-    ASTNode *arg  = node -> as.call.args_head;
+    ASTNode *arg = node->as.call.args_head;
 
     if (arg == NULL) {
         // Default: clear to black (palette index 0)
-        if (use_custom_palette) {
-            emit_asm ("MOV R1, 0x%.8X ; cls() with custom palette index 0\n",
-                     custom_tic80_palette[0]);
-        } else {
-            emit_asm ("MOV R1, 0xFF000000 ; cls() with no args = black\n");
-        }
+        emit_asm("MOV R1, 0x%.8X ; cls() with palette index 0\n",
+                 tic80_palette[0]);
     }
-    else if (arg -> type == NODE_NUMBER) {
+    else if (arg->type == NODE_NUMBER) {
         double val = arg->as.number.val;
         int int_val = (int)val;
 
         if (int_val >= 0 && int_val < 16) {
-            if (use_custom_palette) {
-                emit_asm("MOV R1, 0x%.8X ; Palette index %d (custom)\n",
-                         custom_tic80_palette[int_val], int_val);
-            } else {
-                emit_asm("MOV R1, 0x%.8X ; Palette index %d\n",
-                         tic80_palette[int_val], int_val);
-            }
+            emit_asm("MOV R1, 0x%.8X ; Palette index %d\n",
+                     tic80_palette[int_val], int_val);
         } else {
             // Treat as direct color value
             emit_asm("MOV R1, ");
