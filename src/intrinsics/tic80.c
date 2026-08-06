@@ -5,21 +5,20 @@
 /**
  * Emits assembly for the spr() intrinsic (TIC-80 compatibility).
  *
- * Syntax:
- *   spr(id, x, y)
- *   spr(id, x, y, colorkey)
- *   spr(id, x, y, colorkey, scale)
- *   spr(id, x, y, colorkey, scale, flip)
- *   spr(id, x, y, colorkey, scale, flip, rotate)
- *   spr(id, x, y, colorkey, scale, flip, rotate, w, h)
+ *      Corrected argument mapping to include 'w' parameter.
+ *      Previous code skipped w (args[7]) and pushed h twice.
  *
- * @param node The AST node representing the function call.
- * @return     true if successfully emitted, false on error.
+ * Stack layout:
+ *   [BP+2]  = id      (args[0])
+ *   [BP+3]  = x       (args[1])
+ *   [BP+4]  = y       (args[2])
+ *   [BP+5]  = colorkey (args[3])
+ *   [BP+6]  = scale   (args[4])
+ *   [BP+7]  = flip    (args[5])
+ *   [BP+8]  = rotate  (args[6])
+ *   [BP+9]  = w       (args[7])
+ *   [BP+10] = h       (args[8])
  */
-// Stack position -> args[] index mapping:
-// Stack: h(9), rotate(8), flip(7), scale(6), colorkey(5), y(4), x(3), id(2)
-// Args:  [0]id, [1]x, [2]y, [3]colorkey, [4]scale, [5]flip, [6]rotate, [7]w, [8]h
-
 bool emit_tic80_spr_intrinsic(ASTNode *node)
 {
     emit_asm("    ;; --- TIC-80 spr() Intrinsic ---\n");
@@ -32,35 +31,33 @@ bool emit_tic80_spr_intrinsic(ASTNode *node)
         curr = curr->next;
     }
 
-    // Stack order: h, rotate, flip, scale, colorkey, y, x, id
-    // Args order:  id, x, y, colorkey, scale, flip, rotate, w, h
+    // Push arguments 10-8 (h, w, rotate) instead of 9-8 (h, rotate)
+    // This ensures w (args[7]) is pushed at stack_pos=9 and h (args[8]) at stack_pos=10
+    for (int stack_pos = 10; stack_pos >= 8; stack_pos--) {
+        int arg_idx;
+        if (stack_pos == 10) arg_idx = 8;   // h (args[8])
+        else if (stack_pos == 9) arg_idx = 7; // w (args[7])
+        else arg_idx = 6;                   // rotate (args[6])
 
-    // Map: stack_pos = 9 -> args[8] (h)
-    //      stack_pos = 8 -> args[6] (rotate)
-    //      stack_pos = 7 -> args[5] (flip)
-    //      etc.
-
-    // Args 9-8: h (arg 8), rotate (arg 6)
-    for (int stack_pos = 9; stack_pos >= 8; stack_pos--) {
-        int arg_idx = (stack_pos == 9) ? 8 : 6;  // h is args[8], rotate is args[6]
         int reg = allocate_register();
         register_pinned[reg] = 1;
         if (arg_count > arg_idx) {
             generate_asm(args[arg_idx], reg);
         } else {
+            // Defaults: h=1.0, w=1.0, rotate=0.0
             emit_asm("MOV R%d, %s ; Default %s\n", reg,
-                     stack_pos == 9 ? "1.000000" : "0.000000",
-                     stack_pos == 9 ? "h" : "rotate");
+                     stack_pos == 10 ? "1.000000" : (stack_pos == 9 ? "1.000000" : "0.000000"),
+                     stack_pos == 10 ? "h" : (stack_pos == 9 ? "w" : "rotate"));
         }
         emit_asm("PUSH R%d ; Arg %d: %s\n", reg, stack_pos-1,
-                 stack_pos == 9 ? "h" : "rotate");
+                 stack_pos == 10 ? "h" : (stack_pos == 9 ? "w" : "rotate"));
         register_pinned[reg] = 0;
         unlock_register(reg);
     }
 
     // Args 7-6: flip (arg 5), scale (arg 4)
     for (int stack_pos = 7; stack_pos >= 6; stack_pos--) {
-        int arg_idx = (stack_pos == 7) ? 5 : 4;  // flip is args[5], scale is args[4]
+        int arg_idx = (stack_pos == 7) ? 5 : 4;
         int reg = allocate_register();
         register_pinned[reg] = 1;
         if (arg_count > arg_idx) {
@@ -78,7 +75,7 @@ bool emit_tic80_spr_intrinsic(ASTNode *node)
 
     // Args 5-4: colorkey (arg 3), y (arg 2)
     for (int stack_pos = 5; stack_pos >= 4; stack_pos--) {
-        int arg_idx = stack_pos - 2;  // colorkey=arg[3], y=arg[2]
+        int arg_idx = stack_pos - 2;
         int reg = allocate_register();
         register_pinned[reg] = 1;
         if (arg_count > arg_idx) {
@@ -96,7 +93,7 @@ bool emit_tic80_spr_intrinsic(ASTNode *node)
 
     // Args 3-2: x (arg 1), id (arg 0)
     for (int stack_pos = 3; stack_pos >= 2; stack_pos--) {
-        int arg_idx = stack_pos - 2;  // x=arg[1], id=arg[0]
+        int arg_idx = stack_pos - 2;
         int reg = allocate_register();
         register_pinned[reg] = 1;
         if (arg_count > arg_idx) {

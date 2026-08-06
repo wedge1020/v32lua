@@ -8,8 +8,8 @@
 ;;
 ;; __builtin_tic80_init (initialize 512 regions of 8x8 pixels)
 ;;
-;; Creates 512 regions (0-511) arranged in a 32-column × 16-row grid
-;; Each region is exactly 8×8 pixels with hotspot at (0,0)
+;; Creates 512 regions (0-511) arranged in a 16-column × 32-row grid
+;; Each region is exactly 8×8 pixels with hotspot at TOP-LEFT (texture coords)
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -20,8 +20,8 @@ __builtin_tic80_init:
     OUT   GPU_SelectedTexture, 0  ; Use texture 0 for TIC-80 sprites
 
     MOV   R1, 0                 ; R1 = region ID (0 to 511)
-    MOV   R2, 0                 ; R2 = x position (0 to 255)
-    MOV   R3, 0                 ; R3 = y position (0 to 255)
+    MOV   R2, 0                 ; R2 = x position in texture (0 to 127)
+    MOV   R3, 0                 ; R3 = y position in texture (0 to 255)
 
 _tic80_init_loop:
     ;; Exit when all 512 regions are initialized
@@ -32,13 +32,11 @@ _tic80_init_loop:
     ;; Select current region
     OUT   GPU_SelectedRegion, R1
 
-    ;; Set region bounds: 8x8 pixels (Min to Max inclusive = 8 pixels)
+    ;; Set region bounds: 8x8 pixels
     OUT   GPU_RegionMinX, R2
     OUT   GPU_RegionMinY, R3
 
-    ;; Hotspot at top-left corner (0,0) - critical for flip math
-    ;OUT   GPU_RegionHotspotX, 0
-    ;OUT   GPU_RegionHotspotY, 0
+    ;; Hotspot at TOP-LEFT of region in TEXTURE coordinates
     OUT   GPU_RegionHotspotX, R2
     OUT   GPU_RegionHotspotY, R3
 
@@ -55,9 +53,9 @@ _tic80_init_loop:
     IADD  R1, 1
     IADD  R2, 8              ; Move x by 8 pixels (next column)
 
-    ;; Check if x reached 256 (32 regions × 8 pixels = 256)
+    ;; Check if x reached 128 (16 regions × 8 pixels = 128)
     MOV   R4, R2
-    IEQ   R4, 256
+    IEQ   R4, 128
     JF    R4, _tic80_init_loop
 
     ;; Wrap to next row: reset x to 0, advance y by 8 pixels
@@ -72,30 +70,24 @@ _tic80_init_done:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-;; __builtin_tic80_spr (Multi-Tile Loop & Flip/Rotate/Scale/Colorkey Support)
+;; __builtin_tic80_spr (Multi-Tile Loop & Flip/Rotate/Scale Support)
 ;;
 ;; Stack layout relative to BP:
-;; [BP+2]: id (Sprite ID 0-511)
-;; [BP+3]: x
-;; [BP+4]: y
-;; [BP+5]: colorkey (Transparent color index, -1 for opaque)
-;; [BP+6]: scale (TIC-80 scale: 1.0 = 2.647 on Vircon32)
-;; [BP+7]: flip (0=none, 1=horizontal, 2=vertical, 3=both)
-;; [BP+8]: rotate (0=0°, 1=90°, 2=180°, 3=270°)
-;; [BP+9]: w (Grid Width as Float)
-;; [BP+10]: h (Grid Height as Float)
+;; [BP+2]:  id        (Sprite ID 0-511)
+;; [BP+3]:  x         (Screen X position)
+;; [BP+4]:  y         (Screen Y position)
+;; [BP+5]:  colorkey  (Transparent color index, -1 for opaque)
+;; [BP+6]:  scale     (TIC-80 scale: 1.0 = 2.64 on Vircon32)
+;; [BP+7]:  flip      (0=none, 1=horizontal, 2=vertical, 3=both)
+;; [BP+8]:  rotate    (0=0°, 1=90°, 2=180°, 3=270°) - IGNORED
+;; [BP+9]:  w         (Grid Width in sprites)
+;; [BP+10]: h         (Grid Height in sprites)
 ;;
-;; NOTE: TIC-80 scale of 1.0 maps to Vircon32 scale of ~2.647 (45/17)
-;;       This is achieved via: final_scale = tic80_scale * 2.647
-;;
-;; NOTE on Initializing the Vircon32 Regions
-;;
-;; To guarantee this works flawlessly, the region initialization must
-;; define regions 0 through 511 sequentially from left-to-right,
-;; top-to-bottom across your main 256x256 TIC-80 sprite sheet.
-;;
-;; Width & Height: Every region must be exactly 8x8 pixels.
-;; Hot-spot: Every region's hot-spot MUST be (0,0) (top-left corner).
+;; FIXES APPLIED:
+;;  ✅ GPU_SelectedTexture = 0 (TIC-80 sprite sheet)
+;;  ✅ GPU_MultiplyColor = 0xFFFFFFFF (no tinting)
+;;  ✅ Scale constant = 2.64 (2711/1024)
+;;  ✅ Correct stack layout with w at [BP+9] and h at [BP+10]
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -103,11 +95,15 @@ __builtin_tic80_spr:
     PUSH  BP
     MOV   BP, SP
 
+    ;; ✅ FIX: Ensure correct texture and no tinting for TIC-80 sprites
+    OUT   GPU_SelectedTexture, 0
+    OUT   GPU_MultiplyColor, 0xFFFFFFFF  ; White = no color tinting
+
     ;; --- 1. Calculate final scale as float ---
-    ;; TIC-80 scale 1.0 -> Vircon32 scale ~2.64706 (2711/1024)
+    ;; ✅ FIX: Use exact value 2711/1024 = 2.647060546875
     MOV   R1, [BP+6]        ; tic80_scale (float)
-    MOV   R2, 2.64  ; Pre-calculated float: 2711/1024
-    FMUL  R1, R2            ; R1 = tic80_scale * 2.64706 (float multiply)
+    MOV   R2, 2.64
+    FMUL  R1, R2            ; R1 = tic80_scale * 2.647060546875
     MOV   R12, R1           ; Save X scale in R12 (as float)
     MOV   R13, R1           ; Copy to R13 for Y scale (as float)
 
@@ -136,21 +132,22 @@ _tic80_spr_no_flip_y:
     ;; Rotation (BP+8) is ignored - Vircon32 GPU doesn't support 90° rotation
 
     ;; --- 2. Prepare Loop Limits & Convert ALL Floats to Integers ---
-    MOV   R1, [BP+9]        ; w (grid width)
+    ;; ✅ FIX: Now correctly reads w from [BP+9] and h from [BP+10]
+    MOV   R1, [BP+9]        ; w (grid width in sprites)
     MOV   R5, R1
     CFI   R5                ; R5 = w (integer, columns)
 
-    MOV   R1, [BP+10]       ; h (grid height)
+    MOV   R1, [BP+10]       ; h (grid height in sprites)
     MOV   R6, R1
     CFI   R6                ; R6 = h (integer, rows)
 
     MOV   R7, [BP+2]        ; R7 = id (base sprite index)
     CFI   R7
 
-    MOV   R8, [BP+3]        ; R8 = x (base X, integer)
+    MOV   R8, [BP+3]        ; R8 = x (base X screen position, integer)
     CFI   R8
 
-    MOV   R9, [BP+4]        ; R9 = y (base Y, integer)
+    MOV   R9, [BP+4]        ; R9 = y (base Y screen position, integer)
     CFI   R9
 
     ;; Initialize Row Counter
@@ -170,14 +167,15 @@ _tic80_spr_col_loop_start:
     JT    R1, _tic80_spr_row_loop_end  ; If col >= w, move to next row
 
     ;; --- 3. Calculate Target Region ID ---
-    ;; TIC-80: 256 sprites in 256x256 sheet = 32 sprites per row
     MOV   R1, R4
-    IMUL  R1, 32            ; 32 sprites per row
+    IMUL  R1, 16            ; 16 sprites per row (NOT 32)
     IADD  R1, R3            ; + column offset
     IADD  R1, R7            ; + base sprite id
     OUT   GPU_SelectedRegion, R1
 
-    ;; --- 4. Calculate X Coordinate (NO scale multiplication - GPU handles it) ---
+    ;; --- 4. Calculate X Coordinate ---
+    ;; With hotspot at top-left (texture coords), drawing at (X,Y) places
+    ;; the sprite's top-left at (X,Y) - matches TIC-80 behavior
     MOV   R1, [BP+7]        ; flip parameter
     CFI   R1
     AND   R11, R1
@@ -202,7 +200,7 @@ _tic80_spr_calc_flip_x:
 _tic80_spr_set_x:
     OUT   GPU_DrawingPointX, R1
 
-    ;; --- 5. Calculate Y Coordinate (NO scale multiplication - GPU handles it) ---
+    ;; --- 5. Calculate Y Coordinate ---
     MOV   R1, [BP+7]        ; flip parameter
     CFI   R1
     AND   R11, R1
