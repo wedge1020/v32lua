@@ -138,24 +138,27 @@ void process_tic80_section(const char *section, TIC80AssetData *assets) {
     // Add other sections (WAVES, SFX, TRACKS) here if needed
 }
 
-// Process all collected TIC80 sections
 void process_all_tic80_sections(void) {
-    if (current_tic80_section && current_tic80_assets) {
+    // Defensive: check both are non-NULL before processing
+    if (current_tic80_section != NULL) {
         process_tic80_section(current_tic80_section, current_tic80_assets);
 
-        // Clean up
+        // Clean up section name
         free(current_tic80_section);
-        TIC80AssetData *item = current_tic80_assets;
-        while (item != NULL) {
-            TIC80AssetData *next = item->next;
-            free(item->hex_data);
-            free(item);
-            item = next;
-        }
-
         current_tic80_section = NULL;
-        current_tic80_assets = NULL;
     }
+
+    // Clean up asset list (defensive iteration)
+    TIC80AssetData *item = current_tic80_assets;
+    while (item != NULL) {
+        TIC80AssetData *next = item->next;
+        if (item->hex_data != NULL) {
+            free(item->hex_data);
+        }
+        free(item);
+        item = next;
+    }
+    current_tic80_assets = NULL;
 }
 
 // =============================================================================
