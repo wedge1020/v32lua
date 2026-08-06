@@ -126,6 +126,28 @@ typedef struct astnode {
     } as;
 } ASTNode;
 
+typedef struct TIC80AssetData TIC80AssetData;
+struct TIC80AssetData {
+    int index;
+    char *hex_data;
+    TIC80AssetData *next;
+};
+
+// Global state for TIC80 asset processing
+extern char *current_tic80_section;
+extern uint32_t tic80_palette[16];
+extern bool tic80_use_custom_palette;
+extern bool tic80_has_any_assets;
+extern TIC80AssetData *current_tic80_assets;
+
+// Function declarations
+void process_tic80_section(const char *section, TIC80AssetData *assets);
+TIC80AssetData *parse_tic80_asset_line(const char *line);
+void generate_vtex_from_tic80(const char *output_path);
+bool tic80_has_assets(void);
+bool tic80_has_custom_palette(void);
+uint32_t tic80_get_palette_color(int index);
+
 extern char cart_version[64];
 extern char cart_title[128];
 extern CARTresource *textures_head;

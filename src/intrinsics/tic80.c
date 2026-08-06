@@ -3,6 +3,29 @@
 #define MAX_TIC80_SPR_ARGS 9  // id, x, y, colorkey, scale, flip, rotate, w, h
 
 /**
+ * TIC-80 default 16-color palette (32-bit AABBGGRR for Vircon32 GPU)
+ * Colors match the official TIC-80 palette in Vircon32 format
+ */
+static unsigned int tic80_palette[16] = {
+	0xFF2C1C1A,
+	0xFF5D275D,
+	0xFF533EB1,
+	0xFF577DEF,
+	0xFF75CDFF,
+	0xFF70F0A7,
+	0xFF64B738,
+	0xFF797125,
+	0xFF6F3629,
+	0xFFC95D3B,
+	0xFFF6A641,
+	0xFFF7EF73,
+	0xFFF4F4F4,
+	0xFFC2B094,
+	0xFF866C56,
+	0xFF573C33
+};
+
+/**
  * Emits assembly for the spr() intrinsic (TIC-80 compatibility).
  *
  *      Corrected argument mapping to include 'w' parameter.
@@ -314,53 +337,46 @@ bool emit_tic80_add_intrinsic(ASTNode *node, int dest_reg)
     return true;
 }
 
-/**
- * TIC-80 default 16-color palette (32-bit AABBGGRR for Vircon32 GPU)
- * Colors match the official TIC-80 palette in Vircon32 format
- */
-static const unsigned int tic80_palette[16] = {
-	0xFF2C1C1A,
-	0xFF5D275D,
-	0xFF533EB1,
-	0xFF577DEF,
-	0xFF75CDFF,
-	0xFF70F0A7,
-	0xFF64B738,
-	0xFF797125,
-	0xFF6F3629,
-	0xFFC95D3B,
-	0xFFF6A641,
-	0xFFF7EF73,
-	0xFFF4F4F4,
-	0xFFC2B094,
-	0xFF866C56,
-	0xFF573C33
-};
+// Add a setter function
+void tic80_set_custom_palette(const unsigned int *new_palette) {
+    for (int i = 0; i < 16; i++) {
+        tic80_palette[i] = new_palette[i];
+    }
+}
 
 /**
  * Emits assembly for TIC-80 cls(color) intrinsic
  * color can be: palette index (0-15), hex string ("0xRRGGBB"), or hex number
  */
-bool emit_tic80_cls_intrinsic(ASTNode *node)
+bool  emit_tic80_cls_intrinsic (ASTNode *node)
 {
-    emit_asm("    ;; --- TIC-80 cls() Intrinsic ---\n");
+    emit_asm (";; --- TIC-80 cls() Intrinsic ---\n");
 
-    ASTNode *arg = node->as.call.args_head;
+    ASTNode *arg  = node -> as.call.args_head;
 
     if (arg == NULL) {
         // Default: clear to black (palette index 0)
-        emit_asm("MOV R1, 0xFF000000 ; cls() with no args = black\n");
+        if (use_custom_palette) {
+            emit_asm ("MOV R1, 0x%.8X ; cls() with custom palette index 0\n",
+                     custom_tic80_palette[0]);
+        } else {
+            emit_asm ("MOV R1, 0xFF000000 ; cls() with no args = black\n");
+        }
     }
-    else if (arg->type == NODE_NUMBER) {
+    else if (arg -> type == NODE_NUMBER) {
         double val = arg->as.number.val;
         int int_val = (int)val;
 
-        // Check if it's a palette index (0-15)
         if (int_val >= 0 && int_val < 16) {
-            emit_asm("MOV R1, 0x%.8X ; Palette index %d\n",
-                     tic80_palette[int_val], int_val);
+            if (use_custom_palette) {
+                emit_asm("MOV R1, 0x%.8X ; Palette index %d (custom)\n",
+                         custom_tic80_palette[int_val], int_val);
+            } else {
+                emit_asm("MOV R1, 0x%.8X ; Palette index %d\n",
+                         tic80_palette[int_val], int_val);
+            }
         } else {
-            // Treat as direct 32-bit color value
+            // Treat as direct color value
             emit_asm("MOV R1, ");
             generate_asm(arg, 1);
             emit_asm("\n");

@@ -28,18 +28,20 @@ char *mangle_method_name (const char *table_name, const char *method_name);
 %type <ast_node> argument_list
 %type <ast_node> var_list       /* Added for multiple assignment */
 %type <ast_node> expr_list      /* Added for multiple assignment */
+%type <ast_node> tic80_section tic80_asset_lines
 
 %token <number_val> TOKEN_NUMBER
 %token <string_val> TOKEN_IDENTIFIER TOKEN_STRING
 %token <string_val> TOKEN_COMMENT_LINE TOKEN_COMMENT_BLOCK
+%token <string_val> TOKEN_TIC80_SECTION_HEADER TOKEN_TIC80_ASSET_DATA
+%token <string_val> TOKEN_TIC80_SECTION_FOOTER
 %token <string_val> TOKEN_CART_HINT
 
 %token TOKEN_WHILE TOKEN_FOR TOKEN_BREAK TOKEN_IF TOKEN_ELSEIF TOKEN_THEN TOKEN_ELSE TOKEN_END 
 %token TOKEN_FUNCTION TOKEN_ASM TOKEN_RAWASM TOKEN_RETURN TOKEN_AND TOKEN_OR
 %token TOKEN_EQ TOKEN_NEQ TOKEN_LE TOKEN_GE TOKEN_LT TOKEN_GT TOKEN_CONCAT
 %token TOKEN_LOCAL TOKEN_DO TOKEN_NOT TOKEN_LEN UNARY_MINUS
-%token TOKEN_TRUE TOKEN_FALSE TOKEN_NIL
-%token TOKEN_FLOORDIV
+%token TOKEN_TRUE TOKEN_FALSE TOKEN_NIL TOKEN_FLOORDIV
 
 %type <ast_node> statement statement_list stat_list expr function_def return_stmt
 %type <ast_node> table_constructor function_call else_branch prefix_expr
@@ -228,6 +230,7 @@ statement:
         $$ = make_node(NODE_COMMENT_BLOCK);
         $$->as.string_val.value = $1;
     }
+	| tic80_section             { $$ = $1; }  /* Returns NULL - we process these separately */
     | TOKEN_CART_HINT {
         $$ = make_node_cart_hint($1);
     }
@@ -491,6 +494,32 @@ table_constructor:
     }
     | '{' field_list '}' {
         $$ = make_node_table_constructor($2);
+    }
+    ;
+
+tic80_section:
+    TOKEN_TIC80_SECTION_HEADER
+    {
+        current_tic80_section = strdup($1);  // $1 is already the string, not a node
+        free($1);
+    }
+    tic80_asset_lines
+    TOKEN_TIC80_SECTION_FOOTER
+    {
+        process_tic80_section(current_tic80_section, current_tic80_assets);
+        free(current_tic80_section);
+        free($3);
+        $$ = NULL;  // Return NULL so it doesn't get added to AST
+    }
+    ;
+
+tic80_asset_lines:
+    | tic80_asset_lines TOKEN_TIC80_ASSET_DATA
+    {
+        TIC80AssetData *data = parse_tic80_asset_line($2);  // $2 is the string
+		data->next = current_tic80_assets;
+		current_tic80_assets = data;
+        free($2);
     }
     ;
 %%

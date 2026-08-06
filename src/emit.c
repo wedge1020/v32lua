@@ -525,39 +525,58 @@ void  emit_runtime_library (void)
     emit_asm (";; v32lua Runtime Library Routines\n");
     emit_asm (";; ===========================================================================\n");
 
-	////////////////////////////////////////////////////////////////////////////////////
-	//
+    ////////////////////////////////////////////////////////////////////////////////////
+    //
     // Always needed - core routines
-	//
-	emit_embedded_asm (runtime_memory_start);
+    //
+    emit_embedded_asm (runtime_memory_start);
 
-	////////////////////////////////////////////////////////////////////////////////////
-	//
+    ////////////////////////////////////////////////////////////////////////////////////
+    //
     // Conditional modules
-	//
+    //
     if (runtime_req.needs_exec)
-		emit_embedded_asm (runtime_exec_start);
+        emit_embedded_asm (runtime_exec_start);
     if (runtime_req.needs_tables)
-		emit_embedded_asm (runtime_table_start);
+        emit_embedded_asm (runtime_table_start);
     if (runtime_req.needs_strings)
-		emit_embedded_asm (runtime_string_start);
+        emit_embedded_asm (runtime_string_start);
     if (runtime_req.needs_print)
-		emit_embedded_asm (runtime_print_start);
+        emit_embedded_asm (runtime_print_start);
 
-	////////////////////////////////////////////////////////////////////////////////////
-	//
+    ////////////////////////////////////////////////////////////////////////////////////
+    //
     // API bundles (all-or-nothing)
-	//
+    //
     if (runtime_req.needs_pico8)
-		emit_embedded_asm (runtime_pico8_start);
+        emit_embedded_asm (runtime_pico8_start);
     if (runtime_req.needs_tic80)
-		emit_embedded_asm (runtime_tic80_start);
+    {
+        emit_embedded_asm (runtime_tic80_start);
 
-	////////////////////////////////////////////////////////////////////////////////////
-	//
+        // OVERWRITE default palette with custom if present
+        if (tic80_has_custom_palette()) {
+            emit_asm("\n;; =========================================================");
+            emit_asm(";; TIC-80 Custom Palette (from cartridge, overrides defaults)");
+            emit_asm(";; =========================================================\n");
+            emit_asm("__tic80_palette:\n");
+
+            // Emit all 16 colors on one line (matches default format)
+            emit_asm("integer ");
+            for (int i = 0; i < 16; i++) {
+                emit_asm("0x%.8X", tic80_get_palette_color(i));
+                if (i < 15) emit_asm(", ");
+            }
+            emit_asm("\n");
+        }
+    }
+}
+
+    ////////////////////////////////////////////////////////////////////////////////////
+    //
     // Always needed - epilogue
-	//
-	emit_embedded_asm (runtime_constant_start);
+    //
+    emit_embedded_asm (runtime_constant_start);
     emit_asm (";; ===========================================================================\n");
 }
 

@@ -7,6 +7,13 @@ CARTresource* textures_head  = NULL;
 CARTresource* sounds_head    = NULL;
 int next_texture_id          = 0;
 
+// Add after existing globals
+char *current_tic80_section = NULL;
+TIC80AssetData *current_tic80_assets = NULL;
+uint32_t tic80_palette[16] = {0};
+bool tic80_use_custom_palette = false;
+bool tic80_has_any_assets = false;
+
 ASTNode *make_node (NodeType type)
 {
     ASTNode* n = (ASTNode*)calloc(1, sizeof(ASTNode));

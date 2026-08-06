@@ -4,14 +4,18 @@
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; __builtin_tic80_init (initialize 512 regions of 8x8 pixels)
 ;;
 ;; Creates 512 regions (0-511) arranged in a 16-column × 32-row grid
 ;; Each region is exactly 8×8 pixels with hotspot at TOP-LEFT (texture coords)
 ;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; NOTE: Palette is NOT loaded here - it's just a data array (__tic80_palette)
+;;       that API functions reference directly. Custom palettes are emitted
+;;       with the same label name to override defaults.
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 __builtin_tic80_init:
     PUSH  BP
@@ -604,8 +608,3 @@ _tic80_cls_use_direct:
     POP   BP
     RET
 
-;; ===========================================================================
-;; TIC-80 Default 16-Color Palette (32-bit AABBGGRR for Vircon32 GPU)
-;; ===========================================================================
-__tic80_palette:
-integer 0xFF2C1C1A, 0xFF5D275D, 0xFF533EB1, 0xFF577DEF, 0xFF75CDFF, 0xFF70F0A7, 0xFF64B738, 0xFF797125, 0xFF6F3629, 0xFFC95D3B, 0xFFF6A641, 0xFFF7EF73, 0xFFF4F4F4, 0xFFC2B094, 0xFF866C56, 0xFF573C33

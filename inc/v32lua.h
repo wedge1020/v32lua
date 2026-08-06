@@ -18,8 +18,9 @@
 #include "generate.h"
 #include "internals.h"
 #include "register.h"
+#include "tic80_assets.h"
 
-#define  VERSION      "20260805-dev"
+#define  VERSION      "20260806-dev"
 #define  AUTHOR       "Matthew Haas"
 #define  URL          "https://github.com/wedge1020/v32lua"
 

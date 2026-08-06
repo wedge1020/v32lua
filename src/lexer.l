@@ -83,6 +83,22 @@ char *process_string_literal (const char *text, int  len)
     return TOKEN_COMMENT_LINE;
 }
 
+	/* NEW: TIC80 Asset Section Tokens */
+"-- <"[A-Z]+">" {
+    yylval.string_val = strdup(yytext + 3);  // Skip "-- <"
+    return TOKEN_TIC80_SECTION_HEADER;
+}
+
+"-- "[0-9]+[:][0-9a-fA-F]+ {
+    yylval.string_val = strdup(yytext + 3);  // Skip "-- "
+    return TOKEN_TIC80_ASSET_DATA;
+}
+
+"-- </"[A-Z]+">" {
+    yylval.string_val = strdup(yytext + 4);  // Skip "-- </"
+    return TOKEN_TIC80_SECTION_FOOTER;
+}
+
 "--#".* { 
     char *hint = strdup (yytext + 3);
     int len = strlen(hint);
