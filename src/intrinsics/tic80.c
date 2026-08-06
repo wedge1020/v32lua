@@ -319,24 +319,23 @@ bool emit_tic80_add_intrinsic(ASTNode *node, int dest_reg)
  * Colors match the official TIC-80 palette in Vircon32 format
  */
 static const unsigned int tic80_palette[16] = {
-    0xFF000000, // 0:  black
-    0xFF532B1D, // 1:  dark blue
-    0xFF53257E, // 2:  dark purple
-    0xFF518700, // 3:  dark green
-    0xFF3652AB, // 4:  brown
-    0xFF4F575F, // 5:  dark gray
-    0xFFC7C3C2, // 6:  light gray
-    0xFFE8F1FF, // 7:  white
-    0xFF4D00FF, // 8:  red
-    0xFFA300FF, // 9:  orange
-    0xFF27ECFF, // 10: yellow
-    0xFF36E400, // 11: light green
-    0xFF29ADFF, // 12: blue
-	0xFFC2B094, // 13: cyan
-    0xFF77A8FF, // 14: pink
-    0xFFAAFFCC  // 15: light peach
+	0xFF2C1C1A,
+	0xFF5D275D,
+	0xFF533EB1,
+	0xFF577DEF,
+	0xFF75CDFF,
+	0xFF70F0A7,
+	0xFF64B738,
+	0xFF797125,
+	0xFF6F3629,
+	0xFFC95D3B,
+	0xFFF6A641,
+	0xFFF7EF73,
+	0xFFF4F4F4,
+	0xFFC2B094,
+	0xFF866C56,
+	0xFF573C33
 };
-   // 0xFF9C7683, // 13: lavender
 
 /**
  * Emits assembly for TIC-80 cls(color) intrinsic
