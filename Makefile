@@ -56,3 +56,7 @@ monofiles:
 
 context:
 	$(MAKE) -C src context
+
+put: context
+	@rm -f put/*
+	@cp inc/*.h src/*.c src/*.txt src/intrinsics/*.c src/node/*.c src/runtime/*.txt README.md doc/*.md put/

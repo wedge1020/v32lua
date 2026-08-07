@@ -507,8 +507,6 @@ tic80_section:
     TOKEN_TIC80_SECTION_FOOTER
     {
         // === PROCESS SECTION IMMEDIATELY ===
-        fprintf(stderr, "DEBUG PARSER: Processing section '%s' with %d assets\n",
-                current_tic80_section, count_tic80_assets(current_tic80_assets));
         process_tic80_section(current_tic80_section, current_tic80_assets);
 
         // Clean up this section's data
@@ -534,8 +532,6 @@ tic80_asset_lines:
     | tic80_asset_lines TOKEN_TIC80_ASSET_DATA
     {
         TIC80AssetData *data = parse_tic80_asset_line($2);
-		fprintf(stderr, "DEBUG PARSER: Parsed asset line, index=%d, hex_data=%s\n",
-                data ? data->index : -1, data ? data->hex_data : "NULL");
         if (data != NULL) {  // <-- ADD THIS CHECK
             data->next = current_tic80_assets;
             current_tic80_assets = data;

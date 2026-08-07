@@ -51,7 +51,7 @@ lex.yy.c: lexer.l parser.tab.h
 	$(CC) $(CFLAGS) -Wa,--noexecstack -c $< -o $@
 
 context:
-	@cat runtime/memory.s runtime/exec.s runtime/table.s runtime/string.s runtime/print.s runtime/pico8.s runtime/tic80.s runtime/constant.s > runtime.s.txt
+	#@cat runtime/memory.s runtime/exec.s runtime/table.s runtime/string.s runtime/print.s runtime/pico8.s runtime/tic80.s runtime/constant.s > runtime.s.txt
 	@cp -v runtime/memory.s{,.txt}
 	@cp -v runtime/exec.s{,.txt}
 	@cp -v runtime/table.s{,.txt}

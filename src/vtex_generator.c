@@ -16,9 +16,43 @@ typedef struct {
 // =============================================================================
 // VTEX Generation
 // =============================================================================
+void generate_transparent_vtex(const char *base_path, uint32_t *palette) {
+    uint32_t *pixels = calloc(TEX_WIDTH * TEX_HEIGHT, sizeof(uint32_t));
+
+    for (int texture_idx = 0; texture_idx < 17; texture_idx++) {
+        char filename[256];
+        snprintf(filename, sizeof(filename), "%s_transparent_%d.vtex", base_path, texture_idx);
+
+        FILE *f = fopen(filename, "wb");
+        if (!f) continue;
+
+        // Write header
+        VTEXHeader hdr = { .width = TEX_WIDTH, .height = TEX_HEIGHT };
+        memcpy(hdr.magic, "V32-VTEX", 8);
+        fwrite(&hdr, sizeof(hdr), 1, f);
+
+        // Generate pixels with transparency
+        for (int y = 0; y < TEX_HEIGHT; y++) {
+            for (int x = 0; x < TEX_WIDTH; x++) {
+                uint8_t color_idx = get_tic80_tile_pixel(x, y);
+                uint32_t color = palette[color_idx % 16];
+
+                // For textures 1-16, make the corresponding color transparent
+                if (texture_idx > 0 && color_idx == (texture_idx - 1)) {
+                    color = (color & 0x00FFFFFF) | 0x00;  // Set alpha to 0
+                }
+
+                pixels[y * TEX_WIDTH + x] = color;
+            }
+        }
+
+        fwrite(pixels, sizeof(uint32_t), TEX_WIDTH * TEX_HEIGHT, f);
+        fclose(f);
+    }
+    free(pixels);
+}
 
 void generate_vtex_from_tic80(const char *output_path) {
-	fprintf(stderr, "DEBUG VTEX: Generating to '%s'\n", output_path);
     FILE *f = fopen(output_path, "wb");
     if (!f) {
         fprintf(stderr, "Error: Could not create VTEX file '%s'\n", output_path);
@@ -42,11 +76,6 @@ void generate_vtex_from_tic80(const char *output_path) {
         fclose(f);
         return;
     }
-
-	fprintf(stderr, "DEBUG VTEX: Sampling pixels: (0,0)=%02x, (8,0)=%02x, (16,0)=%02x\n",
-		get_tic80_tile_pixel(0, 0),
-		get_tic80_tile_pixel(8, 0),
-		get_tic80_tile_pixel(16, 0));
 
     // Render TIC80 tilesheet (128x256)
     for (int y = 0; y < TEX_HEIGHT; y++) {
