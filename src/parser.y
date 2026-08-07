@@ -500,16 +500,16 @@ table_constructor:
 tic80_section:
     TOKEN_TIC80_SECTION_HEADER
     {
-        current_tic80_section = strdup($1);  // $1 is already the string, not a node
-        free($1);
+        current_tic80_section = strdup($1);
+        current_tic80_assets = NULL;
     }
     tic80_asset_lines
     TOKEN_TIC80_SECTION_FOOTER
     {
-        process_tic80_section(current_tic80_section, current_tic80_assets);
-        free(current_tic80_section);
+        // DON'T process here - just mark we have assets
+        tic80_has_any_assets = true;
         free($3);
-        $$ = NULL;  // Return NULL so it doesn't get added to AST
+        $$ = NULL;
     }
     ;
 

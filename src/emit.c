@@ -555,7 +555,7 @@ void  emit_runtime_library (void)
         emit_embedded_asm (runtime_tic80_start);
 
         // OVERWRITE default palette with custom if present
-        if (tic80_has_custom_palette()) {
+        //if (tic80_has_custom_palette()) {
             emit_asm("\n;; =========================================================");
             emit_asm(";; TIC-80 Custom Palette (from cartridge, overrides defaults)");
             emit_asm(";; =========================================================\n");
@@ -568,7 +568,7 @@ void  emit_runtime_library (void)
                 if (i < 15) emit_asm(", ");
             }
             emit_asm("\n");
-        }
+       // }
     }
 
     ////////////////////////////////////////////////////////////////////////////////////

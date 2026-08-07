@@ -115,14 +115,15 @@ TIC80AssetData *parse_tic80_asset_line(const char *line) {
     return data;
 }
 
-// Make process_all_tic80_sections more defensive
 void process_all_tic80_sections(void) {
     if (current_tic80_section == NULL) {
         return;
     }
 
+    // Process ONCE here
     process_tic80_section(current_tic80_section, current_tic80_assets);
 
+    // Clean up
     free(current_tic80_section);
     current_tic80_section = NULL;
 

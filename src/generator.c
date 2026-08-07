@@ -532,7 +532,7 @@ void generate_program (ASTNode *head)
 	bool has_tic       = (tic_sym != NULL && tic_sym->is_function == 1);
 
     // If neither main() nor game_loop() exists, halt compilation immediately
-    if (!has_main && !has_game_loop)
+    if (!has_main && !has_game_loop && (!has_tic && !runtime_req.needs_tic80))
     {
         compiler_error(ERR_SEMANTIC, -1, 
             "Compilation failed: Your program must declare either a 'main()' or a 'game_loop()' function.");
