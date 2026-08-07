@@ -518,10 +518,12 @@ tic80_asset_lines:
     | tic80_asset_lines TOKEN_TIC80_ASSET_DATA
     {
         TIC80AssetData *data = parse_tic80_asset_line($2);
-        data->next = current_tic80_assets;
-        current_tic80_assets = data;
+        if (data != NULL) {  // <-- ADD THIS CHECK
+            data->next = current_tic80_assets;
+            current_tic80_assets = data;
+        }
         free($2);
-        $$ = NULL;  // Not added to AST
+        $$ = NULL;
     }
     ;
 %%

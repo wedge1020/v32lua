@@ -88,24 +88,55 @@ uint8_t get_tic80_tile_pixel(int x, int y) {
 // =============================================================================
 
 // Parse a single TIC80 asset line (e.g., "001:eccccccccc888888...")
+// Make parse_tic80_asset_line more defensive
 TIC80AssetData *parse_tic80_asset_line(const char *line) {
+    if (line == NULL || *line == '\0') {
+        return NULL;
+    }
+
     TIC80AssetData *data = malloc(sizeof(TIC80AssetData));
     if (!data) return NULL;
 
-    // Parse format: "001:hexdata"
     char *colon = strchr(line, ':');
     if (!colon) {
         free(data);
         return NULL;
     }
 
-    // Extract index
     *colon = '\0';
     data->index = atoi(line);
     data->hex_data = strdup(colon + 1);
+    if (data->hex_data == NULL) {
+        free(data);
+        return NULL;
+    }
     data->next = NULL;
 
     return data;
+}
+
+// Make process_all_tic80_sections more defensive
+void process_all_tic80_sections(void) {
+    if (current_tic80_section == NULL) {
+        return;
+    }
+
+    process_tic80_section(current_tic80_section, current_tic80_assets);
+
+    free(current_tic80_section);
+    current_tic80_section = NULL;
+
+    TIC80AssetData *item = current_tic80_assets;
+    current_tic80_assets = NULL;
+
+    while (item != NULL) {
+        TIC80AssetData *next = item->next;
+        if (item->hex_data != NULL) {
+            free(item->hex_data);
+        }
+        free(item);
+        item = next;
+    }
 }
 
 // =============================================================================
@@ -136,29 +167,6 @@ void process_tic80_section(const char *section, TIC80AssetData *assets) {
         tic80_has_any_assets = true;
     }
     // Add other sections (WAVES, SFX, TRACKS) here if needed
-}
-
-void process_all_tic80_sections(void) {
-    // Defensive: check both are non-NULL before processing
-    if (current_tic80_section != NULL) {
-        process_tic80_section(current_tic80_section, current_tic80_assets);
-
-        // Clean up section name
-        free(current_tic80_section);
-        current_tic80_section = NULL;
-    }
-
-    // Clean up asset list (defensive iteration)
-    TIC80AssetData *item = current_tic80_assets;
-    while (item != NULL) {
-        TIC80AssetData *next = item->next;
-        if (item->hex_data != NULL) {
-            free(item->hex_data);
-        }
-        free(item);
-        item = next;
-    }
-    current_tic80_assets = NULL;
 }
 
 // =============================================================================

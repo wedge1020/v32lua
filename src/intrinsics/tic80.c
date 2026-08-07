@@ -1,4 +1,5 @@
 #include "v32lua.h"
+#include "tic80_assets.h"
 
 #define MAX_TIC80_SPR_ARGS 9  // id, x, y, colorkey, scale, flip, rotate, w, h
 
