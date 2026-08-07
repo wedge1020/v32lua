@@ -13,45 +13,39 @@ void generate_vtex_from_tic80_with_colorkey(const char *output_path, int texture
         return;
     }
 
-    // Write MINIMAL VTEX header: magic + width + height
-    VTEXHeader hdr = {
-        .width = TEX_WIDTH,
-        .height = TEX_HEIGHT
-    };
+    VTEXHeader hdr = { .width = TEX_WIDTH, .height = TEX_HEIGHT };
     memcpy(hdr.magic, "V32-VTEX", 8);
     fwrite(&hdr, sizeof(hdr), 1, f);
 
-    // Get the palette
     uint32_t *palette = get_tic80_palette();
-
-    // Generate texture data
     uint32_t *pixels = calloc(TEX_WIDTH * TEX_HEIGHT, sizeof(uint32_t));
     if (!pixels) {
         fclose(f);
         return;
     }
 
-    // Render TIC80 tilesheet (128x256) with color keying
     for (int y = 0; y < TEX_HEIGHT; y++) {
         for (int x = 0; x < TEX_WIDTH; x++) {
             uint8_t color_idx = get_tic80_tile_pixel(x, y);
             uint32_t color = palette[color_idx % 16];
 
-            // In AABBGGRR format:
-            // - Alpha is bits 24-31 (0xFF000000)
-            // - Blue is bits 16-23 (0x00FF0000)
-            // - Green is bits 8-15 (0x0000FF00)
-            // - Red is bits 0-7 (0x000000FF)
-            //
-            // For textures 0-15: make their respective palette color transparent
-            // For texture 16: keep all colors opaque
+            // Palette is AABBGGRR format - extract components
+            uint8_t alpha = (color >> 24) & 0xFF;
+            uint8_t blue  = (color >> 16) & 0xFF;
+            uint8_t green = (color >> 8)  & 0xFF;
+            uint8_t red   = color & 0xFF;
+
+            // GPU expects RGBA format - assemble with channel swap (BGR -> RGB)
+            uint32_t rgba_color = (red << 24) | (green << 16) | (blue << 8) | alpha;
+
+            // Apply color keying: clear alpha for matching palette index
             if (texture_idx < 16 && color_idx == texture_idx) {
-                color = color & 0x00FFFFFF;  // Clear alpha (set to 0)
+                rgba_color = rgba_color & 0xFFFFFF00;  // Clear alpha (LSB)
             } else {
-                color = (color & 0x00FFFFFF) | 0xFF000000;  // Set alpha to 0xFF (opaque)
+                rgba_color = (rgba_color & 0xFFFFFF00) | 0x000000FF;  // Set alpha to 255
             }
 
-            pixels[y * TEX_WIDTH + x] = color;
+            pixels[y * TEX_WIDTH + x] = rgba_color;
         }
     }
 
