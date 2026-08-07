@@ -16,5 +16,6 @@ void      tic80_init_default_palette (void);
 void      process_all_tic80_sections (void);
 uint32_t *get_tic80_palette (void);
 uint8_t   get_tic80_tile_pixel (int, int);
+int       count_tic80_assets (TIC80AssetData *);
 
 #endif

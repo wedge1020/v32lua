@@ -12,7 +12,6 @@ void yyerror (const char *s);
 
 // Add your new helper prototype here:
 char *mangle_method_name (const char *table_name, const char *method_name);
-int count_assets(TIC80AssetData *);
 
 %}
 
@@ -549,15 +548,6 @@ tic80_asset_lines:
 
 void yyerror(const char *s) {
     compiler_error(ERR_SYNTAX, yylineno, "%s", s);
-}
-
-int count_assets(TIC80AssetData *head) {
-	int c=0;
-	while(head) {
-		c++;
-		head=head->next;
-	}
-	return c;
 }
 
 char* mangle_method_name(const char* table_name, const char* method_name) {

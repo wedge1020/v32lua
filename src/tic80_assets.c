@@ -33,14 +33,18 @@ static uint8_t tic80_tile_pixels[TIC80_SHEET_WIDTH * TIC80_SHEET_HEIGHT] = {0};
 // Helper Functions
 // =============================================================================
 
-/// Count assets in the linked list (for debugging)
-static int count_tic80_assets(TIC80AssetData *head) {
-    int count = 0;
-    while (head != NULL) {
+/// Count TIC80 assets in the linked list (for debugging)
+/// @param head Pointer to first asset in the list
+/// @return Number of assets
+int  count_tic80_assets (TIC80AssetData *head)
+{
+    int count    = 0;
+    while (head != NULL)
+	{
         count++;
-        head = head->next;
+        head     = head -> next;
     }
-    return count;
+    return (count);
 }
 
 // =============================================================================
