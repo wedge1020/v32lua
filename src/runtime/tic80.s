@@ -4,16 +4,14 @@
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-;; __builtin_tic80_init (initialize 512 regions of 8x8 pixels)
+;; __builtin_tic80_init (initialize 512 regions of 8x8 pixels for ALL 17 textures)
 ;;
 ;; Creates 512 regions (0-511) arranged in a 16-column × 32-row grid
 ;; Each region is exactly 8×8 pixels with hotspot at TOP-LEFT (texture coords)
 ;;
-;; NOTE: Palette is NOT loaded here - it's just a data array (__tic80_palette)
-;;       that API functions reference directly. Custom palettes are emitted
-;;       with the same label name to override defaults.
+;; This must be called for EACH texture (0-16) since regions are per-texture
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -21,17 +19,32 @@ __builtin_tic80_init:
     PUSH  BP
     MOV   BP, SP
 
-    OUT   GPU_SelectedTexture, 0  ; Use texture 0 for TIC-80 sprites
+    ;; Save callee-saved registers we'll use
+    PUSH  R13
 
-    MOV   R1, 0                 ; R1 = region ID (0 to 511)
-    MOV   R2, 0                 ; R2 = x position in texture (0 to 127)
-    MOV   R3, 0                 ; R3 = y position in texture (0 to 255)
+    ;; Outer loop: iterate through all 17 textures (0-16)
+    ;; Using R13 for texture index (R14=BP, R15=SP are reserved)
+    MOV   R13, 0             ; R13 = current texture index
+
+_tic80_init_texture_loop:
+    ;; Exit when all 17 textures are initialized
+    MOV   R0, R13
+    IEQ   R0, 17
+    JT    R0, _tic80_init_done
+
+    ;; Select current texture
+    OUT   GPU_SelectedTexture, R13
+
+    ;; Inner loop: initialize all 512 regions for this texture
+    MOV   R1, 0             ; R1 = region ID (0 to 511)
+    MOV   R2, 0             ; R2 = x position in texture (0 to 127)
+    MOV   R3, 0             ; R3 = y position in texture (0 to 255)
 
 _tic80_init_loop:
-    ;; Exit when all 512 regions are initialized
+    ;; Exit when all 512 regions are initialized for this texture
     MOV   R0, R1
     IEQ   R0, 512
-    JT    R0, _tic80_init_done
+    JT    R0, _tic80_init_next_texture
 
     ;; Select current region
     OUT   GPU_SelectedRegion, R1
@@ -58,16 +71,24 @@ _tic80_init_loop:
     IADD  R2, 8              ; Move x by 8 pixels (next column)
 
     ;; Check if x reached 128 (16 regions × 8 pixels = 128)
-    MOV   R4, R2
-    IEQ   R4, 128
-    JF    R4, _tic80_init_loop
+    MOV   R0, R2
+    IEQ   R0, 128
+    JF    R0, _tic80_init_loop
 
     ;; Wrap to next row: reset x to 0, advance y by 8 pixels
     MOV   R2, 0
     IADD  R3, 8
     JMP   _tic80_init_loop
 
+_tic80_init_next_texture:
+    ;; Move to next texture
+    IADD  R13, 1
+    JMP   _tic80_init_texture_loop
+
 _tic80_init_done:
+    ;; Restore callee-saved register
+    POP   R13
+
     MOV   SP, BP
     POP   BP
     RET
@@ -80,18 +101,16 @@ _tic80_init_done:
 ;; [BP+2]:  id        (Sprite ID 0-511)
 ;; [BP+3]:  x         (Screen X position)
 ;; [BP+4]:  y         (Screen Y position)
-;; [BP+5]:  colorkey  (Transparent color index, -1 for opaque)
+;; [BP+5]:  colorkey  (Transparent color index: 16=opaque, 0-15=transparent)
 ;; [BP+6]:  scale     (TIC-80 scale: 1.0 = 2.64 on Vircon32)
 ;; [BP+7]:  flip      (0=none, 1=horizontal, 2=vertical, 3=both)
 ;; [BP+8]:  rotate    (0=0°, 1=90°, 2=180°, 3=270°) - IGNORED
 ;; [BP+9]:  w         (Grid Width in sprites)
 ;; [BP+10]: h         (Grid Height in sprites)
 ;;
-;; FIXES APPLIED:
-;;  ✅ GPU_SelectedTexture = 0 (TIC-80 sprite sheet)
-;;  ✅ GPU_MultiplyColor = 0xFFFFFFFF (no tinting)
-;;  ✅ Scale constant = 2.64 (2711/1024)
-;;  ✅ Correct stack layout with w at [BP+9] and h at [BP+10]
+;; Texture mapping:
+;;   colorkey = -1  -> texture 16 (all opaque)
+;;   colorkey = 0-15 -> texture 0-15 (that palette color transparent)
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -99,21 +118,31 @@ __builtin_tic80_spr:
     PUSH  BP
     MOV   BP, SP
 
-    ;; Ensure correct texture and no tinting for TIC-80 sprites
-    OUT   GPU_SelectedTexture, 0
+    ;; --- Handle colorkey texture selection ---
+    MOV   R1, [BP+5]        ; colorkey parameter
+    CFI   R1                ; Convert to integer
+
+    ;; Map colorkey to texture:
+    ;;   0-15 -> 0-15 (that color transparent)
+    ;;   16 -> (opaque)
+_tic80_spr_texture_mapped:
+    ;; R1 now contains the texture index (0-16)
+    OUT   GPU_SelectedTexture, R1
+
+    ;; No tinting for TIC-80 sprites
     OUT   GPU_MultiplyColor, 0xFFFFFFFF
 
     ;; --- 1. Calculate final scale as float ---
     MOV   R1, [BP+6]        ; tic80_scale (float)
     MOV   R2, 2.64
-    FMUL  R1, R2            ; R1 = tic80_scale * 2.647060546875
+    FMUL  R1, R2            ; R1 = tic80_scale * 2.64
     MOV   R12, R1           ; Save X scale in R12
     MOV   R13, R1           ; Copy to R13 for Y scale
 
     ;; --- NEW: Pre-calculate scaled offset (8 * scale) ---
     MOV   R1, 8.0
     FMUL  R1, R12           ; R1 = 8 * scale
-    MOV   R10, R1           ; Save in R10 (unused register)
+    MOV   R10, R1           ; Save in R10
 
     ;; --- 1b. Apply flip by negating scale ---
     MOV   R2, [BP+7]        ; flip (0-3)
@@ -188,7 +217,7 @@ _tic80_spr_col_loop_start:
     ;; Normal X = base_x + (col * scaled_offset)
     MOV   R1, R3
     CIF   R1
-    FMUL  R1, R10           ; Use R10 for scaled offset
+    FMUL  R1, R10
     CFI   R1
     IADD  R1, R8
     JMP   _tic80_spr_set_x
@@ -216,7 +245,7 @@ _tic80_spr_set_x:
     ;; Normal Y = base_y + (row * scaled_offset)
     MOV   R1, R4
     CIF   R1
-    FMUL  R1, R10           ; Use R10 for scaled offset
+    FMUL  R1, R10
     CFI   R1
     IADD  R1, R9
     JMP   _tic80_spr_set_y

@@ -155,20 +155,21 @@ int  main (int  argc, char** argv)
                 *last_dot = '\0';
             }
 
-            // Build VTEX path: obj/tic80hello_spritesheet.vtex
-            char vtex_path[256];
-            snprintf(vtex_path, sizeof(vtex_path), "%s_spritesheet.vtex", base_path);
+            // Generate all 17 colorkey textures
+            generate_all_tic80_colorkey_textures(base_path);
 
-            generate_vtex_from_tic80(vtex_path);
-
-            // Register in textures_head (without extension; emit.c adds .vtex)
-            CARTresource *res = malloc(sizeof(CARTresource));
-            res->id = next_texture_id++;
-            res->var_name = strdup("tic80_spritesheet");
-            res->filename = malloc(strlen(base_path) + 12); // "_spritesheet" + null
-            sprintf(res->filename, "%s_spritesheet", base_path);
-            res->next = textures_head;
-            textures_head = res;
+            // Register all 17 textures in textures_head
+            for (int tex_idx = 0; tex_idx < 17; tex_idx++) {
+                CARTresource *res = malloc(sizeof(CARTresource));
+                res->id = next_texture_id++;
+                res->var_name = malloc(32);
+                snprintf(res->var_name, 32, "tic80_spritesheet_%d", tex_idx);
+                res->filename = malloc(strlen(base_path) + 32);
+                snprintf(res->filename, strlen(base_path) + 32,
+                         "%s_colorkey_%d", base_path, tex_idx);
+                res->next = textures_head;
+                textures_head = res;
+            }
         }
     }
 

@@ -11,6 +11,7 @@
 #include <math.h>
 
 #include "enums.h"
+#include "vtex_generator.h"
 #include "tic80_assets.h"
 #include "emit.h"
 #include "ast.h"

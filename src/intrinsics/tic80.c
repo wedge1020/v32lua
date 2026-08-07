@@ -108,7 +108,7 @@ bool emit_tic80_spr_intrinsic(ASTNode *node) {
         if (arg_count > arg_idx) {
             generate_asm(args[arg_idx], reg);
         } else if (stack_pos == 5) {
-            emit_asm("MOV R%d, -1.000000 ; Default colorkey\n", reg);
+            emit_asm("MOV R%d, 16.000000 ; Default colorkey\n", reg);
         } else {
             emit_asm("MOV R%d, BOXED_NIL ; Missing required arg!\n", reg);
         }
