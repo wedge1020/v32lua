@@ -2,13 +2,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-// TIC80 tilesheet is 256x256 pixels (32x32 tiles of 8x8 each)
-#define TIC80_SHEET_WIDTH  256
+// TIC80 tilesheet is 128x256 pixels (16x32 tiles of 8x8 each)
+#define TIC80_SHEET_WIDTH  128   // CHANGED from 256
 #define TIC80_SHEET_HEIGHT 256
-#define TIC80_TILE_SIZE    8
 
 // =============================================================================
-// Global State (defined here, declared in ast.h)
+// Global State (defined here, declared in tic80_assets.h)
 // =============================================================================
 
 char *current_tic80_section = NULL;
@@ -21,6 +20,33 @@ bool tic80_has_any_assets = false;
 static uint8_t tic80_tile_pixels[TIC80_SHEET_WIDTH * TIC80_SHEET_HEIGHT] = {0};
 
 // =============================================================================
+// Tile Parsing
+// =============================================================================
+static void parse_tic80_tile(int tile_index, const char *hex_data) {
+    // TIC80 sheet is 16 tiles wide, 32 rows
+    int x = (tile_index % 16) * 8;   // FIXED: 16 columns
+    int y = (tile_index / 16) * 8;   // FIXED: 16 columns
+
+    for (int i = 0; i < 64 && hex_data[i] != '\0'; i++) {
+        char c = hex_data[i];
+        int color_idx;
+
+        // Convert hex character to 4-bit color index (0-15)
+        if (c >= '0' && c <= '9') color_idx = c - '0';
+        else if (c >= 'a' && c <= 'f') color_idx = 10 + (c - 'a');
+        else if (c >= 'A' && c <= 'F') color_idx = 10 + (c - 'A');
+        else continue;
+
+        int px = x + (i % 8);
+        int py = y + (i / 8);
+
+        if (px < TIC80_SHEET_WIDTH && py < TIC80_SHEET_HEIGHT) {
+            tic80_tile_pixels[py * TIC80_SHEET_WIDTH + px] = (uint8_t)color_idx;
+        }
+    }
+}
+
+// =============================================================================
 // Color Conversion
 // =============================================================================
 
@@ -30,49 +56,6 @@ static uint32_t hex_to_v32_color(const char *hex_rgb) {
     uint32_t g = (strtoul(hex_rgb, NULL, 16) >> 8) & 0xFF;
     uint32_t b = strtoul(hex_rgb, NULL, 16) & 0xFF;
     return 0xFF000000 | (b << 16) | (g << 8) | r;
-}
-
-// =============================================================================
-// Tile Parsing
-// =============================================================================
-
-// Parse a single TIC80 tile (8x8 pixels, hex-encoded)
-static void parse_tic80_tile(int tile_index, const char *hex_data) {
-    // TIC80 tile format: each hex char represents 4 pixels (2-bit color index)
-    // Example: "eccccccccc888888caaaaaaaca888888cacccccccacc0ccccacc0ccccacc0ccc"
-    // This is 64 chars = 256 pixels (8x8 x 4 pixels per char)
-
-    int x = (tile_index % 32) * 8;  // TIC80 sheet is 32 tiles wide
-    int y = (tile_index / 32) * 8;
-
-    for (int i = 0; i < 64 && hex_data[i] != '\0'; i++) {
-        char c = hex_data[i];
-        int nibble = 0;
-
-        // Convert hex character to 4-bit value
-        if (c >= '0' && c <= '9') nibble = c - '0';
-        else if (c >= 'a' && c <= 'f') nibble = 10 + (c - 'a');
-        else if (c >= 'A' && c <= 'F') nibble = 10 + (c - 'A');
-        else continue;
-
-        // Each hex char represents 4 pixels (2 bits per pixel)
-        for (int bit = 0; bit < 4; bit++) {
-            int pixel_color_index = (nibble >> (3 - bit)) & 1;
-            // For TIC80, the actual color index is the nibble value (0-15)
-            // But the hex data encodes 2-bit values, so we need to map properly
-            // Actually, TIC80 tiles use 4-bit color indices (0-15)
-            // Let me re-examine: each hex char is 4 bits, representing one pixel's color index
-            // So we should use the full nibble value, not just bit 0
-            pixel_color_index = nibble & 0x0F;  // Use all 4 bits
-
-            int px = x + (i % 8);
-            int py = y + (i / 8);
-
-            if (px < TIC80_SHEET_WIDTH && py < TIC80_SHEET_HEIGHT) {
-                tic80_tile_pixels[py * TIC80_SHEET_WIDTH + px] = (uint8_t)pixel_color_index;
-            }
-        }
-    }
 }
 
 // Get pixel color index from tile sheet

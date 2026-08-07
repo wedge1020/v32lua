@@ -1,19 +1,16 @@
 #include "v32lua.h"
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
 
 // =============================================================================
-// VTEX File Header Structure
+// VTEX File Header Structure - MINIMAL
 // =============================================================================
+
+#define TEX_WIDTH  128
+#define TEX_HEIGHT 256
 
 typedef struct {
-    char magic[8];           // "V32-VTEX"
-    uint32_t version;        // 1
-    uint32_t texture_count;  // 1 (we're generating one texture)
-    uint32_t width;          // 1024
-    uint32_t height;         // 1024
-    uint32_t reserved[4];
+    char magic[8];    // "V32-VTEX" - NO version, NO texture_count
+    uint32_t width;   // 128
+    uint32_t height;  // 256
 } VTEXHeader;
 
 // =============================================================================
@@ -27,41 +24,34 @@ void generate_vtex_from_tic80(const char *output_path) {
         return;
     }
 
-    // Write VTEX header
+    // Write MINIMAL VTEX header: magic + width + height
     VTEXHeader hdr = {
-        .version = 1,
-        .texture_count = 1,
-        .width = 1024,
-        .height = 1024
+        .width = TEX_WIDTH,
+        .height = TEX_HEIGHT
     };
     memcpy(hdr.magic, "V32-VTEX", 8);
-    fwrite(&hdr, sizeof(hdr), 1, f);
+    fwrite(&hdr, sizeof(hdr), 1, f);  // 16 bytes total
 
-    // Get the palette (either custom or default)
+    // Get the palette
     uint32_t *palette = get_tic80_palette();
 
-    // Generate 1024x1024 texture data
-    uint32_t *pixels = calloc(1024 * 1024, sizeof(uint32_t));
+    // Generate texture data - only what we need
+    uint32_t *pixels = calloc(TEX_WIDTH * TEX_HEIGHT, sizeof(uint32_t));
     if (!pixels) {
         fclose(f);
         return;
     }
 
-    // Render TIC80 tilesheet (256x256) at top-left
-    // TIC80 sheet: 32x32 tiles = 256x256 pixels
-    for (int y = 0; y < 256; y++) {
-        for (int x = 0; x < 256; x++) {
+    // Render TIC80 tilesheet (128x256)
+    for (int y = 0; y < TEX_HEIGHT; y++) {
+        for (int x = 0; x < TEX_WIDTH; x++) {
             uint8_t color_idx = get_tic80_tile_pixel(x, y);
-            if (color_idx < 16) {
-                pixels[y * 1024 + x] = palette[color_idx];
-            } else {
-                pixels[y * 1024 + x] = 0xFF000000;  // Black for invalid indices
-            }
+            pixels[y * TEX_WIDTH + x] = (color_idx < 16) ? palette[color_idx] : 0xFF000000;
         }
     }
 
-    // Write texture pixel data
-    fwrite(pixels, sizeof(uint32_t), 1024 * 1024, f);
+    // Write pixel data immediately after header
+    fwrite(pixels, sizeof(uint32_t), TEX_WIDTH * TEX_HEIGHT, f);
 
     free(pixels);
     fclose(f);

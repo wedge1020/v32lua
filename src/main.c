@@ -114,11 +114,11 @@ int  main (int  argc, char** argv)
         }
     }
 
-	runtime_req.needs_memory_alloc  = true;  // Heap always needed
-	runtime_req.needs_print         = true;
-	runtime_req.needs_strings       = true;
+    runtime_req.needs_memory_alloc  = true;  // Heap always needed
+    runtime_req.needs_print         = true;
+    runtime_req.needs_strings       = true;
 
-	tic80_init_default_palette ();
+    tic80_init_default_palette ();
 
     g_lua_filename                  = input_filename;
     g_asm_filename                  = output_filename;
@@ -139,26 +139,38 @@ int  main (int  argc, char** argv)
     }
     fclose(yyin);
 
-	// After parsing, before semantic analysis
-	if (runtime_req.needs_tic80) {
-		process_all_tic80_sections();  // Processes global state from parsing
+    // After parsing, before semantic analysis
+    if (runtime_req.needs_tic80) {
+        process_all_tic80_sections();  // Processes global state from parsing
 
-		if (tic80_has_assets()) {
-			log_stage(3, "tic80 assets parsing", verbose);
-			char vtex_path[256];
-			snprintf(vtex_path, sizeof(vtex_path), "%s.vtex", output_filename);
+        if (tic80_has_assets()) {
+            log_stage(3, "tic80 assets parsing", verbose);
 
-			generate_vtex_from_tic80(vtex_path);
+            // Derive base path without extension:
+            //     obj/tic80hello.asm -> obj/tic80hello
+            char base_path[256];
+            strncpy(base_path, output_filename, sizeof(base_path));
+            char *last_dot = strrchr(base_path, '.');
+            if (last_dot) {
+                *last_dot = '\0';
+            }
 
-			// Register in textures_head
-			CARTresource *res = malloc(sizeof(CARTresource));
-			res->id = next_texture_id++;
-			res->var_name = strdup("tic80_spritesheet");
-			res->filename = strdup("tic80_spritesheet.vtex");  // Just filename
-			res->next = textures_head;
-			textures_head = res;
-		}
-	}
+            // Build VTEX path: obj/tic80hello_spritesheet.vtex
+            char vtex_path[256];
+            snprintf(vtex_path, sizeof(vtex_path), "%s_spritesheet.vtex", base_path);
+
+            generate_vtex_from_tic80(vtex_path);
+
+            // Register in textures_head (without extension; emit.c adds .vtex)
+            CARTresource *res = malloc(sizeof(CARTresource));
+            res->id = next_texture_id++;
+            res->var_name = strdup("tic80_spritesheet");
+            res->filename = malloc(strlen(base_path) + 12); // "_spritesheet" + null
+            sprintf(res->filename, "%s_spritesheet", base_path);
+            res->next = textures_head;
+            textures_head = res;
+        }
+    }
 
     // --- Stage 4: Semantic Analyzer ---
     log_stage(4, "analyzer", verbose);
