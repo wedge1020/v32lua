@@ -84,24 +84,27 @@ char *process_string_literal (const char *text, int  len)
 }
 
 	/* Extract section name between < and > */
-"-- <"[A-Z]+">" {
+"-- <"[A-Z]+">\n" {
     char *start = strchr(yytext, '<') + 1;
     char *end = strchr(yytext, '>');
     if (end) *end = '\0';
     yylval.string_val = strdup(start);  // Returns "TILES"
+	fprintf(stderr, "DEBUG LEXER: TIC80_SECTION_HEADER = '%s'\n", yylval.string_val);
     return TOKEN_TIC80_SECTION_HEADER;
 }
 
-"-- </"[A-Z]+">" {
+"-- </"[A-Z]+">\n" {
     char *start = strchr(yytext, '<') + 2;  // Skip '<' AND '/'
     char *end = strchr(yytext, '>');
     if (end) *end = '\0';
     yylval.string_val = strdup(start);  // Returns "TILES"
+	fprintf(stderr, "DEBUG LEXER: TIC80_SECTION_FOOTER = '%s'\n", yylval.string_val);
     return TOKEN_TIC80_SECTION_FOOTER;
 }
 
-"-- "[0-9]+[:][0-9a-fA-F]+ {
+"-- "[0-9]+[:][0-9a-fA-F]+\n {
     yylval.string_val = strdup(yytext + 3);  // Skip "-- "
+	fprintf(stderr, "DEBUG LEXER: TIC80_ASSET_DATA = '%s'\n", yylval.string_val);
     return TOKEN_TIC80_ASSET_DATA;
 }
 

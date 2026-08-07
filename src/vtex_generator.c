@@ -18,6 +18,7 @@ typedef struct {
 // =============================================================================
 
 void generate_vtex_from_tic80(const char *output_path) {
+	fprintf(stderr, "DEBUG VTEX: Generating to '%s'\n", output_path);
     FILE *f = fopen(output_path, "wb");
     if (!f) {
         fprintf(stderr, "Error: Could not create VTEX file '%s'\n", output_path);
@@ -41,6 +42,11 @@ void generate_vtex_from_tic80(const char *output_path) {
         fclose(f);
         return;
     }
+
+	fprintf(stderr, "DEBUG VTEX: Sampling pixels: (0,0)=%02x, (8,0)=%02x, (16,0)=%02x\n",
+		get_tic80_tile_pixel(0, 0),
+		get_tic80_tile_pixel(8, 0),
+		get_tic80_tile_pixel(16, 0));
 
     // Render TIC80 tilesheet (128x256)
     for (int y = 0; y < TEX_HEIGHT; y++) {

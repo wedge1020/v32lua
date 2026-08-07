@@ -12,6 +12,7 @@ void yyerror (const char *s);
 
 // Add your new helper prototype here:
 char *mangle_method_name (const char *table_name, const char *method_name);
+int count_assets(TIC80AssetData *);
 
 %}
 
@@ -501,13 +502,29 @@ tic80_section:
     TOKEN_TIC80_SECTION_HEADER
     {
         current_tic80_section = strdup($1);
-        current_tic80_assets = NULL;
+        free($1);
     }
     tic80_asset_lines
     TOKEN_TIC80_SECTION_FOOTER
     {
-        // DON'T process here - just mark we have assets
-        tic80_has_any_assets = true;
+        // === PROCESS SECTION IMMEDIATELY ===
+        fprintf(stderr, "DEBUG PARSER: Processing section '%s' with %d assets\n",
+                current_tic80_section, count_tic80_assets(current_tic80_assets));
+        process_tic80_section(current_tic80_section, current_tic80_assets);
+
+        // Clean up this section's data
+        free(current_tic80_section);
+        current_tic80_section = NULL;
+
+        TIC80AssetData *item = current_tic80_assets;
+        current_tic80_assets = NULL;
+        while (item != NULL) {
+            TIC80AssetData *next = item->next;
+            if (item->hex_data != NULL) free(item->hex_data);
+            free(item);
+            item = next;
+        }
+
         free($3);
         $$ = NULL;
     }
@@ -518,6 +535,8 @@ tic80_asset_lines:
     | tic80_asset_lines TOKEN_TIC80_ASSET_DATA
     {
         TIC80AssetData *data = parse_tic80_asset_line($2);
+		fprintf(stderr, "DEBUG PARSER: Parsed asset line, index=%d, hex_data=%s\n",
+                data ? data->index : -1, data ? data->hex_data : "NULL");
         if (data != NULL) {  // <-- ADD THIS CHECK
             data->next = current_tic80_assets;
             current_tic80_assets = data;
@@ -530,6 +549,15 @@ tic80_asset_lines:
 
 void yyerror(const char *s) {
     compiler_error(ERR_SYNTAX, yylineno, "%s", s);
+}
+
+int count_assets(TIC80AssetData *head) {
+	int c=0;
+	while(head) {
+		c++;
+		head=head->next;
+	}
+	return c;
 }
 
 char* mangle_method_name(const char* table_name, const char* method_name) {
