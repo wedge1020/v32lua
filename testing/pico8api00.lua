@@ -1,6 +1,7 @@
 --#title "pico-8 API spr() and btn() test"
 --#texture sprites "textures/pico8apitest.png"
 --#version "0.3"
+--#api pico8
 
 player                          = { }
 up                              = 0
