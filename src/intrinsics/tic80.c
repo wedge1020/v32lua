@@ -400,3 +400,44 @@ bool emit_tic80_cls_intrinsic(ASTNode *node) {
 
     return true;
 }
+
+// Add to tic80.c
+bool emit_tic80_print_intrinsic(ASTNode *node) {
+    emit_asm("    ;; --- TIC-80 print(value, x, y) Intrinsic ---\n");
+
+    // Extract arguments: value (arg0), x (arg1), y (arg2)
+    ASTNode *arg_val = node->as.call.args_head;
+    ASTNode *arg_x   = (arg_val != NULL) ? arg_val->next : NULL;
+    ASTNode *arg_y   = (arg_x   != NULL) ? arg_x->next   : NULL;
+
+    if (arg_val == NULL || arg_x == NULL || arg_y == NULL) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+                       "TIC-80 print() requires 3 arguments: print(value, x, y)");
+    }
+
+    int reg_val = allocate_pinned_register();
+    int reg_x   = allocate_pinned_register();
+    int reg_y   = allocate_pinned_register();
+
+    generate_asm(arg_val, reg_val);
+    generate_asm(arg_x, reg_x);
+    generate_asm(arg_y, reg_y);
+
+    // Convert coordinates to hardware integers
+    emit_asm("CFI R%d ; Convert X to hardware integer\n", reg_x);
+    emit_asm("CFI R%d ; Convert Y to hardware integer\n", reg_y);
+
+    // Push in order expected by runtime: x, y, value
+    emit_asm("PUSH R%d ; Push X coordinate\n", reg_x);
+    emit_asm("PUSH R%d ; Push Y coordinate\n", reg_y);
+    emit_asm("PUSH R%d ; Push value\n", reg_val);
+
+    emit_asm("CALL __builtin_print\n");
+    emit_asm("IADD SP, 3 ; Clean up arguments\n");
+
+    unlock_register(reg_val);
+    unlock_register(reg_x);
+    unlock_register(reg_y);
+
+    return true;
+}

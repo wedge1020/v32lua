@@ -238,18 +238,26 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     // Non-ioports Intrinsics
     // =========================================================================
 
-    // print(x, y, value)
-    if (strcmp (func_name, "print") == 0) {
-		runtime_req.needs_print      = true;
-		runtime_req.needs_strings    = true;
-        emit_print_intrinsic(node);
-        return 1;
+    // print()
+    if (strcmp (func_name, "print")  == 0) {
+        runtime_req.needs_print       = true;
+        runtime_req.needs_strings     = true;
+
+        if (runtime_req.needs_tic80  == true)
+        {
+            return (emit_tic80_print_intrinsic (node));
+        }
+        else 
+        {
+            emit_print_intrinsic (node);
+            return (1);
+        }
     }
 
     // printf()
     if (strcmp(func_name, "printf") == 0) {
-		runtime_req.needs_print      = true;
-		runtime_req.needs_strings    = true;
+        runtime_req.needs_print      = true;
+        runtime_req.needs_strings    = true;
         if (emit_printf_intrinsic(node, dest_reg)) {
             return 1;
         }
@@ -279,60 +287,60 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     //////////////////////////////////////////////////////////////////////////
 
     // spr()
-	if (strcmp(func_name, "spr") == 0) {
-		if (runtime_req.needs_pico8 == true)
-		{
-			return (emit_pico8_spr_intrinsic (node));
-		}
-		else if (runtime_req.needs_tic80 == true)
-		{
-			return (emit_tic80_spr_intrinsic (node));
-		}
-	}
+    if (strcmp(func_name, "spr") == 0) {
+        if (runtime_req.needs_pico8 == true)
+        {
+            return (emit_pico8_spr_intrinsic (node));
+        }
+        else if (runtime_req.needs_tic80 == true)
+        {
+            return (emit_tic80_spr_intrinsic (node));
+        }
+    }
 
     // btn()
     if (strcmp (func_name, "btn") == 0) {
-		if (runtime_req.needs_pico8 == true)
-		{
-			return (emit_pico8_btn_intrinsic (node, dest_reg));
-		}
-		else if (runtime_req.needs_tic80 == true)
-		{
-			return (emit_tic80_btn_intrinsic (node, dest_reg));
-		}
+        if (runtime_req.needs_pico8 == true)
+        {
+            return (emit_pico8_btn_intrinsic (node, dest_reg));
+        }
+        else if (runtime_req.needs_tic80 == true)
+        {
+            return (emit_tic80_btn_intrinsic (node, dest_reg));
+        }
     }
 
     // btnp()
-	/*
+    /*
     if (strcmp (func_name, "btnp") == 0) {
-		if (runtime_req.needs_pico8 == true)
-		{
-			return (emit_pico8_btnp_intrinsic (node, dest_reg));
-		}
-		else if (runtime_req.needs_tic80 == true)
-		{
-			return (emit_tic80_btnp_intrinsic (node, dest_reg));
-		}
+        if (runtime_req.needs_pico8 == true)
+        {
+            return (emit_pico8_btnp_intrinsic (node, dest_reg));
+        }
+        else if (runtime_req.needs_tic80 == true)
+        {
+            return (emit_tic80_btnp_intrinsic (node, dest_reg));
+        }
     }*/
 
     // add()
     if (strcmp (func_name, "add") == 0) {
-		if (runtime_req.needs_pico8 == true)
-		{
-			return (emit_pico8_add_intrinsic (node, dest_reg));
-		}
-		else if (runtime_req.needs_tic80 == true)
-		{
-			return (emit_tic80_add_intrinsic (node, dest_reg));
-		}
+        if (runtime_req.needs_pico8 == true)
+        {
+            return (emit_pico8_add_intrinsic (node, dest_reg));
+        }
+        else if (runtime_req.needs_tic80 == true)
+        {
+            return (emit_tic80_add_intrinsic (node, dest_reg));
+        }
     }
 
-	// TIC-80 cls()
-	if (strcmp(func_name, "cls") == 0) {
-		if (runtime_req.needs_tic80 == true) {
-			return emit_tic80_cls_intrinsic(node);
-		}
-	}
+    // TIC-80 cls()
+    if (strcmp(func_name, "cls") == 0) {
+        if (runtime_req.needs_tic80 == true) {
+            return emit_tic80_cls_intrinsic(node);
+        }
+    }
 
     // math.floor(x)
     if (strcmp(func_name, "math.floor") == 0) {
