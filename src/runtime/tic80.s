@@ -130,7 +130,7 @@ _tic80_spr_texture_mapped:
     OUT   GPU_SelectedTexture, R1
 
     ;; No tinting for TIC-80 sprites
-    OUT   GPU_MultiplyColor, 0xFFFFFFFF
+    ;OUT   GPU_MultiplyColor, 0xFFFFFFFF
 
     ;; --- 1. Calculate final scale as float ---
     MOV   R1, [BP+6]        ; tic80_scale (float)

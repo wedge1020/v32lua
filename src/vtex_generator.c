@@ -29,20 +29,20 @@ void generate_vtex_from_tic80_with_colorkey(const char *output_path, int texture
             uint8_t color_idx = get_tic80_tile_pixel(x, y);
             uint32_t color = palette[color_idx % 16];
 
-            // Palette is AABBGGRR format - extract components
-            uint8_t alpha = (color >> 24) & 0xFF;
-            uint8_t blue  = (color >> 16) & 0xFF;
-            uint8_t green = (color >> 8)  & 0xFF;
-            uint8_t red   = color & 0xFF;
+            // Palette is AABBGGRR: extract components
+            uint8_t alpha = (color >> 24) & 0xFF;    // AA
+            uint8_t blue  = (color >> 16) & 0xFF;    // BB
+            uint8_t green = (color >> 8)  & 0xFF;    // GG
+            uint8_t red   = color & 0xFF;          // RR
 
-            // GPU expects RGBA format - assemble with channel swap (BGR -> RGB)
+            // Convert to RGBA (0xRRGGBBAA)
             uint32_t rgba_color = (red << 24) | (green << 16) | (blue << 8) | alpha;
 
-            // Apply color keying: clear alpha for matching palette index
+            // FIX: Color keying - make MATCHING color transparent
             if (texture_idx < 16 && color_idx == texture_idx) {
-                rgba_color = rgba_color & 0xFFFFFF00;  // Clear alpha (LSB)
+                rgba_color = rgba_color & 0xFFFFFF00;  // Clear alpha for KEYED color
             } else {
-                rgba_color = (rgba_color & 0xFFFFFF00) | 0x000000FF;  // Set alpha to 255
+                rgba_color = (rgba_color & 0xFFFFFF00) | 0x000000FF;  // Full alpha for others
             }
 
             pixels[y * TEX_WIDTH + x] = rgba_color;

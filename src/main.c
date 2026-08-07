@@ -140,38 +140,40 @@ int  main (int  argc, char** argv)
     fclose(yyin);
 
     // After parsing, before semantic analysis
-    if (runtime_req.needs_tic80) {
-        process_all_tic80_sections();  // Processes global state from parsing
+	if (runtime_req.needs_tic80) {
+		process_all_tic80_sections();
 
-        if (tic80_has_assets()) {
-            log_stage(3, "tic80 assets parsing", verbose);
+		if (tic80_has_assets()) {
+			log_stage(3, "tic80 assets parsing", verbose);
 
-            // Derive base path without extension:
-            //     obj/tic80hello.asm -> obj/tic80hello
-            char base_path[256];
-            strncpy(base_path, output_filename, sizeof(base_path));
-            char *last_dot = strrchr(base_path, '.');
-            if (last_dot) {
-                *last_dot = '\0';
-            }
+			char base_path[256];
+			strncpy(base_path, output_filename, sizeof(base_path));
+			char *last_dot = strrchr(base_path, '.');
+			if (last_dot) *last_dot = '\0';
 
-            // Generate all 17 colorkey textures
-            generate_all_tic80_colorkey_textures(base_path);
+			generate_all_tic80_colorkey_textures(base_path);
 
-            // Register all 17 textures in textures_head
-            for (int tex_idx = 0; tex_idx < 17; tex_idx++) {
-                CARTresource *res = malloc(sizeof(CARTresource));
-                res->id = next_texture_id++;
-                res->var_name = malloc(32);
-                snprintf(res->var_name, 32, "tic80_spritesheet_%d", tex_idx);
-                res->filename = malloc(strlen(base_path) + 32);
-                snprintf(res->filename, strlen(base_path) + 32,
-                         "%s_colorkey_%d", base_path, tex_idx);
-                res->next = textures_head;
-                textures_head = res;
-            }
-        }
-    }
+			// Register all 17 textures in CORRECT order (0-16)
+			CARTresource *prev = NULL;
+			for (int tex_idx = 0; tex_idx < 17; tex_idx++) {
+				CARTresource *res = malloc(sizeof(CARTresource));
+				res->id = next_texture_id++;
+				res->var_name = malloc(32);
+				snprintf(res->var_name, 32, "tic80_spritesheet_%d", tex_idx);
+				res->filename = malloc(strlen(base_path) + 32);
+				snprintf(res->filename, strlen(base_path) + 32,
+						 "%s_colorkey_%d", base_path, tex_idx);
+				res->next = NULL;  // Append, don't prepend
+
+				if (prev) {
+					prev->next = res;
+				} else {
+					textures_head = res;
+				}
+				prev = res;
+			}
+		}
+	}
 
     // --- Stage 4: Semantic Analyzer ---
     log_stage(4, "analyzer", verbose);
