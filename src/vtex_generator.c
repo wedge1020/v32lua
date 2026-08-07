@@ -18,8 +18,8 @@ void generate_vtex_from_tic80_with_colorkey(const char *output_path, int texture
     fwrite(&hdr, sizeof(hdr), 1, f);
 
     uint32_t *palette = get_tic80_palette();
-    uint32_t *pixels = calloc(TEX_WIDTH * TEX_HEIGHT, sizeof(uint32_t));
-    if (!pixels) {
+    uint8_t *pixel_bytes = malloc(TEX_WIDTH * TEX_HEIGHT * 4); // 4 bytes per pixel (RGBA)
+    if (!pixel_bytes) {
         fclose(f);
         return;
     }
@@ -35,22 +35,24 @@ void generate_vtex_from_tic80_with_colorkey(const char *output_path, int texture
             uint8_t green = (color >> 8)  & 0xFF;    // GG
             uint8_t red   = color & 0xFF;          // RR
 
-            // Convert to RGBA (0xRRGGBBAA)
-            uint32_t rgba_color = (red << 24) | (green << 16) | (blue << 8) | alpha;
-
-            // FIX: Color keying - make MATCHING color transparent
+            // Apply color keying
             if (texture_idx < 16 && color_idx == texture_idx) {
-                rgba_color = rgba_color & 0xFFFFFF00;  // Clear alpha for KEYED color
+                alpha = 0x00;  // Transparent
             } else {
-                rgba_color = (rgba_color & 0xFFFFFF00) | 0x000000FF;  // Full alpha for others
+                alpha = 0xFF;  // Opaque
             }
 
-            pixels[y * TEX_WIDTH + x] = rgba_color;
+            // Write RGBA bytes in correct order (R, G, B, A)
+            int offset = (y * TEX_WIDTH + x) * 4;
+            pixel_bytes[offset + 0] = red;    // R
+            pixel_bytes[offset + 1] = green;  // G
+            pixel_bytes[offset + 2] = blue;   // B
+            pixel_bytes[offset + 3] = alpha;  // A
         }
     }
 
-    fwrite(pixels, sizeof(uint32_t), TEX_WIDTH * TEX_HEIGHT, f);
-    free(pixels);
+    fwrite(pixel_bytes, 1, TEX_WIDTH * TEX_HEIGHT * 4, f);
+    free(pixel_bytes);
     fclose(f);
 }
 
