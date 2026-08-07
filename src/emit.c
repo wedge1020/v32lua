@@ -555,20 +555,22 @@ void  emit_runtime_library (void)
         emit_embedded_asm (runtime_tic80_start);
 
         // OVERWRITE default palette with custom if present
-        //if (tic80_has_custom_palette()) {
-            emit_asm("\n;; =========================================================");
-            emit_asm(";; TIC-80 Custom Palette (from cartridge, overrides defaults)");
-            emit_asm(";; =========================================================\n");
-            emit_asm("__tic80_palette:\n");
+        emit_asm ("\n;; =========================================================");
+        emit_asm (";; TIC-80 Custom Palette (from cartridge, overrides defaults)");
+        emit_asm (";; =========================================================\n");
+        emit_asm ("__tic80_palette:\n");
 
-            // Emit all 16 colors on one line (matches default format)
-            emit_asm("integer ");
-            for (int i = 0; i < 16; i++) {
-                emit_asm("0x%.8X", tic80_get_palette_color(i));
-                if (i < 15) emit_asm(", ");
+        // Emit all 16 colors on one line (matches default format)
+        fprintf (out(), "integer ");
+        for (int  index = 0; index < 16; index++)
+        {
+            fprintf (out(), "0x%.8X", tic80_get_palette_color (index));
+            if (index <  15)
+            {
+                fprintf (out(), ", ");
             }
-            emit_asm("\n");
-       // }
+        }
+        fprintf (out(), "\n");
     }
 
     ////////////////////////////////////////////////////////////////////////////////////

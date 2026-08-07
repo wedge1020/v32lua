@@ -2,6 +2,7 @@
 #define __V32LUA_H
 
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -20,7 +21,7 @@
 #include "internals.h"
 #include "register.h"
 
-#define  VERSION      "20260806-dev"
+#define  VERSION      "20260807-dev"
 #define  AUTHOR       "Matthew Haas"
 #define  URL          "https://github.com/wedge1020/v32lua"
 
