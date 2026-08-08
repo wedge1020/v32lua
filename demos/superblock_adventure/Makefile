@@ -50,6 +50,12 @@ v32: bin/$(DEMO).v32
 bin/$(DEMO).v32: obj/$(DEMO).vbin
 	$(PACKER) $(DEMO).xml -o bin/$(DEMO).v32
 
+context:
+	split -a 1 -b 45K -d obj/$(DEMO).asm obj/$(DEMO)_part
+	@for file in obj/$(DEMO)_part?; do \
+		mv "$$file" "$$file.asm.txt"; \
+	done
+
 # --- Clean Up ---
 clean:
 	rm -f bin/*.v32 obj/* textures/*.vtex *.xml
