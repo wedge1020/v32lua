@@ -747,6 +747,17 @@ _tic80_init_map_done:
     POP   BP
     RET
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; __builtin_tic80_mget: Get Tile from TIC-80 Map
+;;
+;; Stack: [BP+2] = x, [BP+3] = y
+;; Returns: R0 = tile index at (x,y) as boxed Lua number, or BOXED_NIL if out of bounds
+;;
+;; Reads a single tile from the map buffer using actual cartridge dimensions.
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 __builtin_tic80_mget:
     PUSH  BP
     MOV   BP, SP
@@ -782,30 +793,17 @@ __builtin_tic80_mget:
     JT    R2, _tic80_mget_invalid
 
     ;; Calculate byte index: index = y * width + x
-    MOV   R5, R3           ; R5 = width
-    IMUL  R2, R5           ; R2 = y * width
-    IADD  R1, R2           ; R1 = byte index (0-65535)
+    MOV   R5, R3
+    IMUL  R2, R5            ; R2 = y * width
+    IADD  R1, R2            ; R1 = byte index
 
-    ;; Calculate word address and byte offset
-    MOV   R4, R1
-    SHL   R4, -2          ; R4 = word index
-    AND   R1, 3           ; R1 = byte offset (0-3)
-
-    ;; Load word from buffer
-    MOV   R5, R12
-    IADD  R5, R4
-    MOV   R6, [R5]        ; R6 = word containing our byte
-
-    ;; Extract the byte
-    SHL   R1, 3           ; R1 = bit shift (0, 8, 16, 24)
-    MOV   R7, 0xFF
-    SHL   R7, R1          ; R7 = byte mask
-    AND   R6, R7          ; R6 = isolated byte
-    ISGN  R1
-    SHL   R6, R1          ; Shift right to extract byte value
+    ;; Load tile index directly (each word = one byte)
+    MOV   R2, R12
+    IADD  R2, R1
+    MOV   R2, [R2]          ; R2 = tile index
 
     ;; Return as boxed Lua number
-    CIF   R6
+    CIF   R2
     JMP   _tic80_mget_done
 
 _tic80_mget_invalid:
@@ -815,6 +813,17 @@ _tic80_mget_done:
     MOV   SP, BP
     POP   BP
     RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; __builtin_tic80_mset: Set Tile in TIC-80 Map
+;;
+;; Stack: [BP+2] = x, [BP+3] = y, [BP+4] = value (tile index 0-255)
+;;
+;; Writes a tile to the map buffer at (x,y) using actual cartridge dimensions.
+;; Clamps value to 0-255 range. Returns the value as boxed Lua number.
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 __builtin_tic80_mset:
     PUSH  BP
@@ -852,10 +861,10 @@ __builtin_tic80_mset:
     IGE   R2, R5
     JT    R2, _tic80_mset_done
 
-    ;; Clamp value to 0-511
+    ;; Clamp value to 0-255 (TIC-80 uses 0-511 but 256 is enough for most cases)
     ILT   R3, 0
     JT    R3, _tic80_mset_clamp_zero
-    IGT   R3, 511
+    IGT   R3, 255
     JT    R3, _tic80_mset_clamp_max
     JMP   _tic80_mset_store
 
@@ -864,38 +873,18 @@ _tic80_mset_clamp_zero:
     JMP   _tic80_mset_store
 
 _tic80_mset_clamp_max:
-    MOV   R3, 511
+    MOV   R3, 255
 
 _tic80_mset_store:
     ;; Calculate byte index: index = y * width + x
-    MOV   R6, R4           ; R6 = width
-    IMUL  R2, R6           ; R2 = y * width
-    IADD  R1, R2           ; R1 = byte index
+    MOV   R6, R4
+    IMUL  R2, R6            ; R2 = y * width
+    IADD  R1, R2            ; R1 = byte index
 
-    ;; Calculate word address and byte offset
-    MOV   R4, R1
-    SHL   R4, -2          ; R4 = word index
-    AND   R1, 3           ; R1 = byte offset (0-3)
-
-    ;; Load current word
-    MOV   R5, R12
-    IADD  R5, R4
-    MOV   R6, [R5]        ; R6 = current word
-
-    ;; Clear the target byte
-    MOV   R7, 0xFF
-    SHL   R7, R1          ; R7 = byte mask
-    NOT   R7              ; R7 = inverted mask
-    AND   R6, R7          ; Clear target byte
-
-    ;; Set the target byte
-    SHL   R3, R1          ; Shift value to correct position
-    OR    R6, R3          ; Set the byte
-
-    ;; Store back to buffer
-    MOV   R5, R12
-    IADD  R5, R4
-    MOV   [R5], R6
+    ;; Store tile index directly (each word = one byte)
+    MOV   R2, R12
+    IADD  R2, R1
+    MOV   [R2], R3          ; Store tile index
 
     ;; Return the value (boxed)
     CIF   R3
@@ -904,6 +893,19 @@ _tic80_mset_done:
     MOV   SP, BP
     POP   BP
     RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; __builtin_tic80_map: Draw TIC-80 Map Region to Screen
+;;
+;; Stack: [BP+2] = x (screen X), [BP+3] = y (screen Y), [BP+4] = w (width in tiles)
+;;        [BP+5] = h (height in tiles), [BP+6] = sx (source X in map)
+;;        [BP+7] = sy (source Y in map), [BP+8] = color_key (transparent color)
+;;
+;; Renders a w×h tile region from the map buffer to the screen at (x,y).
+;; Uses actual cartridge map dimensions from RAM (var_TIC80_MAP_WIDTH/HEIGHT).
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 __builtin_tic80_map:
     PUSH  BP
@@ -946,7 +948,7 @@ __builtin_tic80_map:
     CFI   R6
     CFI   R13
 
-    ;; Load ACTUAL map dimensions (not hardcoded 256!)
+    ;; Load ACTUAL map dimensions
     MOV   R7, var_TIC80_MAP_WIDTH
     MOV   R7, [R7]          ; R7 = actual width
     MOV   R8, var_TIC80_MAP_HEIGHT
@@ -963,7 +965,7 @@ __builtin_tic80_map:
     ILT   R11, 0
     JT    R11, _tic80_map_sx_zero
     MOV   R9,  R7
-    ISUB  R9,  R3       ; R9 = width - w
+    ISUB  R9,  R3
     IGT   R11, R9
     JT    R11, _tic80_map_sx_max
     JMP   _tic80_map_check_sy
@@ -975,13 +977,12 @@ _tic80_map_sx_zero:
 _tic80_map_sx_max:
     MOV   R5, R9
 
-    ;; Clamp sy: 0 <= sy <= height - h
 _tic80_map_check_sy:
     MOV   R11, R6
     ILT   R11, 0
     JT    R11, _tic80_map_sy_zero
     MOV   R9,  R8
-    ISUB  R9,  R4       ; R9 = height - h
+    ISUB  R9,  R4
     IGT   R11, R9
     JT    R11, _tic80_map_sy_max
     JMP   _tic80_map_row_loop_start
@@ -994,7 +995,7 @@ _tic80_map_sy_max:
     MOV   R6, R9
 
     ;; Save width in R11 for byte index calculation
-    MOV   R11, R7           ; R11 = actual width
+    MOV   R11, R7
 
     ;; Outer loop: rows (R9)
     MOV   R9, 0
@@ -1017,40 +1018,24 @@ _tic80_map_col_loop_start:
     IADD  R8, R9           ; R8 = sy + row
 
     ;; Calculate byte index: (sy+row) * width + (sx+col)
-    MOV   R10, R11         ; R10 = width (from R11)
+    MOV   R10, R11
     IMUL  R8, R10          ; R8 = (sy+row) * width
     IADD  R7, R8           ; R7 = byte index
 
-    ;; Calculate word index and byte offset
-    MOV   R8, R7
-    SHL   R8, -2          ; word index = byte_index / 4
-    AND   R7, 3           ; byte offset (0-3)
-
-    ;; Load word from buffer
-    MOV   R10, R12
-    IADD  R10, R8
-    MOV   R10, [R10]       ; R10 = word containing byte
-
-    ;; Extract sprite ID byte
-    SHL   R7, 3           ; R7 = bit shift (0, 8, 16, 24)
-    MOV   R9, 0xFF
-    SHL   R9, R7           ; R9 = byte mask
-    AND   R10, R9          ; R10 = isolated byte
-    ISGN  R7
-    SHL   R10, R7          ; Shift right to extract byte value
-
-    ;; R10 = sprite ID
+    ;; Load tile index directly (each word = one byte)
+    MOV   R8, R12
+    IADD  R8, R7
+    MOV   R10, [R8]        ; R10 = tile index (0-255)
 
     ;; Calculate screen position: x + col*8, y + row*8
     MOV   R7, R10
     IMUL  R7, 8
     IADD  R7, R1           ; x + col*8
-    MOV   R8, R9           ; Reuse R9 for row*8
+    MOV   R8, R9
     IMUL  R8, 8
     IADD  R8, R2           ; y + row*8
 
     ;; Draw sprite via __builtin_tic80_spr
-    ;; Stack: id, x, y, colorkey, scale, flip, rotate, w, h
     MOV   R9, 1.0
     PUSH  R9               ; h = 1
     PUSH  R9               ; w = 1
