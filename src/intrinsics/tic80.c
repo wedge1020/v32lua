@@ -542,27 +542,40 @@ bool emit_tic80_mset_intrinsic(ASTNode *node, int dest_reg) {
 /**
  * Emits assembly for the map() intrinsic (TIC-80 compatibility).
  *
- * Syntax: map(x, y, w, h, sx, sy) -> draws map region to screen
+ * Syntax: map(x, y, w, h, sx, sy[, color_key])
+ * color_key is optional and defaults to 16 (opaque)
  */
 bool emit_tic80_map_intrinsic(ASTNode *node) {
     emit_asm("    ;; --- TIC-80 map() Intrinsic ---\n");
 
-    // Collect exactly 6 arguments
+    // Collect up to 7 arguments
     int arg_count = 0;
     ASTNode *curr = node->as.call.args_head;
-    ASTNode *args[6] = { NULL };
-    while (curr != NULL && arg_count < 6) {
+    ASTNode *args[7] = { NULL }; // Now supports 7 arguments
+    while (curr != NULL && arg_count < 7) {
         args[arg_count++] = curr;
         curr = curr->next;
     }
 
     if (arg_count < 6) {
         compiler_error(ERR_SEMANTIC, node->line_number,
-                      "TIC-80 map() requires 6 arguments: map(x, y, w, h, sx, sy)");
+                      "TIC-80 map() requires at least 6 arguments: map(x, y, w, h, sx, sy)");
         return false;
     }
 
-    // Push arguments right-to-left: sy, sx, h, w, y, x
+    // Push arguments right-to-left: color_key (or default), sy, sx, h, w, y, x
+    // If color_key is not provided, push 16 (opaque) as default
+    if (arg_count >= 7) {
+        int reg = allocate_register();
+        generate_asm(args[6], reg);  // color_key
+        emit_asm("PUSH R%d ; Arg 7: color_key\n", reg);
+        unlock_register(reg);
+    } else {
+        emit_asm("MOV R0, 16.000000 ; Default color_key (opaque)\n");
+        emit_asm("PUSH R0 ; Arg 7: color_key (default)\n");
+    }
+
+    // Push the 6 required arguments (sy, sx, h, w, y, x)
     for (int i = 5; i >= 0; i--) {
         int reg = allocate_register();
         generate_asm(args[i], reg);
@@ -574,7 +587,7 @@ bool emit_tic80_map_intrinsic(ASTNode *node) {
 
     // Call runtime subroutine
     emit_asm("CALL __builtin_tic80_map\n");
-    emit_asm("IADD SP, 6 ; Clean up map() arguments\n");
+    emit_asm("IADD SP, 7 ; Clean up map() arguments (now 7 total)\n");
 
     return true;
 }

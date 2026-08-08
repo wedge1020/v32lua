@@ -1,3 +1,6 @@
+--#title "superblock adventure"
+--#api tic80
+--#version 0.1
 -- title:   superblock_adventure
 -- author:  yoconoob
 -- desc:    es un juego plataforma

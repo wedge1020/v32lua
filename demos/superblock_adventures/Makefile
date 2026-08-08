@@ -13,7 +13,7 @@ ASM_DEBUG_FLAGS =
 .PHONY: all asm vbin v32 debug clean
 
 # Default target: Performs all steps in order
-all: prep asm vbin vtex v32
+all: prep asm vbin v32
 
 # Debug target: Sets the debug flags and builds all targets
 debug: DEBUG_FLAGS = -g

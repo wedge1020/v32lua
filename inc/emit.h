@@ -20,5 +20,6 @@ void  emit_asm (const char *, ...);
 void  emit_truthy_jump (int, const char *);
 void  emit_falsy_jump (int, const char *);
 void  emit_get_gamepad_inputs_intrinsic (int);
+void  emit_tic80_map_data (FILE *);
 
 #endif

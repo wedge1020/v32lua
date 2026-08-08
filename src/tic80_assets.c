@@ -8,14 +8,6 @@
 #include <stdlib.h>
 #include <string.h>
 
- // =============================================================================
-// Configuration Constants
-// =============================================================================
-
-// TIC-80 tilesheet is 128x256 pixels (16 columns x 32 rows of 8x8 tiles)
-#define TIC80_SHEET_WIDTH  128
-#define TIC80_SHEET_HEIGHT 256
-
 // =============================================================================
 // Global State
 // =============================================================================
@@ -27,7 +19,11 @@ bool tic80_use_custom_palette = false;    // Flag: using custom palette from car
 bool tic80_has_any_assets = false;        // Flag: any TIC-80 assets were found
 
 // Storage for tile pixel data (128x256 pixels, each is a palette index 0-15)
-static uint8_t tic80_tile_pixels[TIC80_SHEET_WIDTH * TIC80_SHEET_HEIGHT] = {0};
+uint8_t tic80_tile_pixels[TIC80_SHEET_WIDTH * TIC80_SHEET_HEIGHT] = {0};
+uint8_t tic80_map_data[TIC80_MAP_MAX_WIDTH * TIC80_MAP_MAX_HEIGHT] = {0};
+int tic80_map_width = 0;
+int tic80_map_height = 0;
+bool tic80_has_map = false;
 
 // =============================================================================
 // Helper Functions
@@ -210,6 +206,18 @@ void process_tic80_section(const char *section, TIC80AssetData *assets) {
 		}
         tic80_has_any_assets = true;
     }
+	else if (strcmp(section, "MAP") == 0) {
+		// Initialize map width from first row in the list
+		if (assets != NULL) {
+			tic80_map_width = strlen(assets->hex_data) / 2;
+			tic80_map_height = 0;  // Will be updated by parse_tic80_map_row
+		}
+
+		// Process all map rows
+		for (TIC80AssetData *item = assets; item != NULL; item = item->next) {
+			parse_tic80_map_row(item->index, item->hex_data);
+		}
+	}
     // Add other sections (WAVES, SFX, TRACKS) here if needed
 }
 
@@ -254,4 +262,70 @@ void tic80_init_default_palette(void) {
     for (int i = 0; i < 16; i++) {
         tic80_palette[i] = default_palette[i];
     }
+}
+
+/// Check if map data was loaded
+bool tic80_has_map_data(void) {
+    return tic80_has_map;
+}
+
+/// Get map width
+int tic80_get_map_width(void) {
+    return tic80_map_width;
+}
+
+/// Get map height
+int tic80_get_map_height(void) {
+    return tic80_map_height;
+}
+
+/// Get tile at map position
+/// @param x X coordinate
+/// @param y Y coordinate
+/// @return Tile index (0-511), or 0 if out of bounds
+uint8_t tic80_get_map_tile(int x, int y) {
+    if (x >= 0 && x < tic80_map_width && y >= 0 && y < tic80_map_height) {
+        return tic80_map_data[y * TIC80_MAP_MAX_WIDTH + x];
+    }
+    return 0;
+}
+
+/// Parse a single TIC-80 map row
+/// @param row_index Row number (0-255)
+/// @param hex_data Hex string of tile indices
+/// Parse a single TIC-80 map row
+/// @param row_index Row number (0-255)
+/// @param hex_data  Hex string of packed bytes (each pair = one nibble-swapped tile ID)
+void parse_tic80_map_row(int row_index, const char *hex_data) {
+    int hex_len = strlen(hex_data);
+    int num_bytes = hex_len / 2;
+
+    // Determine map width from first row (in tiles = bytes)
+    if (row_index == 0) {
+        tic80_map_width = num_bytes;
+        //tic80_map_height = 0;
+    }
+
+    // Parse hex pairs into bytes, then nibble-swap
+    for (int i = 0; i < hex_len; i += 2) {
+        if (i + 1 >= hex_len) break;
+
+        char hex_byte[3] = {hex_data[i], hex_data[i+1], '\0'};
+        int byte_val = strtoul(hex_byte, NULL, 16) & 0xFF;
+
+        // Nibble-swap: TIC-80 stores tile IDs as (high_nibble, low_nibble) → (low_nibble, high_nibble)
+        int tile_idx = ((byte_val & 0xF0) >> 4) | ((byte_val & 0x0F) << 4);
+
+        int col = i / 2;
+        if (col < tic80_map_width && row_index < TIC80_MAP_MAX_HEIGHT) {
+            tic80_map_data[row_index * tic80_map_width + col] = (uint8_t)tile_idx;
+        }
+    }
+
+    // Track max row index
+    if (row_index + 1 > tic80_map_height) {
+        tic80_map_height = row_index + 1;
+    }
+
+    tic80_has_map = true;
 }

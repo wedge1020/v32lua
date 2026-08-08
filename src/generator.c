@@ -521,16 +521,22 @@ void generate_program (ASTNode *head)
     // =========================================================================
     // 1. CONDITIONAL ENTRY POINT CHECKS
     // =========================================================================
-    SymbolNode *init_sym         = resolve_symbol("init");
-    SymbolNode *main_sym         = resolve_symbol("main");
-    SymbolNode *game_loop_sym    = resolve_symbol("game_loop");
-	SymbolNode *tic_sym          = resolve_symbol("TIC");
-	SymbolNode *tic_map_buffer   = resolve_symbol("TIC80_MAP_BUFFER_PTR");
+    SymbolNode *init_sym                 = resolve_symbol ("init");
+    SymbolNode *main_sym                 = resolve_symbol ("main");
+    SymbolNode *game_loop_sym            = resolve_symbol ("game_loop");
+	SymbolNode *tic80_sym                = NULL;
+	SymbolNode *tic80_map_buffer         = NULL;
 
-    bool has_init      = (init_sym != NULL && init_sym->is_function == 1);
-    bool has_main      = (main_sym != NULL && main_sym->is_function == 1);
-    bool has_game_loop = (game_loop_sym != NULL && game_loop_sym->is_function == 1);
-	bool has_tic       = (tic_sym != NULL && tic_sym->is_function == 1);
+    if (runtime_req.needs_tic80)
+	{
+		tic80_sym                = resolve_symbol ("TIC");
+		tic80_map_buffer         = resolve_symbol ("TIC80_MAP_BUFFER_PTR");
+	}
+
+    bool has_init            = (init_sym != NULL && init_sym->is_function == 1);
+    bool has_main            = (main_sym != NULL && main_sym->is_function == 1);
+    bool has_game_loop       = (game_loop_sym != NULL && game_loop_sym->is_function == 1);
+	bool has_tic             = (tic80_sym != NULL && tic80_sym->is_function == 1);
 
     // If neither main() nor game_loop() exists, halt compilation immediately
     if (!has_main && !has_game_loop && (!has_tic && !runtime_req.needs_tic80))
@@ -538,6 +544,11 @@ void generate_program (ASTNode *head)
         compiler_error(ERR_SEMANTIC, -1, 
             "Compilation failed: Your program must declare either a 'main()' or a 'game_loop()' function.");
     }
+	else if (runtime_req.needs_tic80 && !has_tic)
+	{
+        compiler_error(ERR_SEMANTIC, -1, 
+            "Compilation failed: Your program must declare a 'TIC()' function.");
+	}
 
     // =========================================================================
     // 2. CODE GENERATION SETUP
@@ -569,7 +580,10 @@ void generate_program (ASTNode *head)
     // If init() exists, execute it immediately after global variable setup
     if (has_init)
     {
-        emit_asm ("CALL __function_init   ; Run user-defined init function\n");
+		if (runtime_req.needs_pico8)
+			emit_asm ("CALL __function__init  ; Run user-defined init function\n");
+		else
+			emit_asm ("CALL __function_init   ; Run user-defined init function\n");
     }
 
     // Route to main() if available; fall back to game_loop() otherwise

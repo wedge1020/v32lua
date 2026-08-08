@@ -561,7 +561,7 @@ void  emit_runtime_library (void)
         emit_asm ("__tic80_palette:\n");
 
         // Emit all 16 colors on one line (matches default format)
-        fprintf (out(), "integer ");
+        fprintf (out(), "    integer ");
         for (int  index = 0; index < 16; index++)
         {
             fprintf (out(), "0x%.8X", tic80_get_palette_color (index));
@@ -571,6 +571,8 @@ void  emit_runtime_library (void)
             }
         }
         fprintf (out(), "\n");
+
+		emit_tic80_map_data (out());
     }
 
     ////////////////////////////////////////////////////////////////////////////////////
@@ -629,4 +631,40 @@ void emit_table_get_literal(int table_reg, const char *property_name)
 
     // 5. Capture Return Value
     emit_asm("MOV  R%d, R0         ; Store returned value", table_reg);
+}
+
+// ============================================================================
+// Map Data Emission
+// ============================================================================
+
+/// Emit the parsed TIC-80 map as ROM data using 'integer' directive
+/// Call this from emit.c after processing TIC-80 sections
+void emit_tic80_map_data(FILE *out) {
+    if (!tic80_has_map) {
+        return;
+    }
+
+    int total_bytes = tic80_map_width * tic80_map_height;
+
+    fprintf(out, "\n;; =========================================================\n");
+    fprintf(out, ";; TIC-80 Map Data (from cartridge)\n");
+    fprintf(out, ";; =========================================================\n");
+
+    // Emit dimensions as integers
+    fprintf(out, "__tic80_map_static_width:\n    integer %d\n\n", tic80_map_width);
+    fprintf(out, "__tic80_map_static_height:\n    integer %d\n\n", tic80_map_height);
+
+    // Emit map data as comma-separated integers (one per byte)
+    fprintf(out, "__tic80_map_static_data:\n    integer ");
+    for (int i = 0; i < total_bytes; i++) {
+        fprintf(out, "%d", tic80_map_data[i]);
+        if (i < total_bytes - 1) {
+            fprintf(out, ", ");
+        }
+        // Line break every 16 values for readability
+        if ((i + 1) % 16 == 0 && i < total_bytes - 1) {
+            fprintf(out, "\n    integer ");
+        }
+    }
+    fprintf(out, "\n\n");
 }

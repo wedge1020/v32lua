@@ -86,6 +86,10 @@ _tic80_init_next_texture:
     JMP   _tic80_init_texture_loop
 
 _tic80_init_done:
+_tic80_init_textures_done:
+    ;; Initialize map buffer after textures
+    CALL  __builtin_tic80_init_map
+
     ;; Restore callee-saved register
     POP   R13
 
@@ -653,37 +657,79 @@ _tic80_cls_use_direct:
 ;; Buffer size in words (64KB = 16384 words)
 %define TIC80_MAP_BUFFER_WORDS  16384
 
+;; ============================================================================
+;; TIC-80 Map Initialization with Static Data
+;; Allocates map buffer and copies parsed map data (if available)
+;; ============================================================================
+
 __builtin_tic80_init_map:
     PUSH  BP
     MOV   BP, SP
 
-    ;; Allocate 16384 words (64KB) for map buffer
+    ;; Allocate map buffer (64KB)
     MOV   R0, TIC80_MAP_BUFFER_WORDS
     PUSH  R0
     CALL  __malloc
     IADD  SP, 1
 
-    ;; Store pointer in global variable
-	MOV   R1, var_TIC80_MAP_BUFFER_PTR
+    ;; Store pointer globally
+    MOV   R1, var_TIC80_MAP_BUFFER_PTR
     MOV   [R1], R0
+    MOV   R12, R0            ; R12 = buffer
 
-    ;; Initialize buffer to 0
-    MOV   R1, R0            ; R1 = buffer start
-    MOV   R2, 0            ; R2 = counter
-    MOV   R3, TIC80_MAP_BUFFER_WORDS
+    ;; Check for static map data (width > 0?)
+    MOV   R1, __tic80_map_static_width
+    MOV   R1, [R1]
+    IEQ   R1, 0
+    JT    R1, _tic80_init_map_zero_fill
 
-_tic80_init_map_clear_loop:
-    IEQ   R2, R3
-    JT    R2, _tic80_init_map_done
+    ;; Copy loop
+    MOV   R2, 0                ; byte index
+    MOV   R3, __tic80_map_static_width
+    MOV   R3, [R3]
+    MOV   R6, __tic80_map_static_height
+    MOV   R6, [R6]
+    IMUL  R3, R6              ; R3 = total bytes
+    MOV   R7, __tic80_map_static_data
 
-    ;; Use temp register for address calculation
-    MOV   R4, R1
-    IADD  R4, R2
-	MOV   R5, 0
-    MOV   [R4], R5
+_tic80_init_map_copy_loop:
+    MOV   R8, R2
+    ILT   R8, R3
+    JT    R8, _tic80_copy_continue
+    JMP   _tic80_init_map_done
+
+_tic80_copy_continue:
+    MOV   R8, R7
+    IADD  R8, R2
+    MOV   R8, [R8]
+
+    MOV   R1, R12
+    IADD  R1, R2
+    MOV   [R1], R8
 
     IADD  R2, 1
-    JMP   _tic80_init_map_clear_loop
+    JMP   _tic80_init_map_copy_loop
+
+    ;; Zero-fill fallback
+_tic80_init_map_zero_fill:
+    MOV   R2, 0
+    MOV   R3, TIC80_MAP_BUFFER_WORDS
+    SHL   R3, 2              ; bytes = words * 4
+
+_tic80_init_map_zero_loop:
+    MOV   R8, R2
+    ILT   R8, R3
+    JT    R8, _tic80_zero_continue
+    JMP   _tic80_init_map_done
+
+_tic80_zero_continue:
+    MOV   R8, 0
+    MOV   R1, R12
+    IADD  R1, R2
+    MOV   [R1], R8
+
+    IADD  R2, 1
+    JMP   _tic80_init_map_zero_loop
 
 _tic80_init_map_done:
     MOV   SP, BP
@@ -858,7 +904,7 @@ __builtin_tic80_map:
     PUSH  R13
 
     ;; Load buffer pointer
-	MOV   R1,  var_TIC80_MAP_BUFFER_PTR
+    MOV   R1,  var_TIC80_MAP_BUFFER_PTR
     MOV   R12, [R1]
     IEQ   R12, 0
     JT    R12, _tic80_map_done
@@ -870,12 +916,14 @@ __builtin_tic80_map:
     MOV   R4, [BP+5]        ; h
     MOV   R5, [BP+6]        ; sx
     MOV   R6, [BP+7]        ; sy
+    MOV   R13, [BP+8]       ; color_key (7th argument, or default 16)
     CFI   R1
     CFI   R2
     CFI   R3
     CFI   R4
     CFI   R5
     CFI   R6
+    CFI   R13
 
     ;; Validate dimensions
     ILT   R3, 1
@@ -918,8 +966,8 @@ _tic80_map_sy_zero:
 _tic80_map_sy_max:
     MOV   R6, R8
 
-    ;; Set colorkey
-    MOV   R13, 16
+    ;; Set colorkey from argument (already loaded into R13)
+    ;; R13 now contains the color_key parameter
 
     ;; Outer loop: rows (R9)
     MOV   R9, 0
@@ -958,7 +1006,7 @@ _tic80_map_col_loop_start:
 
     ;; Extract sprite ID byte
     SHL   R7, 3            ; bit shift
-	ISGN  R7
+    ISGN  R7
     SHL   R11, R7          ; shift right to extract
     AND   R11, 0xFF        ; R11 = sprite ID
 
@@ -978,7 +1026,7 @@ _tic80_map_col_loop_start:
     PUSH  R10              ; rotate = 0
     PUSH  R10              ; flip = 0
     PUSH  R10              ; scale = 1.0
-    PUSH  R13              ; colorkey
+    PUSH  R13              ; colorkey (from argument)
     PUSH  R8               ; y
     PUSH  R7               ; x
     PUSH  R11              ; id
@@ -1013,4 +1061,3 @@ _tic80_map_done:
     MOV   SP, BP
     POP   BP
     RET
-
