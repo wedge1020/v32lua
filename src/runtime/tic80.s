@@ -1017,23 +1017,26 @@ _tic80_map_col_loop_start:
     MOV   R8, R6
     IADD  R8, R9           ; R8 = sy + row
 
+    ;; Save col in R13 (callee-saved) before it gets clobbered
+    MOV   R13, R10         ; R13 = col
+
     ;; Calculate byte index: (sy+row) * width + (sx+col)
-    MOV   R10, R11
+    MOV   R10, R11         ; R10 = width (from R11)
     IMUL  R8, R10          ; R8 = (sy+row) * width
     IADD  R7, R8           ; R7 = byte index
 
     ;; Load tile index directly (each word = one byte)
     MOV   R8, R12
     IADD  R8, R7
-    MOV   R10, [R8]        ; R10 = tile index (0-255)
+    MOV   R10, [R8]        ; R10 = tile index
 
     ;; Calculate screen position: x + col*8, y + row*8
-    MOV   R7, R10
+    MOV   R7, R13          ; R7 = col (from saved R13)
     IMUL  R7, 8
-    IADD  R7, R1           ; x + col*8
-    MOV   R8, R9
+    IADD  R7, R1           ; R7 = screen_x + col*8
+    MOV   R8, R9           ; R8 = row
     IMUL  R8, 8
-    IADD  R8, R2           ; y + row*8
+    IADD  R8, R2           ; R8 = screen_y + row*8
 
     ;; Draw sprite via __builtin_tic80_spr
     MOV   R9, 1.0
