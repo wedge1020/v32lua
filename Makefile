@@ -60,5 +60,9 @@ context:
 put: context
 	@rm -f put/*
 	@cp inc/*.h src/*.c src/*.txt src/runtime/*.txt README.md doc/*.md put/
-	@cp $(patsubst src/intrinsics/%.c,intrinsics_%.c,$(wildcard src/intrinsics/*.c)) put/
-	@cp $(patsubst src/node/%.c,put/node_%.c,$(wildcard src/node/*.c)) put/
+	@for file in src/intrinsics/*.c; do \
+		cp "$$file" "put/intrinsics_$$(basename "$$file")"; \
+	done
+	@for file in src/node/*.c; do \
+		cp "$$file" "put/node_$$(basename "$$file")"; \
+	done
