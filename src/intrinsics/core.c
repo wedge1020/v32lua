@@ -314,7 +314,7 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     if (strcmp (func_name, "btnp") == 0) {
         if (runtime_req.needs_pico8 == true)
         {
-            //return (emit_pico8_btnp_intrinsic (node, dest_reg));
+            return (emit_pico8_btnp_intrinsic (node, dest_reg));
             return (0);
         }
         else if (runtime_req.needs_tic80 == true)
@@ -337,8 +337,13 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
 
     // TIC-80 cls()
     if (strcmp(func_name, "cls") == 0) {
-        if (runtime_req.needs_tic80 == true) {
+        if (runtime_req.needs_tic80 == true)
+		{
             return emit_tic80_cls_intrinsic(node);
+        }
+        else if (runtime_req.needs_pico8 == true)
+        {
+            return (emit_pico8_add_intrinsic (node, dest_reg));
         }
     }
 
@@ -347,6 +352,9 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         if (runtime_req.needs_tic80 == true) {
             return emit_tic80_mget_intrinsic(node, dest_reg);
         }
+        else if (runtime_req.needs_pico8 == true) {
+            return emit_pico8_mget_intrinsic(node, dest_reg);
+        }
     }
 
     // TIC-80 mset()
@@ -354,12 +362,18 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         if (runtime_req.needs_tic80 == true) {
             return emit_tic80_mset_intrinsic(node, dest_reg);
         }
+        else if (runtime_req.needs_pico8 == true) {
+            return emit_pico8_mset_intrinsic(node, dest_reg);
+        }
     }
 
     // TIC-80 map()
     if (strcmp(func_name, "map") == 0) {
         if (runtime_req.needs_tic80 == true) {
             return emit_tic80_map_intrinsic(node);
+        }
+        else if (runtime_req.needs_pico8 == true) {
+            return emit_pico8_map_intrinsic(node);
         }
     }
 

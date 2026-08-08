@@ -525,12 +525,16 @@ void generate_program (ASTNode *head)
     SymbolNode *main_sym                 = resolve_symbol ("main");
     SymbolNode *game_loop_sym            = resolve_symbol ("game_loop");
 	SymbolNode *tic80_sym                = NULL;
-	SymbolNode *tic80_map_buffer         = NULL;
+	SymbolNode *map_buffer               = NULL;
 
     if (runtime_req.needs_tic80)
 	{
 		tic80_sym                = resolve_symbol ("TIC");
-		tic80_map_buffer         = resolve_symbol ("TIC80_MAP_BUFFER_PTR");
+		map_buffer               = resolve_symbol ("TIC80_MAP_BUFFER_PTR");
+	}
+	else if (runtime_req.needs_pico8)
+	{
+		map_buffer               = resolve_symbol ("PICO8_MAP_BUFFER_PTR");
 	}
 
     bool has_init            = (init_sym != NULL && init_sym->is_function == 1);

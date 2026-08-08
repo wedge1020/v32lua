@@ -10,6 +10,7 @@ left                            = 2
 right                           = 3
 frames                          = 0
 
+--[[
 function init()
 
 	x                           = 0
@@ -56,7 +57,7 @@ function init()
 	player.y                    = 176
 	player.xflip                = false
 	player.yflip                = false
-end
+end --]]
 
 function game_loop()
 
