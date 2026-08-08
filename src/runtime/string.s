@@ -23,38 +23,72 @@ __unbox_string_end:
     RET
 
 ;; ---------------------------------------------------------------------------
-;; Built-in: Tag-Aware String Concatenation (4MW RAM / 128MW ROM Rework)
-;; Incoming Stack: [BP+3] = Tagged Left_Str, [BP+2] = Tagged Right_Str
-;; Returns: R0 = Tagged pointer to newly allocated RAM heap string (0xFFC..)
+;; Built-in: Tag-Aware String Concatenation with Auto-Coercion
+;; Incoming Stack: [BP+3] = Left_Val, [BP+2] = Right_Val
+;; Returns: R0 = Tagged pointer to newly allocated RAM heap string
 ;; ---------------------------------------------------------------------------
 __builtin_strcat:
     PUSH BP
     MOV  BP, SP
 
-    ;; --- 1. Unbox and Calculate Length of Left String ---
-    MOV  R0, [BP+3]          ; Load Left tagged pointer
-    CALL __unbox_string      ; R0 is now raw hardware address (ROM or RAM)
-    MOV  R7, R0              ; Cache unboxed Left pointer in R7 for Step 4
+    ;; --- Coerce Left Operand to String if Needed ---
+    MOV  R0, [BP+3]          ; Load Left value
+    MOV  R1, R0
+    AND  R1, BOXED_DATA      ; Extract type tag
+    IEQ  R1, BOXED_ROMSTRING
+    JT   R1, __strcat_left_is_string
+    IEQ  R1, BOXED_RAMSTRING
+    JT   R1, __strcat_left_is_string
+    ;; Not a string - coerce via __builtin_tostring
+    PUSH R0
+    CALL __builtin_tostring  ; Returns tagged string in R0
+    IADD SP, 1
+    CALL __unbox_string      ; R0 = raw unboxed pointer
+    MOV  R7, R0              ; Cache unboxed left pointer
+    JMP  __strcat_calc_left_len
+
+__strcat_left_is_string:
+    CALL __unbox_string      ; R0 = raw unboxed pointer
+    MOV  R7, R0              ; Cache unboxed left pointer
+
+__strcat_calc_left_len:
     MOV  R1, R7              ; R1 = Reading pointer
     MOV  R2, 0               ; R2 = Left length counter
 __strcat_len_left:
     MOV  R3, [R1]            ; Read ASCII character
-    IEQ  R3, 0               ; Check for null terminator
-    JT   R3, __strcat_len_right_check
+    IEQ  R3, 0
+    JT   R3, __strcat_right_prep
     IADD R1, 1
     IADD R2, 1
     JMP  __strcat_len_left
 
-    ;; --- 2. Unbox and Calculate Length of Right String ---
-__strcat_len_right_check:
-    MOV  R0, [BP+2]          ; Load Right tagged pointer
-    CALL __unbox_string      ; R0 is now raw hardware address (ROM or RAM)
-    MOV  R8, R0              ; Cache unboxed Right pointer in R8 for Step 5
+    ;; --- Coerce Right Operand to String if Needed ---
+__strcat_right_prep:
+    MOV  R0, [BP+2]          ; Load Right value
+    MOV  R1, R0
+    AND  R1, BOXED_DATA
+    IEQ  R1, BOXED_ROMSTRING
+    JT   R1, __strcat_right_is_string
+    IEQ  R1, BOXED_RAMSTRING
+    JT   R1, __strcat_right_is_string
+    ;; Not a string - coerce it
+    PUSH R0
+    CALL __builtin_tostring
+    IADD SP, 1
+    CALL __unbox_string
+    MOV  R8, R0              ; Cache unboxed right pointer
+    JMP  __strcat_calc_right_len
+
+__strcat_right_is_string:
+    CALL __unbox_string
+    MOV  R8, R0              ; Cache unboxed right pointer
+
+__strcat_calc_right_len:
     MOV  R1, R8              ; R1 = Reading pointer
     MOV  R4, 0               ; R4 = Right length counter
 __strcat_len_right:
-    MOV  R3, [R1]            ; Read ASCII character
-    IEQ  R3, 0               ; Check for null terminator
+    MOV  R3, [R1]
+    IEQ  R3, 0
     JT   R3, __strcat_alloc
     IADD R1, 1
     IADD R4, 1
@@ -62,10 +96,9 @@ __strcat_len_right:
 
     ;; --- 3. Allocate Memory on Heap ---
 __strcat_alloc:
-    MOV  R0, [HEAP_POINTER]  ; R0 = New string base (raw pointer)
+    MOV  R0, [HEAP_POINTER]
     MOV  R5, R0              ; R5 = Write head
 
-    ;; Advance HEAP_POINTER = old_heap + left_len + right_len + 1
     MOV  R6, R0
     IADD R6, R2
     IADD R6, R4
@@ -73,26 +106,26 @@ __strcat_alloc:
     MOV  [HEAP_POINTER], R6
 
     ;; --- 4. Copy Left String to Heap ---
-    MOV  R1, R7              ; Restore cached unboxed Left pointer
+    MOV  R1, R7
 __strcat_copy_left:
-    MOV  R3, [R1]            ; Read ASCII character into R3
-    MOV  R6, R3              ; Copy to scratch register R6 for testing
-    IEQ  R6, 0               ; Check for null terminator (R3 remains intact)
+    MOV  R3, [R1]
+    MOV  R6, R3
+    IEQ  R6, 0
     JT   R6, __strcat_copy_right_check
-    MOV  [R5], R3            ; Write preserved character to heap
+    MOV  [R5], R3
     IADD R1, 1
     IADD R5, 1
     JMP  __strcat_copy_left
 
     ;; --- 5. Copy Right String to Heap ---
 __strcat_copy_right_check:
-    MOV  R1, R8              ; Restore cached unboxed Right pointer
+    MOV  R1, R8
 __strcat_copy_right:
-    MOV  R3, [R1]            ; Read ASCII character into R3
-    MOV  R6, R3              ; Copy to scratch register R6 for testing
-    IEQ  R6, 0               ; Check for null terminator (R3 remains intact)
+    MOV  R3, [R1]
+    MOV  R6, R3
+    IEQ  R6, 0
     JT   R6, __strcat_finish
-    MOV  [R5], R3            ; Write preserved character to heap
+    MOV  [R5], R3
     IADD R1, 1
     IADD R5, 1
     JMP  __strcat_copy_right
@@ -102,9 +135,7 @@ __strcat_finish:
     MOV  R3, 0
     MOV  [R5], R3            ; Write Null terminator
 
-    ;; Apply RAM Heap String Tag (BOXED_RAMSTRING)
-    OR   R0, BOXED_RAMSTRING ; BOX: R0 untouched since Step 3, holds new
-                             ; string base!
+    OR   R0, BOXED_RAMSTRING ; BOX: R0 = new string base
 
     MOV  SP, BP
     POP  BP

@@ -63,7 +63,7 @@ end
 
 -- --- PROGRAM STARTING PLACE ---
 -- Required by the compiler's __start assembly vector
-function main()
+function game_loop()
 	ioports.gpu.clear("black")
     test_print_and_coercion()
     test_table_routines()

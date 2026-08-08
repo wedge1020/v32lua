@@ -28,25 +28,61 @@ void  node_string (ASTNode *node, int  dest_reg)
     emit_asm ("OR R%d, BOXED_ROMSTRING ; Box as ROM String\n", dest_reg);
 }
 
-void  node_concat (ASTNode *node, int  dest_reg)
+void node_concat (ASTNode *node, int dest_reg)
 {
-    int  left_reg   = allocate_register ();
-    generate_asm (node -> as.binary.left, left_reg);
-    emit_asm ("PUSH R%d\n", left_reg);
-    unlock_register (left_reg);
-    
-    int  right_reg  = allocate_register ();
-    generate_asm (node -> as.binary.right, right_reg);
+    int left_reg = allocate_register();
+    int right_reg = allocate_register();
 
-    ensure_in_register (right_reg);
-    
-    emit_asm ("PUSH R%d\n", right_reg);
-    
-    unlock_register(right_reg);
-    
-    emit_asm ("CALL __builtin_strcat\n");
-    emit_asm ("IADD SP, 2\n");
+    generate_asm(node->as.binary.left, left_reg);
+    generate_asm(node->as.binary.right, right_reg);
+
+    ensure_in_register(left_reg);
+    ensure_in_register(right_reg);
+
+    emit_asm("PUSH R%d\n", left_reg);
+    emit_asm("PUSH R%d\n", right_reg);
+
+    emit_asm("CALL __builtin_strcat\n");
+    emit_asm("IADD SP, 2\n");
 
     if (dest_reg != 0)
-        emit_asm ("MOV R%d, R0\n", dest_reg);
+        emit_asm("MOV R%d, R0\n", dest_reg);
+
+    unlock_register(left_reg);
+    unlock_register(right_reg);
 }
+/*
+void node_concat (ASTNode *node, int dest_reg)
+{
+    int left_reg = allocate_register();
+    generate_asm(node->as.binary.left, left_reg);
+
+    // Coerce left operand to string
+    emit_asm("PUSH R%d\n", left_reg);
+    emit_asm("CALL __builtin_tostring\n");
+    emit_asm("IADD SP, 1\n");
+    emit_asm("MOV R%d, R0\n", left_reg);
+
+    int right_reg = allocate_register();
+    generate_asm(node->as.binary.right, right_reg);
+
+    // Coerce right operand to string
+    emit_asm("PUSH R%d\n", right_reg);
+    emit_asm("CALL __builtin_tostring\n");
+    emit_asm("IADD SP, 1\n");
+    emit_asm("MOV R%d, R0\n", right_reg);
+
+    ensure_in_register(right_reg);
+
+    emit_asm("PUSH R%d\n", left_reg);
+    emit_asm("PUSH R%d\n", right_reg);
+
+    emit_asm("CALL __builtin_strcat\n");
+    emit_asm("IADD SP, 2\n");
+
+    if (dest_reg != 0)
+        emit_asm("MOV R%d, R0\n", dest_reg);
+
+    unlock_register(left_reg);
+    unlock_register(right_reg);
+}*/

@@ -23,7 +23,7 @@ all: $(ASM_OUTS)
 	$(COMPILER) -g $< -o $@
 
 # Assembly verification: Attempt to assemble all .asm files without halting on errors
-asmcheck: $(ASM_OUTS)
+vbin: $(ASM_OUTS)
 	@echo "--- Verifying Vircon32 Assembly ---"
 	@for f in $(ASM_OUTS); do \
 		out=$${f%.asm}.vbin; \
@@ -35,7 +35,7 @@ asmcheck: $(ASM_OUTS)
 	done
 
 # CART verification: Attempt to pack all .vbin files without halting on errors (testing XML)
-v32check: $(XML_OUTS)
+v32: $(XML_OUTS)
 	@echo "--- Verifying Vircon32 CART packing and XML config validity ---"
 	@for f in $(XML_OUTS); do \
 		vbin=$${f%.xml}.vbin; \

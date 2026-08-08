@@ -465,10 +465,15 @@ field:
         // Array-style: {value} -> implicit sequential key
         $$ = $1;
     }
-    | expr '=' expr {
-        // Record-style: {key = value}
-        $$ = make_node_table_set(NULL, $1, $3);
+	| expr '=' expr {
+    // Record-style: {key = value}
+    // Convert identifier key to string literal (Lua semantics: x=8 means key "x", not var x)
+    ASTNode *key_node = $1;
+    if (key_node->type == NODE_IDENTIFIER) {
+        key_node = make_node_string(key_node->as.id.name);
     }
+    $$ = make_node_table_set(NULL, key_node, $3);
+}
     | '[' expr ']' '=' expr {
         // Explicit key: {[key] = value}
         $$ = make_node_table_set(NULL, $2, $5);

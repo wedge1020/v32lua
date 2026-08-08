@@ -42,10 +42,10 @@ tests: bin/$(TARGET)
 # Checkmassembler outputs
 # We explicitly depend on the compiler binary ('src/compiler') being built first!
 asmcheck: bin/$(TARGET)
-	$(MAKE) -C testing asmcheck
+	$(MAKE) -C testing vbin
 
 v32check: bin/$(TARGET)
-	$(MAKE) -C testing v32check
+	$(MAKE) -C testing v32
 
 demos: bin/$(TARGET)
 	$(MAKE) -C demos

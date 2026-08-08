@@ -325,8 +325,10 @@ const char* get_current_function_name(void) {
 StringLiteralNode* strings_head = NULL;
 int string_counter = 0;
 
-int add_string_literal(const char* str) {
-    StringLiteralNode* current = strings_head;
+int add_string_literal (const char *str)
+{
+    // Check if string already exists
+    StringLiteralNode *current = strings_head;
     while (current != NULL) {
         if (strcmp(current->value, str) == 0) {
             return current->id;
@@ -334,16 +336,17 @@ int add_string_literal(const char* str) {
         current = current->next;
     }
 
-    StringLiteralNode *new_node  = (StringLiteralNode *) malloc (sizeof(StringLiteralNode));
+    // String not found, add it
+    StringLiteralNode *new_node = (StringLiteralNode *) malloc(sizeof(StringLiteralNode));
     if (new_node == NULL) {
         compiler_error(ERR_INTERNAL, -1, "Out of memory allocating string literal");
     }
-    
-    new_node -> id     = string_counter++;
-    new_node -> value  = strdup (str);
-    new_node -> next   = strings_head;
-    strings_head       = new_node;
-    return (new_node -> id);
+
+    new_node->id    = string_counter++;
+    new_node->value = strdup(str);
+    new_node->next  = strings_head;
+    strings_head    = new_node;
+    return (new_node->id);
 }
 
 // ============================================================================

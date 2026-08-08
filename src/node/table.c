@@ -49,7 +49,7 @@ void  node_table_constructor (ASTNode *node, int dest_reg)
             else {
                 // field is already a NODE_TABLE_SET with key and value
                 // We need to set the table_expr to our new table
-                field->as.table_set.table_expr = make_node_ident("__temp_table");
+                //field->as.table_set.table_expr = make_node_ident("__temp_table");
 
                 int table_reg = dest_reg; // Already has the table
                 int val_reg = allocate_pinned_register();
