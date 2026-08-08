@@ -525,6 +525,7 @@ void generate_program (ASTNode *head)
     SymbolNode *main_sym         = resolve_symbol("main");
     SymbolNode *game_loop_sym    = resolve_symbol("game_loop");
 	SymbolNode *tic_sym          = resolve_symbol("TIC");
+	SymbolNode *tic_map_buffer   = resolve_symbol("TIC80_MAP_BUFFER_PTR");
 
     bool has_init      = (init_sym != NULL && init_sym->is_function == 1);
     bool has_main      = (main_sym != NULL && main_sym->is_function == 1);

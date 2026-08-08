@@ -441,3 +441,140 @@ bool emit_tic80_print_intrinsic(ASTNode *node) {
 
     return true;
 }
+
+/**
+ * Emits assembly for the mget() intrinsic (TIC-80 compatibility).
+ *
+ * Syntax: mget(x, y) -> returns sprite ID at map position (x, y)
+ */
+bool emit_tic80_mget_intrinsic(ASTNode *node, int dest_reg) {
+    emit_asm("    ;; --- TIC-80 mget() Intrinsic ---\n");
+
+    // Collect exactly 2 arguments: x, y
+    int arg_count = 0;
+    ASTNode *curr = node->as.call.args_head;
+    ASTNode *args[2] = { NULL, NULL };
+    while (curr != NULL && arg_count < 2) {
+        args[arg_count++] = curr;
+        curr = curr->next;
+    }
+
+    if (arg_count < 2) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+                      "TIC-80 mget() requires 2 arguments: mget(x, y)");
+        return false;
+    }
+
+    // Push arguments right-to-left: y, x
+    int reg = allocate_register();
+    generate_asm(args[1], reg);  // y
+    emit_asm("PUSH R%d ; Arg 2: y\n", reg);
+    unlock_register(reg);
+
+    reg = allocate_register();
+    generate_asm(args[0], reg);  // x
+    emit_asm("PUSH R%d ; Arg 1: x\n", reg);
+    unlock_register(reg);
+
+    // Call runtime subroutine
+    emit_asm("CALL __builtin_tic80_mget\n");
+    emit_asm("IADD SP, 2 ; Clean up mget() arguments\n");
+
+    // Transfer result to dest_reg if needed
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R0 ; Transfer return value\n", dest_reg);
+    }
+
+    return true;
+}
+
+/**
+ * Emits assembly for the mset() intrinsic (TIC-80 compatibility).
+ *
+ * Syntax: mset(x, y, v) -> sets sprite ID at map position (x, y) to v
+ */
+bool emit_tic80_mset_intrinsic(ASTNode *node, int dest_reg) {
+    emit_asm("    ;; --- TIC-80 mset() Intrinsic ---\n");
+
+    // Collect exactly 3 arguments: x, y, v
+    int arg_count = 0;
+    ASTNode *curr = node->as.call.args_head;
+    ASTNode *args[3] = { NULL, NULL, NULL };
+    while (curr != NULL && arg_count < 3) {
+        args[arg_count++] = curr;
+        curr = curr->next;
+    }
+
+    if (arg_count < 3) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+                      "TIC-80 mset() requires 3 arguments: mset(x, y, v)");
+        return false;
+    }
+
+    // Push arguments right-to-left: v, y, x
+    int reg = allocate_register();
+    generate_asm(args[2], reg);  // v
+    emit_asm("PUSH R%d ; Arg 3: value\n", reg);
+    unlock_register(reg);
+
+    reg = allocate_register();
+    generate_asm(args[1], reg);  // y
+    emit_asm("PUSH R%d ; Arg 2: y\n", reg);
+    unlock_register(reg);
+
+    reg = allocate_register();
+    generate_asm(args[0], reg);  // x
+    emit_asm("PUSH R%d ; Arg 1: x\n", reg);
+    unlock_register(reg);
+
+    // Call runtime subroutine
+    emit_asm("CALL __builtin_tic80_mset\n");
+    emit_asm("IADD SP, 3 ; Clean up mset() arguments\n");
+
+    // Transfer result to dest_reg if needed
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R0 ; Transfer return value\n", dest_reg);
+    }
+
+    return true;
+}
+
+/**
+ * Emits assembly for the map() intrinsic (TIC-80 compatibility).
+ *
+ * Syntax: map(x, y, w, h, sx, sy) -> draws map region to screen
+ */
+bool emit_tic80_map_intrinsic(ASTNode *node) {
+    emit_asm("    ;; --- TIC-80 map() Intrinsic ---\n");
+
+    // Collect exactly 6 arguments
+    int arg_count = 0;
+    ASTNode *curr = node->as.call.args_head;
+    ASTNode *args[6] = { NULL };
+    while (curr != NULL && arg_count < 6) {
+        args[arg_count++] = curr;
+        curr = curr->next;
+    }
+
+    if (arg_count < 6) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+                      "TIC-80 map() requires 6 arguments: map(x, y, w, h, sx, sy)");
+        return false;
+    }
+
+    // Push arguments right-to-left: sy, sx, h, w, y, x
+    for (int i = 5; i >= 0; i--) {
+        int reg = allocate_register();
+        generate_asm(args[i], reg);
+        emit_asm("PUSH R%d ; Arg %d: %s\n", reg, i+1,
+                 i == 0 ? "x" : (i == 1 ? "y" : (i == 2 ? "w" :
+                 (i == 3 ? "h" : (i == 4 ? "sx" : "sy")))));
+        unlock_register(reg);
+    }
+
+    // Call runtime subroutine
+    emit_asm("CALL __builtin_tic80_map\n");
+    emit_asm("IADD SP, 6 ; Clean up map() arguments\n");
+
+    return true;
+}

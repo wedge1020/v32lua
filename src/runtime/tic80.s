@@ -637,3 +637,380 @@ _tic80_cls_use_direct:
     POP   BP
     RET
 
+;; ===========================================================================
+;; TIC-80 MAP CONSTANTS
+;; ===========================================================================
+
+;; Map dimensions (TIC-80 max: 256x256 cells)
+%define TIC80_MAP_MAX_WIDTH    256
+%define TIC80_MAP_MAX_HEIGHT   256
+%define TIC80_MAP_MAX_CELLS    65536   ; 256*256
+
+;; Default map dimensions (can be changed at runtime)
+%define TIC80_MAP_ACTUAL_WIDTH  256
+%define TIC80_MAP_ACTUAL_HEIGHT 256
+
+;; Buffer size in words (64KB = 16384 words)
+%define TIC80_MAP_BUFFER_WORDS  16384
+
+__builtin_tic80_init_map:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; Allocate 16384 words (64KB) for map buffer
+    MOV   R0, TIC80_MAP_BUFFER_WORDS
+    PUSH  R0
+    CALL  __malloc
+    IADD  SP, 1
+
+    ;; Store pointer in global variable
+	MOV   R1, var_TIC80_MAP_BUFFER_PTR
+    MOV   [R1], R0
+
+    ;; Initialize buffer to 0
+    MOV   R1, R0            ; R1 = buffer start
+    MOV   R2, 0            ; R2 = counter
+    MOV   R3, TIC80_MAP_BUFFER_WORDS
+
+_tic80_init_map_clear_loop:
+    IEQ   R2, R3
+    JT    R2, _tic80_init_map_done
+
+    ;; Use temp register for address calculation
+    MOV   R4, R1
+    IADD  R4, R2
+	MOV   R5, 0
+    MOV   [R4], R5
+
+    IADD  R2, 1
+    JMP   _tic80_init_map_clear_loop
+
+_tic80_init_map_done:
+    MOV   SP, BP
+    POP   BP
+    RET
+
+__builtin_tic80_mget:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; Load buffer pointer
+	MOV   R1,  var_TIC80_MAP_BUFFER_PTR
+    MOV   R12, [R1]
+    IEQ   R12, 0
+    JT    R12, _tic80_mget_invalid
+
+    ;; Load arguments
+    MOV   R1, [BP+2]        ; x
+    MOV   R2, [BP+3]        ; y
+    CFI   R1
+    CFI   R2
+
+    ;; Bounds check: x
+    ILT   R1, 0
+    JT    R1, _tic80_mget_invalid
+    IGE   R1, TIC80_MAP_ACTUAL_WIDTH
+    JT    R1, _tic80_mget_invalid
+
+    ;; Bounds check: y
+    ILT   R2, 0
+    JT    R2, _tic80_mget_invalid
+    IGE   R2, TIC80_MAP_ACTUAL_HEIGHT
+    JT    R2, _tic80_mget_invalid
+
+    ;; Calculate byte index: index = y * width + x
+    MOV   R3, TIC80_MAP_ACTUAL_WIDTH
+    IMUL  R2, R3            ; R2 = y * width
+    IADD  R1, R2            ; R1 = byte index (0-65535)
+
+    ;; Calculate word address and byte offset
+    MOV   R3, R1
+    SHL   R3, -2           ; R3 = word index (byte_index / 4)
+    AND   R1, 3            ; R1 = byte offset within word (0-3)
+
+    ;; Load word from buffer using temp register
+    MOV   R4, R12
+    IADD  R4, R3
+    MOV   R5, [R4]         ; R5 = word containing our byte
+
+    ;; Extract the byte
+    SHL   R1, 3            ; R1 = bit shift (0, 8, 16, 24)
+    MOV   R6, 0xFF
+    SHL   R6, R1           ; R6 = byte mask
+    AND   R5, R6           ; R5 = isolated byte
+	ISGN  R1
+    SHL   R5, R1           ; Shift right to extract byte value
+
+    ;; Return as boxed Lua number
+    CIF   R5
+    ;OR    R0, BOXED_NUMBER  ; numbers do not need boxing
+    JMP   _tic80_mget_done
+
+_tic80_mget_invalid:
+    MOV   R0, BOXED_NIL
+
+_tic80_mget_done:
+    MOV   SP, BP
+    POP   BP
+    RET
+
+__builtin_tic80_mset:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; Load buffer pointer
+	MOV   R1,  var_TIC80_MAP_BUFFER_PTR
+    MOV   R12, [R1]
+    IEQ   R12, 0
+    JT    R12, _tic80_mset_done
+
+    ;; Load arguments
+    MOV   R1, [BP+2]        ; x
+    MOV   R2, [BP+3]        ; y
+    MOV   R3, [BP+4]        ; value
+    CFI   R1
+    CFI   R2
+    CFI   R3
+
+    ;; Bounds check: x
+    ILT   R1, 0
+    JT    R1, _tic80_mset_done
+    IGE   R1, TIC80_MAP_ACTUAL_WIDTH
+    JT    R1, _tic80_mset_done
+
+    ;; Bounds check: y
+    ILT   R2, 0
+    JT    R2, _tic80_mset_done
+    IGE   R2, TIC80_MAP_ACTUAL_HEIGHT
+    JT    R2, _tic80_mset_done
+
+    ;; Clamp value to 0-511
+    ILT   R3, 0
+    JT    R3, _tic80_mset_clamp_zero
+    IGT   R3, 511
+    JT    R3, _tic80_mset_clamp_max
+    JMP   _tic80_mset_store
+
+_tic80_mset_clamp_zero:
+    MOV   R3, 0
+    JMP   _tic80_mset_store
+
+_tic80_mset_clamp_max:
+    MOV   R3, 511
+
+_tic80_mset_store:
+    ;; Calculate byte index
+    MOV   R4, TIC80_MAP_ACTUAL_WIDTH
+    IMUL  R2, R4            ; R2 = y * width
+    IADD  R1, R2            ; R1 = byte index
+
+    ;; Calculate word address and byte offset
+    MOV   R4, R1
+    SHL   R4, -2           ; R4 = word index
+    AND   R1, 3            ; R1 = byte offset (0-3)
+
+    ;; Load current word
+    MOV   R5, R12
+    IADD  R5, R4
+    MOV   R6, [R5]         ; R6 = current word
+
+    ;; Clear the target byte
+    MOV   R7, 0xFF
+    SHL   R7, R1           ; R7 = byte mask
+    NOT   R7               ; R7 = inverted mask (NOT is valid)
+    AND   R6, R7           ; Clear target byte
+
+    ;; Set the target byte
+    SHL   R3, R1           ; Shift value to correct position
+    OR    R6, R3           ; Set the byte
+
+    ;; Store back to buffer
+    MOV   R5, R12
+    IADD  R5, R4
+    MOV   [R5], R6
+
+    ;; Return the value (boxed)
+    CIF   R3
+    ; OR    R0, BOXED_NUMBER ; numbers do not need boxing
+
+_tic80_mset_done:
+    MOV   SP, BP
+    POP   BP
+    RET
+
+__builtin_tic80_map:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; Save callee-saved registers
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
+    PUSH  R7
+    PUSH  R8
+    PUSH  R9
+    PUSH  R10
+    PUSH  R11
+    PUSH  R12
+    PUSH  R13
+
+    ;; Load buffer pointer
+	MOV   R1,  var_TIC80_MAP_BUFFER_PTR
+    MOV   R12, [R1]
+    IEQ   R12, 0
+    JT    R12, _tic80_map_done
+
+    ;; Load arguments
+    MOV   R1, [BP+2]        ; x
+    MOV   R2, [BP+3]        ; y
+    MOV   R3, [BP+4]        ; w
+    MOV   R4, [BP+5]        ; h
+    MOV   R5, [BP+6]        ; sx
+    MOV   R6, [BP+7]        ; sy
+    CFI   R1
+    CFI   R2
+    CFI   R3
+    CFI   R4
+    CFI   R5
+    CFI   R6
+
+    ;; Validate dimensions
+    ILT   R3, 1
+    JT    R3, _tic80_map_done
+    ILT   R4, 1
+    JT    R4, _tic80_map_done
+
+    ;; Clamp sx
+    MOV   R7, R5
+    ILT   R7, 0
+    JT    R7, _tic80_map_sx_zero
+    MOV   R8, TIC80_MAP_ACTUAL_WIDTH
+    ISUB  R8, R3
+    IGT   R7, R8
+    JT    R7, _tic80_map_sx_max
+    JMP   _tic80_map_check_sy
+
+_tic80_map_sx_zero:
+    MOV   R5, 0
+    JMP   _tic80_map_check_sy
+
+_tic80_map_sx_max:
+    MOV   R5, R8
+
+    ;; Clamp sy
+_tic80_map_check_sy:
+    MOV   R7, R6
+    ILT   R7, 0
+    JT    R7, _tic80_map_sy_zero
+    MOV   R8, TIC80_MAP_ACTUAL_HEIGHT
+    ISUB  R8, R4
+    IGT   R7, R8
+    JT    R7, _tic80_map_sy_max
+    JMP   _tic80_map_row_loop_start
+
+_tic80_map_sy_zero:
+    MOV   R6, 0
+    JMP   _tic80_map_row_loop_start
+
+_tic80_map_sy_max:
+    MOV   R6, R8
+
+    ;; Set colorkey
+    MOV   R13, 16
+
+    ;; Outer loop: rows (R9)
+    MOV   R9, 0
+_tic80_map_row_loop_start:
+    MOV   R7, R9
+    IGE   R7, R4
+    JT    R7, _tic80_map_done
+
+    ;; Inner loop: columns (R10)
+    MOV   R10, 0
+_tic80_map_col_loop_start:
+    MOV   R7, R10
+    IGE   R7, R3
+    JT    R7, _tic80_map_row_loop_next
+
+    ;; Calculate map cell position
+    MOV   R7, R5
+    IADD  R7, R10           ; sx + col
+    MOV   R8, R6
+    IADD  R8, R9            ; sy + row
+
+    ;; Calculate byte index: (sy+row) * width + (sx+col)
+    MOV   R11, TIC80_MAP_ACTUAL_WIDTH
+    IMUL  R8, R11           ; (sy+row) * width
+    IADD  R7, R8           ; byte index
+
+    ;; Calculate word index and byte offset
+    MOV   R8, R7
+    SHL   R8, -2           ; word index = byte_index / 4
+    AND   R7, 3            ; byte offset (0-3)
+
+    ;; Load word from buffer
+    MOV   R11, R12
+    IADD  R11, R8
+    MOV   R11, [R11]       ; R11 = word containing byte
+
+    ;; Extract sprite ID byte
+    SHL   R7, 3            ; bit shift
+	ISGN  R7
+    SHL   R11, R7          ; shift right to extract
+    AND   R11, 0xFF        ; R11 = sprite ID
+
+    ;; Calculate screen position
+    MOV   R7, R10
+    IMUL  R7, 8
+    IADD  R7, R1           ; x + col*8
+    MOV   R8, R9
+    IMUL  R8, 8
+    IADD  R8, R2           ; y + row*8
+
+    ;; Draw sprite using __builtin_tic80_spr
+    MOV   R10, 1.0
+    PUSH  R10              ; h = 1
+    PUSH  R10              ; w = 1
+    MOV   R10, 0
+    PUSH  R10              ; rotate = 0
+    PUSH  R10              ; flip = 0
+    PUSH  R10              ; scale = 1.0
+    PUSH  R13              ; colorkey
+    PUSH  R8               ; y
+    PUSH  R7               ; x
+    PUSH  R11              ; id
+
+    CALL  __builtin_tic80_spr
+    IADD  SP, 9
+
+    ;; Next column
+    IADD  R10, 1
+    JMP   _tic80_map_col_loop_start
+
+_tic80_map_row_loop_next:
+    IADD  R9, 1
+    JMP   _tic80_map_row_loop_start
+
+_tic80_map_done:
+    ;; Restore registers
+    POP   R13
+    POP   R12
+    POP   R11
+    POP   R10
+    POP   R9
+    POP   R8
+    POP   R7
+    POP   R6
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+
+    MOV   SP, BP
+    POP   BP
+    RET
+

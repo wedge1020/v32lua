@@ -178,6 +178,9 @@ int  main (int  argc, char** argv)
     // --- Stage 4: Semantic Analyzer ---
     log_stage(4, "analyzer", verbose);
     init_global_scope();
+
+	// TIC-80 map buffer pointer - must be registered before prepass
+	register_global("TIC80_MAP_BUFFER_PTR");
     
     // Perform full symbol pre-pass before code generation
     register_all_globals_prepass(root_node);
