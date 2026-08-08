@@ -677,6 +677,17 @@ __builtin_tic80_init_map:
     MOV   [R1], R0
     MOV   R12,  R0            ; R12 = buffer
 
+    ;; Initialize RAM variables with actual cartridge dimensions from ROM
+    MOV   R1, __tic80_map_static_width
+    MOV   R1, [R1]              ; Load static width (240) from ROM
+    MOV   R2, var_TIC80_MAP_WIDTH    ; RAM address 2
+    MOV   [R2], R1              ; Store width in RAM
+
+    MOV   R1, __tic80_map_static_height
+    MOV   R1, [R1]             ; Load static height (17) from ROM
+    MOV   R2, var_TIC80_MAP_HEIGHT   ; RAM address 3
+    MOV   [R2], R1              ; Store height in RAM
+
     ;; Check for static map data (width > 0?)
     MOV   R1, var_TIC80_MAP_WIDTH
     MOV   R1, [R1]
@@ -951,7 +962,7 @@ __builtin_tic80_map:
     MOV   R11, R5
     ILT   R11, 0
     JT    R11, _tic80_map_sx_zero
-	MOV   R9,  R7
+    MOV   R9,  R7
     ISUB  R9,  R3       ; R9 = width - w
     IGT   R11, R9
     JT    R11, _tic80_map_sx_max
@@ -969,7 +980,7 @@ _tic80_map_check_sy:
     MOV   R11, R6
     ILT   R11, 0
     JT    R11, _tic80_map_sy_zero
-	MOV   R9,  R8
+    MOV   R9,  R8
     ISUB  R9,  R4       ; R9 = height - h
     IGT   R11, R9
     JT    R11, _tic80_map_sy_max
