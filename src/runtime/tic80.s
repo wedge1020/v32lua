@@ -645,14 +645,14 @@ _tic80_cls_use_direct:
 ;; TIC-80 MAP CONSTANTS
 ;; ===========================================================================
 
-;; Map dimensions (TIC-80 max: 256x256 cells)
-%define TIC80_MAP_MAX_WIDTH    256
-%define TIC80_MAP_MAX_HEIGHT   256
-%define TIC80_MAP_MAX_CELLS    65536   ; 256*256
+;; TIC-80 MAP CONSTANTS
+%define TIC80_MAP_MAX_WIDTH     240
+%define TIC80_MAP_MAX_HEIGHT    136
+%define TIC80_MAP_MAX_CELLS     32640   ; 240*136
 
 ;; Default map dimensions (can be changed at runtime)
-%define TIC80_MAP_ACTUAL_WIDTH  256
-%define TIC80_MAP_ACTUAL_HEIGHT 256
+%define TIC80_MAP_ACTUAL_WIDTH  240
+%define TIC80_MAP_ACTUAL_HEIGHT 136
 
 ;; Buffer size in words (64KB = 16384 words)
 %define TIC80_MAP_BUFFER_WORDS  16384
@@ -673,21 +673,21 @@ __builtin_tic80_init_map:
     IADD  SP, 1
 
     ;; Store pointer globally
-    MOV   R1, var_TIC80_MAP_BUFFER_PTR
+    MOV   R1,   var_TIC80_MAP_BUFFER_PTR
     MOV   [R1], R0
-    MOV   R12, R0            ; R12 = buffer
+    MOV   R12,  R0            ; R12 = buffer
 
     ;; Check for static map data (width > 0?)
-    MOV   R1, __tic80_map_static_width
+    MOV   R1, var_TIC80_MAP_WIDTH
     MOV   R1, [R1]
     IEQ   R1, 0
     JT    R1, _tic80_init_map_zero_fill
 
     ;; Copy loop
     MOV   R2, 0                ; byte index
-    MOV   R3, __tic80_map_static_width
+    MOV   R3, var_TIC80_MAP_WIDTH
     MOV   R3, [R3]
-    MOV   R6, __tic80_map_static_height
+    MOV   R6, var_TIC80_MAP_HEIGHT
     MOV   R6, [R6]
     IMUL  R3, R6              ; R3 = total bytes
     MOV   R7, __tic80_map_static_data
@@ -741,7 +741,7 @@ __builtin_tic80_mget:
     MOV   BP, SP
 
     ;; Load buffer pointer
-	MOV   R1,  var_TIC80_MAP_BUFFER_PTR
+    MOV   R1,  var_TIC80_MAP_BUFFER_PTR
     MOV   R12, [R1]
     IEQ   R12, 0
     JT    R12, _tic80_mget_invalid
@@ -752,44 +752,49 @@ __builtin_tic80_mget:
     CFI   R1
     CFI   R2
 
+    ;; Load ACTUAL map dimensions for bounds checking
+    MOV   R3, var_TIC80_MAP_WIDTH
+    MOV   R3, [R3]          ; R3 = actual width
+    MOV   R4, var_TIC80_MAP_HEIGHT
+    MOV   R4, [R4]          ; R4 = actual height
+
     ;; Bounds check: x
     ILT   R1, 0
     JT    R1, _tic80_mget_invalid
-    IGE   R1, TIC80_MAP_ACTUAL_WIDTH
+    IGE   R1, R3
     JT    R1, _tic80_mget_invalid
 
     ;; Bounds check: y
     ILT   R2, 0
     JT    R2, _tic80_mget_invalid
-    IGE   R2, TIC80_MAP_ACTUAL_HEIGHT
+    IGE   R2, R4
     JT    R2, _tic80_mget_invalid
 
     ;; Calculate byte index: index = y * width + x
-    MOV   R3, TIC80_MAP_ACTUAL_WIDTH
-    IMUL  R2, R3            ; R2 = y * width
-    IADD  R1, R2            ; R1 = byte index (0-65535)
+    MOV   R5, R3           ; R5 = width
+    IMUL  R2, R5           ; R2 = y * width
+    IADD  R1, R2           ; R1 = byte index (0-65535)
 
     ;; Calculate word address and byte offset
-    MOV   R3, R1
-    SHL   R3, -2           ; R3 = word index (byte_index / 4)
-    AND   R1, 3            ; R1 = byte offset within word (0-3)
+    MOV   R4, R1
+    SHL   R4, -2          ; R4 = word index
+    AND   R1, 3           ; R1 = byte offset (0-3)
 
-    ;; Load word from buffer using temp register
-    MOV   R4, R12
-    IADD  R4, R3
-    MOV   R5, [R4]         ; R5 = word containing our byte
+    ;; Load word from buffer
+    MOV   R5, R12
+    IADD  R5, R4
+    MOV   R6, [R5]        ; R6 = word containing our byte
 
     ;; Extract the byte
-    SHL   R1, 3            ; R1 = bit shift (0, 8, 16, 24)
-    MOV   R6, 0xFF
-    SHL   R6, R1           ; R6 = byte mask
-    AND   R5, R6           ; R5 = isolated byte
-	ISGN  R1
-    SHL   R5, R1           ; Shift right to extract byte value
+    SHL   R1, 3           ; R1 = bit shift (0, 8, 16, 24)
+    MOV   R7, 0xFF
+    SHL   R7, R1          ; R7 = byte mask
+    AND   R6, R7          ; R6 = isolated byte
+    ISGN  R1
+    SHL   R6, R1          ; Shift right to extract byte value
 
     ;; Return as boxed Lua number
-    CIF   R5
-    ;OR    R0, BOXED_NUMBER  ; numbers do not need boxing
+    CIF   R6
     JMP   _tic80_mget_done
 
 _tic80_mget_invalid:
@@ -805,7 +810,7 @@ __builtin_tic80_mset:
     MOV   BP, SP
 
     ;; Load buffer pointer
-	MOV   R1,  var_TIC80_MAP_BUFFER_PTR
+    MOV   R1,  var_TIC80_MAP_BUFFER_PTR
     MOV   R12, [R1]
     IEQ   R12, 0
     JT    R12, _tic80_mset_done
@@ -818,16 +823,22 @@ __builtin_tic80_mset:
     CFI   R2
     CFI   R3
 
+    ;; Load ACTUAL map dimensions for bounds checking
+    MOV   R4, var_TIC80_MAP_WIDTH
+    MOV   R4, [R4]          ; R4 = actual width
+    MOV   R5, var_TIC80_MAP_HEIGHT
+    MOV   R5, [R5]          ; R5 = actual height
+
     ;; Bounds check: x
     ILT   R1, 0
     JT    R1, _tic80_mset_done
-    IGE   R1, TIC80_MAP_ACTUAL_WIDTH
+    IGE   R1, R4
     JT    R1, _tic80_mset_done
 
     ;; Bounds check: y
     ILT   R2, 0
     JT    R2, _tic80_mset_done
-    IGE   R2, TIC80_MAP_ACTUAL_HEIGHT
+    IGE   R2, R5
     JT    R2, _tic80_mset_done
 
     ;; Clamp value to 0-511
@@ -845,30 +856,30 @@ _tic80_mset_clamp_max:
     MOV   R3, 511
 
 _tic80_mset_store:
-    ;; Calculate byte index
-    MOV   R4, TIC80_MAP_ACTUAL_WIDTH
-    IMUL  R2, R4            ; R2 = y * width
-    IADD  R1, R2            ; R1 = byte index
+    ;; Calculate byte index: index = y * width + x
+    MOV   R6, R4           ; R6 = width
+    IMUL  R2, R6           ; R2 = y * width
+    IADD  R1, R2           ; R1 = byte index
 
     ;; Calculate word address and byte offset
     MOV   R4, R1
-    SHL   R4, -2           ; R4 = word index
-    AND   R1, 3            ; R1 = byte offset (0-3)
+    SHL   R4, -2          ; R4 = word index
+    AND   R1, 3           ; R1 = byte offset (0-3)
 
     ;; Load current word
     MOV   R5, R12
     IADD  R5, R4
-    MOV   R6, [R5]         ; R6 = current word
+    MOV   R6, [R5]        ; R6 = current word
 
     ;; Clear the target byte
     MOV   R7, 0xFF
-    SHL   R7, R1           ; R7 = byte mask
-    NOT   R7               ; R7 = inverted mask (NOT is valid)
-    AND   R6, R7           ; Clear target byte
+    SHL   R7, R1          ; R7 = byte mask
+    NOT   R7              ; R7 = inverted mask
+    AND   R6, R7          ; Clear target byte
 
     ;; Set the target byte
-    SHL   R3, R1           ; Shift value to correct position
-    OR    R6, R3           ; Set the byte
+    SHL   R3, R1          ; Shift value to correct position
+    OR    R6, R3          ; Set the byte
 
     ;; Store back to buffer
     MOV   R5, R12
@@ -877,7 +888,6 @@ _tic80_mset_store:
 
     ;; Return the value (boxed)
     CIF   R3
-    ; OR    R0, BOXED_NUMBER ; numbers do not need boxing
 
 _tic80_mset_done:
     MOV   SP, BP
@@ -916,7 +926,7 @@ __builtin_tic80_map:
     MOV   R4, [BP+5]        ; h
     MOV   R5, [BP+6]        ; sx
     MOV   R6, [BP+7]        ; sy
-    MOV   R13, [BP+8]       ; color_key (7th argument, or default 16)
+    MOV   R13, [BP+8]       ; color_key
     CFI   R1
     CFI   R2
     CFI   R3
@@ -925,20 +935,26 @@ __builtin_tic80_map:
     CFI   R6
     CFI   R13
 
+    ;; Load ACTUAL map dimensions (not hardcoded 256!)
+    MOV   R7, var_TIC80_MAP_WIDTH
+    MOV   R7, [R7]          ; R7 = actual width
+    MOV   R8, var_TIC80_MAP_HEIGHT
+    MOV   R8, [R8]          ; R8 = actual height
+
     ;; Validate dimensions
     ILT   R3, 1
     JT    R3, _tic80_map_done
     ILT   R4, 1
     JT    R4, _tic80_map_done
 
-    ;; Clamp sx
-    MOV   R7, R5
-    ILT   R7, 0
-    JT    R7, _tic80_map_sx_zero
-    MOV   R8, TIC80_MAP_ACTUAL_WIDTH
-    ISUB  R8, R3
-    IGT   R7, R8
-    JT    R7, _tic80_map_sx_max
+    ;; Clamp sx: 0 <= sx <= width - w
+    MOV   R11, R5
+    ILT   R11, 0
+    JT    R11, _tic80_map_sx_zero
+	MOV   R9,  R7
+    ISUB  R9,  R3       ; R9 = width - w
+    IGT   R11, R9
+    JT    R11, _tic80_map_sx_max
     JMP   _tic80_map_check_sy
 
 _tic80_map_sx_zero:
@@ -946,17 +962,17 @@ _tic80_map_sx_zero:
     JMP   _tic80_map_check_sy
 
 _tic80_map_sx_max:
-    MOV   R5, R8
+    MOV   R5, R9
 
-    ;; Clamp sy
+    ;; Clamp sy: 0 <= sy <= height - h
 _tic80_map_check_sy:
-    MOV   R7, R6
-    ILT   R7, 0
-    JT    R7, _tic80_map_sy_zero
-    MOV   R8, TIC80_MAP_ACTUAL_HEIGHT
-    ISUB  R8, R4
-    IGT   R7, R8
-    JT    R7, _tic80_map_sy_max
+    MOV   R11, R6
+    ILT   R11, 0
+    JT    R11, _tic80_map_sy_zero
+	MOV   R9,  R8
+    ISUB  R9,  R4       ; R9 = height - h
+    IGT   R11, R9
+    JT    R11, _tic80_map_sy_max
     JMP   _tic80_map_row_loop_start
 
 _tic80_map_sy_zero:
@@ -964,10 +980,10 @@ _tic80_map_sy_zero:
     JMP   _tic80_map_row_loop_start
 
 _tic80_map_sy_max:
-    MOV   R6, R8
+    MOV   R6, R9
 
-    ;; Set colorkey from argument (already loaded into R13)
-    ;; R13 now contains the color_key parameter
+    ;; Save width in R11 for byte index calculation
+    MOV   R11, R7           ; R11 = actual width
 
     ;; Outer loop: rows (R9)
     MOV   R9, 0
@@ -983,53 +999,58 @@ _tic80_map_col_loop_start:
     IGE   R7, R3
     JT    R7, _tic80_map_row_loop_next
 
-    ;; Calculate map cell position
+    ;; Calculate map cell position: (sx + col, sy + row)
     MOV   R7, R5
-    IADD  R7, R10           ; sx + col
+    IADD  R7, R10          ; R7 = sx + col
     MOV   R8, R6
-    IADD  R8, R9            ; sy + row
+    IADD  R8, R9           ; R8 = sy + row
 
     ;; Calculate byte index: (sy+row) * width + (sx+col)
-    MOV   R11, TIC80_MAP_ACTUAL_WIDTH
-    IMUL  R8, R11           ; (sy+row) * width
-    IADD  R7, R8           ; byte index
+    MOV   R10, R11         ; R10 = width (from R11)
+    IMUL  R8, R10          ; R8 = (sy+row) * width
+    IADD  R7, R8           ; R7 = byte index
 
     ;; Calculate word index and byte offset
     MOV   R8, R7
-    SHL   R8, -2           ; word index = byte_index / 4
-    AND   R7, 3            ; byte offset (0-3)
+    SHL   R8, -2          ; word index = byte_index / 4
+    AND   R7, 3           ; byte offset (0-3)
 
     ;; Load word from buffer
-    MOV   R11, R12
-    IADD  R11, R8
-    MOV   R11, [R11]       ; R11 = word containing byte
+    MOV   R10, R12
+    IADD  R10, R8
+    MOV   R10, [R10]       ; R10 = word containing byte
 
     ;; Extract sprite ID byte
-    SHL   R7, 3            ; bit shift
+    SHL   R7, 3           ; R7 = bit shift (0, 8, 16, 24)
+    MOV   R9, 0xFF
+    SHL   R9, R7           ; R9 = byte mask
+    AND   R10, R9          ; R10 = isolated byte
     ISGN  R7
-    SHL   R11, R7          ; shift right to extract
-    AND   R11, 0xFF        ; R11 = sprite ID
+    SHL   R10, R7          ; Shift right to extract byte value
 
-    ;; Calculate screen position
+    ;; R10 = sprite ID
+
+    ;; Calculate screen position: x + col*8, y + row*8
     MOV   R7, R10
     IMUL  R7, 8
     IADD  R7, R1           ; x + col*8
-    MOV   R8, R9
+    MOV   R8, R9           ; Reuse R9 for row*8
     IMUL  R8, 8
     IADD  R8, R2           ; y + row*8
 
-    ;; Draw sprite using __builtin_tic80_spr
-    MOV   R10, 1.0
-    PUSH  R10              ; h = 1
-    PUSH  R10              ; w = 1
-    MOV   R10, 0
-    PUSH  R10              ; rotate = 0
-    PUSH  R10              ; flip = 0
-    PUSH  R10              ; scale = 1.0
-    PUSH  R13              ; colorkey (from argument)
+    ;; Draw sprite via __builtin_tic80_spr
+    ;; Stack: id, x, y, colorkey, scale, flip, rotate, w, h
+    MOV   R9, 1.0
+    PUSH  R9               ; h = 1
+    PUSH  R9               ; w = 1
+    MOV   R9, 0
+    PUSH  R9               ; rotate = 0
+    PUSH  R9               ; flip = 0
+    PUSH  R9               ; scale = 1.0
+    PUSH  R13              ; colorkey
     PUSH  R8               ; y
     PUSH  R7               ; x
-    PUSH  R11              ; id
+    PUSH  R10              ; id
 
     CALL  __builtin_tic80_spr
     IADD  SP, 9

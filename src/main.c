@@ -179,8 +179,13 @@ int  main (int  argc, char** argv)
     log_stage(4, "analyzer", verbose);
     init_global_scope();
 
-	// TIC-80 map buffer pointer - must be registered before prepass
-	register_global("TIC80_MAP_BUFFER_PTR");
+	if (runtime_req.needs_tic80)
+	{
+		// TIC-80 map buffer pointer - must be registered before prepass
+		register_global ("TIC80_MAP_BUFFER_PTR");
+		register_global ("TIC80_MAP_WIDTH");
+		register_global ("TIC80_MAP_HEIGHT");
+	}
     
     // Perform full symbol pre-pass before code generation
     register_all_globals_prepass(root_node);

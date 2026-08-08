@@ -444,31 +444,38 @@ void  emit_falsy_jump (int  reg, const char *target_label)
 int   emit_variable_map (void)
 {
     int  lines_printed       = 2;
-    fprintf (out(), "%%define  V32_CART_PAGE   0x20000000\n");
-    fprintf (out(), "%%define  NAN_VALUE       0x7F800000\n");
-    fprintf (out(), "%%define  BOXED_CATEGORY  0x80000000 ; RAM(1), ROM(0)\n");
-    fprintf (out(), "%%define  BOXED_TYPE      0x00400000 ; TABLE/FUNCTION (0), STRING (1)\n");
-    fprintf (out(), "%%define  BOXED_DATA      0xFFC00000 ; common bitmask to indicate boxed data\n");
-    fprintf (out(), "%%define  BOXED_FUNCTION  0x7F800000 ; bitmask for boxed lua function (ROM)\n");
-    fprintf (out(), "%%define  BOXED_ROMSTRING 0x7FC00000 ; bitmank for boxed lua string literal (ROM)\n");
-    fprintf (out(), "%%define  BOXED_TABLE     0xFF800000 ; bitmask for boxed lua table (RAM)\n");
-    fprintf (out(), "%%define  BOXED_RAMSTRING 0xFFC00000 ; starting at offset 4\n");
-    fprintf (out(), "%%define  BOXED_NIL       0xFFC00000\n");
-    fprintf (out(), "%%define  BOXED_FALSE     0xFFC00001\n");
-    fprintf (out(), "%%define  BOXED_BOOLEAN   0xFFC00001\n");
-    fprintf (out(), "%%define  BOXED_TRUE      0xFFC00002\n");
-    fprintf (out(), "%%define  BOXED_TOMBSTONE 0xFFC00003 ; future feature\n");
-    fprintf (out(), "%%define  BOXED_PAYLOAD   0x003FFFFF\n");
-    fprintf (out(), "%%define  TABLE_ARRAYSIZE 0x0000FFFF\n");
-    fprintf (out(), "%%define  HEAP_POINTER    0\n");
+    fprintf (out(), "%%define  V32_CART_PAGE            0x20000000\n");
+    fprintf (out(), "%%define  NAN_VALUE                0x7F800000\n");
+    fprintf (out(), "%%define  BOXED_CATEGORY           0x80000000 ; RAM(1), ROM(0)\n");
+    fprintf (out(), "%%define  BOXED_TYPE               0x00400000 ; TABLE/FUNCTION (0), STRING (1)\n");
+    fprintf (out(), "%%define  BOXED_DATA               0xFFC00000 ; common bitmask to indicate boxed data\n");
+    fprintf (out(), "%%define  BOXED_FUNCTION           0x7F800000 ; bitmask for boxed lua function (ROM)\n");
+    fprintf (out(), "%%define  BOXED_ROMSTRING          0x7FC00000 ; bitmank for boxed lua string literal (ROM)\n");
+    fprintf (out(), "%%define  BOXED_TABLE              0xFF800000 ; bitmask for boxed lua table (RAM)\n");
+    fprintf (out(), "%%define  BOXED_RAMSTRING          0xFFC00000 ; starting at offset 4\n");
+    fprintf (out(), "%%define  BOXED_NIL                0xFFC00000\n");
+    fprintf (out(), "%%define  BOXED_FALSE              0xFFC00001\n");
+    fprintf (out(), "%%define  BOXED_BOOLEAN            0xFFC00001\n");
+    fprintf (out(), "%%define  BOXED_TRUE               0xFFC00002\n");
+    fprintf (out(), "%%define  BOXED_TOMBSTONE          0xFFC00003 ; future feature\n");
+    fprintf (out(), "%%define  BOXED_PAYLOAD            0x003FFFFF\n");
+    fprintf (out(), "%%define  TABLE_ARRAYSIZE          0x0000FFFF\n");
+    fprintf (out(), "%%define  HEAP_POINTER             0\n");
+	/*
+    if (runtime_req.needs_tic80)
+	{
+		fprintf (out(), "%%define  MAP_BUFFER_PTR   1\n");
+		fprintf (out(), "%%define  TIC80_MAP_WIDTH  2\n");
+		fprintf (out(), "%%define  TIC80_MAP_HEIGHT 3\n");
+	}*/
     
     SymbolNode *curr = global_scope ? global_scope->symbols : NULL;
     while (curr != NULL)
     {
         if (curr->is_function)
-            fprintf(out(), "%%define func_%s %d\n", curr->name, curr->location);
+            fprintf(out(), "%%define  func_%-19s %d\n", curr->name, curr->location);
         else
-            fprintf(out(), "%%define var_%s %d\n", curr->name, curr->location);
+            fprintf(out(), "%%define  var_%-20s %d\n",  curr->name, curr->location);
         lines_printed    = lines_printed + 1;
         curr = curr->next;
     }
