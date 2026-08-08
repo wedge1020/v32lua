@@ -641,7 +641,8 @@ void emit_table_get_literal(int table_reg, const char *property_name)
 /// Call this from emit.c after processing TIC-80 sections
 void emit_tic80_map_data(FILE *out) {
     if (!tic80_has_map) {
-        return;
+		tic80_map_width   = 0;
+		tic80_map_height  = 0;
     }
 
     int total_bytes = tic80_map_width * tic80_map_height;
@@ -666,5 +667,8 @@ void emit_tic80_map_data(FILE *out) {
             fprintf(out, "\n    integer ");
         }
     }
+    if (!tic80_has_map) {
+		fprintf (out, "0");
+	}
     fprintf(out, "\n\n");
 }
