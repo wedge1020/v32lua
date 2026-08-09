@@ -183,11 +183,11 @@ _tic80_spr_no_flip_y:
     CFI   R7
 
     MOV   R8, [BP+3]        ; x
-	FMUL  R8, R12           ; multiply by x axis screen factor
+	FMUL  R8, 2.64          ; multiply by x axis screen factor
     CFI   R8
 
     MOV   R9, [BP+4]        ; y
-	FMUL  R9, R13           ; multiply by y axis screen factor
+	FMUL  R9, 2.64          ; multiply by y axis screen factor
     CFI   R9
 
     ;; Initialize Row Counter
@@ -753,10 +753,12 @@ _tic80_init_map_done:
 ;;
 ;; __builtin_tic80_mget: Get Tile from TIC-80 Map
 ;;
-;; Stack: [BP+2] = x, [BP+3] = y
-;; Returns: R0 = tile index at (x,y) as boxed Lua number, or BOXED_NIL if out of bounds
+;; Stack: [BP+2] = x
+;;        [BP+3] = y
+;; Returns: R0 = tile index at (x,y) as boxed Lua number,
+;;               ... or BOXED_NIL if out of bounds
 ;;
-;; Reads a single tile from the map buffer using actual cartridge dimensions.
+;; Reads a single tile from the map buffer using actual cartridge dimensions
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
