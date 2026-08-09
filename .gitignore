@@ -59,3 +59,4 @@ dkms.conf
 *.vbin
 *.v32
 .DS_Store
+cmd

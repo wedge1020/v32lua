@@ -1046,11 +1046,6 @@ __debug:
     IADD  R8, R7           ; 
     MOV   R7, [R8]         ; R7 = tile index (Leaves R10 untouched!)
 
-    ;; Calculate screen X position: x + col*8
-    MOV   R8, R10          ; R8 = col
-    IMUL  R8, 8
-    IADD  R8, R1           ; R8 = screen_x + col*8
-
 	PUSH  R1               ; x save
 	PUSH  R2               ; y save
 	PUSH  R3               ; w save
