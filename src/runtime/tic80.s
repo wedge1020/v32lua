@@ -806,9 +806,9 @@ __builtin_tic80_mget:
     IADD  R1, R2            ; R1 = byte index
 
     ;; Load tile index directly (each word = one byte)
-    MOV   R2, R12
-    IADD  R2, R1
-    MOV   R2, [R2]          ; R2 = tile index
+    MOV   R0, R12
+    IADD  R0, R1
+    MOV   R0, [R0]          ; R2 = tile index
 
     ;; Return as boxed Lua number
     CIF   R2
@@ -903,6 +903,7 @@ _tic80_mset_store:
 
     ;; Return the value (boxed)
     CIF   R3
+	MOV   R0, R3
 
 _tic80_mset_done:
     MOV   SP, BP
