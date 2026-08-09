@@ -781,16 +781,20 @@ __builtin_tic80_mget:
     MOV   R4, [R4]          ; R4 = actual height
 
     ;; Bounds check: x
-    ILT   R1, 0
-    JT    R1, _tic80_mget_invalid
-    IGE   R1, R3
-    JT    R1, _tic80_mget_invalid
+	MOV   R5, R1
+    ILT   R5, 0
+    JT    R5, _tic80_mget_invalid
+	MOV   R5, R1
+    IGE   R5, R3
+    JT    R5, _tic80_mget_invalid
 
     ;; Bounds check: y
-    ILT   R2, 0
-    JT    R2, _tic80_mget_invalid
-    IGE   R2, R4
-    JT    R2, _tic80_mget_invalid
+	MOV   R5, R2
+    ILT   R5, 0
+    JT    R5, _tic80_mget_invalid
+	MOV   R5, R2
+    IGE   R5, R4
+    JT    R5, _tic80_mget_invalid
 
     ;; Calculate byte index: index = y * width + x
     MOV   R5, R3
@@ -832,8 +836,9 @@ __builtin_tic80_mset:
     ;; Load buffer pointer
     MOV   R1,  var_TIC80_MAP_BUFFER_PTR
     MOV   R12, [R1]
-    IEQ   R12, 0
-    JT    R12, _tic80_mset_done
+	MOV   R2,  R12
+    IEQ   R2,  0
+    JT    R2,  _tic80_mset_done
 
     ;; Load arguments
     MOV   R1, [BP+2]        ; x
@@ -850,22 +855,28 @@ __builtin_tic80_mset:
     MOV   R5, [R5]          ; R5 = actual height
 
     ;; Bounds check: x
-    ILT   R1, 0
-    JT    R1, _tic80_mset_done
-    IGE   R1, R4
-    JT    R1, _tic80_mset_done
+	MOV   R6, R1
+    ILT   R6, 0
+    JT    R6, _tic80_mset_done
+	MOV   R6, R1
+    IGE   R6, R4
+    JT    R6, _tic80_mset_done
 
     ;; Bounds check: y
-    ILT   R2, 0
-    JT    R2, _tic80_mset_done
-    IGE   R2, R5
-    JT    R2, _tic80_mset_done
+	MOV   R6, R2
+    ILT   R6, 0
+    JT    R6, _tic80_mset_done
+	MOV   R6, R2
+    IGE   R6, R5
+    JT    R6, _tic80_mset_done
 
     ;; Clamp value to 0-255 (TIC-80 uses 0-511 but 256 is enough for most cases)
-    ILT   R3, 0
-    JT    R3, _tic80_mset_clamp_zero
-    IGT   R3, 255
-    JT    R3, _tic80_mset_clamp_max
+	MOV   R6, R3
+    ILT   R6, 0
+    JT    R6, _tic80_mset_clamp_zero
+	MOV   R6, R3
+    IGT   R6, 255
+    JT    R6, _tic80_mset_clamp_max
     JMP   _tic80_mset_store
 
 _tic80_mset_clamp_zero:
@@ -955,10 +966,12 @@ __builtin_tic80_map:
     MOV   R8, [R8]          ; R8 = actual height
 
     ;; Validate dimensions
-    ILT   R3, 1
-    JT    R3, _tic80_map_done
-    ILT   R4, 1
-    JT    R4, _tic80_map_done
+	MOV   R11, R3
+    ILT   R11, 1
+    JT    R11, _tic80_map_done
+	MOV   R11, R4
+    ILT   R11, 1
+    JT    R11, _tic80_map_done
 
     ;; Clamp sx: 0 <= sx <= width - w
     MOV   R11, R5
@@ -985,7 +998,7 @@ _tic80_map_check_sy:
     ISUB  R9,  R4
     IGT   R11, R9
     JT    R11, _tic80_map_sy_max
-    JMP   _tic80_map_row_loop_start
+    JMP   _tic80_map_row_loop_prestart
 
 _tic80_map_sy_zero:
     MOV   R6, 0
@@ -998,6 +1011,7 @@ _tic80_map_sy_max:
     MOV   R11, R7
 
     ;; Outer loop: rows (R9)
+_tic80_map_row_loop_prestart:
     MOV   R9, 0
 _tic80_map_row_loop_start:
     MOV   R7, R9
@@ -1045,6 +1059,7 @@ _tic80_map_col_loop_start:
     MOV   R9, 0
     PUSH  R9               ; rotate = 0
     PUSH  R9               ; flip = 0
+    MOV   R9, 1.0
     PUSH  R9               ; scale = 1.0
     PUSH  R13              ; colorkey
     PUSH  R8               ; y
