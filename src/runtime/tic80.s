@@ -187,10 +187,12 @@ _tic80_spr_no_flip_y:
     ;;         Only ensure they are integers, NO additional scaling.
     MOV   R8, [BP+3]        ; x (Vircon32 pixels)
 	FMUL  R8, 2.64          ; multiply by x axis screen factor
+	FADD  R8, 0.5
     CFI   R8                ; Convert to integer (no scaling)
 
     MOV   R9, [BP+4]        ; y (Vircon32 pixels)
 	FMUL  R9, 2.64          ; multiply by y axis screen factor
+	FADD  R9, 0.5
     CFI   R9                ; Convert to integer (no scaling)
 
     MOV   R4, 0             ; row counter
