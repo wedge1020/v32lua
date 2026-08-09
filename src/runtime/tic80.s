@@ -909,12 +909,16 @@ _tic80_mset_done:
 ;;
 ;; __builtin_tic80_map: Draw TIC-80 Map Region to Screen
 ;;
-;; Stack: [BP+2] = x (screen X), [BP+3] = y (screen Y), [BP+4] = w (width in tiles)
-;;        [BP+5] = h (height in tiles), [BP+6] = sx (source X in map)
-;;        [BP+7] = sy (source Y in map), [BP+8] = color_key (transparent color)
+;; Stack: [BP+2] = x (screen X)
+;;        [BP+3] = y (screen Y)
+;;        [BP+4] = w (width in tiles)
+;;        [BP+5] = h (height in tiles)
+;;        [BP+6] = sx (source X in map)
+;;        [BP+7] = sy (source Y in map)
+;;        [BP+8] = color_key (transparent color)
 ;;
-;; Renders a w×h tile region from the map buffer to the screen at (x,y).
-;; Uses actual cartridge map dimensions from RAM (var_TIC80_MAP_WIDTH/HEIGHT).
+;; Renders a w × h tile region from the map buffer to the screen at (x,y).
+;; Uses actual cartridge map dimensions from RAM (var_TIC80_MAP_WIDTH/HEIGHT)
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -942,6 +946,7 @@ __builtin_tic80_map:
     MOV   R12, [R1]
     IEQ   R12, 0
     JT    R12, _tic80_map_done
+    MOV   R12, [R1]         ; restore R12 after destructive comparison
 
     ;; Load arguments
     MOV   R1, [BP+2]        ; x
@@ -950,14 +955,12 @@ __builtin_tic80_map:
     MOV   R4, [BP+5]        ; h
     MOV   R5, [BP+6]        ; sx
     MOV   R6, [BP+7]        ; sy
-    MOV   R13, [BP+8]       ; color_key
     CFI   R1
     CFI   R2
     CFI   R3
     CFI   R4
     CFI   R5
     CFI   R6
-    CFI   R13
 
     ;; Load ACTUAL map dimensions
     MOV   R7, var_TIC80_MAP_WIDTH
@@ -979,6 +982,7 @@ __builtin_tic80_map:
     JT    R11, _tic80_map_sx_zero
     MOV   R9,  R7
     ISUB  R9,  R3
+	MOV   R11, R5
     IGT   R11, R9
     JT    R11, _tic80_map_sx_max
     JMP   _tic80_map_check_sy
@@ -996,6 +1000,7 @@ _tic80_map_check_sy:
     JT    R11, _tic80_map_sy_zero
     MOV   R9,  R8
     ISUB  R9,  R4
+	MOV   R11, R6
     IGT   R11, R9
     JT    R11, _tic80_map_sy_max
     JMP   _tic80_map_row_loop_prestart
@@ -1035,15 +1040,30 @@ _tic80_map_col_loop_start:
     IMUL  R8, R11          ; R8 = (sy+row) * width (R11 is safely preserved)
     IADD  R7, R8           ; R7 = byte index
 
+__debug:
     ;; Load tile index directly
-    MOV   R8, R12
-    IADD  R8, R7
+    MOV   R8, R12          ; R12 is value at var_TIC80_MAP_BUFFER_PTR
+    IADD  R8, R7           ; 
     MOV   R7, [R8]         ; R7 = tile index (Leaves R10 untouched!)
 
     ;; Calculate screen X position: x + col*8
     MOV   R8, R10          ; R8 = col
     IMUL  R8, 8
     IADD  R8, R1           ; R8 = screen_x + col*8
+
+	PUSH  R1               ; x save
+	PUSH  R2               ; y save
+	PUSH  R3               ; w save
+	PUSH  R4               ; h save
+	PUSH  R5               ; sx save
+	PUSH  R6               ; sy save
+	PUSH  R7
+	PUSH  R8
+	PUSH  R9
+	PUSH  R10              ; column index save
+	PUSH  R11
+	PUSH  R12
+	PUSH  R13              ; color_key save
     
     ;; Push arguments for __builtin_tic80_spr (in reverse order)
     MOV   R0, 1.0
@@ -1054,22 +1074,46 @@ _tic80_map_col_loop_start:
     PUSH  R0               ; flip = 0
     MOV   R0, 1.0
     PUSH  R0               ; scale = 1.0
-    PUSH  R13              ; color_key (safely preserved!)
+
+    MOV   R0, [BP+8]       ; color_key
+    PUSH  R0               ; color_key (safely preserved!)
     
     ;; Calculate screen Y position: y + row*8
     MOV   R0, R9           ; R0 = row
     IMUL  R0, 8
     IADD  R0, R2           ; R0 = screen_y + row*8
+	CIF   R0
     PUSH  R0               ; y
     
-    PUSH  R8               ; x
-    PUSH  R7               ; id
+	MOV   R0, R8
+	CIF   R0
+    PUSH  R0               ; x
+
+	MOV   R0, R7
+	CIF   R0
+    PUSH  R0               ; id
 
     CALL  __builtin_tic80_spr
+__debug2:
+
     IADD  SP, 9
 
+	POP   R13              ; color_key restore
+	POP   R12
+	POP   R11
+	POP   R10              ; column index restore
+	POP   R9
+	POP   R8
+	POP   R7
+	POP   R6               ; sy restore
+	POP   R5               ; sx restore
+	POP   R4               ; h restore
+	POP   R3               ; w restore
+	POP   R2               ; y restore
+	POP   R1               ; x restore
+
     ;; Next column
-    IADD  R10, 1
+    IADD  R10, 1           ; R10 has been clobbered by __builtin_tic80_spr
     JMP   _tic80_map_col_loop_start
 
 _tic80_map_row_loop_next:
