@@ -51,7 +51,6 @@ lex.yy.c: lexer.l parser.tab.h
 	$(CC) $(CFLAGS) -Wa,--noexecstack -c $< -o $@
 
 context:
-	#@cat runtime/memory.s runtime/exec.s runtime/table.s runtime/string.s runtime/print.s runtime/pico8.s runtime/tic80.s runtime/constant.s > runtime.s.txt
 	@cp -v runtime/memory.s{,.txt}
 	@cp -v runtime/exec.s{,.txt}
 	@cp -v runtime/table.s{,.txt}
@@ -64,26 +63,6 @@ context:
 	@cp -v lexer.l   lexer.l.txt
 	@cp -v parser.y  parser.y.txt
 	@cp -v runtime_embed.S runtime_embed.S.txt
-
-# --- Monolithic Source Generation Rule ---
-monofile:
-	@rm -f ../monolithic_source.c
-	@echo "/* ========================================================================== */" >> ../monolithic_source.c
-	@echo "/*                   MONOLITHIC SOURCE                                        */" >> ../monolithic_source.c
-	@echo "/* ========================================================================== */" >> ../monolithic_source.c
-	@echo "" >> ../monolithic_source.c
-	@for file in *.c; do \
-		if [ -f "$$file" ]; then \
-			echo "/* -------------------------------------------------------------------------- */" >> ../monolithic_source.c; \
-			echo "/* SOURCE FILE: $$file */" >> ../monolithic_source.c; \
-			echo "/* -------------------------------------------------------------------------- */" >> ../monolithic_source.c; \
-			cat "$$file" >> ../monolithic_source.c; \
-			echo "" >> ../monolithic_source.c; \
-			echo "/* -------------------------------------------------------------------------- */" >> ../monolithic_source.c; \
-			echo "" >> ../monolithic_source.c; \
-		fi; \
-	done
-	@echo "Successfully generated consolidated file: ../monolithic_source.c"
 
 clean:
 	rm -f $(TARGET) $(OBJS) parser.tab.c parser.tab.h lex.yy.c ../monolithic_source.c *.txt runtime/*.txt intrinsics/*.txt node/*.txt

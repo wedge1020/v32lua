@@ -10,7 +10,7 @@ all:
 
 # Clean both the build files in src/ and the generated assembly in testing/
 clean:
-	rm -f err.txt v32lua.[ch] put/*
+	rm -f err.txt put/*
 	$(MAKE) -C src clean
 	$(MAKE) -C testing clean
 	$(MAKE) -C demos clean
@@ -51,7 +51,10 @@ demos: bin/$(TARGET)
 	$(MAKE) -C demos
 
 monofiles:
+	@rm -f put/*
 	scripts/monolithic_code.sh
+	@cp src/lexer.l put/lexer.l.txt
+	@cp src/parser.y put/parser.y.txt
 	$(MAKE) -C testing monofiles
 
 context:
