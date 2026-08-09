@@ -113,7 +113,7 @@ _tic80_init_textures_done:
 ;; [BP+10]: h         (Grid Height in sprites)
 ;;
 ;; Texture mapping:
-;;   colorkey = -1  -> texture 16 (all opaque)
+;;   colorkey = 16   -> texture 16 (all opaque)
 ;;   colorkey = 0-15 -> texture 0-15 (that palette color transparent)
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1084,11 +1084,13 @@ __debug:
     IADD  R0, R2           ; R0 = screen_y + row*8
 	CIF   R0
     PUSH  R0               ; y
-    
-	MOV   R0, R8
-	CIF   R0
-    PUSH  R0               ; x
 
+	MOV   R0, R10          ; R0 = col (loop counter)
+	IMUL  R0, 8            ; R0 = col * 8
+	IADD  R0, R1           ; R0 = x + col * 8 (screen coordinate)
+	CIF   R0
+	PUSH  R0               ; x
+    
 	MOV   R0, R7
 	CIF   R0
     PUSH  R0               ; id
