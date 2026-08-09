@@ -133,7 +133,6 @@ TIC80AssetData *parse_tic80_asset_line(const char *line) {
         return NULL;
     }
 
-    // Find the colon separator between index and hex data
     char *colon = strchr(line, ':');
     if (!colon) {
         free(data);

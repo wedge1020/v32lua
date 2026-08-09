@@ -806,12 +806,14 @@ __builtin_tic80_mget:
     IADD  R1, R2            ; R1 = byte index
 
     ;; Load tile index directly (each word = one byte)
-    MOV   R0, R12
-    IADD  R0, R1
-    MOV   R0, [R0]          ; R2 = tile index
+    MOV   R12,  var_TIC80_MAP_BUFFER_PTR
+	MOV   R12,  [R12]
+    MOV   R0,   R12
+    IADD  R0,   R1
+    MOV   R0,   [R0]          ; R0 = tile index
 
     ;; Return as boxed Lua number
-    CIF   R2
+    CIF   R0
     JMP   _tic80_mget_done
 
 _tic80_mget_invalid:
