@@ -183,9 +183,11 @@ _tic80_spr_no_flip_y:
     CFI   R7
 
     MOV   R8, [BP+3]        ; x
+	FMUL  R8, R12           ; multiply by x axis screen factor
     CFI   R8
 
     MOV   R9, [BP+4]        ; y
+	FMUL  R9, R13           ; multiply by y axis screen factor
     CFI   R9
 
     ;; Initialize Row Counter
@@ -1079,14 +1081,12 @@ _tic80_map_col_loop_start:
     IMUL  R0, 8
     IADD  R0, R2           ; R0 = screen_y + row*8
 	CIF   R0
-	FMUL  R0, 2.64
     PUSH  R0               ; y
 
 	MOV   R0, R10          ; R0 = col (loop counter)
 	IMUL  R0, 8            ; R0 = col * 8
 	IADD  R0, R1           ; R0 = x + col * 8 (screen coordinate)
 	CIF   R0
-	FMUL  R0, 2.64
 	PUSH  R0               ; x
     
 	MOV   R0, R7
