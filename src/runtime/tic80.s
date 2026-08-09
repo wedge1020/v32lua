@@ -1014,16 +1014,16 @@ _tic80_map_sy_max:
 _tic80_map_row_loop_prestart:
     MOV   R9, 0
 _tic80_map_row_loop_start:
-    MOV   R7, R9
-    IGE   R7, R4
-    JT    R7, _tic80_map_done
+    MOV   R11, R9
+    IGE   R11, R4
+    JT    R11, _tic80_map_done
 
     ;; Inner loop: columns (R10)
     MOV   R10, 0
 _tic80_map_col_loop_start:
-    MOV   R7, R10
-    IGE   R7, R3
-    JT    R7, _tic80_map_row_loop_next
+    MOV   R11, R10
+    IGE   R11, R3
+    JT    R11, _tic80_map_row_loop_next
 
     ;; Calculate map cell position: (sx + col, sy + row)
     MOV   R7, R5
