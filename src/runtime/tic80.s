@@ -184,10 +184,12 @@ _tic80_spr_no_flip_y:
 
     MOV   R8, [BP+3]        ; x
 	FMUL  R8, 2.64          ; multiply by x axis screen factor
+	FADD  R8, 0.5           ; Add 0.5 for rounding
     CFI   R8
 
     MOV   R9, [BP+4]        ; y
 	FMUL  R9, 2.64          ; multiply by y axis screen factor
+	FADD  R9, 0.5           ; Add 0.5 for rounding
     CFI   R9
 
     ;; Initialize Row Counter
