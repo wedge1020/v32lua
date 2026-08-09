@@ -781,18 +781,18 @@ __builtin_tic80_mget:
     MOV   R4, [R4]          ; R4 = actual height
 
     ;; Bounds check: x
-	MOV   R5, R1
+    MOV   R5, R1
     ILT   R5, 0
     JT    R5, _tic80_mget_invalid
-	MOV   R5, R1
+    MOV   R5, R1
     IGE   R5, R3
     JT    R5, _tic80_mget_invalid
 
     ;; Bounds check: y
-	MOV   R5, R2
+    MOV   R5, R2
     ILT   R5, 0
     JT    R5, _tic80_mget_invalid
-	MOV   R5, R2
+    MOV   R5, R2
     IGE   R5, R4
     JT    R5, _tic80_mget_invalid
 
@@ -836,7 +836,7 @@ __builtin_tic80_mset:
     ;; Load buffer pointer
     MOV   R1,  var_TIC80_MAP_BUFFER_PTR
     MOV   R12, [R1]
-	MOV   R2,  R12
+    MOV   R2,  R12
     IEQ   R2,  0
     JT    R2,  _tic80_mset_done
 
@@ -855,26 +855,26 @@ __builtin_tic80_mset:
     MOV   R5, [R5]          ; R5 = actual height
 
     ;; Bounds check: x
-	MOV   R6, R1
+    MOV   R6, R1
     ILT   R6, 0
     JT    R6, _tic80_mset_done
-	MOV   R6, R1
+    MOV   R6, R1
     IGE   R6, R4
     JT    R6, _tic80_mset_done
 
     ;; Bounds check: y
-	MOV   R6, R2
+    MOV   R6, R2
     ILT   R6, 0
     JT    R6, _tic80_mset_done
-	MOV   R6, R2
+    MOV   R6, R2
     IGE   R6, R5
     JT    R6, _tic80_mset_done
 
     ;; Clamp value to 0-255 (TIC-80 uses 0-511 but 256 is enough for most cases)
-	MOV   R6, R3
+    MOV   R6, R3
     ILT   R6, 0
     JT    R6, _tic80_mset_clamp_zero
-	MOV   R6, R3
+    MOV   R6, R3
     IGT   R6, 255
     JT    R6, _tic80_mset_clamp_max
     JMP   _tic80_mset_store
@@ -966,10 +966,10 @@ __builtin_tic80_map:
     MOV   R8, [R8]          ; R8 = actual height
 
     ;; Validate dimensions
-	MOV   R11, R3
+    MOV   R11, R3
     ILT   R11, 1
     JT    R11, _tic80_map_done
-	MOV   R11, R4
+    MOV   R11, R4
     ILT   R11, 1
     JT    R11, _tic80_map_done
 
@@ -1014,16 +1014,16 @@ _tic80_map_sy_max:
 _tic80_map_row_loop_prestart:
     MOV   R9, 0
 _tic80_map_row_loop_start:
-    MOV   R11, R9
-    IGE   R11, R4
-    JT    R11, _tic80_map_done
+    MOV   R7, R9           ; Use R7 as scratch for condition check
+    IGE   R7, R4
+    JT    R7, _tic80_map_done
 
     ;; Inner loop: columns (R10)
     MOV   R10, 0
 _tic80_map_col_loop_start:
-    MOV   R11, R10
-    IGE   R11, R3
-    JT    R11, _tic80_map_row_loop_next
+    MOV   R7, R10          ; Use R7 as scratch for condition check
+    IGE   R7, R3
+    JT    R7, _tic80_map_row_loop_next
 
     ;; Calculate map cell position: (sx + col, sy + row)
     MOV   R7, R5
@@ -1031,40 +1031,39 @@ _tic80_map_col_loop_start:
     MOV   R8, R6
     IADD  R8, R9           ; R8 = sy + row
 
-    ;; Save col in R13 (callee-saved) before it gets clobbered
-    MOV   R13, R10         ; R13 = col
-
     ;; Calculate byte index: (sy+row) * width + (sx+col)
-    MOV   R10, R11         ; R10 = width (from R11)
-    IMUL  R8, R10          ; R8 = (sy+row) * width
+    IMUL  R8, R11          ; R8 = (sy+row) * width (R11 is safely preserved)
     IADD  R7, R8           ; R7 = byte index
 
-    ;; Load tile index directly (each word = one byte)
+    ;; Load tile index directly
     MOV   R8, R12
     IADD  R8, R7
-    MOV   R10, [R8]        ; R10 = tile index
+    MOV   R7, [R8]         ; R7 = tile index (Leaves R10 untouched!)
 
-    ;; Calculate screen position: x + col*8, y + row*8
-    MOV   R7, R13          ; R7 = col (from saved R13)
-    IMUL  R7, 8
-    IADD  R7, R1           ; R7 = screen_x + col*8
-    MOV   R8, R9           ; R8 = row
+    ;; Calculate screen X position: x + col*8
+    MOV   R8, R10          ; R8 = col
     IMUL  R8, 8
-    IADD  R8, R2           ; R8 = screen_y + row*8
-
-    ;; Draw sprite via __builtin_tic80_spr
-    MOV   R9, 1.0
-    PUSH  R9               ; h = 1
-    PUSH  R9               ; w = 1
-    MOV   R9, 0
-    PUSH  R9               ; rotate = 0
-    PUSH  R9               ; flip = 0
-    MOV   R9, 1.0
-    PUSH  R9               ; scale = 1.0
-    PUSH  R13              ; colorkey
-    PUSH  R8               ; y
-    PUSH  R7               ; x
-    PUSH  R10              ; id
+    IADD  R8, R1           ; R8 = screen_x + col*8
+    
+    ;; Push arguments for __builtin_tic80_spr (in reverse order)
+    MOV   R0, 1.0
+    PUSH  R0               ; h = 1.0
+    PUSH  R0               ; w = 1.0
+    MOV   R0, 0
+    PUSH  R0               ; rotate = 0
+    PUSH  R0               ; flip = 0
+    MOV   R0, 1.0
+    PUSH  R0               ; scale = 1.0
+    PUSH  R13              ; color_key (safely preserved!)
+    
+    ;; Calculate screen Y position: y + row*8
+    MOV   R0, R9           ; R0 = row
+    IMUL  R0, 8
+    IADD  R0, R2           ; R0 = screen_y + row*8
+    PUSH  R0               ; y
+    
+    PUSH  R8               ; x
+    PUSH  R7               ; id
 
     CALL  __builtin_tic80_spr
     IADD  SP, 9
