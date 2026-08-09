@@ -1042,7 +1042,6 @@ _tic80_map_col_loop_start:
     IMUL  R8, R11          ; R8 = (sy+row) * width (R11 is safely preserved)
     IADD  R7, R8           ; R7 = byte index
 
-__debug:
     ;; Load tile index directly
     MOV   R8, R12          ; R12 is value at var_TIC80_MAP_BUFFER_PTR
     IADD  R8, R7           ; 
@@ -1080,12 +1079,14 @@ __debug:
     IMUL  R0, 8
     IADD  R0, R2           ; R0 = screen_y + row*8
 	CIF   R0
+	FMUL  R0, 2.64
     PUSH  R0               ; y
 
 	MOV   R0, R10          ; R0 = col (loop counter)
 	IMUL  R0, 8            ; R0 = col * 8
 	IADD  R0, R1           ; R0 = x + col * 8 (screen coordinate)
 	CIF   R0
+	FMUL  R0, 2.64
 	PUSH  R0               ; x
     
 	MOV   R0, R7
@@ -1093,7 +1094,6 @@ __debug:
     PUSH  R0               ; id
 
     CALL  __builtin_tic80_spr
-__debug2:
 
     IADD  SP, 9
 
