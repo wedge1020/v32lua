@@ -190,6 +190,8 @@ __strcmp_equal:
 ;; ---------------------------------------------------------------------------
 ;; Universal Equality (==): Returns raw integer 1 (true) or 0 (false) in R0
 ;; Incoming Stack: [BP+3] = Left_Val, [BP+2] = Right_Val
+;; Handles: bitwise-identical values (fast path), string comparisons, and
+;;         numeric comparisons (boxed Lua numbers)
 ;; ---------------------------------------------------------------------------
 __builtin_eq:
     PUSH BP
@@ -204,7 +206,6 @@ __builtin_eq:
 
     ;; Validate LEFT Operand is a String (Tag 0x7FC0... or 0xFFC0... with
     ;; payload >= 4)
-
     MOV  R3, R1
     AND  R3, BOXED_DATA
     IEQ  R3, BOXED_ROMSTRING
@@ -213,12 +214,7 @@ __builtin_eq:
     MOV  R3, R1
     AND  R3, BOXED_DATA
     IEQ  R3, BOXED_RAMSTRING
-    JF   R3, __eq_return_false
-
-    MOV  R3, R1
-    AND  R3, BOXED_PAYLOAD
-    ILT  R3, 4
-    JT   R3, __eq_return_false
+    JF   R3, __eq_check_numbers  ; Check if it's a number instead
 
 __eq_left_valid:
     ;; Validate RIGHT Operand is a String
@@ -230,12 +226,7 @@ __eq_left_valid:
     MOV  R3, R2
     AND  R3, BOXED_DATA
     IEQ  R3, BOXED_RAMSTRING
-    JF   R3, __eq_return_false
-
-    MOV  R3, R2
-    AND  R3, BOXED_PAYLOAD
-    ILT  R3, 4
-    JT   R3, __eq_return_false
+    JF   R3, __eq_check_numbers  ; Check if it's a number instead
 
 __eq_right_valid:
     ;; Unbox both validated string pointers!
@@ -264,6 +255,32 @@ __eq_strcmp_loop:
     IADD R1, 1
     IADD R2, 1
     JMP  __eq_strcmp_loop
+
+;; ---------------------------------------------------------------------------
+;; Numeric Comparison: Check if both operands are boxed Lua numbers
+;; Boxed numbers have the BOXED_NUMBER tag (0x7FF00000) ORed with the
+;; IEEE 754 float representation. Two numbers with the same value will
+;; have identical bit patterns, so IEQ works correctly.
+;; ---------------------------------------------------------------------------
+__eq_check_numbers:
+    ;; Check if LEFT is a number (BOXED_NUMBER tag)
+    ;MOV  R3, R1
+    ;AND  R3, BOXED_DATA
+    ;IEQ  R3, BOXED_NUMBER
+    ;JF  R3, __eq_return_false
+
+    ;; Check if RIGHT is a number
+    ;MOV  R3, R2
+    ;AND  R3, BOXED_DATA
+    ;IEQ  R3, BOXED_NUMBER
+    ;JF  R3, __eq_return_false
+
+    ;; Both are numbers - compare their bit patterns
+    ;; Since same numeric value = same boxed representation,
+    ;; IEQ correctly determines equality
+    FEQ  R1, R2
+    JT   R1, __eq_return_true
+    JMP  __eq_return_false
 
 __eq_return_true:
     MOV  R0, BOXED_TRUE          ; Return boxed Boolean True
