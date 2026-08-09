@@ -1037,6 +1037,8 @@ _tic80_map_col_loop_start:
     IADD  R8, R9           ; R8 = sy + row
 
     ;; Calculate byte index: (sy+row) * width + (sx+col)
+    MOV   R11, var_TIC80_MAP_WIDTH
+    MOV   R11, [R11]       ; R7 = actual width
     IMUL  R8, R11          ; R8 = (sy+row) * width (R11 is safely preserved)
     IADD  R7, R8           ; R7 = byte index
 
