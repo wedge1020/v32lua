@@ -119,9 +119,13 @@ uint8_t get_tic80_tile_pixel(int x, int y) {
 /// @param line String in format "<index>:<hex_data>"
 /// @return Allocated TIC80AssetData, or NULL on error
 TIC80AssetData *parse_tic80_asset_line(const char *line) {
-
     if (line == NULL || *line == '\0') {
         return NULL;
+    }
+
+    // Skip the "-- " prefix if present
+    if (line[0] == '-' && line[1] == '-' && line[2] == ' ') {
+        line += 3;
     }
 
     TIC80AssetData *data = malloc(sizeof(TIC80AssetData));
@@ -136,9 +140,8 @@ TIC80AssetData *parse_tic80_asset_line(const char *line) {
         return NULL;
     }
 
-    // Split at colon: index before, hex_data after
     *colon = '\0';
-    data->index = atoi(line);
+    data->index = atoi(line);  // Now correctly parses "015" as 15
     data->hex_data = strdup(colon + 1);
     if (data->hex_data == NULL) {
         free(data);
