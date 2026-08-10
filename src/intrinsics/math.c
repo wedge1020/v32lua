@@ -416,7 +416,7 @@ bool emit_math_cos_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.cos(x) ---\n");
 
-    int arg_reg = allocate_register();
+    int arg_reg = allocate_pinned_register();
     generate_asm(arg, arg_reg);
 
     // Push argument for runtime call
@@ -428,7 +428,7 @@ bool emit_math_cos_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("    MOV R%d, R0    ; Transfer result to dest_reg\n", dest_reg);
     }
 
-    unlock_register(arg_reg);
+    unlock_pinned_register(arg_reg);
     return true;
 }
 
@@ -450,8 +450,8 @@ bool emit_math_atan_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.atan(x) ---\n");
 
-    int x_reg = allocate_register();
-    int one_reg = allocate_register();
+    int x_reg = allocate_pinned_register();
+    int one_reg = allocate_pinned_register();
 
     generate_asm(arg, x_reg);
 
@@ -467,8 +467,8 @@ bool emit_math_atan_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("    MOV R%d, R%d    ; Transfer result to dest_reg\n", dest_reg, x_reg);
     }
 
-    unlock_register(x_reg);
-    unlock_register(one_reg);
+    unlock_pinned_register(x_reg);
+    unlock_pinned_register(one_reg);
     return true;
 }
 
@@ -490,7 +490,7 @@ bool emit_math_exp_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.exp(x) ---\n");
 
-    int arg_reg = allocate_register();
+    int arg_reg = allocate_pinned_register();
     generate_asm(arg, arg_reg);
 
     // Push argument for runtime call
@@ -502,13 +502,9 @@ bool emit_math_exp_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("    MOV R%d, R0    ; Transfer result to dest_reg\n", dest_reg);
     }
 
-    unlock_register(arg_reg);
+    unlock_pinned_register(arg_reg);
     return true;
 }
-
-// ============================================================================
-// Quick Wins: Direct Vircon32 instruction mappings
-// ============================================================================
 
 /**
  * Emits assembly for the math.fmod(x, y) intrinsic.
