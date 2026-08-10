@@ -89,17 +89,25 @@ bool  emit_string_char_intrinsic (ASTNode *, int);
 //
 // math intrinsics
 //
-// math intrinsics
-bool  emit_math_floor_intrinsic (ASTNode *, int);
-bool  emit_math_sqrt_intrinsic  (ASTNode *, int);
-bool  emit_math_sin_intrinsic   (ASTNode *, int);
-bool  emit_math_abs_intrinsic   (ASTNode *, int);
-bool  emit_math_ceil_intrinsic  (ASTNode *, int);
-bool  emit_math_acos_intrinsic  (ASTNode *, int);
-bool  emit_math_log_intrinsic   (ASTNode *, int);
-bool  emit_math_pow_intrinsic   (ASTNode *, int);
-bool  emit_math_atan2_intrinsic (ASTNode *, int);
-bool  emit_math_floor_intrinsic (ASTNode *, int);
-bool  emit_math_sqrt_intrinsic  (ASTNode *, int);
+bool  emit_math_floor_intrinsic      (ASTNode *, int);
+bool  emit_math_sqrt_intrinsic       (ASTNode *, int);
+bool  emit_math_sin_intrinsic        (ASTNode *, int);
+bool  emit_math_abs_intrinsic        (ASTNode *, int);
+bool  emit_math_ceil_intrinsic       (ASTNode *, int);
+bool  emit_math_acos_intrinsic       (ASTNode *, int);
+bool  emit_math_log_intrinsic        (ASTNode *, int);
+bool  emit_math_pow_intrinsic        (ASTNode *, int);
+bool  emit_math_atan2_intrinsic      (ASTNode *, int);
+bool  emit_math_floor_intrinsic      (ASTNode *, int);
+bool  emit_math_sqrt_intrinsic       (ASTNode *, int);
+bool  emit_math_random_intrinsic     (ASTNode *, int);
+bool  emit_math_randomseed_intrinsic (ASTNode *, int);
+
+//////////////////////////////////////////////////////////////////////////////	
+//
+// iter intrinsics (for generic for loops)
+//
+bool  emit_pairs_intrinsic      (ASTNode *, int);
+bool  emit_ipairs_intrinsic     (ASTNode *, int);
 
 #endif

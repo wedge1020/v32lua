@@ -40,7 +40,7 @@ char *mangle_method_name (const char *table_name, const char *method_name);
 %token TOKEN_WHILE TOKEN_FOR TOKEN_BREAK TOKEN_IF TOKEN_ELSEIF TOKEN_THEN TOKEN_ELSE TOKEN_END 
 %token TOKEN_FUNCTION TOKEN_ASM TOKEN_RAWASM TOKEN_RETURN TOKEN_AND TOKEN_OR
 %token TOKEN_EQ TOKEN_NEQ TOKEN_LE TOKEN_GE TOKEN_LT TOKEN_GT TOKEN_CONCAT
-%token TOKEN_LOCAL TOKEN_DO TOKEN_NOT TOKEN_LEN UNARY_MINUS
+%token TOKEN_LOCAL TOKEN_IN TOKEN_DO TOKEN_NOT TOKEN_LEN UNARY_MINUS
 %token TOKEN_TRUE TOKEN_FALSE TOKEN_NIL TOKEN_FLOORDIV
 
 %type <ast_node> statement statement_list stat_list expr function_def return_stmt
@@ -187,25 +187,31 @@ statement:
     }
     | for_start TOKEN_IDENTIFIER '=' expr ',' expr TOKEN_DO statement_list TOKEN_END {
         $$ = make_node(NODE_FOR_NUMERIC);
-        $$->as.for_numeric.index_name = $2;
-        $$->as.for_numeric.start_expr = $4;
-        $$->as.for_numeric.stop_expr  = $6;
-        $$->as.for_numeric.step_expr  = NULL; // Omitted step
-        $$->as.for_numeric.body       = $8;
+        $$->as.for_numeric.index_name  = $2;
+        $$->as.for_numeric.start_expr  = $4;
+        $$->as.for_numeric.stop_expr   = $6;
+        $$->as.for_numeric.step_expr   = NULL; // Omitted step
+        $$->as.for_numeric.body        = $8;
     }
     | for_start TOKEN_IDENTIFIER '=' expr ',' expr ',' expr TOKEN_DO statement_list TOKEN_END {
         $$ = make_node(NODE_FOR_NUMERIC);
-        $$->as.for_numeric.index_name = $2;
-        $$->as.for_numeric.start_expr = $4;
-        $$->as.for_numeric.stop_expr  = $6;
-        $$->as.for_numeric.step_expr  = $8;  // Explicit step
-        $$->as.for_numeric.body       = $10;
+        $$->as.for_numeric.index_name  = $2;
+        $$->as.for_numeric.start_expr  = $4;
+        $$->as.for_numeric.stop_expr   = $6;
+        $$->as.for_numeric.step_expr   = $8;  // Explicit step
+        $$->as.for_numeric.body        = $10;
+    }
+    | for_start var_list TOKEN_IN expr_list TOKEN_DO statement_list TOKEN_END {
+        $$ = make_node(NODE_FOR_GENERIC);
+        $$->as.for_generic.var_list    = $2;
+        $$->as.for_generic.iter_expr   = $4;
+        $$->as.for_generic.body        = $6;
     }
     | if_start expr TOKEN_THEN statement_list else_branch TOKEN_END { 
-        $$                          = $1;
-        $$ -> as.if_stmt.condition  = $2;
-        $$ -> as.if_stmt.if_body    = $4;
-        $$ -> as.if_stmt.else_body  = $5;
+        $$                             = $1;
+        $$ -> as.if_stmt.condition     = $2;
+        $$ -> as.if_stmt.if_body       = $4;
+        $$ -> as.if_stmt.else_body     = $5;
     }
     | TOKEN_LOCAL var_list {
         $$ = make_node(NODE_MULTIPLE_ASSIGNMENT);
@@ -230,7 +236,7 @@ statement:
         $$ = make_node(NODE_COMMENT_BLOCK);
         $$->as.string_val.value = $1;
     }
-	| tic80_section             { $$ = $1; }  /* Returns NULL - we process these separately */
+    | tic80_section             { $$ = $1; }  /* Returns NULL - we process these separately */
     | TOKEN_CART_HINT {
         $$ = make_node_cart_hint($1);
     }
@@ -406,12 +412,12 @@ expr:
     | expr '+' expr     { $$ = make_node_binary (NODE_ADD, $1, $3); }
     | expr '-' expr     { $$ = make_node_binary (NODE_SUB, $1, $3); }
     | expr '*' expr     { $$ = make_node_binary (NODE_MUL, $1, $3); }
-	| expr TOKEN_FLOORDIV expr { $$ = make_node_binary (NODE_FLOORDIV, $1, $3); }
+    | expr TOKEN_FLOORDIV expr { $$ = make_node_binary (NODE_FLOORDIV, $1, $3); }
     | expr '/' expr     { $$ = make_node_binary (NODE_DIV, $1, $3); }
     | expr '%' expr     { $$ = make_node_binary (NODE_MOD, $1, $3); }
     | TOKEN_TRUE  { $$ = make_node_boolean (true);  }
     | TOKEN_FALSE { $$ = make_node_boolean (false); }
-	| TOKEN_NIL   { $$ = make_node_nil ();          }
+    | TOKEN_NIL   { $$ = make_node_nil ();          }
     | TOKEN_LEN expr    { $$ = make_node_unary  (OP_LEN,   $2);     }
     | '-' expr %prec UNARY_MINUS { $$ = make_node_unary (OP_UNM, $2); }
     | TOKEN_NOT expr             { $$ = make_node_unary (OP_NOT, $2); }
@@ -465,7 +471,7 @@ field:
         // Array-style: {value} -> implicit sequential key
         $$ = $1;
     }
-	| expr '=' expr {
+    | expr '=' expr {
     // Record-style: {key = value}
     // Convert identifier key to string literal (Lua semantics: x=8 means key "x", not var x)
     ASTNode *key_node = $1;

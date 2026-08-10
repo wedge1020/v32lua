@@ -37,6 +37,7 @@ void  node_concat              (ASTNode *, int);
 void  node_div                 (ASTNode *, int);
 void  node_floordiv            (ASTNode *, int);
 void  node_for_numeric         (ASTNode *);
+void  node_for_generic         (ASTNode *);
 void  node_function_call       (ASTNode *, int);
 void  node_function_def        (ASTNode *);
 void  node_function_pointer    (ASTNode *, int);

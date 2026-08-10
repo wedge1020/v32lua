@@ -37,6 +37,12 @@ typedef struct astnode {
             struct astnode* body;
         } for_numeric;
 
+        struct {
+            struct astnode* var_list; // Linked list of variable names (k, v, etc.)
+            struct astnode* iter_expr; // The iterator expression (e.g., pairs(t))
+            struct astnode* body;
+        } for_generic;
+
         struct
         {
             struct astnode *condition;
@@ -90,9 +96,9 @@ typedef struct astnode {
             char* value;
         } string_val;
 
-		struct {
-			struct astnode* initializers_head; // Linked list of table_set nodes
-		} table_constructor;
+        struct {
+            struct astnode* initializers_head; // Linked list of table_set nodes
+        } table_constructor;
 
         struct {
             struct astnode* table_expr;

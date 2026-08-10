@@ -54,6 +54,7 @@ context:
 	@cp -v runtime/memory.s{,.txt}
 	@cp -v runtime/exec.s{,.txt}
 	@cp -v runtime/table.s{,.txt}
+	@cp -v runtime/math.s{,.txt}
 	@cp -v runtime/string.s{,.txt}
 	@cp -v runtime/print.s{,.txt}
 	@cp -v runtime/pico8.s{,.txt}

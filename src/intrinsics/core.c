@@ -461,6 +461,24 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         return emit_math_sqrt_intrinsic(node, dest_reg);
     }
 
+	// math.random([m[, n]])
+	if (strcmp(func_name, "math.random") == 0) {
+		return emit_math_random_intrinsic(node, dest_reg);
+	}
+
+	// math.randomseed(x)
+	if (strcmp(func_name, "math.randomseed") == 0) {
+		return emit_math_randomseed_intrinsic(node, dest_reg);
+	}
+
+	// loop iters
+	if (strcmp(func_name, "pairs") == 0) {
+		return emit_pairs_intrinsic(node, dest_reg);
+	}
+	if (strcmp(func_name, "ipairs") == 0) {
+		return emit_ipairs_intrinsic(node, dest_reg);
+	}
+
     return 0; // Not an intrinsic
 }
 

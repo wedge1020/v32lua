@@ -166,6 +166,11 @@ int  count_function_locals(ASTNode* node)
                 count += 3 + count_function_locals(node->as.for_numeric.body);
                 break;
 
+            case NODE_FOR_GENERIC:
+                // Adds 3 to the stack requirement frame frame (+1 index, +1 limit, +1 step)
+                count += 3 + count_function_locals(node->as.for_numeric.body);
+                break;
+
             case NODE_FUNCTION_DEF:
                 // CRITICAL BOUNDARY: Do NOT recurse into nested function definitions!
                 // Any locals inside a closure/nested function belong to THAT function's 
@@ -191,6 +196,7 @@ int check_needs_stack (ASTNode *node)
 
     switch (node -> type) {
         case NODE_FOR_NUMERIC:
+        case NODE_FOR_GENERIC:
         case NODE_CONCAT:
         case NODE_TABLE_SET:
         case NODE_TABLE_GET:
@@ -302,6 +308,11 @@ void  generate_asm (ASTNode *node, int  dest_reg)
             case NODE_FOR_NUMERIC:
                 node_for_numeric (node);
                 break;
+
+			case NODE_FOR_GENERIC:
+				node_for_generic (node);
+				runtime_req.needs_tables = true;  // pairs/ipairs need tables
+				break;
 
             case NODE_BREAK:
                 node_break ();

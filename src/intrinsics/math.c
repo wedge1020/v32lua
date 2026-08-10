@@ -40,8 +40,7 @@ bool emit_math_floor_intrinsic(ASTNode *node, int dest_reg)
 /**
  * Emits assembly for the math.sqrt(x) intrinsic.
  *
- * Returns the square root of x. Delegates to the runtime library's
- * __builtin_sqrt subroutine.
+ * Returns the square root of x.
  *
  * @param node     The AST node representing the function call.
  * @param dest_reg The destination register for the result (0 = discard).
@@ -289,5 +288,112 @@ bool emit_math_atan2_intrinsic(ASTNode *node, int dest_reg)
 
     unlock_pinned_register(y_reg);
     unlock_pinned_register(x_reg);
+    return true;
+}
+
+/**
+ * Emits assembly for the math.random() intrinsic.
+ *
+ * Lua math.random() has three forms:
+ *   math.random()      -> float in [0, 1)
+ *   math.random(n)     -> integer in [1, n]
+ *   math.random(m, n)  -> integer in [m, n]
+ *
+ * Delegates to runtime subroutine __builtin_random which handles
+ * all cases and accesses the Vircon32 RNG hardware port (0x100).
+ */
+bool emit_math_random_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+    int arg_count = 0;
+
+    // Count arguments (0, 1, or 2 are valid)
+    if (arg) {
+        arg_count++;
+        if (arg->next) {
+            arg_count++;
+            if (arg->next->next) {
+                compiler_error(ERR_SYNTAX, node->line_number,
+                    "math.random() expects 0, 1, or 2 arguments");
+                return false;
+            }
+        }
+    }
+
+    emit_asm("    ;; --- Intrinsic: math.random() ---\n");
+
+    // Push arguments onto stack in reverse order (C ABI)
+    // Lua passes: arg1, arg2 (for math.random(m, n))
+    // C expects:  n, m (right-to-left)
+
+    int arg1_reg = 0, arg2_reg = 0;
+
+    if (arg_count >= 1) {
+        arg1_reg = allocate_pinned_register();
+        generate_asm(arg, arg1_reg);
+        emit_asm("    PUSH R%d       ; Push first argument\n", arg1_reg);
+    }
+
+    if (arg_count == 2) {
+        arg2_reg = allocate_pinned_register();
+        generate_asm(arg->next, arg2_reg);
+        emit_asm("    PUSH R%d       ; Push second argument\n", arg2_reg);
+    }
+
+    // Call the runtime subroutine
+    emit_asm("    CALL __builtin_random\n");
+
+    // Clean up stack: 2 args = pop 2, 1 arg = pop 1, 0 args = pop 0
+    if (arg_count > 0) {
+        emit_asm("    IADD SP, %d    ; Clean up %d argument(s)\n", arg_count, arg_count);
+    }
+
+    // Result is in R0
+    if (dest_reg != 0) {
+        emit_asm("    MOV R%d, R0    ; Transfer result to dest_reg\n", dest_reg);
+    }
+
+    if (arg1_reg) unlock_pinned_register(arg1_reg);
+    if (arg2_reg) unlock_pinned_register(arg2_reg);
+
+    return true;
+}
+
+/**
+ * Emits assembly for the math.randomseed(x) intrinsic.
+ *
+ * Seeds the Vircon32 RNG with x.
+ * Returns nil.
+ */
+bool emit_math_randomseed_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+
+    if (!arg || arg->next != NULL) {
+        compiler_error(ERR_SYNTAX, node->line_number,
+            "math.randomseed() expects exactly one argument");
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: math.randomseed(x) ---\n");
+
+    int arg_reg = allocate_pinned_register();
+    generate_asm(arg, arg_reg);
+
+    // Push argument for runtime call
+    emit_asm("    PUSH R%d       ; Push seed argument\n", arg_reg);
+
+    // Call runtime subroutine
+    emit_asm("    CALL __builtin_randomseed\n");
+
+    // Clean up stack (1 argument)
+    emit_asm("    IADD SP, 1    ; Clean up 1 argument\n");
+
+    // Result is in R0 (nil)
+    if (dest_reg != 0) {
+        emit_asm("    MOV R%d, R0    ; Transfer result (nil) to dest_reg\n", dest_reg);
+    }
+
+    unlock_pinned_register(arg_reg);
     return true;
 }
