@@ -22,7 +22,7 @@ bool emit_math_floor_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.floor(x) ---\n");
 
-    int arg_reg = allocate_pinned_register();
+    int arg_reg = allocate_register();
 
     generate_asm(arg, arg_reg);
 
@@ -32,7 +32,7 @@ bool emit_math_floor_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("MOV R%d, R%d ; Transfer result to dest_reg\n", dest_reg, arg_reg);
     }
 
-    unlock_pinned_register(arg_reg);
+    unlock_register(arg_reg);
 
     return (true);
 }
@@ -58,8 +58,8 @@ bool emit_math_sqrt_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.sqrt(x) ---\n");
 
-    int arg_reg = allocate_pinned_register();
-    int tmp_reg = allocate_pinned_register();
+    int arg_reg = allocate_register();
+    int tmp_reg = allocate_register();
 
     generate_asm(arg, arg_reg);
 
@@ -71,8 +71,8 @@ bool emit_math_sqrt_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("MOV R%d, R%d ; Transfer result\n", dest_reg, arg_reg);
     }
 
-    unlock_pinned_register(tmp_reg);
-    unlock_pinned_register(arg_reg);
+    unlock_register(tmp_reg);
+    unlock_register(arg_reg);
 
     return true;
 }
@@ -97,7 +97,7 @@ bool emit_math_sin_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.sin(x) ---\n");
 
-    int arg_reg = allocate_pinned_register();
+    int arg_reg = allocate_register();
     generate_asm(arg, arg_reg);
     emit_asm("SIN R%d ; Compute sine\n", arg_reg);
 
@@ -105,7 +105,7 @@ bool emit_math_sin_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("MOV R%d, R%d ; Transfer result to dest_reg\n", dest_reg, arg_reg);
     }
 
-    unlock_pinned_register(arg_reg);
+    unlock_register(arg_reg);
     return true;
 }
 
@@ -125,7 +125,7 @@ bool emit_math_abs_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.abs(x) ---\n");
 
-    int arg_reg = allocate_pinned_register();
+    int arg_reg = allocate_register();
     generate_asm(arg, arg_reg);
     emit_asm("FABS R%d ; Absolute value\n", arg_reg);
 
@@ -133,7 +133,7 @@ bool emit_math_abs_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("MOV R%d, R%d ; Transfer result to dest_reg\n", dest_reg, arg_reg);
     }
 
-    unlock_pinned_register(arg_reg);
+    unlock_register(arg_reg);
     return true;
 }
 
@@ -153,7 +153,7 @@ bool emit_math_ceil_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.ceil(x) ---\n");
 
-    int arg_reg = allocate_pinned_register();
+    int arg_reg = allocate_register();
     generate_asm(arg, arg_reg);
     emit_asm("CEIL R%d ; Ceiling\n", arg_reg);
 
@@ -161,7 +161,7 @@ bool emit_math_ceil_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("MOV R%d, R%d ; Transfer result to dest_reg\n", dest_reg, arg_reg);
     }
 
-    unlock_pinned_register(arg_reg);
+    unlock_register(arg_reg);
     return true;
 }
 
@@ -181,7 +181,7 @@ bool emit_math_acos_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.acos(x) ---\n");
 
-    int arg_reg = allocate_pinned_register();
+    int arg_reg = allocate_register();
     generate_asm(arg, arg_reg);
     emit_asm("ACOS R%d ; Arc cosine\n", arg_reg);
 
@@ -189,7 +189,7 @@ bool emit_math_acos_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("MOV R%d, R%d ; Transfer result to dest_reg\n", dest_reg, arg_reg);
     }
 
-    unlock_pinned_register(arg_reg);
+    unlock_register(arg_reg);
     return true;
 }
 
@@ -209,7 +209,7 @@ bool emit_math_log_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.log(x) ---\n");
 
-    int arg_reg = allocate_pinned_register();
+    int arg_reg = allocate_register();
     generate_asm(arg, arg_reg);
     emit_asm("LOG R%d ; Natural log\n", arg_reg);
 
@@ -217,7 +217,7 @@ bool emit_math_log_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("MOV R%d, R%d ; Transfer result to dest_reg\n", dest_reg, arg_reg);
     }
 
-    unlock_pinned_register(arg_reg);
+    unlock_register(arg_reg);
     return true;
 }
 
@@ -241,8 +241,8 @@ bool emit_math_pow_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.pow(x, y) ---\n");
 
-    int x_reg = allocate_pinned_register();
-    int y_reg = allocate_pinned_register();
+    int x_reg = allocate_register();
+    int y_reg = allocate_register();
 
     generate_asm(arg, x_reg);
     generate_asm(arg->next, y_reg);
@@ -253,8 +253,8 @@ bool emit_math_pow_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("MOV R%d, R%d ; Transfer result to dest_reg\n", dest_reg, x_reg);
     }
 
-    unlock_pinned_register(x_reg);
-    unlock_pinned_register(y_reg);
+    unlock_register(x_reg);
+    unlock_register(y_reg);
     return true;
 }
 
@@ -274,8 +274,8 @@ bool emit_math_atan2_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.atan2(y, x) ---\n");
 
-    int y_reg = allocate_pinned_register();
-    int x_reg = allocate_pinned_register();
+    int y_reg = allocate_register();
+    int x_reg = allocate_register();
 
     generate_asm(arg, y_reg);      // First arg = y
     generate_asm(arg->next, x_reg); // Second arg = x
@@ -286,8 +286,8 @@ bool emit_math_atan2_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("MOV R%d, R%d ; Transfer result to dest_reg\n", dest_reg, y_reg);
     }
 
-    unlock_pinned_register(y_reg);
-    unlock_pinned_register(x_reg);
+    unlock_register(y_reg);
+    unlock_register(x_reg);
     return true;
 }
 
@@ -416,7 +416,7 @@ bool emit_math_cos_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.cos(x) ---\n");
 
-    int arg_reg = allocate_pinned_register();
+    int arg_reg = allocate_register();
     generate_asm(arg, arg_reg);
 
     // Push argument for runtime call
@@ -428,7 +428,7 @@ bool emit_math_cos_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("    MOV R%d, R0    ; Transfer result to dest_reg\n", dest_reg);
     }
 
-    unlock_pinned_register(arg_reg);
+    unlock_register(arg_reg);
     return true;
 }
 
@@ -450,8 +450,8 @@ bool emit_math_atan_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.atan(x) ---\n");
 
-    int x_reg = allocate_pinned_register();
-    int one_reg = allocate_pinned_register();
+    int x_reg = allocate_register();
+    int one_reg = allocate_register();
 
     generate_asm(arg, x_reg);
 
@@ -467,8 +467,8 @@ bool emit_math_atan_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("    MOV R%d, R%d    ; Transfer result to dest_reg\n", dest_reg, x_reg);
     }
 
-    unlock_pinned_register(x_reg);
-    unlock_pinned_register(one_reg);
+    unlock_register(x_reg);
+    unlock_register(one_reg);
     return true;
 }
 
@@ -490,7 +490,7 @@ bool emit_math_exp_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.exp(x) ---\n");
 
-    int arg_reg = allocate_pinned_register();
+    int arg_reg = allocate_register();
     generate_asm(arg, arg_reg);
 
     // Push argument for runtime call
@@ -502,7 +502,7 @@ bool emit_math_exp_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("    MOV R%d, R0    ; Transfer result to dest_reg\n", dest_reg);
     }
 
-    unlock_pinned_register(arg_reg);
+    unlock_register(arg_reg);
     return true;
 }
 
@@ -528,8 +528,8 @@ bool emit_math_fmod_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.fmod(x, y) ---\n");
 
-    int x_reg = allocate_pinned_register();
-    int y_reg = allocate_pinned_register();
+    int x_reg = allocate_register();
+    int y_reg = allocate_register();
 
     generate_asm(arg, x_reg);
     generate_asm(arg->next, y_reg);
@@ -540,8 +540,8 @@ bool emit_math_fmod_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("    MOV R%d, R%d ; Transfer result to dest_reg\n", dest_reg, x_reg);
     }
 
-    unlock_pinned_register(x_reg);
-    unlock_pinned_register(y_reg);
+    unlock_register(x_reg);
+    unlock_register(y_reg);
     return true;
 }
 
@@ -563,8 +563,8 @@ bool emit_math_max_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.max(x, y) ---\n");
 
-    int x_reg = allocate_pinned_register();
-    int y_reg = allocate_pinned_register();
+    int x_reg = allocate_register();
+    int y_reg = allocate_register();
 
     generate_asm(arg, x_reg);
     generate_asm(arg->next, y_reg);
@@ -575,8 +575,8 @@ bool emit_math_max_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("    MOV R%d, R%d ; Transfer result to dest_reg\n", dest_reg, x_reg);
     }
 
-    unlock_pinned_register(x_reg);
-    unlock_pinned_register(y_reg);
+    unlock_register(x_reg);
+    unlock_register(y_reg);
     return true;
 }
 
@@ -598,8 +598,8 @@ bool emit_math_min_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.min(x, y) ---\n");
 
-    int x_reg = allocate_pinned_register();
-    int y_reg = allocate_pinned_register();
+    int x_reg = allocate_register();
+    int y_reg = allocate_register();
 
     generate_asm(arg, x_reg);
     generate_asm(arg->next, y_reg);
@@ -610,8 +610,8 @@ bool emit_math_min_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("    MOV R%d, R%d ; Transfer result to dest_reg\n", dest_reg, x_reg);
     }
 
-    unlock_pinned_register(x_reg);
-    unlock_pinned_register(y_reg);
+    unlock_register(x_reg);
+    unlock_register(y_reg);
     return true;
 }
 
@@ -637,7 +637,7 @@ bool emit_math_asin_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.asin(x) ---\n");
 
-    int arg_reg = allocate_pinned_register();
+    int arg_reg = allocate_register();
     generate_asm(arg, arg_reg);
 
     emit_asm("    PUSH R%d       ; Push argument\n", arg_reg);
@@ -648,7 +648,7 @@ bool emit_math_asin_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("    MOV R%d, R0    ; Transfer result to dest_reg\n", dest_reg);
     }
 
-    unlock_pinned_register(arg_reg);
+    unlock_register(arg_reg);
     return true;
 }
 
@@ -670,7 +670,7 @@ bool emit_math_tan_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.tan(x) ---\n");
 
-    int arg_reg = allocate_pinned_register();
+    int arg_reg = allocate_register();
     generate_asm(arg, arg_reg);
 
     emit_asm("    PUSH R%d       ; Push argument\n", arg_reg);
@@ -681,7 +681,7 @@ bool emit_math_tan_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("    MOV R%d, R0    ; Transfer result to dest_reg\n", dest_reg);
     }
 
-    unlock_pinned_register(arg_reg);
+    unlock_register(arg_reg);
     return true;
 }
 
@@ -703,7 +703,7 @@ bool emit_math_deg_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.deg(x) ---\n");
 
-    int arg_reg = allocate_pinned_register();
+    int arg_reg = allocate_register();
     generate_asm(arg, arg_reg);
 
     emit_asm("    PUSH R%d       ; Push argument\n", arg_reg);
@@ -714,7 +714,7 @@ bool emit_math_deg_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("    MOV R%d, R0    ; Transfer result to dest_reg\n", dest_reg);
     }
 
-    unlock_pinned_register(arg_reg);
+    unlock_register(arg_reg);
     return true;
 }
 
@@ -736,7 +736,7 @@ bool emit_math_rad_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.rad(x) ---\n");
 
-    int arg_reg = allocate_pinned_register();
+    int arg_reg = allocate_register();
     generate_asm(arg, arg_reg);
 
     emit_asm("    PUSH R%d       ; Push argument\n", arg_reg);
@@ -747,7 +747,7 @@ bool emit_math_rad_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("    MOV R%d, R0    ; Transfer result to dest_reg\n", dest_reg);
     }
 
-    unlock_pinned_register(arg_reg);
+    unlock_register(arg_reg);
     return true;
 }
 
@@ -769,7 +769,7 @@ bool emit_math_log10_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.log10(x) ---\n");
 
-    int arg_reg = allocate_pinned_register();
+    int arg_reg = allocate_register();
     generate_asm(arg, arg_reg);
 
     emit_asm("    PUSH R%d       ; Push argument\n", arg_reg);
@@ -780,6 +780,6 @@ bool emit_math_log10_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("    MOV R%d, R0    ; Transfer result to dest_reg\n", dest_reg);
     }
 
-    unlock_pinned_register(arg_reg);
+    unlock_register(arg_reg);
     return true;
 }

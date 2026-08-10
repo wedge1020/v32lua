@@ -157,6 +157,11 @@ void emit_asm(const char *format, ...) {
         }
     }
 
+    // Add at the end of emit_asm(), before the debug hook:
+    for (int i = 0; i < NUM_GPRS; i++) {
+        update_register_live(i);
+    }
+
     // =========================================================================
     // SECTION 2: INTEGRATED DEBUG REGISTRATION HOOK
     // =========================================================================
@@ -461,13 +466,13 @@ int   emit_variable_map (void)
     fprintf (out(), "%%define  BOXED_PAYLOAD            0x003FFFFF\n");
     fprintf (out(), "%%define  TABLE_ARRAYSIZE          0x0000FFFF\n");
     fprintf (out(), "%%define  HEAP_POINTER             0\n");
-	/*
+    /*
     if (runtime_req.needs_tic80)
-	{
-		fprintf (out(), "%%define  MAP_BUFFER_PTR   1\n");
-		fprintf (out(), "%%define  TIC80_MAP_WIDTH  2\n");
-		fprintf (out(), "%%define  TIC80_MAP_HEIGHT 3\n");
-	}*/
+    {
+        fprintf (out(), "%%define  MAP_BUFFER_PTR   1\n");
+        fprintf (out(), "%%define  TIC80_MAP_WIDTH  2\n");
+        fprintf (out(), "%%define  TIC80_MAP_HEIGHT 3\n");
+    }*/
     
     SymbolNode *curr = global_scope ? global_scope->symbols : NULL;
     while (curr != NULL)
@@ -579,7 +584,7 @@ void  emit_runtime_library (void)
         }
         fprintf (out(), "\n");
 
-		emit_tic80_map_data (out());
+        emit_tic80_map_data (out());
     }
 
     ////////////////////////////////////////////////////////////////////////////////////
@@ -648,8 +653,8 @@ void emit_table_get_literal(int table_reg, const char *property_name)
 /// Call this from emit.c after processing TIC-80 sections
 void emit_tic80_map_data(FILE *out) {
     if (!tic80_has_map) {
-		tic80_map_width   = 0;
-		tic80_map_height  = 0;
+        tic80_map_width   = 0;
+        tic80_map_height  = 0;
     }
 
     int total_bytes = tic80_map_width * tic80_map_height;
@@ -675,7 +680,7 @@ void emit_tic80_map_data(FILE *out) {
         }
     }
     if (!tic80_has_map) {
-		fprintf (out, "0");
-	}
+        fprintf (out, "0");
+    }
     fprintf(out, "\n\n");
 }

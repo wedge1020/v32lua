@@ -340,7 +340,7 @@ void node_for_generic(ASTNode *node)
     // ---------------------------------------------------------------------
     // STEP 4: Loop start label
     // ---------------------------------------------------------------------
-    emit_asm("%s:\\n", start_label);
+    emit_asm("%s:\n", start_label);
 
     // ---------------------------------------------------------------------
     // STEP 5: Check if key is nil (end of iteration)
@@ -407,12 +407,12 @@ void node_for_generic(ASTNode *node)
     // ---------------------------------------------------------------------
     // STEP 8: Jump back to start
     // ---------------------------------------------------------------------
-    emit_asm("JMP %s\\n", start_label);
+    emit_asm("JMP %s\n", start_label);
 
     // ---------------------------------------------------------------------
     // STEP 9: Loop end label
     // ---------------------------------------------------------------------
-    emit_asm("%s:\\n", end_label);
+    emit_asm("%s:\n", end_label);
 
     // Clean up
     free(var_names);

@@ -28,15 +28,17 @@ extern int  base_spill_frame_offset;
 //
 // register function prototypes
 //
-void  lock_register            (int);
-void  unlock_register          (int);
-int   allocate_pinned_register (void);
-void  unlock_pinned_register   (int);
-int   is_register_locked       (int);
-int   allocate_register        (void);
-void  spill_register           (int);  // Spill a register to stack
-int   ensure_in_register       (int);  // Load if spilled
-void  reset_spill_slots        (int);  // per-function spilling
-void  mark_register_live       (int,  int);
+void  lock_register             (int);
+void  unlock_register           (int);
+int   allocate_pinned_register  (void);
+void  unlock_pinned_register    (int);
+int   is_register_locked        (int);
+int   allocate_register         (void);
+void  spill_register            (int);  // Spill a register to stack
+int   ensure_in_register        (int);  // Load if spilled
+void  reset_spill_slots         (int);  // per-function spilling
+void  mark_register_live        (int,  int);
+void  update_register_live      (int);
+void  update_all_registers_live (void);
 
 #endif

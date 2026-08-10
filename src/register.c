@@ -176,3 +176,9 @@ void  unlock_pinned_register (int  reg)
     register_pinned[reg]  = 0;
     unlock_register (reg);
 }
+
+void update_all_registers_live(void) {
+    for (int i = 0; i < NUM_GPRS; i++) {
+        update_register_live(i);
+    }
+}
