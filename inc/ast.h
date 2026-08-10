@@ -146,6 +146,7 @@ extern char cart_title[128];
 extern CARTresource *textures_head;
 extern CARTresource *sounds_head;
 extern int next_texture_id;
+extern int next_sound_id;
 extern int yylineno;
 
 ////////////////////////////////////////////////////////////////////////////////////////

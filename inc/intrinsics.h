@@ -80,6 +80,13 @@ void  emit_system_halt_intrinsic ();
 
 //////////////////////////////////////////////////////////////////////////////	
 //
+// string intrinsics
+//
+bool  emit_string_byte_intrinsic (ASTNode *, int);
+bool  emit_string_char_intrinsic (ASTNode *, int);
+
+//////////////////////////////////////////////////////////////////////////////	
+//
 // math intrinsics
 //
 bool  emit_math_floor_intrinsic (ASTNode *, int);

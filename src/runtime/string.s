@@ -628,3 +628,138 @@ __ftoa_done:
     POP  BP
     RET
 
+;; ===========================================================================
+;; Built-in: string.byte(s [, i [, j]])
+;; Returns byte values from string as Lua numbers
+;; Incoming Stack: [BP+2] = string, [BP+3] = optional start index (1-based), [BP+4] = optional end index
+;; Returns: R0 = byte value (as boxed float), or multiple values on stack
+;; ===========================================================================
+__builtin_string_byte:
+    PUSH BP
+    MOV  BP, SP
+
+    ;; Load and unbox string
+    MOV  R0, [BP+2]
+    CALL __unbox_string
+    MOV  R1, R0              ; R1 = unboxed string pointer
+
+    ;; Default start index = 1 (Lua is 1-based)
+    MOV  R2, [BP+3]          ; Check if start index provided
+    IEQ  R2, BOXED_NIL
+    JT   R2, __string_byte_default_start
+    ;; Convert from Lua float to integer index
+    CFI  R2                 ; Convert Float to Integer
+    IADD R2, -1            ; Convert to 0-based
+    JMP  __string_byte_check_end
+
+__string_byte_default_start:
+    MOV  R2, 0              ; Start at index 0 (first character)
+
+__string_byte_check_end:
+    ;; Default end index = start index (single byte)
+    MOV  R3, [BP+4]          ; Check if end index provided
+    IEQ  R3, BOXED_NIL
+    JT   R3, __string_byte_default_end
+    CFI  R3
+    IADD R3, -1
+    JMP  __string_byte_validate
+
+__string_byte_default_end:
+    MOV  R3, R2              ; Default: same as start
+
+__string_byte_validate:
+    ;; Validate indices are within bounds
+    ;; Get string length
+    MOV  R0, R1
+    CALL __builtin_len
+    CIF  R0                 ; Already a float
+    MOV  R4, R0            ; R4 = length as float
+    CFI  R4                 ; Convert to integer
+
+    ;; Check start >= 0 and start < length
+    ILT  R2, 0
+    JT   R2, __string_byte_error
+    IGE  R2, R4
+    JT   R2, __string_byte_error
+
+    ;; Check end >= start and end < length
+    ILT  R3, R2
+    JT   R3, __string_byte_error
+    IGE  R3, R4
+    JT   R3, __string_byte_error
+
+    ;; Return byte at position R2
+    IADD R1, R2            ; Point to character
+    MOV  R0, [R1]          ; Load byte
+    CIF  R0               ; Convert to Lua number (float)
+
+    MOV  SP, BP
+    POP  BP
+    RET
+
+__string_byte_error:
+    MOV  R0, BOXED_NIL      ; Return nil on error
+    MOV  SP, BP
+    POP  BP
+    RET
+
+;; ===========================================================================
+;; Built-in: string.char(b1, b2, ..., bn)
+;; Creates a string from byte values
+;; Incoming Stack: [BP+2...] = byte values (as Lua numbers)
+;; Returns: R0 = new string (boxed)
+;; ===========================================================================
+__builtin_string_char:
+    PUSH BP
+    MOV  BP, SP
+
+    ;; Count arguments (they're on stack starting at [BP+2])
+    ;; We need to find how many arguments were passed
+    ;; For now, assume we have access to argument count via convention
+
+    ;; Allocate memory for string (worst case: all args + null terminator)
+    ;; This is simplified - in practice you'd count args first
+    MOV  R0, 32             ; Allocate 32 bytes (adjust as needed)
+    PUSH R0
+    CALL __malloc
+    IADD SP, 1
+    MOV  R1, R0            ; R1 = heap pointer
+
+    ;; Check for OOM
+    IEQ  R1, 0
+    JT   R1, __string_char_oom
+
+    ;; Copy bytes from stack arguments
+    MOV  R2, 2             ; Start at [BP+2] (first argument)
+    MOV  R3, R1            ; R3 = current write position
+
+__string_char_copy_loop:
+    MOV  R0, [BP+R2]       ; Load argument
+    IEQ  R0, BOXED_NIL
+    JT   R0, __string_char_done    ; Stop at nil (end of args)
+
+    CFI  R0                 ; Convert to integer
+    MOV  [R3], R0           ; Store byte
+    IADD R3, 1
+    IADD R2, 1
+    JMP  __string_char_copy_loop
+
+__string_char_done:
+    ;; Null-terminate
+    MOV  R0, 0
+    MOV  [R3], R0
+
+    ;; Box as RAM string
+    MOV  R0, R1
+    OR   R0, BOXED_RAMSTRING
+
+    MOV  SP, BP
+    POP  BP
+    RET
+
+__string_char_oom:
+    ;; Handle out of memory - return empty string or error
+    MOV  R0, BOXED_NIL
+    MOV  SP, BP
+    POP  BP
+    RET

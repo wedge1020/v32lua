@@ -329,10 +329,6 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         {
             return (emit_pico8_add_intrinsic (node, dest_reg));
         }
-        else if (runtime_req.needs_tic80 == true)
-        {
-            return (emit_tic80_add_intrinsic (node, dest_reg));
-        }
     }
 
     // TIC-80 cls()
@@ -397,6 +393,28 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
 			return emit_tic80_music_intrinsic(node, dest_reg);
 		}
 	}
+
+	//////////////////////////////////////////////////////////////////////////
+	//
+	// string library intrinsics
+	//
+	//////////////////////////////////////////////////////////////////////////
+
+	// string.byte(s [, i [, j]])
+	if (strcmp(func_name, "string.byte") == 0) {
+		return emit_string_byte_intrinsic(node, dest_reg);
+	}
+
+	// string.char(b1, b2, ..., bn)
+	if (strcmp(func_name, "string.char") == 0) {
+		return emit_string_char_intrinsic(node, dest_reg);
+	}
+
+	//////////////////////////////////////////////////////////////////////////
+	//
+	// math library intrinsics
+	//
+	//////////////////////////////////////////////////////////////////////////
 
     // math.floor(x)
     if (strcmp(func_name, "math.floor") == 0) {
