@@ -3,28 +3,6 @@
 
 #define MAX_TIC80_SPR_ARGS 9  // id, x, y, colorkey, scale, flip, rotate, w, h
 
-// TIC-80 default 16-color palette (32-bit AABBGGRR for Vircon32 GPU)
-// These can be overridden by cartridge PALETTE section
-/*
-uint32_t tic80_palette[16] = {
-    0xFF2C1C1A,
-    0xFF5D275D,
-    0xFF533EB1,
-    0xFF577DEF,
-    0xFF75CDFF,
-    0xFF70F0A7,
-    0xFF64B738,
-    0xFF797125,
-    0xFF6F3629,
-    0xFFC95D3B,
-    0xFFF6A641,
-    0xFFF7EF73,
-    0xFFF4F4F4,
-    0xFFC2B094,
-    0xFF866C56,
-    0xFF573C33
-};*/
-
 // Set custom palette from cartridge (called after parsing TIC80 assets)
 void tic80_set_custom_palette(const uint32_t *new_palette) {
     for (int i = 0; i < 16; i++) {
@@ -588,6 +566,88 @@ bool emit_tic80_map_intrinsic(ASTNode *node) {
     // Call runtime subroutine
     emit_asm("CALL __builtin_tic80_map\n");
     emit_asm("IADD SP, 7 ; Clean up map() arguments (now 7 total)\n");
+
+    return true;
+}
+
+// ============================================================================
+// Sound API Intrinsics
+// ============================================================================
+
+bool emit_tic80_play_intrinsic(ASTNode *node, int dest_reg) {
+    emit_asm("    ;; --- TIC-80 play() Intrinsic ---\n");
+
+    // play(sound_id, channel, volume, speed)
+    // Maps to SPU registers
+
+    ASTNode *args[4] = {NULL};
+    int arg_count = 0;
+    for (ASTNode *curr = node->as.call.args_head; curr && arg_count < 4; curr = curr->next) {
+        args[arg_count++] = curr;
+    }
+
+    // Set selected sound
+    if (args[0]) {
+        generate_asm(args[0], 1);  // R1 = sound_id
+        emit_asm("OUT SPU_SelectedSound, R1\n");
+    }
+
+    // Set channel (default 0)
+    if (args[1]) {
+        generate_asm(args[1], 1);
+        emit_asm("OUT SPU_SelectedChannel, R1\n");
+    } else {
+        emit_asm("MOV R1, 0\n");
+        emit_asm("OUT SPU_SelectedChannel, R1\n");
+    }
+
+    // Set volume (default 1.0)
+    if (args[2]) {
+        generate_asm(args[2], 1);
+        emit_asm("OUT SPU_ChannelVolume, R1\n");
+    }
+
+    // Set speed (default 1.0)
+    if (args[3]) {
+        generate_asm(args[3], 1);
+        emit_asm("OUT SPU_ChannelSpeed, R1\n");
+    }
+
+    // Play command
+    emit_asm("OUT SPU_Command, SPUCommand_PlaySelectedChannel\n");
+
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, BOXED_NIL ; return nil\n", dest_reg);
+    }
+
+    return true;
+}
+
+bool emit_tic80_sfx_intrinsic(ASTNode *node, int dest_reg) {
+    emit_asm("    ;; --- TIC-80 sfx() Intrinsic ---\n");
+
+    // sfx(sfx_id, channel, volume, speed)
+    // Same as play() but for SFX (0-31)
+
+    // For now, just map to play() with SFX offset
+    ASTNode *sfx_arg = node->as.call.args_head;
+    if (sfx_arg) {
+        // Convert SFX ID to sound ID (assuming SFX are stored first)
+        generate_asm(sfx_arg, 1);
+        emit_asm("IADD R1, %d ; SFX offset\n", 0); // TODO: actual offset
+    }
+
+    // Call play intrinsic with modified sound ID
+    // ... (rest similar to play)
+
+    return true;
+}
+
+bool emit_tic80_music_intrinsic(ASTNode *node, int dest_reg) {
+    emit_asm("    ;; --- TIC-80 music() Intrinsic ---\n");
+
+    // music(track_id, channel, volume, speed)
+    // TODO: Implement music playback
 
     return true;
 }

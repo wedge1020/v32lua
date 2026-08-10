@@ -377,6 +377,27 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         }
     }
 
+	// play()
+	if (strcmp(func_name, "play") == 0) {
+		if (runtime_req.needs_tic80 == true) {
+			return emit_tic80_play_intrinsic(node, dest_reg);
+		}
+	}
+
+	// sfx()
+	if (strcmp(func_name, "sfx") == 0) {
+		if (runtime_req.needs_tic80 == true) {
+			return emit_tic80_sfx_intrinsic(node, dest_reg);
+		}
+	}
+
+	// music()
+	if (strcmp(func_name, "music") == 0) {
+		if (runtime_req.needs_tic80 == true) {
+			return emit_tic80_music_intrinsic(node, dest_reg);
+		}
+	}
+
     // math.floor(x)
     if (strcmp(func_name, "math.floor") == 0) {
         return emit_math_floor_intrinsic(node, dest_reg);

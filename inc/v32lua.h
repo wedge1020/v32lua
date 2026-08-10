@@ -12,6 +12,7 @@
 
 #include "enums.h"
 #include "vtex_generator.h"
+#include "vsnd_generator.h"
 #include "tic80_assets.h"
 #include "emit.h"
 #include "ast.h"
@@ -22,7 +23,7 @@
 #include "internals.h"
 #include "register.h"
 
-#define  VERSION      "20260809-dev"
+#define  VERSION      "20260810-dev"
 #define  AUTHOR       "Matthew Haas"
 #define  URL          "https://github.com/wedge1020/v32lua"
 

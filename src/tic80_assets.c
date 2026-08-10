@@ -180,6 +180,11 @@ void process_all_tic80_sections(void) {
         free(item);
         item = next;
     }
+
+	// Generate VSND after processing all sections
+    if (tic80_has_waves || tic80_has_sfx || tic80_has_tracks) {
+        process_tic80_sound_sections();
+    }
 }
 
 /// Process a single TIC-80 section (PALETTE, TILES, etc.)
@@ -220,7 +225,24 @@ void process_tic80_section(const char *section, TIC80AssetData *assets) {
 			parse_tic80_map_row(item->index, item->hex_data);
 		}
 	}
-    // Add other sections (WAVES, SFX, TRACKS) here if needed
+
+	// ==========================================================================
+    // SOUND SECTIONS
+    // ==========================================================================
+    else if (strcmp(section, "WAVES") == 0) {
+        for (TIC80AssetData *item = assets; item != NULL; item = item->next) {
+            parse_tic80_wave(item->index, item->hex_data);
+        }
+    }
+    else if (strcmp(section, "SFX") == 0) {
+        for (TIC80AssetData *item = assets; item != NULL; item = item->next) {
+            parse_tic80_sfx(item->index, item->hex_data);
+        }
+    }
+    else if (strcmp(section, "TRACKS") == 0) {
+        // TODO: Parse music tracks
+        tic80_has_tracks = true;
+    }
 }
 
 // =============================================================================

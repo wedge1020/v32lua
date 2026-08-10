@@ -23,6 +23,9 @@ struct TIC80AssetData {
 
 // In the TIC80 assets section
 extern bool  tic80_has_map;
+extern bool  tic80_has_waves;
+extern bool  tic80_has_sfx;
+extern bool  tic80_has_tracks;
 extern int   tic80_map_width;
 extern int   tic80_map_height;
 extern uint8_t tic80_tile_pixels[TIC80_SHEET_WIDTH * TIC80_SHEET_HEIGHT];

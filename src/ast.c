@@ -1,11 +1,12 @@
 #include "v32lua.h"
 
 // Global state for XML generation
-char cart_version[64]        = "1.0";
-char cart_title[128]         = "Vircon32 Program";
-CARTresource* textures_head  = NULL;
-CARTresource* sounds_head    = NULL;
-int next_texture_id          = 0;
+char          cart_version[64]  = "1.0";
+char          cart_title[128]   = "Vircon32 Program";
+CARTresource *textures_head     = NULL;
+CARTresource *sounds_head       = NULL;
+int           next_texture_id   = 0;
+int           next_sound_id     = 0;
 
 ASTNode *make_node (NodeType type)
 {
@@ -65,33 +66,33 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
     node->as.cart_hint.resource_id = -1;
 
     // Handle API selection hint
-	if (strcmp(action, "api") == 0 && tokens >= 2) {
-		// Strip surrounding quotes from param1 if present
-		char api_name[128];
-		size_t param1_len = strlen(param1);
+    if (strcmp(action, "api") == 0 && tokens >= 2) {
+        // Strip surrounding quotes from param1 if present
+        char api_name[128];
+        size_t param1_len = strlen(param1);
 
-		if (param1_len >= 2 && param1[0] == '"' && param1[param1_len-1] == '"') {
-			// Copy without quotes
-			strncpy(api_name, param1 + 1, param1_len - 2);
-			api_name[param1_len - 2] = '\0';
-		} else {
-			strncpy(api_name, param1, sizeof(api_name) - 1);
-			api_name[sizeof(api_name) - 1] = '\0';
-		}
+        if (param1_len >= 2 && param1[0] == '"' && param1[param1_len-1] == '"') {
+            // Copy without quotes
+            strncpy(api_name, param1 + 1, param1_len - 2);
+            api_name[param1_len - 2] = '\0';
+        } else {
+            strncpy(api_name, param1, sizeof(api_name) - 1);
+            api_name[sizeof(api_name) - 1] = '\0';
+        }
 
-		if (strcmp(api_name, "pico8") == 0) {
-			runtime_req.needs_pico8 = true;
-			runtime_req.needs_tic80 = false;
-			runtime_req.needs_tables = true;
-		} else if (strcmp(api_name, "tic80") == 0) {
-			runtime_req.needs_tic80 = true;
-			runtime_req.needs_pico8 = false;
-			runtime_req.needs_tables = true;
-		} else {
-			compiler_error(ERR_SEMANTIC, -1, "Unknown API: %s. Use 'pico8' or 'tic80'", api_name);
-		}
-		node->as.cart_hint.value = strdup(api_name);
-	}
+        if (strcmp(api_name, "pico8") == 0) {
+            runtime_req.needs_pico8 = true;
+            runtime_req.needs_tic80 = false;
+            runtime_req.needs_tables = true;
+        } else if (strcmp(api_name, "tic80") == 0) {
+            runtime_req.needs_tic80 = true;
+            runtime_req.needs_pico8 = false;
+            runtime_req.needs_tables = true;
+        } else {
+            compiler_error(ERR_SEMANTIC, -1, "Unknown API: %s. Use 'pico8' or 'tic80'", api_name);
+        }
+        node->as.cart_hint.value = strdup(api_name);
+    }
     else if (strcmp(action, "version") == 0 && tokens >= 2) {
         // e.g., --#version 1.1
         strncpy(cart_version, param1, sizeof(cart_version) - 1);
@@ -120,6 +121,22 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
         res->filename = strdup(param2);
         res->next = textures_head;
         textures_head = res;
+    }
+    // In make_node_cart_hint(), after texture handling:
+    else if (strcmp (action, "sound") == 0 && tokens == 3) {
+        int  assigned_id                  = next_sound_id++;
+
+        node -> as.cart_hint.name         = strdup (param1); // Variable name
+        node -> as.cart_hint.value        = strdup (param2); // Filename (e.g., "explosion.vsnd")
+        node -> as.cart_hint.resource_id  = assigned_id;
+
+        // Register in sound linked list
+        CARTresource *res                 = (CARTresource *) malloc (sizeof (CARTresource));
+        res->id = assigned_id;
+        res->var_name = strdup(param1);
+        res->filename = strdup(param2);
+        res->next = sounds_head;
+        sounds_head = res;
     }
 
     return node;
