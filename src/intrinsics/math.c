@@ -505,3 +505,281 @@ bool emit_math_exp_intrinsic(ASTNode *node, int dest_reg)
     unlock_pinned_register(arg_reg);
     return true;
 }
+
+// ============================================================================
+// Quick Wins: Direct Vircon32 instruction mappings
+// ============================================================================
+
+/**
+ * Emits assembly for the math.fmod(x, y) intrinsic.
+ *
+ * Returns x - y * floor(x/y) (floating point modulus).
+ * Uses Vircon32 FMOD instruction directly.
+ */
+bool emit_math_fmod_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+
+    if (!arg || !arg->next || arg->next->next != NULL) {
+        compiler_error(ERR_SYNTAX, node->line_number,
+            "math.fmod() expects exactly two arguments");
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: math.fmod(x, y) ---\n");
+
+    int x_reg = allocate_pinned_register();
+    int y_reg = allocate_pinned_register();
+
+    generate_asm(arg, x_reg);
+    generate_asm(arg->next, y_reg);
+
+    emit_asm("FMOD R%d, R%d ; R%d = fmod(R%d, R%d)\n", x_reg, y_reg, x_reg, x_reg, y_reg);
+
+    if (dest_reg != 0) {
+        emit_asm("    MOV R%d, R%d ; Transfer result to dest_reg\n", dest_reg, x_reg);
+    }
+
+    unlock_pinned_register(x_reg);
+    unlock_pinned_register(y_reg);
+    return true;
+}
+
+/**
+ * Emits assembly for the math.max(x, y) intrinsic.
+ *
+ * Returns the larger of x and y.
+ * Uses Vircon32 FMAX instruction directly.
+ */
+bool emit_math_max_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+
+    if (!arg || !arg->next || arg->next->next != NULL) {
+        compiler_error(ERR_SYNTAX, node->line_number,
+            "math.max() expects exactly two arguments");
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: math.max(x, y) ---\n");
+
+    int x_reg = allocate_pinned_register();
+    int y_reg = allocate_pinned_register();
+
+    generate_asm(arg, x_reg);
+    generate_asm(arg->next, y_reg);
+
+    emit_asm("FMAX R%d, R%d ; R%d = max(R%d, R%d)\n", x_reg, y_reg, x_reg, x_reg, y_reg);
+
+    if (dest_reg != 0) {
+        emit_asm("    MOV R%d, R%d ; Transfer result to dest_reg\n", dest_reg, x_reg);
+    }
+
+    unlock_pinned_register(x_reg);
+    unlock_pinned_register(y_reg);
+    return true;
+}
+
+/**
+ * Emits assembly for the math.min(x, y) intrinsic.
+ *
+ * Returns the smaller of x and y.
+ * Uses Vircon32 FMIN instruction directly.
+ */
+bool emit_math_min_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+
+    if (!arg || !arg->next || arg->next->next != NULL) {
+        compiler_error(ERR_SYNTAX, node->line_number,
+            "math.min() expects exactly two arguments");
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: math.min(x, y) ---\n");
+
+    int x_reg = allocate_pinned_register();
+    int y_reg = allocate_pinned_register();
+
+    generate_asm(arg, x_reg);
+    generate_asm(arg->next, y_reg);
+
+    emit_asm("FMIN R%d, R%d ; R%d = min(R%d, R%d)\n", x_reg, y_reg, x_reg, x_reg, y_reg);
+
+    if (dest_reg != 0) {
+        emit_asm("    MOV R%d, R%d ; Transfer result to dest_reg\n", dest_reg, x_reg);
+    }
+
+    unlock_pinned_register(x_reg);
+    unlock_pinned_register(y_reg);
+    return true;
+}
+
+// ============================================================================
+// Additional Math Functions - Runtime-based implementations
+// ============================================================================
+
+/**
+ * Emits assembly for the math.asin(x) intrinsic.
+ *
+ * Arc sine: asin(x) = atan2(x, sqrt(1 - x^2))
+ * Delegates to runtime subroutine __builtin_asin.
+ */
+bool emit_math_asin_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+
+    if (!arg || arg->next != NULL) {
+        compiler_error(ERR_SYNTAX, node->line_number,
+            "math.asin() expects exactly one argument");
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: math.asin(x) ---\n");
+
+    int arg_reg = allocate_pinned_register();
+    generate_asm(arg, arg_reg);
+
+    emit_asm("    PUSH R%d       ; Push argument\n", arg_reg);
+    emit_asm("    CALL __builtin_asin\n");
+    emit_asm("    IADD SP, 1    ; Clean up 1 argument\n");
+
+    if (dest_reg != 0) {
+        emit_asm("    MOV R%d, R0    ; Transfer result to dest_reg\n", dest_reg);
+    }
+
+    unlock_pinned_register(arg_reg);
+    return true;
+}
+
+/**
+ * Emits assembly for the math.tan(x) intrinsic.
+ *
+ * Tangent: tan(x) = sin(x) / cos(x)
+ * Delegates to runtime subroutine __builtin_tan.
+ */
+bool emit_math_tan_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+
+    if (!arg || arg->next != NULL) {
+        compiler_error(ERR_SYNTAX, node->line_number,
+            "math.tan() expects exactly one argument");
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: math.tan(x) ---\n");
+
+    int arg_reg = allocate_pinned_register();
+    generate_asm(arg, arg_reg);
+
+    emit_asm("    PUSH R%d       ; Push argument\n", arg_reg);
+    emit_asm("    CALL __builtin_tan\n");
+    emit_asm("    IADD SP, 1    ; Clean up 1 argument\n");
+
+    if (dest_reg != 0) {
+        emit_asm("    MOV R%d, R0    ; Transfer result to dest_reg\n", dest_reg);
+    }
+
+    unlock_pinned_register(arg_reg);
+    return true;
+}
+
+/**
+ * Emits assembly for the math.deg(x) intrinsic.
+ *
+ * Convert radians to degrees: deg(x) = x * 180 / PI
+ * Delegates to runtime subroutine __builtin_deg.
+ */
+bool emit_math_deg_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+
+    if (!arg || arg->next != NULL) {
+        compiler_error(ERR_SYNTAX, node->line_number,
+            "math.deg() expects exactly one argument");
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: math.deg(x) ---\n");
+
+    int arg_reg = allocate_pinned_register();
+    generate_asm(arg, arg_reg);
+
+    emit_asm("    PUSH R%d       ; Push argument\n", arg_reg);
+    emit_asm("    CALL __builtin_deg\n");
+    emit_asm("    IADD SP, 1    ; Clean up 1 argument\n");
+
+    if (dest_reg != 0) {
+        emit_asm("    MOV R%d, R0    ; Transfer result to dest_reg\n", dest_reg);
+    }
+
+    unlock_pinned_register(arg_reg);
+    return true;
+}
+
+/**
+ * Emits assembly for the math.rad(x) intrinsic.
+ *
+ * Convert degrees to radians: rad(x) = x * PI / 180
+ * Delegates to runtime subroutine __builtin_rad.
+ */
+bool emit_math_rad_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+
+    if (!arg || arg->next != NULL) {
+        compiler_error(ERR_SYNTAX, node->line_number,
+            "math.rad() expects exactly one argument");
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: math.rad(x) ---\n");
+
+    int arg_reg = allocate_pinned_register();
+    generate_asm(arg, arg_reg);
+
+    emit_asm("    PUSH R%d       ; Push argument\n", arg_reg);
+    emit_asm("    CALL __builtin_rad\n");
+    emit_asm("    IADD SP, 1    ; Clean up 1 argument\n");
+
+    if (dest_reg != 0) {
+        emit_asm("    MOV R%d, R0    ; Transfer result to dest_reg\n", dest_reg);
+    }
+
+    unlock_pinned_register(arg_reg);
+    return true;
+}
+
+/**
+ * Emits assembly for the math.log10(x) intrinsic.
+ *
+ * Base-10 logarithm: log10(x) = log(x) / log(10)
+ * Delegates to runtime subroutine __builtin_log10.
+ */
+bool emit_math_log10_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+
+    if (!arg || arg->next != NULL) {
+        compiler_error(ERR_SYNTAX, node->line_number,
+            "math.log10() expects exactly one argument");
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: math.log10(x) ---\n");
+
+    int arg_reg = allocate_pinned_register();
+    generate_asm(arg, arg_reg);
+
+    emit_asm("    PUSH R%d       ; Push argument\n", arg_reg);
+    emit_asm("    CALL __builtin_log10\n");
+    emit_asm("    IADD SP, 1    ; Clean up 1 argument\n");
+
+    if (dest_reg != 0) {
+        emit_asm("    MOV R%d, R0    ; Transfer result to dest_reg\n", dest_reg);
+    }
+
+    unlock_pinned_register(arg_reg);
+    return true;
+}

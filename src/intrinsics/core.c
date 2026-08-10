@@ -486,6 +486,46 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         return emit_math_exp_intrinsic(node, dest_reg);
     }
 
+    // math.fmod(x, y)
+    if (strcmp(func_name, "math.fmod") == 0) {
+        return emit_math_fmod_intrinsic(node, dest_reg);
+    }
+
+    // math.max(x, y)
+    if (strcmp(func_name, "math.max") == 0) {
+        return emit_math_max_intrinsic(node, dest_reg);
+    }
+
+    // math.min(x, y)
+    if (strcmp(func_name, "math.min") == 0) {
+        return emit_math_min_intrinsic(node, dest_reg);
+    }
+
+    // math.asin(x)
+    if (strcmp(func_name, "math.asin") == 0) {
+        return emit_math_asin_intrinsic(node, dest_reg);
+    }
+
+    // math.tan(x)
+    if (strcmp(func_name, "math.tan") == 0) {
+        return emit_math_tan_intrinsic(node, dest_reg);
+    }
+
+    // math.deg(x)
+    if (strcmp(func_name, "math.deg") == 0) {
+        return emit_math_deg_intrinsic(node, dest_reg);
+    }
+
+    // math.rad(x)
+    if (strcmp(func_name, "math.rad") == 0) {
+        return emit_math_rad_intrinsic(node, dest_reg);
+    }
+
+    // math.log10(x)
+    if (strcmp(func_name, "math.log10") == 0) {
+        return emit_math_log10_intrinsic(node, dest_reg);
+    }
+
     // loop iters
     if (strcmp(func_name, "pairs") == 0) {
         return emit_pairs_intrinsic(node, dest_reg);

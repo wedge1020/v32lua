@@ -216,3 +216,183 @@ __builtin_exp:
     POP  BP
     RET
 
+;; ===========================================================================
+;; Vircon32 Lua Math Runtime Subroutines - Additional Functions
+;; ===========================================================================
+
+;; ===========================================================================
+;; Built-in: math.asin(x) - Arc Sine
+;;
+;; Uses identity: asin(x) = atan2(x, sqrt(1 - x^2))
+;;
+;; Stack on entry: [BP+2] = x (float in [-1, 1])
+;; Returns: R0 = asin(x) in radians [-PI/2, PI/2]
+;; Clobbers: R0-R4
+;; ===========================================================================
+
+__builtin_asin:
+    PUSH BP
+    MOV  BP, SP
+
+    ;; --- Load x ---
+    MOV  R0, [BP+2]          ; R0 = x
+
+    ;; --- Compute x^2 ---
+    MOV  R1, R0
+    FMUL R1, R0             ; R1 = x^2
+
+    ;; --- Compute 1 - x^2 ---
+    MOV  R2, 1.0
+    FSUB R2, R1             ; R2 = 1 - x^2
+
+    ;; --- Compute sqrt(1 - x^2) ---
+    ;; Note: This assumes 1 - x^2 >= 0 (i.e., |x| <= 1)
+    ;; For |x| > 1, this will produce NaN which is correct for asin domain error
+    ;; Vircon32 doesn't have SQRT instruction, so we call runtime
+    PUSH R2
+    CALL __builtin_sqrt
+    IADD SP, 1
+    MOV  R2, R0             ; R2 = sqrt(1 - x^2)
+
+    ;; --- Compute atan2(x, sqrt(1-x^2)) ---
+    ;; ATAN2 takes: DSTREG, SRCREG where DSTREG = y, SRCREG = x
+    ;; We want atan2(x, sqrt(1-x^2)) = atan2(y=x, x=sqrt(1-x^2))
+    MOV  R1, R2             ; R1 = sqrt(1-x^2) = x coordinate
+    MOV  R2, R0             ; R2 = x = y coordinate
+    ATAN2 R2, R1            ; R2 = atan2(x, sqrt(1-x^2)) = asin(x)
+
+    MOV  R0, R2             ; Return in R0
+
+    ;; --- Done ---
+    MOV  SP, BP
+    POP  BP
+    RET
+
+;; ===========================================================================
+;; Built-in: math.tan(x) - Tangent
+;;
+;; Uses identity: tan(x) = sin(x) / cos(x)
+;;
+;; Stack on entry: [BP+2] = x (float)
+;; Returns: R0 = tan(x)
+;; Clobbers: R0-R3
+;; ===========================================================================
+
+__builtin_tan:
+    PUSH BP
+    MOV  BP, SP
+
+    ;; --- Load x ---
+    MOV  R0, [BP+2]          ; R0 = x
+
+    ;; --- Compute sin(x) ---
+    MOV  R1, R0
+    SIN  R1                 ; R1 = sin(x)
+
+    ;; --- Compute cos(x) ---
+    MOV  R2, R0
+    ;; Use identity: cos(x) = sin(x + PI/2)
+    MOV  R3, 1.57079632679  ; PI/2
+    FADD R2, R3
+    SIN  R2                 ; R2 = cos(x)
+
+    ;; --- Compute tan(x) = sin(x) / cos(x) ---
+	MOV  R0, R1
+    FDIV R0, R2         ; R0 = sin(x) / cos(x) = tan(x)
+
+    ;; --- Done ---
+    MOV  SP, BP
+    POP  BP
+    RET
+
+;; ===========================================================================
+;; Built-in: math.deg(x) - Convert Radians to Degrees
+;;
+;; Uses: deg(x) = x * 180 / PI
+;;
+;; Stack on entry: [BP+2] = x (radians)
+;; Returns: R0 = degrees
+;; Clobbers: R0-R3
+;; ===========================================================================
+
+__builtin_deg:
+    PUSH BP
+    MOV  BP, SP
+
+    ;; --- Load x ---
+    MOV  R0, [BP+2]          ; R0 = x (radians)
+
+    ;; --- Multiply by 180 ---
+    MOV  R1, 180.0
+    FMUL R0, R1             ; R0 = x * 180
+
+    ;; --- Divide by PI ---
+    MOV  R1, 3.14159265359  ; PI
+    FDIV R0, R1             ; R0 = x * 180 / PI
+
+    ;; --- Done ---
+    MOV  SP, BP
+    POP  BP
+    RET
+
+;; ===========================================================================
+;; Built-in: math.rad(x) - Convert Degrees to Radians
+;;
+;; Uses: rad(x) = x * PI / 180
+;;
+;; Stack on entry: [BP+2] = x (degrees)
+;; Returns: R0 = radians
+;; Clobbers: R0-R3
+;; ===========================================================================
+
+__builtin_rad:
+    PUSH BP
+    MOV  BP, SP
+
+    ;; --- Load x ---
+    MOV  R0, [BP+2]          ; R0 = x (degrees)
+
+    ;; --- Multiply by PI ---
+    MOV  R1, 3.14159265359  ; PI
+    FMUL R0, R1             ; R0 = x * PI
+
+    ;; --- Divide by 180 ---
+    MOV  R1, 180.0
+    FDIV R0, R1             ; R0 = x * PI / 180
+
+    ;; --- Done ---
+    MOV  SP, BP
+    POP  BP
+    RET
+
+;; ===========================================================================
+;; Built-in: math.log10(x) - Base-10 Logarithm
+;;
+;; Uses identity: log10(x) = log(x) / log(10)
+;;
+;; Stack on entry: [BP+2] = x (float > 0)
+;; Returns: R0 = log10(x)
+;; Clobbers: R0-R4
+;; ===========================================================================
+
+__builtin_log10:
+    PUSH BP
+    MOV  BP, SP
+
+    ;; --- Load x ---
+    MOV  R0, [BP+2]          ; R0 = x
+
+    ;; --- Compute log(x) ---
+    LOG  R0                 ; R0 = ln(x)
+
+    ;; --- Compute log(10) ---
+    MOV  R1, 10.0
+    LOG  R1                 ; R1 = ln(10)
+
+    ;; --- Compute log10(x) = ln(x) / ln(10) ---
+    FDIV R0, R1             ; R0 = ln(x) / ln(10) = log10(x)
+
+    ;; --- Done ---
+    MOV  SP, BP
+    POP  BP
+    RET

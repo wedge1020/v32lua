@@ -98,13 +98,19 @@ bool  emit_math_acos_intrinsic       (ASTNode *, int);
 bool  emit_math_log_intrinsic        (ASTNode *, int);
 bool  emit_math_pow_intrinsic        (ASTNode *, int);
 bool  emit_math_atan2_intrinsic      (ASTNode *, int);
-bool  emit_math_floor_intrinsic      (ASTNode *, int);
-bool  emit_math_sqrt_intrinsic       (ASTNode *, int);
 bool  emit_math_random_intrinsic     (ASTNode *, int);
 bool  emit_math_randomseed_intrinsic (ASTNode *, int);
 bool  emit_math_cos_intrinsic        (ASTNode *, int);
 bool  emit_math_atan_intrinsic       (ASTNode *, int);
 bool  emit_math_exp_intrinsic        (ASTNode *, int);
+bool  emit_math_fmod_intrinsic       (ASTNode *, int);
+bool  emit_math_max_intrinsic        (ASTNode *, int);
+bool  emit_math_min_intrinsic        (ASTNode *, int);
+bool  emit_math_asin_intrinsic       (ASTNode *, int);
+bool  emit_math_tan_intrinsic        (ASTNode *, int);
+bool  emit_math_deg_intrinsic        (ASTNode *, int);
+bool  emit_math_rad_intrinsic        (ASTNode *, int);
+bool  emit_math_log10_intrinsic      (ASTNode *, int);
 
 //////////////////////////////////////////////////////////////////////////////	
 //
