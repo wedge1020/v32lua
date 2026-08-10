@@ -24,7 +24,7 @@ function test_edge_cases()
 
     -- Zero index
     local zero_idx = string.byte("ABC", 0)
-    print(10, 90, format_result(""byte('ABC', 0) [zero]", zero_idx))
+	print(10, 90, format_result("byte('ABC', 0) [zero]", zero_idx))
 
     -- String with null bytes
     local with_null = string.char(65, 0, 66)

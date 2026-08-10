@@ -334,7 +334,7 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     // TIC-80 cls()
     if (strcmp(func_name, "cls") == 0) {
         if (runtime_req.needs_tic80 == true)
-		{
+        {
             return emit_tic80_cls_intrinsic(node);
         }
         else if (runtime_req.needs_pico8 == true)
@@ -373,83 +373,83 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         }
     }
 
-	// play()
-	if (strcmp(func_name, "play") == 0) {
-		if (runtime_req.needs_tic80 == true) {
-			return emit_tic80_play_intrinsic(node, dest_reg);
-		}
-	}
+    // play()
+    if (strcmp(func_name, "play") == 0) {
+        if (runtime_req.needs_tic80 == true) {
+            return emit_tic80_play_intrinsic(node, dest_reg);
+        }
+    }
 
-	// sfx()
-	if (strcmp(func_name, "sfx") == 0) {
-		if (runtime_req.needs_tic80 == true) {
-			return emit_tic80_sfx_intrinsic(node, dest_reg);
-		}
-	}
+    // sfx()
+    if (strcmp(func_name, "sfx") == 0) {
+        if (runtime_req.needs_tic80 == true) {
+            return emit_tic80_sfx_intrinsic(node, dest_reg);
+        }
+    }
 
-	// music()
-	if (strcmp(func_name, "music") == 0) {
-		if (runtime_req.needs_tic80 == true) {
-			return emit_tic80_music_intrinsic(node, dest_reg);
-		}
-	}
+    // music()
+    if (strcmp(func_name, "music") == 0) {
+        if (runtime_req.needs_tic80 == true) {
+            return emit_tic80_music_intrinsic(node, dest_reg);
+        }
+    }
 
-	//////////////////////////////////////////////////////////////////////////
-	//
-	// string library intrinsics
-	//
-	//////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////////
+    //
+    // string library intrinsics
+    //
+    //////////////////////////////////////////////////////////////////////////
 
-	// string.byte(s [, i [, j]])
-	if (strcmp(func_name, "string.byte") == 0) {
-		return emit_string_byte_intrinsic(node, dest_reg);
-	}
+    // string.byte(s [, i [, j]])
+    if (strcmp(func_name, "string.byte") == 0) {
+        return emit_string_byte_intrinsic(node, dest_reg);
+    }
 
-	// string.char(b1, b2, ..., bn)
-	if (strcmp(func_name, "string.char") == 0) {
-		return emit_string_char_intrinsic(node, dest_reg);
-	}
+    // string.char(b1, b2, ..., bn)
+    if (strcmp(func_name, "string.char") == 0) {
+        return emit_string_char_intrinsic(node, dest_reg);
+    }
 
-	//////////////////////////////////////////////////////////////////////////
-	//
-	// math library intrinsics
-	//
-	//////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////////
+    //
+    // math library intrinsics
+    //
+    //////////////////////////////////////////////////////////////////////////
 
-	// math.sin(x)
-	if (strcmp(func_name, "math.sin") == 0) {
-		return emit_math_sin_intrinsic(node, dest_reg);
-	}
+    // math.sin(x)
+    if (strcmp(func_name, "math.sin") == 0) {
+        return emit_math_sin_intrinsic(node, dest_reg);
+    }
 
-	// math.abs(x)
-	if (strcmp(func_name, "math.abs") == 0) {
-		return emit_math_abs_intrinsic(node, dest_reg);
-	}
+    // math.abs(x)
+    if (strcmp(func_name, "math.abs") == 0) {
+        return emit_math_abs_intrinsic(node, dest_reg);
+    }
 
-	// math.ceil(x)
-	if (strcmp(func_name, "math.ceil") == 0) {
-		return emit_math_ceil_intrinsic(node, dest_reg);
-	}
+    // math.ceil(x)
+    if (strcmp(func_name, "math.ceil") == 0) {
+        return emit_math_ceil_intrinsic(node, dest_reg);
+    }
 
-	// math.acos(x)
-	if (strcmp(func_name, "math.acos") == 0) {
-		return emit_math_acos_intrinsic(node, dest_reg);
-	}
+    // math.acos(x)
+    if (strcmp(func_name, "math.acos") == 0) {
+        return emit_math_acos_intrinsic(node, dest_reg);
+    }
 
-	// math.log(x)
-	if (strcmp(func_name, "math.log") == 0) {
-		return emit_math_log_intrinsic(node, dest_reg);
-	}
+    // math.log(x)
+    if (strcmp(func_name, "math.log") == 0) {
+        return emit_math_log_intrinsic(node, dest_reg);
+    }
 
-	// math.pow(x, y)
-	if (strcmp(func_name, "math.pow") == 0) {
-		return emit_math_pow_intrinsic(node, dest_reg);
-	}
+    // math.pow(x, y)
+    if (strcmp(func_name, "math.pow") == 0) {
+        return emit_math_pow_intrinsic(node, dest_reg);
+    }
 
-	// math.atan2(y, x)
-	if (strcmp(func_name, "math.atan2") == 0) {
-		return emit_math_atan2_intrinsic(node, dest_reg);
-	}
+    // math.atan2(y, x)
+    if (strcmp(func_name, "math.atan2") == 0) {
+        return emit_math_atan2_intrinsic(node, dest_reg);
+    }
 
     // math.floor(x)
     if (strcmp(func_name, "math.floor") == 0) {
@@ -461,23 +461,38 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         return emit_math_sqrt_intrinsic(node, dest_reg);
     }
 
-	// math.random([m[, n]])
-	if (strcmp(func_name, "math.random") == 0) {
-		return emit_math_random_intrinsic(node, dest_reg);
-	}
+    // math.random([m[, n]])
+    if (strcmp(func_name, "math.random") == 0) {
+        return emit_math_random_intrinsic(node, dest_reg);
+    }
 
-	// math.randomseed(x)
-	if (strcmp(func_name, "math.randomseed") == 0) {
-		return emit_math_randomseed_intrinsic(node, dest_reg);
-	}
+    // math.randomseed(x)
+    if (strcmp(func_name, "math.randomseed") == 0) {
+        return emit_math_randomseed_intrinsic(node, dest_reg);
+    }
 
-	// loop iters
-	if (strcmp(func_name, "pairs") == 0) {
-		return emit_pairs_intrinsic(node, dest_reg);
-	}
-	if (strcmp(func_name, "ipairs") == 0) {
-		return emit_ipairs_intrinsic(node, dest_reg);
-	}
+    // math.cos(x)
+    if (strcmp(func_name, "math.cos") == 0) {
+        return emit_math_cos_intrinsic(node, dest_reg);
+    }
+
+    // math.atan(x)
+    if (strcmp(func_name, "math.atan") == 0) {
+        return emit_math_atan_intrinsic(node, dest_reg);
+    }
+
+    // math.exp(x)
+    if (strcmp(func_name, "math.exp") == 0) {
+        return emit_math_exp_intrinsic(node, dest_reg);
+    }
+
+    // loop iters
+    if (strcmp(func_name, "pairs") == 0) {
+        return emit_pairs_intrinsic(node, dest_reg);
+    }
+    if (strcmp(func_name, "ipairs") == 0) {
+        return emit_ipairs_intrinsic(node, dest_reg);
+    }
 
     return 0; // Not an intrinsic
 }

@@ -397,3 +397,111 @@ bool emit_math_randomseed_intrinsic(ASTNode *node, int dest_reg)
     unlock_pinned_register(arg_reg);
     return true;
 }
+
+/**
+ * Emits assembly for the math.cos(x) intrinsic.
+ *
+ * Uses identity: cos(x) = sin(x + PI/2)
+ * Delegates to runtime subroutine __builtin_cos.
+ */
+bool emit_math_cos_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+
+    if (!arg || arg->next != NULL) {
+        compiler_error(ERR_SYNTAX, node->line_number,
+            "math.cos() expects exactly one argument");
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: math.cos(x) ---\n");
+
+    int arg_reg = allocate_pinned_register();
+    generate_asm(arg, arg_reg);
+
+    // Push argument for runtime call
+    emit_asm("    PUSH R%d       ; Push argument\n", arg_reg);
+    emit_asm("    CALL __builtin_cos\n");
+    emit_asm("    IADD SP, 1    ; Clean up 1 argument\n");
+
+    if (dest_reg != 0) {
+        emit_asm("    MOV R%d, R0    ; Transfer result to dest_reg\n", dest_reg);
+    }
+
+    unlock_pinned_register(arg_reg);
+    return true;
+}
+
+/**
+ * Emits assembly for the math.atan(x) intrinsic.
+ *
+ * Uses identity: atan(x) = atan2(x, 1)
+ * Uses Vircon32 ATAN2 instruction directly.
+ */
+bool emit_math_atan_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+
+    if (!arg || arg->next != NULL) {
+        compiler_error(ERR_SYNTAX, node->line_number,
+            "math.atan() expects exactly one argument");
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: math.atan(x) ---\n");
+
+    int x_reg = allocate_pinned_register();
+    int one_reg = allocate_pinned_register();
+
+    generate_asm(arg, x_reg);
+
+    // Load constant 1.0
+    emit_asm("    MOV R%d, 1.0     ; Load constant 1 for ATAN2\n", one_reg);
+
+    // ATAN2 takes: DSTREG, SRCREG where DSTREG = y, SRCREG = x
+    // So we need: ATAN2 x_reg, one_reg to get atan2(x, 1)
+    // But ATAN2 stores result in DSTREG, so we use x_reg as both y and result
+    emit_asm("ATAN2 R%d, R%d ; R%d = atan2(x, 1) = atan(x)\n", x_reg, one_reg, x_reg);
+
+    if (dest_reg != 0) {
+        emit_asm("    MOV R%d, R%d    ; Transfer result to dest_reg\n", dest_reg, x_reg);
+    }
+
+    unlock_pinned_register(x_reg);
+    unlock_pinned_register(one_reg);
+    return true;
+}
+
+/**
+ * Emits assembly for the math.exp(x) intrinsic.
+ *
+ * Uses identity: exp(x) = pow(e, x)
+ * Delegates to runtime subroutine __builtin_exp.
+ */
+bool emit_math_exp_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+
+    if (!arg || arg->next != NULL) {
+        compiler_error(ERR_SYNTAX, node->line_number,
+            "math.exp() expects exactly one argument");
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: math.exp(x) ---\n");
+
+    int arg_reg = allocate_pinned_register();
+    generate_asm(arg, arg_reg);
+
+    // Push argument for runtime call
+    emit_asm("    PUSH R%d       ; Push argument\n", arg_reg);
+    emit_asm("    CALL __builtin_exp\n");
+    emit_asm("    IADD SP, 1    ; Clean up 1 argument\n");
+
+    if (dest_reg != 0) {
+        emit_asm("    MOV R%d, R0    ; Transfer result to dest_reg\n", dest_reg);
+    }
+
+    unlock_pinned_register(arg_reg);
+    return true;
+}

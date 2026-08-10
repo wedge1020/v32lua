@@ -102,6 +102,9 @@ bool  emit_math_floor_intrinsic      (ASTNode *, int);
 bool  emit_math_sqrt_intrinsic       (ASTNode *, int);
 bool  emit_math_random_intrinsic     (ASTNode *, int);
 bool  emit_math_randomseed_intrinsic (ASTNode *, int);
+bool  emit_math_cos_intrinsic        (ASTNode *, int);
+bool  emit_math_atan_intrinsic       (ASTNode *, int);
+bool  emit_math_exp_intrinsic        (ASTNode *, int);
 
 //////////////////////////////////////////////////////////////////////////////	
 //

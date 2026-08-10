@@ -154,3 +154,65 @@ __builtin_randomseed:
     POP  BP
     RET
 
+;; ===========================================================================
+;; Built-in: math.cos(x) - Cosine
+;;
+;; Uses identity: cos(x) = sin(x + PI/2)
+;;
+;; Stack on entry: [BP+2] = x (float)
+;; Returns: R0 = cos(x) as Lua float
+;; Clobbers: R0-R3
+;; ===========================================================================
+
+__builtin_cos:
+    PUSH BP
+    MOV  BP, SP
+
+    ;; --- Load argument ---
+    MOV  R0, [BP+2]          ; R0 = x
+
+    ;; --- Add PI/2 (approximately 1.57079632679) ---
+    ;; PI/2 as a float constant
+    ;; Using 0x3FF921FB54442D18 hex float approximation
+    ;; For simplicity, use decimal approximation
+    MOV  R1, 1.57079632679  ; R1 = PI/2 (loads as float)
+
+    FADD R0, R1             ; R0 = x + PI/2
+
+    ;; --- Compute sin(x + PI/2) ---
+    SIN  R0                 ; R0 = sin(x + PI/2) = cos(x)
+
+    ;; --- Return result ---
+    MOV  SP, BP
+    POP  BP
+    RET
+
+;; ===========================================================================
+;; Built-in: math.exp(x) - Exponential (e^x)
+;;
+;; Uses identity: exp(x) = pow(e, x)
+;; where e ≈ 2.71828182846
+;;
+;; Stack on entry: [BP+2] = x (float)
+;; Returns: R0 = e^x as Lua float
+;; Clobbers: R0-R3
+;; ===========================================================================
+
+__builtin_exp:
+    PUSH BP
+    MOV  BP, SP
+
+    ;; --- Load argument x ---
+    MOV  R1, [BP+2]          ; R1 = x
+
+    ;; --- Load e constant (≈ 2.71828182846) ---
+    MOV  R0, 2.71828182846  ; R0 = e (base)
+
+    ;; --- Compute pow(e, x) ---
+    POW  R0, R1             ; R0 = e^x
+
+    ;; --- Return result ---
+    MOV  SP, BP
+    POP  BP
+    RET
+

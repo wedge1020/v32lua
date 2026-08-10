@@ -67,12 +67,6 @@ bool emit_string_char_intrinsic(ASTNode *node, int dest_reg) {
         arg = arg->next;
     }
 
-    if (arg_count == 0) {
-        compiler_error(ERR_SEMANTIC, node->line_number,
-            "string.char() requires at least 1 argument");
-        return false;
-    }
-
     emit_asm("    ;; --- Intrinsic: string.char(b1, b2, ..., bn) ---\n");
 
     // Push all arguments onto stack (right-to-left for C ABI)
