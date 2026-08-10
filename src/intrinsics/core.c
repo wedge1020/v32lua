@@ -416,6 +416,41 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
 	//
 	//////////////////////////////////////////////////////////////////////////
 
+	// math.sin(x)
+	if (strcmp(func_name, "math.sin") == 0) {
+		return emit_math_sin_intrinsic(node, dest_reg);
+	}
+
+	// math.abs(x)
+	if (strcmp(func_name, "math.abs") == 0) {
+		return emit_math_abs_intrinsic(node, dest_reg);
+	}
+
+	// math.ceil(x)
+	if (strcmp(func_name, "math.ceil") == 0) {
+		return emit_math_ceil_intrinsic(node, dest_reg);
+	}
+
+	// math.acos(x)
+	if (strcmp(func_name, "math.acos") == 0) {
+		return emit_math_acos_intrinsic(node, dest_reg);
+	}
+
+	// math.log(x)
+	if (strcmp(func_name, "math.log") == 0) {
+		return emit_math_log_intrinsic(node, dest_reg);
+	}
+
+	// math.pow(x, y)
+	if (strcmp(func_name, "math.pow") == 0) {
+		return emit_math_pow_intrinsic(node, dest_reg);
+	}
+
+	// math.atan2(y, x)
+	if (strcmp(func_name, "math.atan2") == 0) {
+		return emit_math_atan2_intrinsic(node, dest_reg);
+	}
+
     // math.floor(x)
     if (strcmp(func_name, "math.floor") == 0) {
         return emit_math_floor_intrinsic(node, dest_reg);
