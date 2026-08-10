@@ -122,7 +122,7 @@ bool  emit_math_modf_intrinsic       (ASTNode *, int);
 //
 // iter intrinsics (for generic for loops)
 //
-bool  emit_pairs_intrinsic      (ASTNode *, int);
-bool  emit_ipairs_intrinsic     (ASTNode *, int);
+bool  emit_pairs_intrinsic      (ASTNode *);
+bool  emit_ipairs_intrinsic     (ASTNode *);
 
 #endif

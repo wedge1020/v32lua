@@ -1,6 +1,6 @@
 #include "v32lua.h"
 
-bool emit_pairs_intrinsic(ASTNode *node, int dest_reg) {
+bool emit_pairs_intrinsic(ASTNode *node) {
     // pairs(t) returns: next, t, nil
     // next is the table iteration function
     // t is the table itself
@@ -38,7 +38,7 @@ bool emit_pairs_intrinsic(ASTNode *node, int dest_reg) {
     return true;
 }
 
-bool emit_ipairs_intrinsic(ASTNode *node, int dest_reg) {
+bool emit_ipairs_intrinsic(ASTNode *node) {
     // ipairs(t) returns: ipairs_iter, t, 1
     // ipairs_iter is a custom iterator that does numeric iteration
 

@@ -106,7 +106,7 @@ _tic80_init_textures_done:
 ;; [BP+3]:  x         (Screen X position in TIC-80 pixels)
 ;; [BP+4]:  y         (Screen Y position in TIC-80 pixels)
 ;; [BP+5]:  colorkey  (Transparent color index: 16=opaque, 0-15=transparent)
-;; [BP+6]:  scale     (TIC-80 scale: 1.0 = 2.64 on Vircon32)
+;; [BP+6]:  scale     (TIC-80 scale: 1.0 = 2.625 on Vircon32)
 ;; [BP+7]:  flip      (0=none, 1=horizontal, 2=vertical, 3=both)
 ;; [BP+8]:  rotate    (0=0°, 1=90°, 2=180°, 3=270°) - IGNORED
 ;; [BP+9]:  w         (Grid Width in sprites)
@@ -117,7 +117,7 @@ _tic80_init_textures_done:
 ;;   colorkey = 0-15 -> texture 0-15 (that palette color transparent)
 ;;
 ;; FIXES APPLIED:
-;;   - Base x/y positions are now scaled by 2.64 and rounded
+;;   - Base x/y positions are now scaled by 2.625 and rounded
 ;;   - All coordinate calculations use rounding (FADD 0.5) before CFI
 ;;     to eliminate sub-pixel gaps that caused thin black grid lines
 ;;
@@ -134,7 +134,7 @@ __builtin_tic80_spr:
 
     ;; --- Calculate final scale ---
     MOV   R1, [BP+6]        ; tic80_scale (float)
-    MOV   R2, 2.64
+    MOV   R2, 2.625
     FMUL  R1, R2
     MOV   R12, R1           ; X scale
     MOV   R13, R1           ; Y scale
@@ -174,13 +174,13 @@ _tic80_spr_no_flip_y:
     ;; --- FIX: Base x/y are ALREADY scaled (from caller).
     ;;         Only ensure they are integers, NO additional scaling.
     MOV   R8, [BP+3]        ; x (Vircon32 pixels)
-	FMUL  R8, 2.64          ; multiply by x axis screen factor
-	FADD  R8, 0.5
+    FMUL  R8, 2.625         ; multiply by x axis screen factor
+    FADD  R8, 0.5
     CFI   R8                ; Convert to integer (no scaling)
 
     MOV   R9, [BP+4]        ; y (Vircon32 pixels)
-	FMUL  R9, 2.64          ; multiply by y axis screen factor
-	FADD  R9, 0.5
+    FMUL  R9, 2.625         ; multiply by y axis screen factor
+    FADD  R9, 0.5
     CFI   R9                ; Convert to integer (no scaling)
 
     MOV   R4, 0             ; row counter
@@ -686,10 +686,18 @@ __builtin_tic80_mget:
     ;; Load arguments
     MOV   R1, [BP+2]        ; x
     MOV   R2, [BP+3]        ; y
-	FADD  R1, 0.5
-	FADD  R2, 0.5
-    CFI   R1
-    CFI   R2
+
+    ;; Snap to 0.1-pixel grid, then round to integer
+    FMUL  R1, 10.0          ; x * 10 (float)
+    FADD  R1, 0.5           ; + 0.5 (float)
+    CFI   R1                ; → integer (round(x*10))
+    IDIV  R1, 10            ; integer division: round(x*10) / 10
+
+    ;; Snap to 0.1-pixel grid, then round to integer
+    FMUL  R2, 10.0          ; y * 10 (float)
+    FADD  R2, 0.5           ; + 0.5 (float)
+    CFI   R2                ; → integer (round(y*10))
+    IDIV  R2, 10            ; integer division: round(y*10) / 10
 
     ;; Load ACTUAL map dimensions for bounds checking
     MOV   R3, var_TIC80_MAP_WIDTH
@@ -720,7 +728,7 @@ __builtin_tic80_mget:
 
     ;; Load tile index directly (each word = one byte)
     MOV   R12,  var_TIC80_MAP_BUFFER_PTR
-	MOV   R12,  [R12]
+    MOV   R12,  [R12]
     MOV   R0,   R12
     IADD  R0,   R1
     MOV   R0,   [R0]          ; R0 = tile index
@@ -759,15 +767,27 @@ __builtin_tic80_mset:
     IEQ   R2,  0
     JT    R2,  _tic80_mset_done
 
-    ;; Load arguments
+    ;; X: Load coordinate argument
     MOV   R1, [BP+2]        ; x
+
+    ;; X: Snap to 0.1-pixel grid, then round to integer
+    FMUL  R1, 10.0          ; x * 10 (float)
+    FADD  R1, 0.5           ; + 0.5 (float)
+    CFI   R1                ; → integer (round(x*10))
+    IDIV  R1, 10            ; integer division: round(x*10) / 10
+
+    ;; Y: Load coordinate argument
     MOV   R2, [BP+3]        ; y
+
+    ;; Y: Snap to 0.1-pixel grid, then round to integer
+    FMUL  R2, 10.0          ; y * 10 (float)
+    FADD  R2, 0.5           ; + 0.5 (float)
+    CFI   R2                ; → integer (round(y*10))
+    IDIV  R2, 10            ; integer division: round(y*10) / 10
+
+	;; load value argument
     MOV   R3, [BP+4]        ; value
-	FADD  R1, 0.5
-	FADD  R2, 0.5
-    CFI   R1
-    CFI   R2
-    CFI   R3
+	CFI   R3
 
     ;; Load ACTUAL map dimensions for bounds checking
     MOV   R4, var_TIC80_MAP_WIDTH
@@ -820,7 +840,7 @@ _tic80_mset_store:
 
     ;; Return the value (boxed)
     CIF   R3
-	MOV   R0, R3
+    MOV   R0, R3
 
 _tic80_mset_done:
     MOV   SP, BP
@@ -871,10 +891,10 @@ __builtin_tic80_map:
     MOV   R12, [R1]         ; restore R12 after destructive comparison
 
     ;; Load arguments
-	MOV   R5, [BP+2]        ; sx (source X in map)  <-- Was R1
-	MOV   R6, [BP+3]        ; sy (source Y in map)  <-- Was R2
-	MOV   R1, [BP+6]        ; x (screen X)          <-- Was R5
-	MOV   R2, [BP+7]        ; y (screen Y)          <-- Was R6
+    MOV   R5, [BP+2]        ; sx (source X in map)  <-- Was R1
+    MOV   R6, [BP+3]        ; sy (source Y in map)  <-- Was R2
+    MOV   R1, [BP+6]        ; x (screen X)          <-- Was R5
+    MOV   R2, [BP+7]        ; y (screen Y)          <-- Was R6
     ;MOV   R1, [BP+2]        ; x
     ;MOV   R2, [BP+3]        ; y
     MOV   R3, [BP+4]        ; w
@@ -908,7 +928,7 @@ __builtin_tic80_map:
     JT    R11, _tic80_map_sx_zero
     MOV   R9,  R7
     ISUB  R9,  R3
-	MOV   R11, R5
+    MOV   R11, R5
     IGT   R11, R9
     JT    R11, _tic80_map_sx_max
     JMP   _tic80_map_check_sy
@@ -926,7 +946,7 @@ _tic80_map_check_sy:
     JT    R11, _tic80_map_sy_zero
     MOV   R9,  R8
     ISUB  R9,  R4
-	MOV   R11, R6
+    MOV   R11, R6
     IGT   R11, R9
     JT    R11, _tic80_map_sy_max
     JMP   _tic80_map_row_loop_prestart
@@ -973,19 +993,19 @@ _tic80_map_col_loop_start:
     IADD  R8, R7           ; 
     MOV   R7, [R8]         ; R7 = tile index (Leaves R10 untouched!)
 
-	PUSH  R1               ; x save
-	PUSH  R2               ; y save
-	PUSH  R3               ; w save
-	PUSH  R4               ; h save
-	PUSH  R5               ; sx save
-	PUSH  R6               ; sy save
-	PUSH  R7
-	PUSH  R8
-	PUSH  R9
-	PUSH  R10              ; column index save
-	PUSH  R11
-	PUSH  R12
-	PUSH  R13              ; color_key save
+    PUSH  R1               ; x save
+    PUSH  R2               ; y save
+    PUSH  R3               ; w save
+    PUSH  R4               ; h save
+    PUSH  R5               ; sx save
+    PUSH  R6               ; sy save
+    PUSH  R7
+    PUSH  R8
+    PUSH  R9
+    PUSH  R10              ; column index save
+    PUSH  R11
+    PUSH  R12
+    PUSH  R13              ; color_key save
     
     ;; Push arguments for __builtin_tic80_spr (in reverse order)
     MOV   R0, 1.0
@@ -1004,36 +1024,36 @@ _tic80_map_col_loop_start:
     MOV   R0, R9           ; R0 = row
     IMUL  R0, 8
     IADD  R0, R2           ; R0 = screen_y + row*8
-	CIF   R0
+    CIF   R0
     PUSH  R0               ; y
 
-	MOV   R0, R10          ; R0 = col (loop counter)
-	IMUL  R0, 8            ; R0 = col * 8
-	IADD  R0, R1           ; R0 = x + col * 8 (screen coordinate)
-	CIF   R0
-	PUSH  R0               ; x
+    MOV   R0, R10          ; R0 = col (loop counter)
+    IMUL  R0, 8            ; R0 = col * 8
+    IADD  R0, R1           ; R0 = x + col * 8 (screen coordinate)
+    CIF   R0
+    PUSH  R0               ; x
     
-	MOV   R0, R7
-	CIF   R0
+    MOV   R0, R7
+    CIF   R0
     PUSH  R0               ; id
 
     CALL  __builtin_tic80_spr
 
     IADD  SP, 9
 
-	POP   R13              ; color_key restore
-	POP   R12
-	POP   R11
-	POP   R10              ; column index restore
-	POP   R9
-	POP   R8
-	POP   R7
-	POP   R6               ; sy restore
-	POP   R5               ; sx restore
-	POP   R4               ; h restore
-	POP   R3               ; w restore
-	POP   R2               ; y restore
-	POP   R1               ; x restore
+    POP   R13              ; color_key restore
+    POP   R12
+    POP   R11
+    POP   R10              ; column index restore
+    POP   R9
+    POP   R8
+    POP   R7
+    POP   R6               ; sy restore
+    POP   R5               ; sx restore
+    POP   R4               ; h restore
+    POP   R3               ; w restore
+    POP   R2               ; y restore
+    POP   R1               ; x restore
 
     ;; Next column
     IADD  R10, 1           ; R10 has been clobbered by __builtin_tic80_spr

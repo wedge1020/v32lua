@@ -52,7 +52,7 @@ void spill_register(int reg) {
     if (register_pinned[reg]) return;
 
     int slot = get_register_spill_slot(reg);
-    spill_slot_for_reg[reg] = slot;
+    spill_slot_for_reg[reg] = slot;  // Overwrite with new slot
     emit_store_to_spill(reg, slot);
     register_inventory[reg] = 0;
 }
@@ -61,13 +61,10 @@ void spill_register(int reg) {
 int ensure_in_register(int reg) {
     if (reg < 0 || reg >= NUM_GPRS) return -1;
 
-    // Only reload if register is FREE but has a spilled value.
-    // If register is ALLOCATED (inventory=1), it already holds the current value.
-    // spill_slot_for_reg != 0 with inventory=1 means:
-    //   "old value is spilled, but register now holds a new value"
-    if (register_inventory[reg] == 0 && spill_slot_for_reg[reg] != 0) {
+    // Reload if there's ANY spilled value, regardless of inventory state
+    if (spill_slot_for_reg[reg] != 0) {
         emit_load_from_spill(reg, spill_slot_for_reg[reg]);
-        spill_slot_for_reg[reg] = 0;
+        spill_slot_for_reg[reg] = 0;  // Clear after reload
         register_inventory[reg] = 1;
     }
     return reg;
@@ -107,13 +104,13 @@ void update_register_live(int reg) {
 // ============================================================================
 // Intelligent Allocation with Liveness
 // ============================================================================
-
 int allocate_register(void) {
     // Phase 1: Free register
     for (int i = 1; i < NUM_GPRS; i++) {
         if (!register_inventory[i] && !register_pinned[i]) {
             register_inventory[i] = 1;
-            spill_slot_for_reg[i] = 0;
+            // FIX: Don't clear spill_slot_for_reg here either
+            // spill_slot_for_reg[i] = 0;
             register_use_distance[i] = 0;
             return i;
         }
@@ -122,7 +119,7 @@ int allocate_register(void) {
     // Phase 2: Dead register (use_distance == 0)
     for (int i = 1; i < NUM_GPRS; i++) {
         if (register_inventory[i] && !register_pinned[i] && register_use_distance[i] == 0) {
-            spill_slot_for_reg[i] = 0;
+            // spill_slot_for_reg[i] = 0;  // Already removed
             register_use_distance[i] = 0;
             return i;
         }

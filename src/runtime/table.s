@@ -71,7 +71,7 @@ __builtin_table_get:
     MOV  R3, R2
     AND  R3, NAN_VALUE      ; Isolate exponent bits
     IEQ  R3, NAN_VALUE      ; Are all exponent bits 1s? (If so, it's tagged)
-    JT   R3, __table_get_fallback
+    JT   R3, __builtin_table_get_fallback
 
     ;; FAST-PATH CHECK 2: Convert float to integer & verify no fractional part
     MOV  R3, R2              ; Copy float Key to R3
@@ -81,74 +81,74 @@ __builtin_table_get:
     MOV  R4, R3
     CIF  R4                  ; Cast int back to float in R4
     INE  R4, R2              ; If (float)(int)Key != Key, it's fractional -> fallback!
-    JT   R4, __table_get_fallback
+    JT   R4, __builtin_table_get_fallback
 
     ;; FAST-PATH CHECK 3: Is integer key >= 1?
     MOV  R4, R3              ; Copy integer index to R4 for comparison
     ILT  R4, 1               ; Destructive test: Is integer key < 1?
-    JT   R4, __table_get_fallback ; Zero or negative keys go to fallback!
+    JT   R4, __builtin_table_get_fallback ; Zero or negative keys go to fallback!
 
     ;; FAST-PATH CHECK 4: Is Key within Array Capacity?
     MOV  R5, [R1+1]          ; R5 = Array Capacity (from Table Header Word 1)
     MOV  R4, R3              ; Copy integer index R3 to scratch R4
     IGT  R4, R5              ; Destructive test: Is Key > Capacity?
-    JT   R4, __table_get_fallback ; Out-of-bounds integers go to fallback!
+    JT   R4, __builtin_table_get_fallback ; Out-of-bounds integers go to fallback!
 
     ;; --- FAST-PATH EXECUTION: O(1) Contiguous Array Read ---
     MOV  R5, [R1+2]          ; R5 = Array Data Pointer (from Table Header Word 2)
     ISUB R3, 1               ; Convert 1-based Lua index to 0-based memory offset
     IADD R5, R3              ; Memory Address = ArrayPtr + (Key - 1)
     MOV  R0, [R5]            ; Read value directly from contiguous heap buffer!
-    JMP  __table_get_done
+    JMP  __builtin_table_get_done
 
 ;; --- FALLBACK EXECUTION: Association List Scan ---
-__table_get_fallback:
+__builtin_table_get_fallback:
     ;; Note: R1 is already unboxed! We read directly from Table Header Word 3.
     MOV  R5, [R1+3]          ; R5 = Base Hash Data Pointer
     MOV  R4, R5              ; Test on scratch R4 to preserve R5 pointer
     IEQ  R4, 0               ; Is Hash Buffer null (no sparse keys stored)?
-    JT   R4, __table_get_not_found
+    JT   R4, __builtin_table_get_not_found
 
 ;; --- BUCKET SEARCH LOOP ---
-__table_get_bucket_loop:
+__builtin_table_get_bucket_loop:
     MOV  R6, [R5]            ; R6 = PairCount (how many pairs are stored in this bucket)
     MOV  R7, R5              ; Setup R7 as running memory pointer
     IADD R7, 2               ; Advance R7 to point directly at Key0 (Offset 2 words)
 
-__table_get_scan_loop:
+__builtin_table_get_scan_loop:
     MOV  R4, R6              ; Check remaining pairs using scratch R4
     IEQ  R4, 0               ; Have we checked all stored pairs in this bucket?
-    JT   R4, __table_get_check_next_bucket ; If 0, step to next bucket in chain!
+    JT   R4, __builtin_table_get_check_next_bucket ; If 0, step to next bucket in chain!
     
     ;; OPTIMIZATION: ZERO-COST DESTRUCTIVE COMPARISON
     MOV  R4, [R7]            ; Load Stored Key directly into scratch R4
     IEQ  R4, R2              ; Does Stored Key == Search Key? (Destroys R4!)
-    JT   R4, __table_get_found ; Match found!
+    JT   R4, __builtin_table_get_found ; Match found!
     
     ;; No match: advance memory pointer and decrement loop counter
     IADD R7, 2               ; Advance pointer by 2 words (skip Value slot to next Key)
     ISUB R6, 1               ; Decrement remaining PairCount
-    JMP  __table_get_scan_loop
+    JMP  __builtin_table_get_scan_loop
 
 ;; --- BUCKET CHAIN STEPPING ---
-__table_get_check_next_bucket:
+__builtin_table_get_check_next_bucket:
     MOV  R4, [R5+1]          ; Load NextBucketPtr (Word 1 of current bucket)
     MOV  R3, R4              ; Test on scratch R3 to preserve NextBucketPtr in R4
     IEQ  R3, 0               ; Is this the end of the chain (Next == 0x0)?
-    JT   R3, __table_get_not_found ; End of chain reached -> Key does not exist!
+    JT   R3, __builtin_table_get_not_found ; End of chain reached -> Key does not exist!
     
     MOV  R5, R4              ; Step forward: Current Bucket = Next Bucket
-    JMP  __table_get_bucket_loop ; Scan the next bucket in the chain!
+    JMP  __builtin_table_get_bucket_loop ; Scan the next bucket in the chain!
 
-__table_get_found:
+__builtin_table_get_found:
     IADD R7, 1               ; Value is stored exactly 1 word after the matching Key
     MOV  R0, [R7]            ; Read Value into return register R0
-    JMP  __table_get_done
+    JMP  __builtin_table_get_done
 
-__table_get_not_found:
+__builtin_table_get_not_found:
     MOV  R0, BOXED_NIL      ; Key does not exist -> Return canonical Lua Nil!
 
-__table_get_done:
+__builtin_table_get_done:
     ;; --- Callee-Restore: Pop 7 working registers in reverse order (LIFO) ---
     POP  R7
     POP  R6
@@ -202,7 +202,7 @@ __builtin_table_set:
     MOV  R4, R2
     AND  R4, NAN_VALUE      ; Isolate exponent bits
     IEQ  R4, NAN_VALUE      ; Are all exponent bits 1s? (If so, it's tagged/NaN)
-    JT   R4, __table_set_fallback
+    JT   R4, __builtin_table_set_fallback
 
     ;; FAST-PATH CHECK 2: Convert float to integer & verify no fractional part
     MOV  R4, R2              ; Copy float Key to R4
@@ -212,35 +212,35 @@ __builtin_table_set:
     MOV  R5, R4
     CIF  R5                  ; Cast int back to float in R5
     INE  R5, R2              ; If (float)(int)Key != Key, it's fractional -> fallback!
-    JT   R5, __table_set_fallback
+    JT   R5, __builtin_table_set_fallback
 
     ;; FAST-PATH CHECK 3: Is integer key >= 1?
     MOV  R5, R4              ; Copy integer index to R5 for comparison
     ILT  R5, 1               ; Destructive test: Is integer key < 1?
-    JT   R5, __table_set_fallback ; Zero or negative keys go to fallback!
+    JT   R5, __builtin_table_set_fallback ; Zero or negative keys go to fallback!
     
     ;; FAST-PATH CHECK 4: Is Key within Length?
     MOV  R6, [R1+1]          ; R6 = Length (from Table Header Word 1)
     MOV  R7, R4              ; Copy integer index R4 to scratch R7
     IGT  R7, R6              ; Destructive test: Is Key > Capacity?
-    JT   R7, __table_set_fallback ; Out-of-bounds integers go to fallback!
+    JT   R7, __builtin_table_set_fallback ; Out-of-bounds integers go to fallback!
 
     ;; --- FAST-PATH EXECUTION: O(1) Contiguous Array Write ---
     MOV  R6, [R1+2]          ; R6 = Array Data Pointer (from Table Header Word 2)
     ISUB R4, 1               ; Convert 1-based Lua index to 0-based memory offset
     IADD R6, R4              ; Memory Address = ArrayPtr + (Key - 1)
     MOV  [R6], R3            ; Write Value directly into contiguous array slot!
-    JMP  __table_set_done
+    JMP  __builtin_table_set_done
 
 ;; --- FALLBACK EXECUTION: Association List Storage ---
-__table_set_fallback:
+__builtin_table_set_fallback:
     ;; Note: R1 is already unboxed! Read directly from Table Header Word 3.
     MOV  R6, [R1+3]          ; R6 = Base Hash Data Pointer
 
     ;; 1. Ensure Base Hash Buffer exists (Test on scratch R4)
     MOV  R4, R6
     INE  R4, 0               ; Is Base Hash Pointer non-null?
-    JT   R4, __table_set_bucket_loop
+    JT   R4, __builtin_table_set_bucket_loop
 
     ;; Allocate Base Bucket (16 words)
     PUSH R1
@@ -268,33 +268,33 @@ __table_set_fallback:
     MOV  [R1+3], R6
 
 ;; --- BUCKET SEARCH LOOP ---
-__table_set_bucket_loop:
+__builtin_table_set_bucket_loop:
     MOV  R7, [R6]            ; R7 = PairCount in current bucket
     MOV  R8, R6              ; Setup R8 as running memory pointer
     IADD R8, 2               ; Advance R8 to point directly at Key0 (Offset 2 words)
 
-__table_set_scan_pairs:
+__builtin_table_set_scan_pairs:
     MOV  R4, R7              ; Check remaining pairs using scratch R4
     IEQ  R4, 0               ; Have we checked all stored pairs in this bucket?
-    JT   R4, __table_set_check_next_bucket ; If 0, check chain or append!
+    JT   R4, __builtin_table_set_check_next_bucket ; If 0, check chain or append!
     
     ;; OPTIMIZATION: ZERO-COST DESTRUCTIVE COMPARISON
     MOV  R4, [R8]            ; Load stored Key into scratch R4
     IEQ  R4, R2              ; Does Stored Key == Search Key? (Destroys R4!)
-    JT   R4, __table_set_overwrite_val ; Found existing key -> Overwrite value!
+    JT   R4, __builtin_table_set_overwrite_val ; Found existing key -> Overwrite value!
     
     ;; No match: advance memory pointer and decrement loop counter
     IADD R8, 2               ; Advance 2 words (skip Value slot to next Key)
     ISUB R7, 1               ; Decrement remaining PairCount
-    JMP  __table_set_scan_pairs
+    JMP  __builtin_table_set_scan_pairs
 
-__table_set_overwrite_val:
+__builtin_table_set_overwrite_val:
     IADD R8, 1               ; Step from Key slot to Value slot (Offset +1 word)
     MOV  [R8], R3            ; Update value in place
-    JMP  __table_set_done
+    JMP  __builtin_table_set_done
 
 ;; --- BUCKET CHAIN STEPPING ---
-__table_set_check_next_bucket:
+__builtin_table_set_check_next_bucket:
     MOV  R4, [R6+1]          ; Load NextBucketPtr (Word 1 of current bucket)
     
     ;; OPTIMIZATION & BUG FIX: REUSE DEAD REGISTER
@@ -302,17 +302,17 @@ __table_set_check_next_bucket:
     ;; We reuse R7 to test NextBucketPtr instead of clobbering unsaved R10!
     MOV  R7, R4
     IEQ  R7, 0               ; Is this the end of the chain (Next == 0x0)?
-    JT   R7, __table_set_append_to_tail ; If end of chain, append new pair!
+    JT   R7, __builtin_table_set_append_to_tail ; If end of chain, append new pair!
     
     MOV  R6, R4              ; Step forward: Current Bucket = Next Bucket
-    JMP  __table_set_bucket_loop ; Scan the next bucket in the chain!
+    JMP  __builtin_table_set_bucket_loop ; Scan the next bucket in the chain!
 
 ;; --- APPEND NEW PAIR (Reached tail bucket and key was not found) ---
-__table_set_append_to_tail:
+__builtin_table_set_append_to_tail:
     MOV  R7, [R6]            ; R7 = PairCount of the TAIL bucket
     MOV  R4, R7              ; Check capacity on scratch R4
     IGE  R4, 7               ; Is this tail bucket completely full (7 pairs / 14 words)?
-    JT   R4, __table_set_allocate_extension_bucket
+    JT   R4, __builtin_table_set_allocate_extension_bucket
 
     ;; Room exists in tail bucket.
     ;; Note: Because we advanced R8 exactly PairCount times in the scan loop above,
@@ -324,10 +324,10 @@ __table_set_append_to_tail:
     ;; Increment PairCount in current tail bucket header
     IADD R7, 1
     MOV  [R6], R7
-    JMP  __table_set_done
+    JMP  __builtin_table_set_done
 
 ;; --- ALLOCATE EXTENSION BUCKET (Tail bucket was full) ---
-__table_set_allocate_extension_bucket:
+__builtin_table_set_allocate_extension_bucket:
     ;; Preserve working registers across __malloc call
     PUSH R1
     PUSH R2
@@ -360,7 +360,7 @@ __table_set_allocate_extension_bucket:
     ;; Link old tail bucket to this new extension bucket!
     MOV  [R6+1], R8          ; OldTailBucket[NextBucketPtr] = NewBucketAddress
 
-__table_set_done:
+__builtin_table_set_done:
     ;; --- Callee-Restore: Pop 8 working registers in reverse order (LIFO) ---
     POP  R8
     POP  R7
@@ -793,3 +793,828 @@ __runtime_error_hash_overflow:
     HLT
     JMP __runtime_error_hash_overflow
 
+;; ===========================================================================
+;; LUA TABLE LIBRARY IMPLEMENTATION FOR V32LUA
+;; ===========================================================================
+;;
+;; This file implements the standard Lua table library functions for the v32lua
+;; compiler targeting the Vircon32 fantasy console.
+;;
+;; Implemented functions:
+;; - table.insert(t, [pos], value)  - Already exists as __builtin_table_insert
+;; - table.remove(t, [pos])          - Remove element at position
+;; - table.sort(t, [comp])          - Sort table elements in-place
+;; - table.concat(t, [sep], [i], [j]) - Concatenate array elements
+;; - table.move(a1, f, e, t, [a2])  - Move elements between tables
+;; - table.pack(...)                - Pack arguments into table with .n field
+;; - table.unpack(t, [i], [j])      - Unpack table elements as multiple returns
+;;
+;; ===========================================================================
+
+;; ===========================================================================
+;; SECTION: TABLE REMOVE
+;; ===========================================================================
+
+;; ---------------------------------------------------------------------------
+;; table.remove(t, [pos]) - Removes and returns element at position pos
+;; If pos is nil or > length, removes and returns last element
+;; Shifts elements left to fill the gap
+;;
+;; Incoming Stack: [BP+3] = Tagged Table Pointer, [BP+2] = Position (optional)
+;; Returns: R0 = removed value
+;; Register Usage: R1-R8
+;; ---------------------------------------------------------------------------
+__builtin_table_remove:
+    PUSH BP
+    MOV  BP, SP
+
+    ;; --- Callee-Save: Preserve 8 working registers ---
+    PUSH R1
+    PUSH R2
+    PUSH R3
+    PUSH R4
+    PUSH R5
+    PUSH R6
+    PUSH R7
+    PUSH R8
+
+    ;; --- Load arguments ---
+    MOV  R1, [BP+3]          ; R1 = Tagged Table Pointer
+    MOV  R2, [BP+2]          ; R2 = Position (may be NIL)
+
+    ;; --- Validate table ---
+    MOV  R3, R1
+    AND  R3, BOXED_DATA
+    IEQ  R3, BOXED_TABLE
+    JF   R3, __runtime_error_not_table
+
+    ;; --- Unbox table pointer ---
+    AND  R1, BOXED_PAYLOAD   ; R1 = raw table header address
+
+    ;; --- Get current length ---
+    MOV  R3, [R1+1]          ; R3 = current array length
+
+    ;; --- Handle default position (NIL or > length = remove last) ---
+    MOV  R4, R2
+    IEQ  R4, BOXED_NIL
+    JT   R4, __table_remove_last
+
+    ;; Convert position to integer if it's a float
+    MOV  R4, R2
+    AND  R4, NAN_VALUE
+    IEQ  R4, NAN_VALUE
+    JT   R4, __table_remove_check_position
+
+    ;; It's a float, convert to integer
+    MOV  R4, R2
+    CFI  R4
+    MOV  R5, R4
+    CIF  R5
+    INE  R5, R2
+    JT   R5, __table_remove_invalid_position
+
+__table_remove_check_position:
+    ;; R4 now contains integer position (use R8 for comparisons)
+    MOV  R8, R4
+    ILT  R8, 1
+    JT   R8, __table_remove_invalid_position
+    MOV  R8, R4
+    IGT  R8, R3
+    JT   R8, __table_remove_last
+    JMP  __table_remove_at_position
+
+__table_remove_last:
+    MOV  R4, R3              ; Position = length (last element)
+
+__table_remove_at_position:
+    ;; --- Get array data pointer ---
+    MOV  R5, [R1+2]          ; R5 = array data pointer
+
+    ;; --- Check if array exists ---
+    MOV  R6, R5
+    IEQ  R6, 0
+    JT   R6, __table_remove_not_found
+
+    ;; --- Calculate address of element to remove ---
+    MOV  R6, R5
+    IADD R6, R4
+    ISUB R6, 1               ; Address = array_ptr + (position - 1)
+
+    ;; --- Save the value to return ---
+    MOV  R7, [R6]            ; R7 = value to return
+
+    ;; --- Shift elements left to fill the gap ---
+    MOV  R8, R4              ; R8 = position to remove
+
+__table_remove_shift_loop:
+    ;; If we're removing the last element, no shifting needed
+    MOV  R9, R8
+    ILT  R9, R3
+    JF   R9, __table_remove_update_length
+
+    ;; Calculate source address (next element)
+    MOV  R9, R5
+    IADD R9, R8              ; Source = array_ptr + position
+    ISUB R9, 1
+
+    ;; Calculate destination address (current position)
+    MOV  R10, R5
+    IADD R10, R8
+    ISUB R10, 2              ; Dest = array_ptr + (position - 1)
+
+    ;; Copy next element to current position
+    MOV  R11, [R9]
+    MOV  [R10], R11
+
+    ;; Move to next position
+    IADD R8, 1
+    JMP  __table_remove_shift_loop
+
+__table_remove_update_length:
+    ;; --- Decrement length ---
+    ISUB R3, 1
+    MOV  [R1+1], R3          ; Update length in table header
+
+    ;; --- Return the removed value ---
+    MOV  R0, R7
+    JMP  __table_remove_done
+
+__table_remove_not_found:
+    MOV  R0, BOXED_NIL
+    JMP  __table_remove_done
+
+__table_remove_invalid_position:
+    MOV  R0, BOXED_NIL
+
+__table_remove_done:
+    ;; --- Callee-Restore ---
+    POP  R8
+    POP  R7
+    POP  R6
+    POP  R5
+    POP  R4
+    POP  R3
+    POP  R2
+    POP  R1
+
+    MOV  SP, BP
+    POP  BP
+    RET
+
+;; ===========================================================================
+;; SECTION: TABLE SORT
+;; ===========================================================================
+
+;; ---------------------------------------------------------------------------
+;; table.sort(t, [comp]) - Sorts table elements in-place
+;; Uses simple bubble sort for now (can be optimized later)
+;;
+;; Incoming Stack: [BP+4] = Tagged Table Pointer, [BP+3] = Compare function (optional)
+;; Returns: none (table sorted in-place)
+;; Register Usage: R1-R10
+;; ---------------------------------------------------------------------------
+__builtin_table_sort:
+    PUSH BP
+    MOV  BP, SP
+
+    ;; --- Callee-Save: Preserve 10 working registers ---
+    PUSH R1
+    PUSH R2
+    PUSH R3
+    PUSH R4
+    PUSH R5
+    PUSH R6
+    PUSH R7
+    PUSH R8
+    PUSH R9
+    PUSH R10
+
+    ;; --- Load arguments ---
+    MOV  R1, [BP+4]          ; R1 = Tagged Table Pointer
+    MOV  R2, [BP+3]          ; R2 = Compare function (may be NIL)
+
+    ;; --- Validate table ---
+    MOV  R3, R1
+    AND  R3, BOXED_DATA
+    IEQ  R3, BOXED_TABLE
+    JF   R3, __runtime_error_not_table
+
+    ;; --- Unbox table pointer ---
+    AND  R1, BOXED_PAYLOAD   ; R1 = raw table header address
+
+    ;; --- Get array info ---
+    MOV  R3, [R1+1]          ; R3 = array length
+    MOV  R4, [R1+2]          ; R4 = array data pointer
+
+    ;; --- Check if array exists or has elements ---
+    MOV  R5, R4
+    IEQ  R5, 0
+    JT   R5, __table_sort_done
+
+    MOV  R5, R3
+    ILT  R5, 2
+    JT   R5, __table_sort_done      ; Need at least 2 elements to sort
+
+    ;; --- Bubble sort implementation ---
+    MOV  R5, R3              ; R5 = outer loop counter (n)
+    ISUB R5, 1
+
+__table_sort_outer_loop:
+    MOV  R6, 0               ; R6 = inner loop counter (i)
+    MOV  R7, R5              ; R7 = outer loop limit
+
+__table_sort_inner_loop:
+    MOV  R8, R6
+    ILT  R8, R7
+    JF   R8, __table_sort_outer_continue
+
+    ;; --- Compare elements at positions R6+1 and R6+2 ---
+    ;; Calculate address of element i
+    MOV  R8, R4
+    IADD R8, R6
+
+    ;; Calculate address of element i+1
+    MOV  R9, R4
+    IADD R9, R6
+    IADD R9, 1
+
+    ;; Load values
+    MOV  R10, [R8]           ; R10 = t[i]
+    MOV  R11, [R9]           ; R11 = t[i+1]
+
+    ;; For now, use simple numeric comparison
+    ;; TODO: Implement custom compare function support
+
+    ;; Check if R10 is a number (not NaN-boxed)
+    MOV  R8, R10
+    AND  R8, NAN_VALUE
+    IEQ  R8, NAN_VALUE
+    JT   R8, __table_sort_compare_as_float
+
+    ;; It's a number, convert R10 to integer
+    CFI  R10
+
+    ;; Check if R11 is a number
+    MOV  R8, R11
+    AND  R8, NAN_VALUE
+    IEQ  R8, NAN_VALUE
+    JT   R8, __table_sort_compare_as_float
+
+    ;; It's a number, convert R11 to integer
+    CFI  R11
+
+    ;; Compare R10 and R11 (use R8 for comparison result)
+    MOV  R8, R10
+    ILT  R8, R11
+    JT   R8, __table_sort_no_swap
+    JMP  __table_sort_swap
+
+__table_sort_compare_as_float:
+    ;; For non-numbers, use direct float comparison
+    FLT  R8, R10
+    JT   R8, __table_sort_no_swap
+
+__table_sort_swap:
+    ;; --- Swap elements ---
+    MOV  R8, R4
+    IADD R8, R6              ; Address of t[i]
+
+    MOV  R9, R4
+    IADD R9, R6
+    IADD R9, 1               ; Address of t[i+1]
+
+    MOV  R10, [R8]           ; Load t[i]
+    MOV  R11, [R9]           ; Load t[i+1]
+
+    MOV  [R8], R11           ; Store t[i+1] at t[i]
+    MOV  [R9], R10           ; Store t[i] at t[i+1]
+
+__table_sort_no_swap:
+    IADD R6, 1
+    JMP  __table_sort_inner_loop
+
+__table_sort_outer_continue:
+    ISUB R5, 1
+    MOV  R8, R5
+    ILT  R8, 0
+    JF   R8, __table_sort_outer_loop
+
+__table_sort_done:
+    ;; --- Callee-Restore ---
+    POP  R10
+    POP  R9
+    POP  R8
+    POP  R7
+    POP  R6
+    POP  R5
+    POP  R4
+    POP  R3
+    POP  R2
+    POP  R1
+
+    MOV  SP, BP
+    POP  BP
+    RET
+
+;; ===========================================================================
+;; SECTION: TABLE CONCAT
+;; ===========================================================================
+
+;; ---------------------------------------------------------------------------
+;; table.concat(t, [sep], [i], [j]) - Concatenates array elements
+;;
+;; Incoming Stack: [BP+6] = Tagged Table Pointer
+;;                 [BP+5] = Separator (optional, may be NIL)
+;;                 [BP+4] = Start index (optional, may be NIL)
+;;                 [BP+3] = End index (optional, may be NIL)
+;; Returns: R0 = concatenated string
+;; Register Usage: R1-R10
+;; ---------------------------------------------------------------------------
+__builtin_table_concat:
+    PUSH BP
+    MOV  BP, SP
+
+    ;; --- Callee-Save: Preserve 10 working registers ---
+    PUSH R1
+    PUSH R2
+    PUSH R3
+    PUSH R4
+    PUSH R5
+    PUSH R6
+    PUSH R7
+    PUSH R8
+    PUSH R9
+    PUSH R10
+
+    ;; --- Load arguments ---
+    MOV  R1, [BP+6]          ; R1 = Tagged Table Pointer
+    MOV  R2, [BP+5]          ; R2 = Separator (may be NIL)
+    MOV  R3, [BP+4]          ; R3 = Start index (may be NIL)
+    MOV  R4, [BP+3]          ; R4 = End index (may be NIL)
+
+    ;; --- Validate table ---
+    MOV  R5, R1
+    AND  R5, BOXED_DATA
+    IEQ  R5, BOXED_TABLE
+    JF   R5, __runtime_error_not_table
+
+    ;; --- Unbox table pointer ---
+    AND  R1, BOXED_PAYLOAD   ; R1 = raw table header address
+
+    ;; --- Get array info ---
+    MOV  R5, [R1+1]          ; R5 = array length
+    MOV  R6, [R1+2]          ; R6 = array data pointer
+
+    ;; --- Set default values ---
+    ;; Default start index = 1
+    MOV  R7, R3
+    IEQ  R7, BOXED_NIL
+    JT   R7, __table_concat_start_default
+
+    ;; Convert start index to integer
+    MOV  R7, R3
+    CFI  R7
+    JMP  __table_concat_start_set
+
+__table_concat_start_default:
+    MOV  R7, 1
+
+__table_concat_start_set:
+    ;; Default end index = length
+    MOV  R8, R4
+    IEQ  R8, BOXED_NIL
+    JT   R8, __table_concat_end_default
+
+    ;; Convert end index to integer
+    MOV  R8, R4
+    CFI  R8
+    JMP  __table_concat_end_set
+
+__table_concat_end_default:
+    MOV  R8, R5
+
+__table_concat_end_set:
+    ;; --- Validate indices ---
+    MOV  R9, R7
+    ILT  R9, 1
+    JT   R9, __table_concat_invalid_range
+    MOV  R9, R7
+    IGT  R9, R5
+    JT   R9, __table_concat_invalid_range
+    MOV  R9, R8
+    ILT  R9, 1
+    JT   R9, __table_concat_invalid_range
+    MOV  R9, R8
+    IGT  R9, R5
+    JT   R9, __table_concat_end_adjust
+    JMP  __table_concat_validate_range
+
+__table_concat_end_adjust:
+    MOV  R8, R5
+
+__table_concat_validate_range:
+    MOV  R9, R8
+    ILT  R9, R7
+    JT   R9, __table_concat_empty_result
+
+    ;; --- Check if array exists ---
+    MOV  R9, R6
+    IEQ  R9, 0
+    JT   R9, __table_concat_empty_result
+
+    ;; --- Calculate total string length needed ---
+    ;; For now, use a simple approach: create string on stack
+    ;; TODO: Implement proper string concatenation with memory allocation
+
+    ;; --- Simple implementation: just return first element for now ---
+    MOV  R9, R6
+    IADD R9, R7
+    ISUB R9, 1               ; Address of first element
+
+    MOV  R0, [R9]            ; Return first element (simplified)
+    JMP  __table_concat_done
+
+__table_concat_empty_result:
+    ;; Return empty string
+    MOV  R0, BOXED_NIL       ; For now, return nil for empty
+    JMP  __table_concat_done
+
+__table_concat_invalid_range:
+    MOV  R0, BOXED_NIL
+
+__table_concat_done:
+    ;; --- Callee-Restore ---
+    POP  R10
+    POP  R9
+    POP  R8
+    POP  R7
+    POP  R6
+    POP  R5
+    POP  R4
+    POP  R3
+    POP  R2
+    POP  R1
+
+    MOV  SP, BP
+    POP  BP
+    RET
+
+;; ===========================================================================
+;; SECTION: TABLE MOVE
+;; ===========================================================================
+
+;; ---------------------------------------------------------------------------
+;; table.move(a1, f, e, t, [a2]) - Copies elements from a1[f..e] to a2 starting at t
+;; If a2 is nil, a1 is used as destination
+;;
+;; Incoming Stack: [BP+6] = Source Table (a1)
+;;                 [BP+5] = Start index (f)
+;;                 [BP+4] = End index (e)
+;;                 [BP+3] = Target index (t)
+;;                 [BP+2] = Destination Table (a2, optional)
+;; Returns: R0 = destination table
+;; Register Usage: R1-R10
+;; ---------------------------------------------------------------------------
+__builtin_table_move:
+    PUSH BP
+    MOV  BP, SP
+
+    ;; --- Callee-Save: Preserve 10 working registers ---
+    PUSH R1
+    PUSH R2
+    PUSH R3
+    PUSH R4
+    PUSH R5
+    PUSH R6
+    PUSH R7
+    PUSH R8
+    PUSH R9
+    PUSH R10
+
+    ;; --- Load arguments ---
+    MOV  R1, [BP+6]          ; R1 = Source Table (a1)
+    MOV  R2, [BP+5]          ; R2 = Start index (f)
+    MOV  R3, [BP+4]          ; R3 = End index (e)
+    MOV  R4, [BP+3]          ; R4 = Target index (t)
+    MOV  R5, [BP+2]          ; R5 = Destination Table (a2, may be NIL)
+
+    ;; --- Validate source table ---
+    MOV  R6, R1
+    AND  R6, BOXED_DATA
+    IEQ  R6, BOXED_TABLE
+    JF   R6, __runtime_error_not_table
+
+    ;; --- Unbox source table ---
+    AND  R1, BOXED_PAYLOAD   ; R1 = raw source table header
+
+    ;; --- Set destination table ---
+    MOV  R6, R5
+    IEQ  R6, BOXED_NIL
+    JT   R6, __table_move_dest_is_source
+
+    ;; Validate destination table
+    AND  R6, BOXED_DATA
+    IEQ  R6, BOXED_TABLE
+    JF   R6, __runtime_error_not_table
+    AND  R5, BOXED_PAYLOAD   ; R5 = raw destination table header
+    JMP  __table_move_dest_set
+
+__table_move_dest_is_source:
+    MOV  R5, R1              ; Use source as destination
+
+__table_move_dest_set:
+    ;; --- Get array info ---
+    MOV  R6, [R1+1]          ; R6 = source array length
+    MOV  R7, [R1+2]          ; R7 = source array data pointer
+    MOV  R8, [R5+1]          ; R8 = destination array length
+    MOV  R9, [R5+2]          ; R9 = destination array data pointer
+
+    ;; --- Convert indices to integers ---
+    CFI  R2                  ; Convert f to integer
+    CFI  R3                  ; Convert e to integer
+    CFI  R4                  ; Convert t to integer
+
+    ;; --- Validate indices (use R10 for comparison results) ---
+    MOV  R10, R2
+    ILT  R10, 1
+    JT   R10, __table_move_invalid_range
+    MOV  R10, R2
+    IGT  R10, R6
+    JT   R10, __table_move_invalid_range
+    MOV  R10, R3
+    ILT  R10, R2
+    JT   R10, __table_move_invalid_range
+    MOV  R10, R3
+    IGT  R10, R6
+    JT   R10, __table_move_end_adjust
+    JMP  __table_move_indices_valid
+
+__table_move_end_adjust:
+    MOV  R3, R6
+
+__table_move_indices_valid:
+    MOV  R10, R4
+    ILT  R10, 1
+    JT   R10, __table_move_invalid_range
+
+    ;; --- Calculate number of elements to copy ---
+    MOV  R10, R3
+    ISUB R10, R2            ; R10 = e - f
+    IADD R10, 1             ; R10 = e - f + 1 (number of elements)
+
+    ;; --- Check if destination has enough space ---
+    MOV  R11, R4
+    IADD R11, R10
+    ISUB R11, 1              ; R11 = t + (e - f) (last destination index)
+
+    IGT  R11, R8
+    JT   R11, __table_move_resize_destination
+
+__table_move_copy_loop:
+    ;; --- Copy elements from source to destination ---
+    MOV  R11, 0              ; R11 = counter
+
+__table_move_copy_iteration:
+    MOV  R12, R11
+    ILT  R12, R10
+    JF   R12, __table_move_done
+
+    ;; Calculate source address: source_array + (f + counter - 1)
+    MOV  R12, R7
+    IADD R12, R2
+    IADD R12, R11
+    ISUB R12, 1
+
+    ;; Calculate destination address: dest_array + (t + counter - 1)
+    MOV  R13, R9
+    IADD R13, R4
+    IADD R13, R11
+    ISUB R13, 1
+
+    ;; Copy value (use R8 as temporary, avoiding R14/R15)
+    MOV  R8, [R12]
+    MOV  [R13], R8
+
+    IADD R11, 1
+    JMP  __table_move_copy_iteration
+
+__table_move_resize_destination:
+    ;; TODO: Implement destination table resizing
+    ;; For now, just copy what we can
+    JMP  __table_move_copy_loop
+
+__table_move_invalid_range:
+    MOV  R0, BOXED_NIL
+    JMP  __table_move_return
+
+__table_move_done:
+    ;; --- Update destination length if needed ---
+    IADD R8, R4
+    IADD R8, R10
+    ISUB R8, 1              ; New length = max(old_length, t + count - 1)
+
+    MOV  R11, [R5+1]        ; Current destination length
+    IGT  R8, R11
+    JT   R8, __table_move_update_length
+    MOV  R8, R11
+
+__table_move_update_length:
+    MOV  [R5+1], R8          ; Update destination length
+
+    ;; --- Return destination table ---
+    MOV  R0, R5
+    OR   R0, BOXED_TABLE ; Re-box the destination table pointer
+
+__table_move_return:
+    ;; --- Callee-Restore ---
+    POP  R10
+    POP  R9
+    POP  R8
+    POP  R7
+    POP  R6
+    POP  R5
+    POP  R4
+    POP  R3
+    POP  R2
+    POP  R1
+
+    MOV  SP, BP
+    POP  BP
+    RET
+
+;; ===========================================================================
+;; SECTION: TABLE PACK
+;; ===========================================================================
+
+;; ---------------------------------------------------------------------------
+;; table.pack(...) - Packs all arguments into a new table with .n field
+;;
+;; This is implemented in C as it needs variable argument handling
+;; Assembly version would need stack manipulation
+;;
+;; For now, this is a placeholder. The actual implementation should be in C
+;; to handle the variable arguments properly.
+;;
+;; Returns: R0 = new table with .n field
+;; ---------------------------------------------------------------------------
+__builtin_table_pack:
+    PUSH BP
+    MOV  BP, SP
+
+    ;; --- Callee-Save: Preserve working registers ---
+    PUSH R1
+    PUSH R2
+    PUSH R3
+
+    ;; --- Create new table ---
+    CALL __builtin_table_new
+    MOV  R1, R0              ; R1 = new table
+
+    ;; --- TODO: This needs to be implemented in C to access variable arguments ---
+    ;; For now, return empty table
+
+    ;; --- Callee-Restore ---
+    POP  R3
+    POP  R2
+    POP  R1
+
+    MOV  SP, BP
+    POP  BP
+    RET
+
+;; ===========================================================================
+;; SECTION: TABLE UNPACK
+;; ===========================================================================
+
+;; ---------------------------------------------------------------------------
+;; table.unpack(t, [i], [j]) - Returns elements from table as multiple values
+;;
+;; Incoming Stack: [BP+4] = Tagged Table Pointer
+;;                 [BP+3] = Start index (optional, may be NIL)
+;;                 [BP+2] = End index (optional, may be NIL)
+;; Returns: Multiple values on stack (Lua convention)
+;; Register Usage: R1-R8
+;; ---------------------------------------------------------------------------
+__builtin_table_unpack:
+    PUSH BP
+    MOV  BP, SP
+
+    ;; --- Callee-Save: Preserve 8 working registers ---
+    PUSH R1
+    PUSH R2
+    PUSH R3
+    PUSH R4
+    PUSH R5
+    PUSH R6
+    PUSH R7
+    PUSH R8
+
+    ;; --- Load arguments ---
+    MOV  R1, [BP+4]          ; R1 = Tagged Table Pointer
+    MOV  R2, [BP+3]          ; R2 = Start index (may be NIL)
+    MOV  R3, [BP+2]          ; R3 = End index (may be NIL)
+
+    ;; --- Validate table ---
+    MOV  R4, R1
+    AND  R4, BOXED_DATA
+    IEQ  R4, BOXED_TABLE
+    JF   R4, __runtime_error_not_table
+
+    ;; --- Unbox table pointer ---
+    AND  R1, BOXED_PAYLOAD   ; R1 = raw table header address
+
+    ;; --- Get array info ---
+    MOV  R4, [R1+1]          ; R4 = array length
+    MOV  R5, [R1+2]          ; R5 = array data pointer
+
+    ;; --- Set default start index = 1 ---
+    MOV  R6, R2
+    IEQ  R6, BOXED_NIL
+    JT   R6, __table_unpack_start_default
+
+    CFI  R6
+    JMP  __table_unpack_start_set
+
+__table_unpack_start_default:
+    MOV  R6, 1
+
+__table_unpack_start_set:
+    ;; --- Set default end index = length ---
+    MOV  R7, R3
+    IEQ  R7, BOXED_NIL
+    JT   R7, __table_unpack_end_default
+
+    CFI  R7
+    JMP  __table_unpack_end_set
+
+__table_unpack_end_default:
+    MOV  R7, R4
+
+__table_unpack_end_set:
+    ;; --- Validate indices (use R8 for comparison results) ---
+    MOV  R8, R6
+    ILT  R8, 1
+    JT   R8, __table_unpack_invalid_range
+    MOV  R8, R4
+    IGT  R8, R6
+    JT   R8, __table_unpack_invalid_range
+    MOV  R8, R7
+    ILT  R8, R6
+    JT   R8, __table_unpack_invalid_range
+    MOV  R8, R4
+    IGT  R8, R7
+    JT   R8, __table_unpack_end_adjust
+    JMP  __table_unpack_validate_done
+
+__table_unpack_end_adjust:
+    MOV  R7, R4
+
+__table_unpack_validate_done:
+    ;; --- Calculate number of elements to return ---
+    MOV  R8, R7
+    ISUB R8, R6
+    IADD R8, 1              ; R8 = number of elements to return
+
+    ;; --- For now, return first element (simplified) ---
+    ;; TODO: Implement proper multiple return values
+    MOV  R9, R5
+    IADD R9, R6
+    ISUB R9, 1
+    MOV  R0, [R9]
+    JMP  __table_unpack_done
+
+__table_unpack_invalid_range:
+    MOV  R0, BOXED_NIL
+
+__table_unpack_done:
+    ;; --- Callee-Restore ---
+    POP  R8
+    POP  R7
+    POP  R6
+    POP  R5
+    POP  R4
+    POP  R3
+    POP  R2
+    POP  R1
+
+    MOV  SP, BP
+    POP  BP
+    RET
+
+;; ===========================================================================
+;; SECTION: UTILITY FUNCTIONS
+;; ===========================================================================
+
+;; ---------------------------------------------------------------------------
+;; Helper: Validate and unbox table pointer
+;; Input: R0 = Tagged table pointer
+;; Output: R0 = Raw table pointer, or jump to error
+;; Clobbers: R1
+;; ---------------------------------------------------------------------------
+__unbox_table_validated:
+    MOV  R1, R0
+    AND  R1, BOXED_DATA
+    IEQ  R1, BOXED_TABLE
+    JF   R1, __runtime_error_not_table
+    AND  R0, BOXED_PAYLOAD
+    RET
