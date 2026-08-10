@@ -706,51 +706,64 @@ __string_byte_error:
 ;; ===========================================================================
 ;; Built-in: string.char(b1, b2, ..., bn)
 ;; Creates a string from byte values
-;; Incoming Stack: [BP+2...] = byte values (as Lua numbers)
-;; Returns: R0 = new string (boxed)
+;; Incoming Stack: [BP+2] = first byte, [BP+3] = second byte, ... terminated by BOXED_NIL
+;; Returns: R0 = new string (boxed as RAM string)
+;; Clobbers: R0-R5
 ;; ===========================================================================
 __builtin_string_char:
     PUSH BP
     MOV  BP, SP
 
-    ;; Count arguments (they're on stack starting at [BP+2])
-    ;; We need to find how many arguments were passed
-    ;; For now, assume we have access to argument count via convention
+    ;; --- STEP 1: Count arguments by scanning for BOXED_NIL terminator ---
+    MOV  R1, BP              ; R1 = base pointer to stack frame
+    IADD R1, 2              ; R1 = pointer to first argument ([BP+2])
+    MOV  R2, 0              ; R2 = argument counter
 
-    ;; Allocate memory for string (worst case: all args + null terminator)
-    ;; This is simplified - in practice you'd count args first
-    MOV  R0, 32             ; Allocate 32 bytes (adjust as needed)
-    PUSH R0
+__string_char_count_loop:
+    MOV  R3, [R1]           ; Load current argument
+    IEQ  R3, BOXED_NIL      ; Check for terminator
+    JT   R3, __string_char_count_done
+    IADD R2, 1              ; Increment counter
+    IADD R1, 1              ; Move to next argument
+    JMP  __string_char_count_loop
+
+__string_char_count_done:
+    ;; R2 now contains the number of arguments
+    ;; Allocate memory: R2 bytes + 1 for null terminator
+    IADD R2, 1              ; +1 for null terminator
+    PUSH R2
     CALL __malloc
     IADD SP, 1
-    MOV  R1, R0            ; R1 = heap pointer
+    MOV  R4, R0            ; R4 = heap pointer (save in R4)
 
     ;; Check for OOM
-    IEQ  R1, 0
-    JT   R1, __string_char_oom
+    IEQ  R4, 0
+    JT   R4, __string_char_oom
 
-    ;; Copy bytes from stack arguments
-    MOV  R2, 2             ; Start at [BP+2] (first argument)
-    MOV  R3, R1            ; R3 = current write position
+    ;; --- STEP 2: Copy bytes from stack to heap ---
+    MOV  R1, BP              ; Reset R1 to base pointer
+    IADD R1, 2              ; R1 = pointer to first argument
+    MOV  R5, R4            ; R5 = current write position in heap
 
 __string_char_copy_loop:
-    MOV  R0, [BP+R2]       ; Load argument
-    IEQ  R0, BOXED_NIL
-    JT   R0, __string_char_done    ; Stop at nil (end of args)
+    MOV  R3, [R1]           ; Load current argument
+    IEQ  R3, BOXED_NIL      ; Check for terminator
+    JT   R3, __string_char_copy_done
 
-    CFI  R0                 ; Convert to integer
-    MOV  [R3], R0           ; Store byte
-    IADD R3, 1
-    IADD R2, 1
+    ;; Convert Lua number to integer byte
+    CFI  R3                 ; Convert Float to Integer
+    MOV  [R5], R3           ; Store byte at current position
+    IADD R5, 1              ; Advance write pointer
+    IADD R1, 1              ; Advance read pointer (to next stack arg)
     JMP  __string_char_copy_loop
 
-__string_char_done:
-    ;; Null-terminate
-    MOV  R0, 0
-    MOV  [R3], R0
+__string_char_copy_done:
+    ;; Null-terminate the string
+    MOV  R3, 0
+    MOV  [R5], R3
 
-    ;; Box as RAM string
-    MOV  R0, R1
+    ;; Box as RAM string and return
+    MOV  R0, R4
     OR   R0, BOXED_RAMSTRING
 
     MOV  SP, BP
@@ -758,8 +771,7 @@ __string_char_done:
     RET
 
 __string_char_oom:
-    ;; Handle out of memory - return empty string or error
-    MOV  R0, BOXED_NIL
+    MOV  R0, BOXED_NIL      ; Return nil on OOM
     MOV  SP, BP
     POP  BP
     RET
