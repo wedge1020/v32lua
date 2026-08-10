@@ -687,17 +687,23 @@ __builtin_tic80_mget:
     MOV   R1, [BP+2]        ; x
     MOV   R2, [BP+3]        ; y
 
-    ;; Snap to 0.1-pixel grid, then round to integer
-    FMUL  R1, 10.0          ; x * 10 (float)
-    FADD  R1, 0.5           ; + 0.5 (float)
-    CFI   R1                ; → integer (round(x*10))
-    IDIV  R1, 10            ; integer division: round(x*10) / 10
+	;; Snap to integer tile coordinates
+	FADD  R1, 0.5
+	CFI   R1                ; R1 = round(x)
+	FADD  R2, 0.5
+	CFI   R2                ; R2 = round(y)
 
     ;; Snap to 0.1-pixel grid, then round to integer
-    FMUL  R2, 10.0          ; y * 10 (float)
-    FADD  R2, 0.5           ; + 0.5 (float)
-    CFI   R2                ; → integer (round(y*10))
-    IDIV  R2, 10            ; integer division: round(y*10) / 10
+;   FMUL  R1, 10.0          ; x * 10 (float)
+;   FADD  R1, 0.5           ; + 0.5 (float)
+;   CFI   R1                ; → integer (round(x*10))
+;   IDIV  R1, 10            ; integer division: round(x*10) / 10
+
+    ;; Snap to 0.1-pixel grid, then round to integer
+;   FMUL  R2, 10.0          ; y * 10 (float)
+;   FADD  R2, 0.5           ; + 0.5 (float)
+;   CFI   R2                ; → integer (round(y*10))
+;   IDIV  R2, 10            ; integer division: round(y*10) / 10
 
     ;; Load ACTUAL map dimensions for bounds checking
     MOV   R3, var_TIC80_MAP_WIDTH
@@ -770,20 +776,26 @@ __builtin_tic80_mset:
     ;; X: Load coordinate argument
     MOV   R1, [BP+2]        ; x
 
+	;; Snap to integer tile coordinates
+	FADD  R1, 0.5
+	CFI   R1                ; R1 = round(x)
+
     ;; X: Snap to 0.1-pixel grid, then round to integer
-    FMUL  R1, 10.0          ; x * 10 (float)
-    FADD  R1, 0.5           ; + 0.5 (float)
-    CFI   R1                ; → integer (round(x*10))
-    IDIV  R1, 10            ; integer division: round(x*10) / 10
+;   FMUL  R1, 10.0          ; x * 10 (float)
+;   FADD  R1, 0.5           ; + 0.5 (float)
+;   CFI   R1                ; → integer (round(x*10))
+;   IDIV  R1, 10            ; integer division: round(x*10) / 10
 
     ;; Y: Load coordinate argument
     MOV   R2, [BP+3]        ; y
+	FADD  R2, 0.5
+	CFI   R2                ; R2 = round(y)
 
     ;; Y: Snap to 0.1-pixel grid, then round to integer
-    FMUL  R2, 10.0          ; y * 10 (float)
-    FADD  R2, 0.5           ; + 0.5 (float)
-    CFI   R2                ; → integer (round(y*10))
-    IDIV  R2, 10            ; integer division: round(y*10) / 10
+;   FMUL  R2, 10.0          ; y * 10 (float)
+;   FADD  R2, 0.5           ; + 0.5 (float)
+;   CFI   R2                ; → integer (round(y*10))
+;   IDIV  R2, 10            ; integer division: round(y*10) / 10
 
 	;; load value argument
     MOV   R3, [BP+4]        ; value
