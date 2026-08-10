@@ -23,9 +23,12 @@
 #include "internals.h"
 #include "register.h"
 
-#define  VERSION      "20260810-dev"
-#define  AUTHOR       "Matthew Haas"
-#define  URL          "https://github.com/wedge1020/v32lua"
+#define  VERSION         "20260810-dev"
+#define  AUTHOR          "Matthew Haas"
+#define  URL             "https://github.com/wedge1020/v32lua"
+
+#define  MATH_PI         3.14159265358979323846
+#define  MATH_HUGE       (1.0 / 0.0)  // Infinity in IEEE 754
 
 #define  V32_CART_PAGE   0x20000000
 #define  NAN_VALUE       0x7F800000

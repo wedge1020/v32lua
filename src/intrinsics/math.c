@@ -765,7 +765,7 @@ bool emit_math_log10_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.log10(x) ---\n");
 
-    int arg_reg = allocate_register();
+    int arg_reg = allocate_pinned_register();
     generate_asm(arg, arg_reg);
 
     emit_asm("    PUSH R%d       ; Push argument\n", arg_reg);
@@ -776,6 +776,161 @@ bool emit_math_log10_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("    MOV R%d, R0    ; Transfer result to dest_reg\n", dest_reg);
     }
 
+    unlock_pinned_register(arg_reg);
+    return true;
+}
+
+// ============================================================================
+// Remaining Math Functions - Runtime implementations
+// ============================================================================
+
+/**
+ * Emits assembly for the math.cosh(x) intrinsic.
+ * Hyperbolic cosine: cosh(x) = (exp(x) + exp(-x)) / 2
+ */
+bool emit_math_cosh_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+    if (!arg || arg->next != NULL) {
+        compiler_error(ERR_SYNTAX, node->line_number,
+            "math.cosh() expects exactly one argument");
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: math.cosh(x) ---\n");
+    int arg_reg = allocate_register();
+    generate_asm(arg, arg_reg);
+    emit_asm("    PUSH R%d\n", arg_reg);
+    emit_asm("    CALL __builtin_cosh\n");
+    emit_asm("    IADD SP, 1\n");
+    if (dest_reg != 0) emit_asm("    MOV R%d, R0\n", dest_reg);
+    unlock_register(arg_reg);
+    return true;
+}
+
+/**
+ * Emits assembly for the math.sinh(x) intrinsic.
+ * Hyperbolic sine: sinh(x) = (exp(x) - exp(-x)) / 2
+ */
+bool emit_math_sinh_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+    if (!arg || arg->next != NULL) {
+        compiler_error(ERR_SYNTAX, node->line_number,
+            "math.sinh() expects exactly one argument");
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: math.sinh(x) ---\n");
+    int arg_reg = allocate_register();
+    generate_asm(arg, arg_reg);
+    emit_asm("    PUSH R%d\n", arg_reg);
+    emit_asm("    CALL __builtin_sinh\n");
+    emit_asm("    IADD SP, 1\n");
+    if (dest_reg != 0) emit_asm("    MOV R%d, R0\n", dest_reg);
+    unlock_register(arg_reg);
+    return true;
+}
+
+/**
+ * Emits assembly for the math.tanh(x) intrinsic.
+ * Hyperbolic tangent: tanh(x) = sinh(x) / cosh(x)
+ */
+bool emit_math_tanh_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+    if (!arg || arg->next != NULL) {
+        compiler_error(ERR_SYNTAX, node->line_number,
+            "math.tanh() expects exactly one argument");
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: math.tanh(x) ---\n");
+    int arg_reg = allocate_register();
+    generate_asm(arg, arg_reg);
+    emit_asm("    PUSH R%d\n", arg_reg);
+    emit_asm("    CALL __builtin_tanh\n");
+    emit_asm("    IADD SP, 1\n");
+    if (dest_reg != 0) emit_asm("    MOV R%d, R0\n", dest_reg);
+    unlock_register(arg_reg);
+    return true;
+}
+
+/**
+ * Emits assembly for the math.frexp(x) intrinsic.
+ * Returns mantissa and exponent.
+ * Note: Lua expects two return values. This requires special handling.
+ */
+bool emit_math_frexp_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+    if (!arg || arg->next != NULL) {
+        compiler_error(ERR_SYNTAX, node->line_number,
+            "math.frexp() expects exactly one argument");
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: math.frexp(x) ---\n");
+    int arg_reg = allocate_register();
+    generate_asm(arg, arg_reg);
+    emit_asm("    PUSH R%d\n", arg_reg);
+    emit_asm("    CALL __builtin_frexp\n");
+    emit_asm("    IADD SP, 1\n");
+    // Note: frexp returns two values. In Lua, these would be returned as multiple values.
+    // For now, just return mantissa in dest_reg
+    if (dest_reg != 0) emit_asm("    MOV R%d, R0\n", dest_reg);
+    unlock_register(arg_reg);
+    return true;
+}
+
+/**
+ * Emits assembly for the math.ldexp(m, e) intrinsic.
+ * Returns m * 2^e.
+ */
+bool emit_math_ldexp_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+    if (!arg || !arg->next || arg->next->next != NULL) {
+        compiler_error(ERR_SYNTAX, node->line_number,
+            "math.ldexp() expects exactly two arguments");
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: math.ldexp(m, e) ---\n");
+    int m_reg = allocate_register();
+    int e_reg = allocate_register();
+    generate_asm(arg, m_reg);
+    generate_asm(arg->next, e_reg);
+    emit_asm("    PUSH R%d\n", m_reg);
+    emit_asm("    PUSH R%d\n", e_reg);
+    emit_asm("    CALL __builtin_ldexp\n");
+    emit_asm("    IADD SP, 2\n");
+    if (dest_reg != 0) emit_asm("    MOV R%d, R0\n", dest_reg);
+    unlock_register(m_reg);
+    unlock_register(e_reg);
+    return true;
+}
+
+/**
+ * Emits assembly for the math.modf(x) intrinsic.
+ * Returns integer and fractional parts.
+ */
+bool emit_math_modf_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+    if (!arg || arg->next != NULL) {
+        compiler_error(ERR_SYNTAX, node->line_number,
+            "math.modf() expects exactly one argument");
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: math.modf(x) ---\n");
+    int arg_reg = allocate_register();
+    generate_asm(arg, arg_reg);
+    emit_asm("    PUSH R%d\n", arg_reg);
+    emit_asm("    CALL __builtin_modf\n");
+    emit_asm("    IADD SP, 1\n");
+    if (dest_reg != 0) emit_asm("    MOV R%d, R0\n", dest_reg);
     unlock_register(arg_reg);
     return true;
 }

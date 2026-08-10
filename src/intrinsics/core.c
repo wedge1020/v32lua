@@ -526,6 +526,36 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         return emit_math_log10_intrinsic(node, dest_reg);
     }
 
+	// math.cosh(x)
+	if (strcmp(func_name, "math.cosh") == 0) {
+		return emit_math_cosh_intrinsic(node, dest_reg);
+	}
+
+	// math.sinh(x)
+	if (strcmp(func_name, "math.sinh") == 0) {
+		return emit_math_sinh_intrinsic(node, dest_reg);
+	}
+
+	// math.tanh(x)
+	if (strcmp(func_name, "math.tanh") == 0) {
+		return emit_math_tanh_intrinsic(node, dest_reg);
+	}
+
+	// math.frexp(x)
+	if (strcmp(func_name, "math.frexp") == 0) {
+		return emit_math_frexp_intrinsic(node, dest_reg);
+	}
+
+	// math.ldexp(m, e)
+	if (strcmp(func_name, "math.ldexp") == 0) {
+		return emit_math_ldexp_intrinsic(node, dest_reg);
+	}
+
+	// math.modf(x)
+	if (strcmp(func_name, "math.modf") == 0) {
+		return emit_math_modf_intrinsic(node, dest_reg);
+	}
+
     // loop iters
     if (strcmp(func_name, "pairs") == 0) {
         return emit_pairs_intrinsic(node, dest_reg);
