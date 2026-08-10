@@ -43,6 +43,7 @@ typedef struct {
     bool needs_exec;
     bool needs_memory_alloc;  // Always true for heap
 	bool needs_print;
+	bool needs_math;
 
     // API modes (mutually exclusive)
     bool needs_pico8;

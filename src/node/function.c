@@ -114,7 +114,7 @@ void  node_function_call (ASTNode *node, int  dest_reg)
     // STEP 1: Allocate and Pin Target Register
     // -------------------------------------------------------------------------
     int total_arg_count = 0;
-    int target_reg = allocate_pinned_register();
+    int target_reg = allocate_register();
     int table_reg = -1; // Only used for method calls
 
     // ✅ Mark as live for the duration of call setup
@@ -128,8 +128,8 @@ void  node_function_call (ASTNode *node, int  dest_reg)
         emit_asm("    ; --- Method call: resolve target and cache 'self' ---\n");
 
         ASTNode *table_get_node = node->as.call.target;
-        table_reg = allocate_pinned_register();
-        int key_reg = allocate_pinned_register();
+        table_reg = allocate_register();
+        int key_reg = allocate_register();
 
         // ✅ Short-lived registers for lookup
         mark_register_live(table_reg, 5);
@@ -159,7 +159,7 @@ void  node_function_call (ASTNode *node, int  dest_reg)
         }
 
         // Clean up key register
-        unlock_pinned_register(key_reg);
+        unlock_register(key_reg);
 
         // 🟡 Spill table_reg and target_reg to free registers for argument eval
         //    But keep them PINNED so they won't be reused
@@ -274,7 +274,7 @@ void  node_function_call (ASTNode *node, int  dest_reg)
         ensure_in_register(table_reg);
 
         emit_asm("PUSH R%d ; Arg 1: self\n", table_reg);
-        unlock_pinned_register(table_reg); // No longer needed
+        unlock_register(table_reg); // No longer needed
         total_arg_count++;
     }
 
@@ -284,7 +284,7 @@ void  node_function_call (ASTNode *node, int  dest_reg)
     if (is_c_call) {
         // --- Direct C ABI Call ---
         // For C calls, target_reg is unused (we call by symbol name)
-        unlock_pinned_register(target_reg);
+        unlock_register(target_reg);
         register_pinned[target_reg] = 0; // Clear pin
 
         emit_asm("    ; --- Direct C ABI Call ---\n");
@@ -310,7 +310,7 @@ void  node_function_call (ASTNode *node, int  dest_reg)
             emit_asm("MOV R0, R%d ; Prepare boxed target for validation\n", target_reg);
         }
 
-        unlock_pinned_register(target_reg);
+        unlock_register(target_reg);
 
         // Call the Lua function executor (handles tag validation & tail-call)
         emit_asm("CALL __builtin_exec ; Validate and execute\n");

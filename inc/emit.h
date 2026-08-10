@@ -5,6 +5,7 @@
 extern const char runtime_memory_start[];
 extern const char runtime_exec_start[];
 extern const char runtime_table_start[];
+extern const char runtime_math_start[];
 extern const char runtime_string_start[];
 extern const char runtime_print_start[];
 extern const char runtime_pico8_start[];

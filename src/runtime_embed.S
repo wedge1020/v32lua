@@ -64,6 +64,24 @@
     runtime_table_end:
 #endif
 
+/* --- Math Library Routines --- */
+#ifdef __APPLE__
+    .global _runtime_math_start
+    _runtime_math_start:
+#else
+    .global runtime_math_start
+    runtime_math_start:
+#endif
+    .incbin "runtime/math.s"
+    .byte 0
+#ifdef __APPLE__
+    .global _runtime_math_end
+    _runtime_math_end:
+#else
+    .global runtime_math_end
+    runtime_math_end:
+#endif
+
 /* --- Strings --- */
 #ifdef __APPLE__
     .global _runtime_string_start

@@ -400,6 +400,12 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     //
     //////////////////////////////////////////////////////////////////////////
 
+    // check if strings are used (include runtime routines)
+    if (strcmp (func_name, "string\.")   == 0)
+    {
+        runtime_req.needs_strings         = true;
+    }
+
     // string.byte(s [, i [, j]])
     if (strcmp(func_name, "string.byte") == 0) {
         return emit_string_byte_intrinsic(node, dest_reg);
@@ -415,6 +421,12 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     // math library intrinsics
     //
     //////////////////////////////////////////////////////////////////////////
+
+    // check if math is used (include runtime routines)
+    if (strcmp (func_name, "math\.") == 0)
+    {
+        runtime_req.needs_math        = true;
+    }
 
     // math.sin(x)
     if (strcmp(func_name, "math.sin") == 0) {
@@ -526,35 +538,35 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         return emit_math_log10_intrinsic(node, dest_reg);
     }
 
-	// math.cosh(x)
-	if (strcmp(func_name, "math.cosh") == 0) {
-		return emit_math_cosh_intrinsic(node, dest_reg);
-	}
+    // math.cosh(x)
+    if (strcmp(func_name, "math.cosh") == 0) {
+        return emit_math_cosh_intrinsic(node, dest_reg);
+    }
 
-	// math.sinh(x)
-	if (strcmp(func_name, "math.sinh") == 0) {
-		return emit_math_sinh_intrinsic(node, dest_reg);
-	}
+    // math.sinh(x)
+    if (strcmp(func_name, "math.sinh") == 0) {
+        return emit_math_sinh_intrinsic(node, dest_reg);
+    }
 
-	// math.tanh(x)
-	if (strcmp(func_name, "math.tanh") == 0) {
-		return emit_math_tanh_intrinsic(node, dest_reg);
-	}
+    // math.tanh(x)
+    if (strcmp(func_name, "math.tanh") == 0) {
+        return emit_math_tanh_intrinsic(node, dest_reg);
+    }
 
-	// math.frexp(x)
-	if (strcmp(func_name, "math.frexp") == 0) {
-		return emit_math_frexp_intrinsic(node, dest_reg);
-	}
+    // math.frexp(x)
+    if (strcmp(func_name, "math.frexp") == 0) {
+        return emit_math_frexp_intrinsic(node, dest_reg);
+    }
 
-	// math.ldexp(m, e)
-	if (strcmp(func_name, "math.ldexp") == 0) {
-		return emit_math_ldexp_intrinsic(node, dest_reg);
-	}
+    // math.ldexp(m, e)
+    if (strcmp(func_name, "math.ldexp") == 0) {
+        return emit_math_ldexp_intrinsic(node, dest_reg);
+    }
 
-	// math.modf(x)
-	if (strcmp(func_name, "math.modf") == 0) {
-		return emit_math_modf_intrinsic(node, dest_reg);
-	}
+    // math.modf(x)
+    if (strcmp(func_name, "math.modf") == 0) {
+        return emit_math_modf_intrinsic(node, dest_reg);
+    }
 
     // loop iters
     if (strcmp(func_name, "pairs") == 0) {

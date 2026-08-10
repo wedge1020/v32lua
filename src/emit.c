@@ -551,6 +551,8 @@ void  emit_runtime_library (void)
         emit_embedded_asm (runtime_exec_start);
     if (runtime_req.needs_tables)
         emit_embedded_asm (runtime_table_start);
+    if (runtime_req.needs_math)
+        emit_embedded_asm (runtime_math_start);
     if (runtime_req.needs_strings)
         emit_embedded_asm (runtime_string_start);
     if (runtime_req.needs_print)
