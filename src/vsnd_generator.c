@@ -97,6 +97,14 @@ void generate_vsnd_from_tic80_sounds(const char *output_path) {
     // 3. Write sample data
 
     fclose(f);
+
+	// Register in global sounds list for XML generation
+    CARTresource* res = (CARTresource*)malloc(sizeof(CARTresource));
+    res->id = next_sound_id++;
+    res->var_name = strdup("tic80_sounds");  // Or generate from section
+    res->filename = strdup(output_path);
+    res->next = sounds_head;
+    sounds_head = res;
 }
 
 // ============================================================================

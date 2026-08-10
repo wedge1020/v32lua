@@ -60,3 +60,4 @@ dkms.conf
 *.v32
 .DS_Store
 cmd
+put/*

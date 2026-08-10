@@ -43,4 +43,11 @@ int       tic80_get_map_height       (void);
 uint8_t   tic80_get_map_tile         (int, int);
 void      parse_tic80_map_row        (int, const char *);
 
+// ============================================================================
+// Sound Function Declarations
+// ============================================================================
+void parse_tic80_wave(int wave_index, const char *hex_data);
+void parse_tic80_sfx(int sfx_index, const char *hex_data);
+void parse_tic80_track(int track_index, const char *hex_data);
+
 #endif

@@ -50,7 +50,7 @@ int  count_tic80_assets (TIC80AssetData *head)
 /// Convert RRGGBB hex string to Vircon32 AABBGGRR format
 /// @param hex_rgb 6-character RRGGBB string (e.g., "FF0000" = red)
 /// @return 32-bit color in AABBGGRR format with alpha=0xFF
-static uint32_t hex_to_v32_color(const char *hex_rgb) {
+uint32_t hex_to_v32_color(const char *hex_rgb) {
     uint32_t r = (strtoul(hex_rgb, NULL, 16) >> 16) & 0xFF;
     uint32_t g = (strtoul(hex_rgb, NULL, 16) >> 8) & 0xFF;
     uint32_t b = strtoul(hex_rgb, NULL, 16) & 0xFF;
@@ -65,7 +65,7 @@ static uint32_t hex_to_v32_color(const char *hex_rgb) {
 /// Each hex char represents one pixel's 4-bit color index (0-15)
 /// @param tile_index Tile number (0-511 for 16x32 sheet)
 /// @param hex_data 64-character hex string
-static void parse_tic80_tile(int tile_index, const char *hex_data) {
+void parse_tic80_tile(int tile_index, const char *hex_data) {
 
     // Calculate position in the 128x256 tilesheet
     // TIC-80: 16 columns, 32 rows, each tile is 8x8 pixels
@@ -155,9 +155,11 @@ TIC80AssetData *parse_tic80_asset_line(const char *line) {
 // Section Processing
 // =============================================================================
 
-/// Process all accumulated TIC-80 sections (called after parsing)
-void process_all_tic80_sections(void) {
-
+// ============================================================================
+// Process all accumulated TIC-80 sections (called after parsing)
+// ============================================================================
+void process_all_tic80_sections(void)
+{
     if (current_tic80_section == NULL) {
         return;
     }
@@ -181,17 +183,37 @@ void process_all_tic80_sections(void) {
         item = next;
     }
 
-	// Generate VSND after processing all sections
+    // ========================================================================
+    // Generate VSND from sound sections - NEW
+    // ========================================================================
     if (tic80_has_waves || tic80_has_sfx || tic80_has_tracks) {
-        process_tic80_sound_sections();
+        // Generate VSND file from accumulated sound data
+        generate_vsnd_from_tic80_sounds("tic80_sounds.vsnd");
+
+        // Register in global sounds list for XML generation
+        CARTresource* res = (CARTresource*)malloc(sizeof(CARTresource));
+        res->id = next_sound_id++;
+        res->var_name = strdup("tic80_sounds");
+        res->filename = strdup("tic80_sounds.vsnd");
+        res->next = sounds_head;
+        sounds_head = res;
     }
 }
 
-/// Process a single TIC-80 section (PALETTE, TILES, etc.)
-/// @param section Section name ("PALETTE", "TILES", etc.)
+// ============================================================================
+// Process a single TIC-80 section (PALETTE, TILES, MAP, WAVES, SFX, TRACKS)
+// ============================================================================
+///
+/// @param section Section name ("PALETTE", "TILES", "WAVES", etc.)
 /// @param assets Linked list of asset data for this section
-void process_tic80_section(const char *section, TIC80AssetData *assets) {
-
+///
+void process_tic80_section(const char *section, TIC80AssetData *assets)
+{
+    // ========================================================================
+    // PALETTE SECTION
+    // Format: single line with 96 hex chars (16 colors x RRGGBB)
+    // Example: -- 0:2C1C1A5D275D533EB1... (96 chars total)
+    // ========================================================================
     if (strcmp(section, "PALETTE") == 0) {
         if (assets != NULL) {
             TIC80AssetData *data = assets;
@@ -203,44 +225,72 @@ void process_tic80_section(const char *section, TIC80AssetData *assets) {
                     tic80_palette[i] = hex_to_v32_color(color_hex);
                 }
                 tic80_use_custom_palette = true;
-			}
+            }
         }
     }
+    // ========================================================================
+    // TILES SECTION
+    // Format: multiple lines, each: index:64_hex_chars (8x8 tile)
+    // Example: -- 000:0123456789abcdef... (64 chars = 32 bytes)
+    // ========================================================================
     else if (strcmp(section, "TILES") == 0) {
-		// Process all tile data
-		for (TIC80AssetData *item = assets; item != NULL; item = item->next) {
-			parse_tic80_tile(item->index, item->hex_data);
-		}
+        // Process all tile data
+        for (TIC80AssetData *item = assets; item != NULL; item = item->next) {
+            parse_tic80_tile(item->index, item->hex_data);
+        }
         tic80_has_any_assets = true;
     }
-	else if (strcmp(section, "MAP") == 0) {
-		// Initialize map width from first row in the list
-		if (assets != NULL) {
-			tic80_map_width = strlen(assets->hex_data) / 2;
-			tic80_map_height = 0;  // Will be updated by parse_tic80_map_row
-		}
+    // ========================================================================
+    // MAP SECTION
+    // Format: multiple lines, each: index:hex_pairs (nibble-swapped tile IDs)
+    // Example: -- 000:0123456789... (variable length)
+    // ========================================================================
+    else if (strcmp(section, "MAP") == 0) {
+        // Initialize map width from first row in the list
+        if (assets != NULL) {
+            tic80_map_width = strlen(assets->hex_data) / 2;
+            tic80_map_height = 0;  // Will be updated by parse_tic80_map_row
+        }
 
-		// Process all map rows
-		for (TIC80AssetData *item = assets; item != NULL; item = item->next) {
-			parse_tic80_map_row(item->index, item->hex_data);
-		}
-	}
-
-	// ==========================================================================
-    // SOUND SECTIONS
-    // ==========================================================================
+        // Process all map rows
+        for (TIC80AssetData *item = assets; item != NULL; item = item->next) {
+            parse_tic80_map_row(item->index, item->hex_data);
+        }
+    }
+    // ========================================================================
+    // WAVES SECTION - NEW
+    // Format: multiple lines, each: index:32_hex_bytes (32-byte waveform)
+    // Example: -- 000:00000000ffffffff00000000ffffffff
+    // TIC-80 has 32 waveforms, each 32 bytes
+    // ========================================================================
     else if (strcmp(section, "WAVES") == 0) {
         for (TIC80AssetData *item = assets; item != NULL; item = item->next) {
             parse_tic80_wave(item->index, item->hex_data);
         }
+        tic80_has_waves = true;
     }
+    // ========================================================================
+    // SFX SECTION - NEW
+    // Format: multiple lines, each: index:hex_data (SFX pattern)
+    // Example: -- 000:0000111122223333...
+    // TIC-80 SFX format: [speed:4][volume:4][wave:6][effect:2] per note
+    // ========================================================================
     else if (strcmp(section, "SFX") == 0) {
         for (TIC80AssetData *item = assets; item != NULL; item = item->next) {
             parse_tic80_sfx(item->index, item->hex_data);
         }
+        tic80_has_sfx = true;
     }
+    // ========================================================================
+    // TRACKS SECTION - NEW
+    // Format: multiple lines, each: index:hex_data (music track pattern)
+    // Example: -- 000:00010203...
+    // TIC-80 has 8 music tracks
+    // ========================================================================
     else if (strcmp(section, "TRACKS") == 0) {
-        // TODO: Parse music tracks
+        for (TIC80AssetData *item = assets; item != NULL; item = item->next) {
+            parse_tic80_track(item->index, item->hex_data);
+        }
         tic80_has_tracks = true;
     }
 }
@@ -352,4 +402,153 @@ void parse_tic80_map_row(int row_index, const char *hex_data) {
     }
 
     tic80_has_map = true;
+}
+
+// ============================================================================
+// TIC-80 Sound Constants
+// ============================================================================
+#define TIC80_NUM_WAVES    32    // Maximum waveforms
+#define TIC80_NUM_SFX      32    // Maximum sound effects
+#define TIC80_NUM_TRACKS   8     // Maximum music tracks
+#define TIC80_WAVE_SIZE    32    // Waveform size in bytes
+
+// ============================================================================
+// Sound Data Storage (add to global state)
+// ============================================================================
+uint8_t tic80_waves[TIC80_NUM_WAVES][TIC80_WAVE_SIZE] = {0};
+bool tic80_has_waves = false;
+bool tic80_has_sfx = false;
+bool tic80_has_tracks = false;
+
+// ============================================================================
+// Wave Parsing
+// ============================================================================
+///
+/// Parse a single TIC-80 waveform
+///
+/// @param wave_index Waveform number (0-31)
+/// @param hex_data   Hex string of waveform data (64 chars = 32 bytes)
+///
+/// TIC-80 waveforms are 32 bytes of 8-bit signed samples
+/// Stored in cartridge as hex pairs: "00ff8040..." (64 hex chars)
+///
+void parse_tic80_wave(int wave_index, const char *hex_data)
+{
+    if (wave_index < 0 || wave_index >= TIC80_NUM_WAVES) {
+        fprintf(stderr, "Warning: Wave index %d out of range (0-%d)\n",
+                wave_index, TIC80_NUM_WAVES - 1);
+        return;
+    }
+
+    size_t hex_len = strlen(hex_data);
+
+    // Each byte = 2 hex chars, so max 64 chars for 32 bytes
+    size_t num_bytes = hex_len / 2;
+    if (num_bytes > TIC80_WAVE_SIZE) {
+        num_bytes = TIC80_WAVE_SIZE;
+    }
+
+    for (size_t i = 0; i < num_bytes; i++) {
+        char hex_byte[3] = {hex_data[i*2], hex_data[i*2+1], '\0'};
+        tic80_waves[wave_index][i] = (uint8_t)strtoul(hex_byte, NULL, 16);
+    }
+
+    tic80_has_waves = true;
+}
+
+// ============================================================================
+// SFX Parsing
+// ============================================================================
+///
+/// TIC-80 SFX Note structure (16 bits per note)
+/// Bit layout: [speed:4][volume:4][waveform:6][effect:2]
+/// Stored as 4 hex chars per note: "0123" = one note
+///
+/// @param sfx_index SFX number (0-31)
+/// @param hex_data  Hex string of SFX pattern data
+///
+void parse_tic80_sfx(int sfx_index, const char *hex_data)
+{
+    if (sfx_index < 0 || sfx_index >= TIC80_NUM_SFX) {
+        fprintf(stderr, "Warning: SFX index %d out of range (0-%d)\n",
+                sfx_index, TIC80_NUM_SFX - 1);
+        return;
+    }
+
+    size_t hex_len = strlen(hex_data);
+
+    // Each note = 4 hex chars (2 bytes), max 256 notes per SFX
+    int num_notes = hex_len / 4;
+    if (num_notes > 256) num_notes = 256;
+
+    for (int i = 0; i < num_notes; i++) {
+        char hex_note[5] = {0};
+        strncpy(hex_note, hex_data + (i * 4), 4);
+        uint16_t note_data = (uint16_t)strtoul(hex_note, NULL, 16);
+
+        // Extract note fields
+        uint8_t speed    = (note_data >> 12) & 0x0F;   // Bits 15-12
+        uint8_t volume   = (note_data >> 8) & 0x0F;    // Bits 11-8
+        uint8_t wave_idx = (note_data >> 2) & 0x3F;    // Bits 7-2
+        uint8_t effect   = note_data & 0x03;           // Bits 1-0
+
+        // TODO: Store SFX note data for later synthesis
+        // tic80_sfx[sfx_index].notes[i] = {speed, volume, wave_idx, effect};
+    }
+
+    tic80_has_sfx = true;
+}
+
+// ============================================================================
+// Track Parsing
+// ============================================================================
+///
+/// Parse a single TIC-80 music track
+///
+/// @param track_index Track number (0-7)
+/// @param hex_data   Hex string of track pattern data
+///
+/// TIC-80 track format is similar to SFX but with additional
+/// channel/tempo information
+///
+void parse_tic80_track(int track_index, const char *hex_data)
+{
+    if (track_index < 0 || track_index >= TIC80_NUM_TRACKS) {
+        fprintf(stderr, "Warning: Track index %d out of range (0-%d)\n",
+                track_index, TIC80_NUM_TRACKS - 1);
+        return;
+    }
+
+    // TODO: Implement track parsing
+    // Similar to SFX but with multi-channel data
+
+    tic80_has_tracks = true;
+}
+
+// ============================================================================
+// TIC-80 Section Detection - Handle <WAVES>, <SFX>, <TRACKS> tags
+// ============================================================================
+
+// Check if line is a TIC-80 section start tag: -- <SECTION>
+bool is_tic80_section_start(const char *line, char *section_name, size_t name_size) {
+    if (strncmp(line, "-- <", 4) != 0) return false;
+
+    char *start = strchr(line, '<');
+    char *end = strchr(line, '>');
+    if (!start || !end) return false;
+
+    size_t len = end - start - 1;
+    if (len >= name_size) return false;
+
+    strncpy(section_name, start + 1, len);
+    section_name[len] = '\0';
+
+    return true;
+}
+
+// Check if line is a TIC-80 section end tag: -- </SECTION>
+bool is_tic80_section_end(const char *line, const char *section_name) {
+    char expected[64];
+    snprintf(expected, sizeof(expected), "-- </%s>", section_name);
+    return strncmp(line, expected, strlen(expected)) == 0;
 }

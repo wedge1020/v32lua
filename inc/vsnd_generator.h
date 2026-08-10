@@ -6,7 +6,7 @@
 // VSND File Header
 typedef struct
 {
-    char      magic[8];     // "V32-VSND"
+    char      magic[9];     // "V32-VSND"
     uint32_t  sample_rate;  // 44100
     uint32_t  num_samples;
     uint32_t  num_channels; // 1=mono, 2=stereo
