@@ -24,7 +24,7 @@
  * @param format Printf-style format string for the assembly line
  * @param ...    Variable arguments for the format string
  */
-void emit_asm(const char *format, ...) {
+void  emit_asm (const char *format, ...) {
     char raw_buf[EMIT_BUFFER_SIZE];
     va_list args;
     va_start(args, format);

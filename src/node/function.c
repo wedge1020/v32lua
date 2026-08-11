@@ -54,29 +54,32 @@ void  node_function_def (ASTNode *node)
     pop_function_context();
 }
 
+// ============================================================================
+// FUNCTION CALL: f(x, y, z) or obj:method(a, b)
+//
+// Strategy:
+//   1. Try hardware/builtin intrinsic first (fast path)
+//   2. Resolve target function (direct or method call)
+//   3. Evaluate and push arguments right-to-left (C ABI convention)
+//   4. Push implicit 'self' for method calls (last, so it's at [BP+2])
+//   5. Execute call and handle return value
+//
+// REGISTER FIX: Changed from allocate_pinned_register() to allocate_register()
+// + lock_register(). This prevents target_reg from blocking ALL register
+// allocation during argument evaluation, which was causing register exhaustion
+// in nested calls (e.g., format_result() inside ipairs loops).
+//
+// The target register is still protected (locked), but can be spilled if
+// absolutely necessary, unlike pinned registers which can NEVER be spilled.
+//
+// Registers used:
+//   - target_reg: Function pointer (LOCKED - won't be reused for args)
+//   - table_reg: Table for method calls (spilled after lookup)
+//   - arg_reg: Temporary for each argument evaluation
+//   - pad_reg: For padding missing arguments
+// ============================================================================
 void node_function_call(ASTNode *node, int dest_reg)
 {
-    // =========================================================================
-    // FUNCTION CALL: f(x, y, z) or obj:method(a, b)
-    //
-    // Strategy:
-    //   1. Try hardware/builtin intrinsic first (fast path)
-    //   2. Resolve target function (direct or method call)
-    //   3. Evaluate and push arguments right-to-left (C ABI convention)
-    //   4. Push implicit 'self' for method calls (last, so it's at [BP+2])
-    //   5. Execute call and handle return value
-    //
-    // CRITICAL FIX: target_reg is now ALLOCATED PINNED to prevent reuse
-    // during argument generation. This eliminates the need to spill/reload
-    // the function pointer, which was causing the [BP-20] vs [BP-1] corruption.
-    //
-    // Registers used:
-    //   - target_reg: Function pointer (PINNED - won't be reused for args)
-    //   - table_reg: Table for method calls (spilled after lookup)
-    //   - arg_reg: Temporary for each argument evaluation
-    //   - pad_reg: For padding missing arguments
-    // =========================================================================
-
     // -------------------------------------------------------------------------
     // STEP 0: Hardware & Builtin Intrinsic Fast Path
     // -------------------------------------------------------------------------
@@ -85,6 +88,9 @@ void node_function_call(ASTNode *node, int dest_reg)
         return; // Intrinsic handled - skip standard call generation
     }
 
+    // -------------------------------------------------------------------------
+    // STEP 0.5: Check for Undeclared Functions
+    // -------------------------------------------------------------------------
     SymbolNode *target_sym = NULL;
     const char *func_name = NULL;
 
@@ -99,10 +105,7 @@ void node_function_call(ASTNode *node, int dest_reg)
         }
     }
 
-    // If not an intrinsic, C native, or resolvable symbol → ERROR
-    //if (!try_emit_call_intrinsic(node, dest_reg) &&
-    //    !is_c_native_function(target_sym) &&
-    //    !target_sym) {
+    // If not an intrinsic or resolvable symbol -> ERROR
     if (!try_emit_call_intrinsic(node, dest_reg) &&
         !target_sym) {
 
@@ -112,7 +115,7 @@ void node_function_call(ASTNode *node, int dest_reg)
     }
 
     // -------------------------------------------------------------------------
-    // STEP 0.5: FFI Integration - Check for C Native Functions
+    // STEP 0.75: Full Symbol Resolution for FFI
     // -------------------------------------------------------------------------
     target_sym = NULL;
 
@@ -139,15 +142,17 @@ void node_function_call(ASTNode *node, int dest_reg)
     bool is_c_call = (target_sym != NULL && target_sym->is_c_native == 1);
 
     // -------------------------------------------------------------------------
-    // STEP 1: Allocate Target Register
+    // STEP 1: Allocate and Resolve Target Function Pointer
     // -------------------------------------------------------------------------
-    // ✅ FIX: Use allocate_pinned_register() to prevent reuse during arg eval
-    // This eliminates the need to spill/reload the function pointer entirely.
-    // Pinned registers are skipped in allocate_register(), so they won't be
-    // reused for argument evaluation.
+    // REGISTER FIX: Use allocate_register() + lock_register() instead of
+    // allocate_pinned_register(). This allows the allocator to spill this
+    // register if absolutely necessary during argument evaluation, while still
+    // preventing normal reuse. Pinned registers can NEVER be spilled, which
+    // was causing the exhaustion issue.
     // -------------------------------------------------------------------------
     int total_arg_count = 0;
-    int target_reg = allocate_pinned_register();  // ✅ PINNED - won't be reused
+    int target_reg = allocate_register();  // NOT pinned - allows emergency spilling
+    lock_register(target_reg);             // Still protected from normal reuse
     int table_reg = -1; // Only used for method calls
 
     // -------------------------------------------------------------------------
@@ -190,14 +195,13 @@ void node_function_call(ASTNode *node, int dest_reg)
         // Clean up key register
         unlock_register(key_reg);
 
-        // ✅ Spill table_reg but NOT target_reg (target is pinned!)
+        // Spill table_reg but NOT target_reg (target is still locked)
         // Method lookup is done, but we still need the method pointer in target_reg
         spill_register(table_reg);
     } else {
         // Direct function call: foo() or module.func()
         if (!is_c_call) {
-            // Standard Lua function - resolve target directly into pinned register
-            // ✅ No spill needed - target_reg is pinned and won't be reused
+            // Standard Lua function - resolve target directly into locked register
             generate_asm(node->as.call.target, target_reg);
         }
         // For C calls, target_reg is unused (we call by name)
@@ -259,7 +263,9 @@ void node_function_call(ASTNode *node, int dest_reg)
 
         emit_asm("    ; --- Pushing explicit arguments Right-to-Left ---\n");
 
-        // Push in reverse order: Arg N, Arg N-1, ..., Arg 1
+        // REGISTER FIX: Because target_reg is only LOCKED (not pinned),
+        // argument evaluation can now reuse other registers or even spill
+        // target_reg if absolutely necessary. This prevents exhaustion.
         for (int i = explicit_arg_count - 1; i >= 0; i--) {
             int arg_reg = allocate_register();
             mark_register_live(arg_reg, 2);
@@ -286,7 +292,7 @@ void node_function_call(ASTNode *node, int dest_reg)
     if (node->as.call.is_method_call) {
         emit_asm("    ; --- Pushing implicit 'self' (Top of arg stack) ---\n");
 
-        // ✅ Ensure table_reg is loaded from its spill slot
+        // Ensure table_reg is loaded from its spill slot
         ensure_in_register(table_reg);
 
         emit_asm("PUSH R%d ; Arg 1: self\n", table_reg);
@@ -299,7 +305,9 @@ void node_function_call(ASTNode *node, int dest_reg)
     // -------------------------------------------------------------------------
     if (is_c_call) {
         // --- Direct C ABI Call ---
-        unlock_pinned_register(target_reg);  // ✅ Unpin before cleanup
+        // Unlock target_reg before cleanup (no longer needed)
+        unlock_register(target_reg);
+
         emit_asm("    ; --- Direct C ABI Call ---\n");
         emit_asm("CALL _%s ; Call C symbol directly\n", target_sym->name);
 
@@ -313,12 +321,12 @@ void node_function_call(ASTNode *node, int dest_reg)
             emit_asm("OR R%d, 0x7FF00000 ; Apply Lua Number tag\n", dest_reg);
         }
     } else {
-        // --- Lua Function Call (via __builtin_exec) ---
-        // ✅ FIX: No reload needed - target_reg is pinned and still holds the
-        // function pointer. Just move it to R0 for __builtin_exec.
+        // --- Lua Function Call (via __builtin_exec trampoline) ---
+        // Move target to R0 for __builtin_exec (validation & execution)
         emit_asm("MOV R0, R%d ; Prepare boxed target for validation\n", target_reg);
 
-        unlock_pinned_register(target_reg);  // ✅ Clean up pinned register
+        // Unlock target_reg now that we've moved its value to R0
+        unlock_register(target_reg);
 
         // Call the Lua function executor (handles tag validation & tail-call)
         emit_asm("CALL __builtin_exec ; Validate and execute\n");

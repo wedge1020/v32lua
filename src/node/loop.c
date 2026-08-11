@@ -235,7 +235,7 @@ void  node_for_numeric (ASTNode *node)
     pop_scope ();
 }
 
-// ===========================================================================
+// ============================================================================
 // GENERIC FOR LOOP: for k, v in pairs(t) do ... end
 //
 // Strategy:
@@ -245,7 +245,12 @@ void  node_for_numeric (ASTNode *node)
 //   4. Generate while(true) loop that calls iterator_func(state, key)
 //   5. Check for nil to break
 //   6. Assign loop variables and execute body
-// ===========================================================================
+//
+// FIX 2: When executing the loop body, temporarily unpin the loop control
+// registers (iter_reg, state_reg, key_reg) to allow the body code to reuse
+// them. This prevents register exhaustion when the loop body contains function
+// calls or complex expressions that need many registers.
+// ============================================================================
 void node_for_generic(ASTNode *node)
 {
     int label_id = get_next_label();
@@ -283,14 +288,13 @@ void node_for_generic(ASTNode *node)
     // [SP-2] = initial key
     // But we need to capture these into variables
 
-    // For now, assume the iterator expression is a call that returns 3 values
-    // We'll store them in local variables
-
-    // Create local variable names for the iterator state
+    // ---------------------------------------------------------------------
+    // STEP 2.5: Store iterator results in local variables
+    // ---------------------------------------------------------------------
     char iter_func_var[64], state_var[64], key_var[64];
-    snprintf(iter_func_var, sizeof(iter_func_var), "__iter_func_%d", label_id);
-    snprintf(state_var, sizeof(state_var), "__iter_state_%d", label_id);
-    snprintf(key_var, sizeof(key_var), "__iter_key_%d", label_id);
+    snprintf(iter_func_var, sizeof(iter_func_var), "__for_iter_%d", label_id);
+    snprintf(state_var, sizeof(state_var), "__for_state_%d", label_id);
+    snprintf(key_var, sizeof(key_var), "__for_key_%d", label_id);
 
     // Register locals
     register_local(iter_func_var);
@@ -313,6 +317,13 @@ void node_for_generic(ASTNode *node)
     emit_asm("MOV R0, [SP-2]     ; Load initial key\n");
     emit_asm("MOV %s, R0         ; Store initial key\n", access_key);
     emit_asm("IADD SP, 2         ; Clean up 2 stack values\n");
+
+    // FIX 2: Now that we've stored the loop control values in stack locals,
+    // we can UNPIN the registers we used for setup. The values are safe in
+    // the stack variables, so we don't need to keep them in registers.
+    unlock_pinned_register(iter_reg);
+    unlock_pinned_register(state_reg);
+    unlock_pinned_register(key_reg);
 
     // ---------------------------------------------------------------------
     // STEP 3: Create local variables for loop vars
@@ -345,7 +356,8 @@ void node_for_generic(ASTNode *node)
     // ---------------------------------------------------------------------
     // STEP 5: Check if key is nil (end of iteration)
     // ---------------------------------------------------------------------
-    int check_reg = allocate_pinned_register();
+    // FIX 2: Use a temporary register for the check, don't pin it
+    int check_reg = allocate_register();
     mark_register_live(check_reg, 5);
 
     get_variable_access_string(key_var, access_key);
@@ -355,8 +367,22 @@ void node_for_generic(ASTNode *node)
 
     // ---------------------------------------------------------------------
     // STEP 6: Assign loop variables from iterator results
-    // Call: iterator_func(state, current_key) -> returns new_key, value1, value2, ...
+    // Call: iterator_func(state, current_key)
     // ---------------------------------------------------------------------
+    // FIX 2: Temporarily unpin any loop-related registers before evaluating body
+    // This allows the body to reuse registers without causing exhaustion
+    //
+    // Save current pinning state for loop control registers
+    int saved_pinned[NUM_GPRS];
+    for (int i = 0; i < NUM_GPRS; i++) {
+        saved_pinned[i] = register_pinned[i];
+    }
+
+    // Unpin all registers temporarily for body evaluation
+    for (int i = 0; i < NUM_GPRS; i++) {
+        register_pinned[i] = 0;
+    }
+
     // Push arguments for iterator call: state, current_key
     get_variable_access_string(state_var, access_state);
     emit_asm("PUSH %s           ; Arg 2: state\n", access_state);
@@ -377,45 +403,44 @@ void node_for_generic(ASTNode *node)
     emit_asm("MOV %s, R0        ; Save new key for next iteration\n", access_key);
 
     // Assign loop variables from stack
-    for (int i = 0; i < var_count; i++) {
-        if (i == 0) {
-            // First variable gets the key (already in R0)
-            char var_access[128];
-            get_variable_access_string(var_names[i], var_access);
-            emit_asm("MOV %s, R0    ; %s = key\n", var_access, var_names[i]);
-        } else {
-            // Subsequent variables get values from stack
-            char var_access[128];
-            get_variable_access_string(var_names[i], var_access);
-            emit_asm("MOV R0, [SP+%d]    ; Load value %d from stack\n", i-1, i);
-            emit_asm("MOV %s, R0        ; %s = value\n", var_access, var_names[i]);
-        }
+    for (int i = 0; i < var_count && i < 3; i++) {
+        // Pop value from stack (values are pushed in order: key, val1, val2...)
+        emit_asm("MOV R0, [SP-%d]     ; Load value %d from stack\n", i, i);
+        emit_asm("MOV %s, R0        ; Assign to loop variable '%s'\n",
+                 var_names[i], var_names[i]);
     }
 
-    // Clean up stack (we consumed var_count values)
-    if (var_count > 1) {
-        emit_asm("IADD SP, %d       ; Clean up %d values from stack\n", var_count - 1, var_count - 1);
-    }
+    // Clean up iterator results from stack
+    emit_asm("IADD SP, %d       ; Clean up %d values from stack\n",
+             var_count > 0 ? var_count : 1, var_count > 0 ? var_count : 1);
 
     // ---------------------------------------------------------------------
-    // STEP 7: Execute loop body
+    // STEP 7: Execute Loop Body
     // ---------------------------------------------------------------------
+    // FIX 2: Body is evaluated with unpinned registers, allowing it to
+    // reuse registers that were previously pinned for loop control
     push_scope();
     generate_block(node->as.for_generic.body);
     pop_scope();
 
-    // ---------------------------------------------------------------------
-    // STEP 8: Jump back to start
-    // ---------------------------------------------------------------------
+    // Jump back to start
     emit_asm("JMP %s\n", start_label);
 
     // ---------------------------------------------------------------------
-    // STEP 9: Loop end label
+    // STEP 8: Loop end label
     // ---------------------------------------------------------------------
     emit_asm("%s:\n", end_label);
 
+    // Restore pinning state after loop body
+    for (int i = 0; i < NUM_GPRS; i++) {
+        register_pinned[i] = saved_pinned[i];
+    }
+
     // Clean up
-    free(var_names);
     pop_loop();
     pop_scope();
+
+    if (var_names != NULL) {
+        free(var_names);
+    }
 }
