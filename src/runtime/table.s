@@ -226,7 +226,7 @@ __builtin_table_set:
 
     ;; Key is positive integer: Update contiguous length if key <= current length
     MOV  R5, [R1+1]          ; R5 = Current contiguous length
-	MOV  R6, R4
+    MOV  R6, R4
     IGT  R6, R5              ; ✅ Use R6 for comparison (preserves R4)
     JT   R6, __builtin_table_set_nil_done ; key > length → no change
 
@@ -862,15 +862,15 @@ __builtin_table_len:
     MOV  R0, [BP+2]    ; Table pointer
     CALL __unbox_table   ; R0 = raw table header address
 
-    ;; --- VALIDATION: Reject null and ROM addresses ---
-	MOV  R1, R0
+    ;; --- VALIDATION: Use R1 and R2 (scratch) to preserve R0 ---
+    MOV  R1, R0          ; Copy for null check
     IEQ  R1, 0
     JT   R1, __table_len_invalid
-    MOV  R1, R0
-    IGE  R1, 0x20000000  ; Check if address is in ROM (>= V32_CART_PAGE)
-    JT   R1, __table_len_invalid
 
-    ;; --- Safe to read table header ---
+    MOV  R2, R0          ; Copy for ROM check (R0 still intact!)
+    IGE  R2, 0x20000000
+    JT   R2, __table_len_invalid
+
     MOV  R0, [R0+1]     ; Read array length from header word 1
     CIF  R0             ; Convert to float
     MOV  SP, BP
