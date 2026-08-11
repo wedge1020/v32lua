@@ -617,8 +617,22 @@ void generate_program (ASTNode *head)
     {
         emit_asm ("__start:\n");
         emit_asm ("CALL __function_TIC ; Execute game loop tick\n");
+        emit_asm ("__pause:\n");
+        emit_asm ("IN R0, INP_GamepadButtonStart\n");
+        emit_asm ("IGT R0, 0  ; check if START is pressed\n");
         emit_asm ("WAIT\n");
+        emit_asm ("JT  R0, __pause_setup\n");
         emit_asm ("JMP __start\n");
+        emit_asm ("__pause_setup:\n");
+        emit_asm ("MOV R1, 295\n");
+        emit_asm ("PUSH R1\n");
+        emit_asm ("MOV R1, 170\n");
+        emit_asm ("PUSH R1\n");
+        emit_asm ("MOV R1, __const_str_pause\n");
+        emit_asm ("PUSH R1\n");
+        emit_asm ("CALL __builtin_print\n");
+        emit_asm ("IADD SP, 3\n");
+        emit_asm ("JMP __pause\n");
     }
 
     emit_asm ("HLT                  ; Safe-guard halt\n");

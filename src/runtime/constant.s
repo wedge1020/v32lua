@@ -22,6 +22,9 @@ __const_str_function:
 __const_str_err_call_nil:
     string "RUNTIME ERROR: ATTEMPT TO CALL NIL"
 
+__const_str_pause:
+    string "PAUSED"
+
 ;; ===========================================================================
 ;; Math Constants for Lua Library
 ;; ===========================================================================

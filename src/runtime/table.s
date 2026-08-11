@@ -200,6 +200,47 @@ __builtin_table_set:
     MOV  R2, [BP+3]          ; R2 = Search Key (preserved throughout routine)
     MOV  R3, [BP+2]          ; R3 = Value to store (preserved throughout routine)
 
+    ;; --- SPECIAL CASE: Setting to nil (removes key, updates contiguous length) ---
+    MOV  R4, R3              ; Copy value to R4
+    IEQ  R4, BOXED_NIL
+    JF   R4, __builtin_table_set_not_nil ; Not nil → normal processing
+
+    ;; --- Value IS nil: Check if key is a positive integer ---
+    MOV  R4, R2              ; R4 = Key
+    AND  R4, NAN_VALUE
+    IEQ  R4, NAN_VALUE
+    JT   R4, __builtin_table_set_nil_done ; Tagged → skip (hash keys TODO)
+
+    ;; Check for integer (no fractional part)
+    MOV  R4, R2
+    CFI  R4                  ; R4 = integer key
+    MOV  R5, R4
+    CIF  R5
+    INE  R5, R2
+    JT   R5, __builtin_table_set_nil_done ; Fractional → skip
+
+    ;; Check key >= 1
+    MOV  R5, R4
+    ILT  R5, 1
+    JT   R5, __builtin_table_set_nil_done ; < 1 → skip
+
+    ;; Key is positive integer: Update contiguous length if key <= current length
+    MOV  R5, [R1+1]          ; R5 = Current contiguous length
+	MOV  R6, R4
+    IGT  R6, R5              ; ✅ Use R6 for comparison (preserves R4)
+    JT   R6, __builtin_table_set_nil_done ; key > length → no change
+
+    ;; key <= length → set length to key-1
+    ISUB R4, 1               ; R4 = key - 1
+    MOV  [R1+1], R4          ; Update contiguous length
+    JMP  __builtin_table_set_done
+
+__builtin_table_set_nil_done:
+    ;; Skip storing nil (key removed from table)
+    JMP  __builtin_table_set_done
+
+__builtin_table_set_not_nil:
+
     ;; --- 1. STRICT TABLE TYPE VALIDATION ---
     ;; Ensure R1 is actually a Table before touching memory!
     MOV  R4, R1
@@ -246,13 +287,14 @@ __builtin_table_set:
     IADD R6, R4              ; Memory Address = ArrayPtr + (Key - 1)
     MOV  [R6], R3            ; Write Value directly into contiguous array slot!
 
-    ;; --- UPDATE LENGTH IF KEY EXCEEDS CURRENT LENGTH ---
-    MOV  R7, [R1+1]          ; R7 = Current length
-    IADD R4, 1               ; Restore R4 to 1-based key (was decremented above)
-    MOV  R9, R4
-    IGT  R9, R7              ; Is Key > Current Length?
-    JF   R9, __builtin_table_set_done
-    MOV  [R1+1], R4          ; Update length to new key
+    ;; --- UPDATE LENGTH ONLY FOR CONTIGUOUS KEYS (length + 1) ---
+    MOV  R7, [R1+1]          ; R7 = Current contiguous length
+    IADD R7, 1               ; R7 = length + 1
+    MOV  R8, R4
+    IEQ  R8, R7              ; ✅ Compare R8 vs R7, result in R8 (preserves R4)
+    JF   R8, __builtin_table_set_done
+    MOV  [R1+1], R4          ; ✅ R4 still contains the key value
+
     JMP  __builtin_table_set_done
 
 ;; --- REALLOCATION PATH: Key exceeds array capacity ---
@@ -291,12 +333,13 @@ __builtin_table_set_hash_check_int:
     ILT  R8, 1
     JT   R8, __builtin_table_set_hash_store ; < 1
 
-    ;; Key is positive integer - UPDATE LENGTH
-    MOV  R8, [R1+1]          ; R8 = Current length
+    ;; Key is positive integer - UPDATE LENGTH (contiguous only)
+    MOV  R8, [R1+1]          ; R8 = Current contiguous length
+    IADD R8, 1               ; R8 = length + 1
     MOV  R9, R7
-    IGT  R9, R8              ; Is Key > Length?
+    IEQ  R9, R8              ; ✅ Compare R9 vs R8, result in R9 (preserves R7)
     JF   R9, __builtin_table_set_hash_store
-    MOV  [R1+1], R7          ; Update length to key
+    MOV  [R1+1], R7          ; ✅ R7 still contains the key value
 
 __builtin_table_set_hash_store:
     ;; Resume original hash storage logic:
@@ -818,9 +861,25 @@ __builtin_table_len:
     MOV  BP, SP
     MOV  R0, [BP+2]    ; Table pointer
     CALL __unbox_table   ; R0 = raw table header address
-;    PUSH R0             ; Save unboxed address on stack
+
+    ;; --- VALIDATION: Reject null and ROM addresses ---
+	MOV  R1, R0
+    IEQ  R1, 0
+    JT   R1, __table_len_invalid
+    MOV  R1, R0
+    IGE  R1, 0x20000000  ; Check if address is in ROM (>= V32_CART_PAGE)
+    JT   R1, __table_len_invalid
+
+    ;; --- Safe to read table header ---
     MOV  R0, [R0+1]     ; Read array length from header word 1
     CIF  R0             ; Convert to float
+    MOV  SP, BP
+    POP  BP
+    RET
+
+__table_len_invalid:
+    MOV  R0, 0
+    CIF  R0
     MOV  SP, BP
     POP  BP
     RET
