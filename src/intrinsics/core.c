@@ -401,7 +401,7 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     //////////////////////////////////////////////////////////////////////////
 
     // check if strings are used (include runtime routines)
-    if (strcmp (func_name, "string.")     == 0)
+    if (strncmp (func_name, "string.", 7) == 0)
     {
         runtime_req.needs_strings          = true;
     }
@@ -432,38 +432,38 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     //////////////////////////////////////////////////////////////////////////
 
     // check if math is used (include runtime routines)
-    if (strcmp (func_name, "math.") == 0)
+    if (strncmp (func_name, "math.", 5) == 0)
     {
-        runtime_req.needs_math        = true;
+        runtime_req.needs_math           = true;
     }
 
     // math.sin(x)
-    if (strcmp(func_name, "math.sin") == 0) {
+    if (strcmp(func_name, "math.sin")   == 0) {
         return emit_math_sin_intrinsic(node, dest_reg);
     }
 
     // math.abs(x)
-    if (strcmp(func_name, "math.abs") == 0) {
+    if (strcmp(func_name, "math.abs")   == 0) {
         return emit_math_abs_intrinsic(node, dest_reg);
     }
 
     // math.ceil(x)
-    if (strcmp(func_name, "math.ceil") == 0) {
+    if (strcmp(func_name, "math.ceil")  == 0) {
         return emit_math_ceil_intrinsic(node, dest_reg);
     }
 
     // math.acos(x)
-    if (strcmp(func_name, "math.acos") == 0) {
+    if (strcmp(func_name, "math.acos")  == 0) {
         return emit_math_acos_intrinsic(node, dest_reg);
     }
 
     // math.log(x)
-    if (strcmp(func_name, "math.log") == 0) {
+    if (strcmp(func_name, "math.log")   == 0) {
         return emit_math_log_intrinsic(node, dest_reg);
     }
 
     // math.pow(x, y)
-    if (strcmp(func_name, "math.pow") == 0) {
+    if (strcmp(func_name, "math.pow")   == 0) {
         return emit_math_pow_intrinsic(node, dest_reg);
     }
 
@@ -478,7 +478,7 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     }
 
     // math.sqrt(x)
-    if (strcmp(func_name, "math.sqrt") == 0) {
+    if (strcmp(func_name, "math.sqrt")   == 0) {
         return emit_math_sqrt_intrinsic(node, dest_reg);
     }
 
