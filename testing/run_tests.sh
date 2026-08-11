@@ -11,9 +11,9 @@
 UNIT=$(echo "${1}" | cut -d'.' -f1)
 COMPILE="../bin/v32lua"
 COMPILE="v32lua"
-CFLAGS="-w"
+CFLAGS="-w -g"
 ASSEMBLE="assemble"
-AFLAGS=
+AFLAGS="-g program"
 PACKAGE="packrom"
 PFLAGS=
 RUNEVAL="v32sim"
