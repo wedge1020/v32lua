@@ -108,9 +108,11 @@ __builtin_len:
 
     ;; --- Type check: Is it a STRING (ROM or RAM)? ---
     MOV  R1, R0
+    AND  R1, BOXED_DATA      ; Extract tag bits
     IEQ  R1, BOXED_ROMSTRING
     JT   R1, __builtin_len_string
     MOV  R1, R0
+    AND  R1, BOXED_DATA      ; Extract tag bits
     IEQ  R1, BOXED_RAMSTRING
     JT   R1, __builtin_len_string
 

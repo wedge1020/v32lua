@@ -762,9 +762,10 @@ __builtin_table_len:
     PUSH BP
     MOV  BP, SP
     MOV  R0, [BP+2]    ; Table pointer
-    CALL __unbox_table
-    MOV  R0, [R1+1]    ; Return array length
-    CIF  R0            ; Convert to float
+    CALL __unbox_table   ; R0 = raw table header address
+;    PUSH R0             ; Save unboxed address on stack
+    MOV  R0, [R0+1]     ; Read array length from header word 1
+    CIF  R0             ; Convert to float
     MOV  SP, BP
     POP  BP
     RET
