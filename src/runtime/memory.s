@@ -89,3 +89,46 @@ __builtin_unm:
     POP  BP 
     RET 
 
+;; ---------------------------------------------------------------------------
+;; Length Operator Dispatch (#): Returns length as IEEE 754 Float in R0
+;; Incoming Stack: [BP+2] = Target Value
+;; Handles: strings, tables, and returns 0 for other types
+;; ---------------------------------------------------------------------------
+__builtin_len:
+    PUSH BP
+    MOV  BP, SP
+
+    MOV  R0, [BP+2]          ; Load argument
+
+    ;; --- Type check: Is it a TABLE? ---
+    MOV  R1, R0
+    AND  R1, BOXED_DATA      ; Extract tag bits
+    IEQ  R1, BOXED_TABLE
+    JT   R1, __builtin_len_table
+
+    ;; --- Type check: Is it a STRING (ROM or RAM)? ---
+    MOV  R1, R0
+    IEQ  R1, BOXED_ROMSTRING
+    JT   R1, __builtin_len_string
+    MOV  R1, R0
+    IEQ  R1, BOXED_RAMSTRING
+    JT   R1, __builtin_len_string
+
+    ;; --- Default: Not a string or table (number, boolean, nil, function) ---
+    MOV  R0, 0               ; Return 0 as integer
+    CIF  R0                  ; Convert to float
+    JMP  __builtin_len_done
+
+__builtin_len_string:
+    CALL __builtin_string_len  ; String length handler
+    JMP  __builtin_len_done
+
+__builtin_len_table:
+    CALL __builtin_table_len    ; Table length handler
+    ; R0 already contains float result from __builtin_table_len
+
+__builtin_len_done:
+    MOV  SP, BP
+    POP  BP
+    RET
+

@@ -300,11 +300,11 @@ __eq_return_false:
 ;; Incoming Stack: [BP+2] = Target Value 
 ;; ---------------------------------------------------------------------------
 ;; ===========================================================================
-;; Runtime Built-in: __builtin_len
+;; Runtime Built-in: __builtin_string_len
 ;; ABI: Arg 1 at [BP+2] (Stack Parameter), Caller cleans up.
 ;; Returns: R0 = Length of string as a Lua Float.
 ;; ===========================================================================
-__builtin_len:
+__builtin_string_len:
     PUSH BP
     MOV  BP, SP
 
@@ -318,15 +318,15 @@ __builtin_len:
 
     ;; 3. Calculate string length
     MOV  R1, 0                  ; R1 = Character counter
-__len_loop:
+__string_len_loop:
     MOV  R2, [R0]               ; Read character from address
     IEQ  R2, 0                  ; Is it null terminator?
-    JT   R2, __len_done
+    JT   R2, __string_len_done
     IADD R0, 1                  ; Advance pointer
     IADD R1, 1                  ; Increment counter
-    JMP  __len_loop
+    JMP  __string_len_loop
 
-__len_done:
+__string_len_done:
     ;; 4. Convert integer count in R1 to a Vircon32 Float in R0
     MOV  R0, R1
     CIF  R0                     ; Cast Integer to Float (Standard Lua number)
@@ -671,7 +671,7 @@ __string_byte_validate:
     ;; Validate indices are within bounds
     ;; Get string length
     MOV  R0, R1
-    CALL __builtin_len
+    CALL __builtin_string_len
     CIF  R0                 ; Already a float
     MOV  R4, R0            ; R4 = length as float
     CFI  R4                 ; Convert to integer
