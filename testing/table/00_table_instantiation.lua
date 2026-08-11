@@ -1,3 +1,4 @@
+--#title "v32lua table instantiation unit test"
 --@ Vircon32 Lua Table Instantiation Unit Test
 --@ Tests ONLY table creation and initialization syntax.
 --@ Results are stored in global variables for automated memory scraping.

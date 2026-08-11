@@ -1,3 +1,4 @@
+--#title "v32lua table array operations unit test"
 --@ Vircon32 Lua Table Array Operations Unit Test
 --@ Tests ONLY array part operations (integer keys >= 1).
 --@ Results stored in global variables for automated memory scraping.
@@ -57,6 +58,7 @@ function main()
 end
 
 --[[
+
 === EXPECTED OUTPUT ===
 Global Variables:
 number_result1: 100
@@ -70,4 +72,5 @@ string_result2: "only"
 string_result3: "nil"
 number_result7: 50
 number_result8: 10
-]]
+
+--]]

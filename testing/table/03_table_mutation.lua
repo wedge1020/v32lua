@@ -1,3 +1,4 @@
+--#title "v32lua table mutation unit test"
 --@ Vircon32 Lua Table Mutation Unit Test
 --@ Tests ONLY table value modification and deletion.
 --@ Results stored in global variables for automated memory scraping.
@@ -64,6 +65,7 @@ function main()
 end
 
 --[[
+
 === EXPECTED OUTPUT ===
 Global Variables:
 string_result1: "new1"
@@ -79,4 +81,5 @@ boolean_result1: true
 number_result5: 30
 string_result6: "fresh"
 number_result6: 0
-]]
+
+--]]

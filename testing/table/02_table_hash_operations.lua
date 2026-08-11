@@ -1,3 +1,4 @@
+--#title "v32lua table hash operations unit test"
 --@ Vircon32 Lua Table Hash Operations Unit Test
 --@ Tests ONLY hash part operations (non-integer keys).
 --@ Results stored in global variables for automated memory scraping.
@@ -65,6 +66,7 @@ function main()
 end
 
 --[[
+
 === EXPECTED OUTPUT ===
 Global Variables:
 string_result1: "hero"
@@ -82,4 +84,5 @@ string_result10: "value"
 string_result11: "yes"
 boolean_result1: true
 boolean_result2: true
-]]
+
+--]]
