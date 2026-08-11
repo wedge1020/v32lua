@@ -425,6 +425,13 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         return emit_tostring_intrinsic(node, dest_reg);
     }
 
+	// string.format(format, ...)
+    if (strcmp(func_name, "string.format") == 0)
+    {
+        runtime_req.needs_strings = true;
+        return emit_string_format_intrinsic(node, dest_reg);
+    }
+
     //////////////////////////////////////////////////////////////////////////
     //
     // math library intrinsics

@@ -120,3 +120,49 @@ bool emit_tostring_intrinsic(ASTNode *node, int dest_reg) {
     unlock_pinned_register(arg_reg);
     return true;
 }
+
+/**
+ * Emits assembly for the string.format() intrinsic.
+ * Supports Lua 5.1 format specifiers.
+ */
+bool emit_string_format_intrinsic(ASTNode *node, int dest_reg) {
+    ASTNode *arg = node->as.call.args_head;
+    if (!arg) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+            "string.format() requires at least 1 argument (format string)");
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: string.format(format, ...) ---\n");
+
+    int fmt_reg = allocate_pinned_register();
+    generate_asm(arg, fmt_reg);
+    emit_asm("PUSH R%d             ; Arg 1: Format string\n", fmt_reg);
+
+    // Push format arguments
+    arg = arg->next;
+    int arg_count = 0;
+    while (arg) {
+        int arg_reg = allocate_pinned_register();
+        generate_asm(arg, arg_reg);
+        emit_asm("PUSH R%d             ; Format arg %d\n", arg_reg, arg_count + 1);
+        unlock_pinned_register(arg_reg);
+        arg = arg->next;
+        arg_count++;
+    }
+
+    // Push terminator
+    emit_asm("PUSH R0             ; BOXED_NIL terminator\n");
+    emit_asm("MOV R0, BOXED_NIL\n");
+    emit_asm("PUSH R0\n");
+
+    emit_asm("CALL __builtin_string_format\n");
+    emit_asm("IADD SP, %d           ; Clean up arguments\n", arg_count + 2);
+
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R0         ; Store result\n", dest_reg);
+    }
+
+    unlock_pinned_register(fmt_reg);
+    return true;
+}

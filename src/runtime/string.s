@@ -418,19 +418,19 @@ __tostring_passthrough:
 __tostring_table:
     MOV  SP, BP
     POP  BP
-    JMP  __format_table_address 
+    JMP  __string_format_table_address 
 
 __tostring_function:
     MOV  SP, BP
     POP  BP
-    JMP  __format_function_address 
+    JMP  __string_format_function_address 
     
 __tostring_done:
     MOV  SP, BP
     POP  BP
     RET
 
-__format_table_address:
+__string_format_table_address:
     PUSH BP
     MOV  BP, SP
 
@@ -441,7 +441,7 @@ __format_table_address:
     POP  BP
     RET
 
-__format_function_address:
+__string_format_function_address:
     PUSH BP
     MOV  BP, SP
 
@@ -775,3 +775,205 @@ __string_char_oom:
     MOV  SP, BP
     POP  BP
     RET
+
+;; ===========================================================================
+;; Built-in: string.format(s, ...)
+;; Incoming Stack: [BP+2] = format string, [BP+3...] = args, BOXED_NIL terminated
+;; Returns: R0 = formatted string (boxed RAM string)
+;; ===========================================================================
+;__builtin_string_format:
+;    PUSH BP
+;    MOV  BP, SP
+;
+;    ;; Load and unbox format string
+;    MOV  R0, [BP+2]
+;    CALL __unbox_string
+;    MOV  R1, R0              ; R1 = format string pointer
+;
+;    ;; Calculate format length for buffer estimation
+;    MOV  R2, 0
+;__string_format_calc_len:
+;    MOV  R3, [R1, R2]
+;    IEQ  R3, 0
+;    JT   R3, __string_format_len_done
+;    IADD R2, 1
+;    JMP  __string_format_calc_len
+;__string_format_len_done:
+;    MOV  R0, R2
+;    IADD R0, R2
+;    IADD R0, R2            ; *3 for expansion
+;    IADD R0, 64           ; + safety margin
+;    PUSH R0
+;    CALL __malloc
+;    IADD SP, 1
+;    MOV  R4, R0            ; R4 = result buffer
+;    IEQ  R4, 0
+;    JT   R4, __string_format_oom
+;
+;    MOV  R5, R4            ; R5 = write pointer
+;    MOV  R1, [BP+2]
+;    CALL __unbox_string
+;    MOV  R1, R0            ; R1 = format string
+;
+;    MOV  R6, BP
+;    IADD R6, 3            ; R6 = arg pointer
+;
+;__string_format_loop:
+;    MOV  R3, [R1]
+;    IEQ  R3, 0
+;    JT   R3, __string_format_done
+;
+;    IEQ  R3, 37           ; '%'
+;    JF   R3, __string_format_copy_char
+;
+;    IADD R1, 1
+;    MOV  R3, [R1]
+;    IEQ  R3, 37
+;    JT   R3, __string_format_literal_percent
+;
+;    MOV  R0, [R6]
+;    IADD R6, 1
+;
+;    IEQ  R3, 100          ; 'd'
+;    JT   R3, __string_format_handle_di
+;    IEQ  R3, 105          ; 'i'
+;    JT   R3, __string_format_handle_di
+;    IEQ  R3, 117          ; 'u'
+;    JT   R3, __string_format_handle_u
+;    IEQ  R3, 102          ; 'f'
+;    JT   R3, __string_format_handle_f
+;    IEQ  R3, 101          ; 'e'
+;    JT   R3, __string_format_handle_efg
+;    IEQ  R3, 69           ; 'E'
+;    JT   R3, __string_format_handle_efg
+;    IEQ  R3, 103          ; 'g'
+;    JT   R3, __string_format_handle_efg
+;    IEQ  R3, 71           ; 'G'
+;    JT   R3, __string_format_handle_efg
+;    IEQ  R3, 115          ; 's'
+;    JT   R3, __string_format_handle_s
+;    IEQ  R3, 99           ; 'c'
+;    JT   R3, __string_format_handle_c
+;    IEQ  R3, 113          ; 'q'
+;    JT   R3, __string_format_handle_q
+;    JMP  __string_format_write_char
+;
+;__string_format_literal_percent:
+;    MOV  R3, 37
+;    JMP  __string_format_write_char
+;
+;__string_format_handle_di:
+;    IEQ  R0, BOXED_NIL
+;    JT   R0, __string_format_arg_nil
+;    CFI  R0
+;    PUSH R0
+;    CALL __builtin_ftoa
+;    IADD SP, 1
+;    MOV  R7, R0
+;    JMP  __string_format_copy_string
+;
+;__string_format_handle_u:
+;    IEQ  R0, BOXED_NIL
+;    JT   R0, __string_format_arg_nil
+;    CFI  R0
+;    PUSH R0
+;    CALL __builtin_ftoa
+;    IADD SP, 1
+;    MOV  R7, R0
+;    JMP  __string_format_copy_string
+;
+;__string_format_handle_f:
+;    IEQ  R0, BOXED_NIL
+;    JT   R0, __string_format_arg_nil
+;    PUSH R0
+;    CALL __builtin_ftoa
+;    IADD SP, 1
+;    MOV  R7, R0
+;    JMP  __string_format_copy_string
+;
+;__string_format_handle_efg:
+;    IEQ  R0, BOXED_NIL
+;    JT   R0, __string_format_arg_nil
+;    PUSH R0
+;    CALL __builtin_ftoa
+;    IADD SP, 1
+;    MOV  R7, R0
+;    JMP  __string_format_copy_string
+;
+;__string_format_handle_s:
+;    IEQ  R0, BOXED_NIL
+;    JT   R0, __string_format_arg_nil
+;    CALL __unbox_string
+;    MOV  R7, R0
+;    JMP  __string_format_copy_string
+;
+;__string_format_handle_c:
+;    IEQ  R0, BOXED_NIL
+;    JT   R0, __string_format_arg_nil
+;    CFI  R0
+;    AND  R0, 255
+;    MOV  [R5], R0
+;    IADD R5, 1
+;    IADD R1, 1
+;    JMP  __string_format_loop
+;
+;__string_format_handle_q:
+;    IEQ  R0, BOXED_NIL
+;    JT   R0, __string_format_arg_nil
+;    CALL __unbox_string
+;    MOV  R7, R0
+;    MOV  R3, 34
+;    MOV  [R5], R3
+;    IADD R5, 1
+;    CALL __string_format_copy_string
+;    MOV  R3, 34
+;    MOV  [R5], R3
+;    IADD R5, 1
+;    JMP  __string_format_loop
+;
+;__string_format_arg_nil:
+;    MOV  R3, 110
+;    MOV  [R5], R3
+;    IADD R5, 1
+;    MOV  R3, 105
+;    MOV  [R5], R3
+;    IADD R5, 1
+;    MOV  R3, 108
+;    MOV  [R5], R3
+;    IADD R5, 1
+;    IADD R1, 1
+;    JMP  __string_format_loop
+;
+;__string_format_copy_string:
+;    MOV  R3, [R7]
+;    IEQ  R3, 0
+;    JT   R3, __string_format_after_copy
+;    MOV  [R5], R3
+;    IADD R5, 1
+;    IADD R7, 1
+;    JMP  __string_format_copy_string
+;__string_format_after_copy:
+;    IADD R1, 1
+;    JMP  __string_format_loop
+;
+;__string_format_copy_char:
+;    MOV  [R5], R3
+;    IADD R5, 1
+;__string_format_write_char:
+;    IADD R1, 1
+;    JMP  __string_format_loop
+;
+;__string_format_done:
+;    MOV  R3, 0
+;    MOV  [R5], R3
+;    MOV  R0, R4
+;    OR   R0, BOXED_RAMSTRING
+;    MOV  SP, BP
+;    POP  BP
+;    RET
+;
+;__string_format_oom:
+;    MOV  R0, BOXED_NIL
+;    MOV  SP, BP
+;    POP  BP
+;    RET

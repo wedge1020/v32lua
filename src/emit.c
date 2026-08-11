@@ -535,7 +535,7 @@ int   emit_variable_map (void)
     fprintf (out(), "%%define  BOXED_TOMBSTONE          0xFFC00003 ; future feature\n");
     fprintf (out(), "%%define  BOXED_PAYLOAD            0x003FFFFF\n");
     fprintf (out(), "%%define  TABLE_ARRAYSIZE          0x0000FFFF\n");
-    fprintf (out(), "%%define  HEAP_POINTER             0\n");
+    fprintf (out(), "%%define  HEAP_POINTER             0x00000000\n");
     /*
     if (runtime_req.needs_tic80)
     {
@@ -548,14 +548,14 @@ int   emit_variable_map (void)
     while (curr != NULL)
     {
         if (curr->is_function)
-            fprintf(out(), "%%define  func_%-19s %d\n", curr->name, curr->location);
+            fprintf(out(), "%%define  func_%-19s 0x%.8X\n", curr->name, curr->location);
         else
-            fprintf(out(), "%%define  var_%-20s %d\n",  curr->name, curr->location);
+            fprintf(out(), "%%define  var_%-20s 0x%.8X\n",  curr->name, curr->location);
         lines_printed    = lines_printed + 1;
         curr = curr->next;
     }
-    fprintf(out(), "\n;; Highest used global RAM address: %d\n", next_ram_address - 1);
-    fprintf(out(), ";; Dynamic heap will start at runtime address: %d\n\n", next_ram_address);
+    fprintf(out(), "\n;; Highest used global RAM address: 0x%.8X\n", next_ram_address - 1);
+    fprintf(out(), ";; Dynamic heap will start at runtime address: 0x%.8X\n\n", next_ram_address);
     lines_printed    = lines_printed + 2;
     return (lines_printed);
 }
