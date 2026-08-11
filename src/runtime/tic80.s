@@ -301,6 +301,16 @@ __builtin_tic80_btn:
     MOV   R2, [BP+2]
     CFI   R2 ; convert button ID to int
 
+    ;; --- isolate gamepad #, distill R2 to the button 0-7 id on gamepad
+    MOV   R3, R2
+    IDIV  R3, 8  ; R3 will contain gamepad id
+    OUT   INP_SelectedGamepad, R3
+    IMOD  R2, 8  ; R2 now just contains button id on gamepad (0-7)
+
+    ;; If invalid button ID (gamepad id > 3), return false
+    IGT   R3, 3
+    JT    R3, _tic80_btn_false
+
     ;; Compare and jump to specific hardware port read
     ;; TIC-80 uses a unified button mapping, but we'll map to Vircon32 gamepad
     MOV   R1, R2
@@ -328,8 +338,7 @@ __builtin_tic80_btn:
     IEQ   R1, 7
     JT    R1, _tic80_btn_y
 
-    ;; If invalid button ID (8-31 not mapped to Vircon32), return false
-    JMP   _tic80_btn_false
+    JMP   _tic80_btn_false ; in the unlikely event we reach this, return false
 
 _tic80_btn_up:
     IN    R2, INP_GamepadUp
@@ -394,13 +403,19 @@ __builtin_tic80_btnp:
     PUSH  BP
     MOV   BP, SP
 
-    ;; --- 1. Select Gamepad (TIC-80 doesn't have player parameter, use player 0) ---
-    MOV   R1, 0
-    OUT   INP_SelectedGamepad, R1
-
-    ;; --- 2. Evaluate Button ID ---
+    ;; --- 1. Evaluate Button ID ---
     MOV   R2, [BP+2]
     CFI   R2
+
+    ;; --- isolate gamepad #, distill R2 to the button 0-7 id on gamepad
+    MOV   R3, R2
+    IDIV  R3, 8  ; R3 will contain gamepad id
+    OUT   INP_SelectedGamepad, R3
+    IMOD  R2, 8  ; R2 now just contains button id on gamepad (0-7)
+
+    ;; If invalid button ID (gamepad id > 3), return false
+    IGT   R3, 3
+    JT    R3, _tic80_btnp_false
 
     ;; Compare and jump to specific hardware port read
     MOV   R1, R2
@@ -687,11 +702,11 @@ __builtin_tic80_mget:
     MOV   R1, [BP+2]        ; x
     MOV   R2, [BP+3]        ; y
 
-	;; Snap to integer tile coordinates
-	FADD  R1, 0.5
-	CFI   R1                ; R1 = round(x)
-	FADD  R2, 0.5
-	CFI   R2                ; R2 = round(y)
+    ;; Snap to integer tile coordinates
+    FADD  R1, 0.5
+    CFI   R1                ; R1 = round(x)
+    FADD  R2, 0.5
+    CFI   R2                ; R2 = round(y)
 
     ;; Snap to 0.1-pixel grid, then round to integer
 ;   FMUL  R1, 10.0          ; x * 10 (float)
@@ -776,9 +791,9 @@ __builtin_tic80_mset:
     ;; X: Load coordinate argument
     MOV   R1, [BP+2]        ; x
 
-	;; Snap to integer tile coordinates
-	FADD  R1, 0.5
-	CFI   R1                ; R1 = round(x)
+    ;; Snap to integer tile coordinates
+    FADD  R1, 0.5
+    CFI   R1                ; R1 = round(x)
 
     ;; X: Snap to 0.1-pixel grid, then round to integer
 ;   FMUL  R1, 10.0          ; x * 10 (float)
@@ -788,8 +803,8 @@ __builtin_tic80_mset:
 
     ;; Y: Load coordinate argument
     MOV   R2, [BP+3]        ; y
-	FADD  R2, 0.5
-	CFI   R2                ; R2 = round(y)
+    FADD  R2, 0.5
+    CFI   R2                ; R2 = round(y)
 
     ;; Y: Snap to 0.1-pixel grid, then round to integer
 ;   FMUL  R2, 10.0          ; y * 10 (float)
@@ -797,9 +812,9 @@ __builtin_tic80_mset:
 ;   CFI   R2                ; → integer (round(y*10))
 ;   IDIV  R2, 10            ; integer division: round(y*10) / 10
 
-	;; load value argument
+    ;; load value argument
     MOV   R3, [BP+4]        ; value
-	CFI   R3
+    CFI   R3
 
     ;; Load ACTUAL map dimensions for bounds checking
     MOV   R4, var_TIC80_MAP_WIDTH
