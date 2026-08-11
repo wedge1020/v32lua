@@ -122,10 +122,12 @@ __builtin_len:
     JMP  __builtin_len_done
 
 __builtin_len_string:
+	PUSH R0
     CALL __builtin_string_len  ; String length handler
     JMP  __builtin_len_done
 
 __builtin_len_table:
+	PUSH R0
     CALL __builtin_table_len    ; Table length handler
     ; R0 already contains float result from __builtin_table_len
 
