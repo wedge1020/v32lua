@@ -299,6 +299,11 @@ void  generate_asm (ASTNode *node, int  dest_reg)
             g_current_lua_line = node->line_number; // Assumes your parser sets node->line_number
         }
 
+        if (g_verbose_debug && node != NULL) {
+            fprintf(stderr, "\n[debug] generate_asm(): Processing node type %d at line %d\n",
+                    node->type, node->line_number);
+        }
+
         switch (node -> type)
         {
             case NODE_WHILE:

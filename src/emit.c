@@ -224,6 +224,11 @@ void emit_asm(const char *format, ...) {
             strncpy (last_emitted_src,  src  ? src  : "", sizeof (last_emitted_src) - 1);
         }
 
+        // Immediate stderr output in verbose debug mode
+        if (g_verbose_debug) {
+            fprintf(stderr, "[debug] emit_asm(): %s\n", raw_buf);
+        }
+
         // =========================================================================
         // UPDATE REGISTER LIVE TRACKING (only for registers actually touched)
         // =========================================================================

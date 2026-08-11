@@ -52,14 +52,24 @@ void spill_register(int reg) {
     if (register_pinned[reg]) return;
 
     int slot = get_register_spill_slot(reg);
+
     spill_slot_for_reg[reg] = slot;  // Overwrite with new slot
     emit_store_to_spill(reg, slot);
     register_inventory[reg] = 0;
+
+    if (g_verbose_debug) {
+        fprintf(stderr, "[debug] spill_register(): Spilling R%d to stack slot %d\n", reg, slot);
+    }
 }
 
 // FIXED: Check for non-zero instead of > 0
 int ensure_in_register(int reg) {
     if (reg < 0 || reg >= NUM_GPRS) return -1;
+
+    if (g_verbose_debug && spill_slot_for_reg[reg] != 0) {
+        fprintf(stderr, "[debug] ensure_in_register(): Reloading R%d from stack slot %d\n",
+                reg, spill_slot_for_reg[reg]);
+    }
 
     // Reload if there's ANY spilled value, regardless of inventory state
     if (spill_slot_for_reg[reg] != 0) {
@@ -105,6 +115,19 @@ void update_register_live(int reg) {
 // Intelligent Allocation with Liveness
 // ============================================================================
 int allocate_register(void) {
+
+    if (g_verbose_debug) {
+        fprintf(stderr, "\n[debug] allocate_register() Inventory: ");
+        for (int i = 0; i < NUM_GPRS; i++) {
+            fprintf(stderr, "%d", register_inventory[i]);
+        }
+        fprintf(stderr, " | Pinned: ");
+        for (int i = 0; i < NUM_GPRS; i++) {
+            fprintf(stderr, "%d", register_pinned[i]);
+        }
+        fprintf(stderr, "\n");
+    }
+
     // Phase 1: Free register
     for (int i = 1; i < NUM_GPRS; i++) {
         if (!register_inventory[i] && !register_pinned[i]) {
@@ -148,7 +171,23 @@ int allocate_register(void) {
         }
     }
 
-    if (best_candidate == -1) {
+    if (best_candidate == -1)
+    {
+        if (g_verbose_debug)
+        {
+            fprintf(stderr, "\n[debug] allocate_register() ERROR: Register inventory exhausted!\n");
+            fprintf(stderr, "[debug] Current Lua line: %d\n", yylineno);
+            fprintf(stderr, "[debug] Function: %s\n", get_current_function_name());
+            fprintf(stderr, "[debug] Inventory: ");
+            for (int i = 0; i < NUM_GPRS; i++) {
+                fprintf(stderr, "R%d=%d ", i, register_inventory[i]);
+            }
+            fprintf(stderr, "\n[debug] Pinned: ");
+            for (int i = 0; i < NUM_GPRS; i++) {
+                fprintf(stderr, "R%d=%d ", i, register_pinned[i]);
+            }
+            fprintf(stderr, "\n");
+        }
         compiler_error(ERR_INTERNAL, -1, "Register inventory exhausted!");
         return -1;
     }
