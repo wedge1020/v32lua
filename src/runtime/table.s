@@ -98,11 +98,15 @@ __builtin_table_get:
     ILT  R4, 1               ; Destructive test: Is integer key < 1?
     JT   R4, __builtin_table_get_fallback ; Zero or negative keys go to fallback!
 
-    ;; FAST-PATH CHECK 4: Is Key within Array Capacity?
-    MOV  R5, [R1+1]          ; R5 = Array Capacity (from Table Header Word 1)
+    ;; FAST-PATH CHECK 4: Is Key within CAPACITY AND array allocated?
+    MOV  R5, [R1]            ; R5 = Flags from Table Header Word 0
+    AND  R5, TABLE_ARRAYSIZE ; Extract capacity from lower bits
+    MOV  R6, [R1+2]          ; R6 = Array Data Pointer
+    IEQ  R6, 0               ; Is array NULL?
+    JT   R6, __builtin_table_get_fallback ; If no array, use hash lookup
     MOV  R4, R3              ; Copy integer index R3 to scratch R4
-    IGT  R4, R5              ; Destructive test: Is Key > Capacity?
-    JT   R4, __builtin_table_get_fallback ; Out-of-bounds integers go to fallback!
+    IGT  R4, R5              ; Is Key > Capacity?
+    JT   R4, __builtin_table_get_fallback
 
     ;; --- FAST-PATH EXECUTION: O(1) Contiguous Array Read ---
     MOV  R5, [R1+2]          ; R5 = Array Data Pointer (from Table Header Word 2)
@@ -229,23 +233,74 @@ __builtin_table_set:
     ILT  R5, 1               ; Destructive test: Is integer key < 1?
     JT   R5, __builtin_table_set_fallback ; Zero or negative keys go to fallback!
     
-    ;; FAST-PATH CHECK 4: Is Key within Length?
-    MOV  R6, [R1+1]          ; R6 = Length (from Table Header Word 1)
+    ;; --- FAST-PATH CHECK 4: Is Key within CAPACITY? (not Length!) ---
+    MOV  R6, [R1]            ; R6 = Flags from Table Header Word 0
+    AND  R6, TABLE_ARRAYSIZE ; Extract capacity from lower bits
     MOV  R7, R4              ; Copy integer index R4 to scratch R7
     IGT  R7, R6              ; Destructive test: Is Key > Capacity?
-    JT   R7, __builtin_table_set_fallback ; Out-of-bounds integers go to fallback!
+    JT   R7, __builtin_table_set_reallocate ; Need array reallocation!
 
     ;; --- FAST-PATH EXECUTION: O(1) Contiguous Array Write ---
     MOV  R6, [R1+2]          ; R6 = Array Data Pointer (from Table Header Word 2)
     ISUB R4, 1               ; Convert 1-based Lua index to 0-based memory offset
     IADD R6, R4              ; Memory Address = ArrayPtr + (Key - 1)
     MOV  [R6], R3            ; Write Value directly into contiguous array slot!
+
+    ;; --- UPDATE LENGTH IF KEY EXCEEDS CURRENT LENGTH ---
+    MOV  R7, [R1+1]          ; R7 = Current length
+    IADD R4, 1               ; Restore R4 to 1-based key (was decremented above)
+    MOV  R9, R4
+    IGT  R9, R7              ; Is Key > Current Length?
+    JF   R9, __builtin_table_set_done
+    MOV  [R1+1], R4          ; Update length to new key
     JMP  __builtin_table_set_done
+
+;; --- REALLOCATION PATH: Key exceeds array capacity ---
+__builtin_table_set_reallocate:
+    ;; TODO: Implement proper array reallocation
+    MOV  R6, [R1+3]          ; R6 = Base Hash Data Pointer
+    MOV  R4, R2              ; Restore R4 = Key
+    JMP  __builtin_table_set_fallback
 
 ;; --- FALLBACK EXECUTION: Association List Storage ---
 __builtin_table_set_fallback:
     ;; Note: R1 is already unboxed! Read directly from Table Header Word 3.
     MOV  R6, [R1+3]          ; R6 = Base Hash Data Pointer
+
+    ;; --- UPDATE LENGTH FOR POSITIVE INTEGER KEYS ---
+    MOV  R7, R2              ; R7 = Key
+    AND  R7, NAN_VALUE
+    IEQ  R7, NAN_VALUE
+    JF   R7, __builtin_table_set_hash_check_int ; Not tagged, might be integer
+
+    ;; Tagged key - go to hash storage without length update
+    JMP  __builtin_table_set_hash_store
+
+__builtin_table_set_hash_check_int:
+    ;; Check if key is a positive integer
+    MOV  R7, R2
+    CFI  R7                  ; Convert to integer
+    MOV  R8, R7
+    CIF  R8
+    MOV  R9, R8
+    INE  R9, R2
+    JT   R9, __builtin_table_set_hash_store ; Has fractional part
+
+    ;; Check if integer >= 1
+    MOV  R8, R7
+    ILT  R8, 1
+    JT   R8, __builtin_table_set_hash_store ; < 1
+
+    ;; Key is positive integer - UPDATE LENGTH
+    MOV  R8, [R1+1]          ; R8 = Current length
+    MOV  R9, R7
+    IGT  R9, R8              ; Is Key > Length?
+    JF   R9, __builtin_table_set_hash_store
+    MOV  [R1+1], R7          ; Update length to key
+
+__builtin_table_set_hash_store:
+    ;; Resume original hash storage logic:
+    MOV  R4, R6              ; Test on scratch R4 to preserve R6 pointer
 
     ;; 1. Ensure Base Hash Buffer exists (Test on scratch R4)
     MOV  R4, R6
