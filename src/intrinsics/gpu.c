@@ -83,7 +83,7 @@ bool emit_gpu_draw_intrinsic(ASTNode *node, int dest_reg)
     // CASE D: Dynamic Variable -> Runtime evaluation with nil-check
     // =====================================================================
     int mode_reg = allocate_register();
-	register_pinned[mode_reg] = 1;
+    register_pinned[mode_reg] = 1;
     generate_asm(arg_mode, mode_reg);
 
     int label_id = get_next_label();
@@ -94,7 +94,7 @@ bool emit_gpu_draw_intrinsic(ASTNode *node, int dest_reg)
     snprintf(end_label,    sizeof(end_label),    "__%s_gpu_draw_end_%d", ctx, label_id);
 
     int scratch = allocate_register();
-	register_pinned[scratch] = 1;
+    register_pinned[scratch] = 1;
 
     // Check for runtime nil (no argument provided)
     emit_asm("MOV R%d, R%d\n",          scratch, mode_reg);
@@ -118,8 +118,8 @@ bool emit_gpu_draw_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("MOV R%d, BOXED_NIL ; return nil\n", dest_reg);
     }
 
-	register_pinned[mode_reg] = 0;
-	register_pinned[scratch] = 0;
+    register_pinned[mode_reg] = 0;
+    register_pinned[scratch] = 0;
 
     unlock_register(scratch);
     unlock_register(mode_reg);
@@ -160,7 +160,7 @@ void emit_gpu_clear_intrinsic(ASTNode *node, int dest_reg) {
 
     if (arg != NULL) {
         int color_reg = allocate_register();
-		register_pinned[color_reg] = 1;
+        register_pinned[color_reg] = 1;
         if (arg->type == NODE_STRING) {
             const char *color_name = arg->as.string_val.value;
             unsigned int color_hex = 0x000000FF; // Default Opaque Black
@@ -182,7 +182,7 @@ void emit_gpu_clear_intrinsic(ASTNode *node, int dest_reg) {
             generate_asm(arg, color_reg);
         }
         emit_asm ("OUT GPU_ClearColor, R%d\n", color_reg);
-		register_pinned[color_reg] = 0;
+        register_pinned[color_reg] = 0;
         unlock_register(color_reg);
     }
 

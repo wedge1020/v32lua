@@ -140,52 +140,52 @@ int  main (int  argc, char** argv)
     fclose(yyin);
 
     // After parsing, before semantic analysis
-	if (runtime_req.needs_tic80) {
-		process_all_tic80_sections();
+    if (runtime_req.needs_tic80) {
+        process_all_tic80_sections();
 
-		if (tic80_has_assets()) {
-			log_stage(3, "tic80 assets parsing", verbose);
+        if (tic80_has_assets()) {
+            log_stage(3, "tic80 assets parsing", verbose);
 
-			char base_path[256];
-			strncpy(base_path, output_filename, sizeof(base_path));
-			char *last_dot = strrchr(base_path, '.');
-			if (last_dot) *last_dot = '\0';
+            char base_path[256];
+            strncpy(base_path, output_filename, sizeof(base_path));
+            char *last_dot = strrchr(base_path, '.');
+            if (last_dot) *last_dot = '\0';
 
-			generate_all_tic80_colorkey_textures(base_path);
+            generate_all_tic80_colorkey_textures(base_path);
 
-			// Register all 17 textures in CORRECT order (0-16)
-			CARTresource *prev = NULL;
-			for (int tex_idx = 0; tex_idx < 17; tex_idx++) {
-				CARTresource *res = malloc(sizeof(CARTresource));
-				res->id = next_texture_id++;
-				res->var_name = malloc(32);
-				snprintf(res->var_name, 32, "tic80_spritesheet_%d", tex_idx);
-				res->filename = malloc(strlen(base_path) + 32);
-				snprintf(res->filename, strlen(base_path) + 32,
-						 "%s_colorkey_%d", base_path, tex_idx);
-				res->next = NULL;  // Append, don't prepend
+            // Register all 17 textures in CORRECT order (0-16)
+            CARTresource *prev = NULL;
+            for (int tex_idx = 0; tex_idx < 17; tex_idx++) {
+                CARTresource *res = malloc(sizeof(CARTresource));
+                res->id = next_texture_id++;
+                res->var_name = malloc(32);
+                snprintf(res->var_name, 32, "tic80_spritesheet_%d", tex_idx);
+                res->filename = malloc(strlen(base_path) + 32);
+                snprintf(res->filename, strlen(base_path) + 32,
+                         "%s_colorkey_%d", base_path, tex_idx);
+                res->next = NULL;  // Append, don't prepend
 
-				if (prev) {
-					prev->next = res;
-				} else {
-					textures_head = res;
-				}
-				prev = res;
-			}
-		}
-	}
+                if (prev) {
+                    prev->next = res;
+                } else {
+                    textures_head = res;
+                }
+                prev = res;
+            }
+        }
+    }
 
     // --- Stage 4: Semantic Analyzer ---
     log_stage(4, "analyzer", verbose);
     init_global_scope();
 
-	if (runtime_req.needs_tic80)
-	{
-		// TIC-80 map buffer pointer - must be registered before prepass
-		register_global ("TIC80_MAP_BUFFER_PTR");
-		register_global ("TIC80_MAP_WIDTH");
-		register_global ("TIC80_MAP_HEIGHT");
-	}
+    if (runtime_req.needs_tic80)
+    {
+        // TIC-80 map buffer pointer - must be registered before prepass
+        register_global ("TIC80_MAP_BUFFER_PTR");
+        register_global ("TIC80_MAP_WIDTH");
+        register_global ("TIC80_MAP_HEIGHT");
+    }
     
     // Perform full symbol pre-pass before code generation
     register_all_globals_prepass(root_node);

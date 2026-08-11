@@ -94,7 +94,7 @@ bool emit_spu_cmd_intrinsic(ASTNode *node, int dest_reg)
     // CASE D: Dynamic Variable -> Runtime evaluation with nil-check
     // =====================================================================
     int mode_reg = allocate_register();
-	register_pinned[mode_reg] = 1;
+    register_pinned[mode_reg] = 1;
     generate_asm(arg_mode, mode_reg);
 
     int label_id = get_next_label();
@@ -105,7 +105,7 @@ bool emit_spu_cmd_intrinsic(ASTNode *node, int dest_reg)
     snprintf(end_label,    sizeof(end_label),    "__%s_spu_cmd_end_%d", ctx, label_id);
 
     int scratch = allocate_register();
-	register_pinned[scratch] = 1;
+    register_pinned[scratch] = 1;
 
     // Check for runtime nil
     emit_asm("MOV R%d, R%d\n",          scratch, mode_reg);
@@ -129,8 +129,8 @@ bool emit_spu_cmd_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("MOV R%d, BOXED_NIL ; return nil\n", dest_reg);
     }
 
-	register_pinned[mode_reg] = 0;
-	register_pinned[scratch] = 0;
+    register_pinned[mode_reg] = 0;
+    register_pinned[scratch] = 0;
 
     unlock_register(scratch);
     unlock_register(mode_reg);

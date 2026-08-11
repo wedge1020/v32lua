@@ -401,19 +401,28 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     //////////////////////////////////////////////////////////////////////////
 
     // check if strings are used (include runtime routines)
-    if (strcmp (func_name, "string\.")   == 0)
+    if (strcmp (func_name, "string.")     == 0)
     {
-        runtime_req.needs_strings         = true;
+        runtime_req.needs_strings          = true;
     }
 
     // string.byte(s [, i [, j]])
-    if (strcmp(func_name, "string.byte") == 0) {
+    if (strcmp (func_name, "string.byte") == 0)
+    {
         return emit_string_byte_intrinsic(node, dest_reg);
     }
 
     // string.char(b1, b2, ..., bn)
-    if (strcmp(func_name, "string.char") == 0) {
+    if (strcmp (func_name, "string.char") == 0)
+    {
         return emit_string_char_intrinsic(node, dest_reg);
+    }
+
+    // Core type conversion
+    if (strcmp (func_name, "tostring")    == 0)
+    {
+        runtime_req.needs_strings          = true;
+        return emit_tostring_intrinsic(node, dest_reg);
     }
 
     //////////////////////////////////////////////////////////////////////////
@@ -423,7 +432,7 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     //////////////////////////////////////////////////////////////////////////
 
     // check if math is used (include runtime routines)
-    if (strcmp (func_name, "math\.") == 0)
+    if (strcmp (func_name, "math.") == 0)
     {
         runtime_req.needs_math        = true;
     }

@@ -9,7 +9,7 @@
 void  emit_get_gamepad_inputs_intrinsic (int  dest_reg)
 {
     int  bit_reg  = allocate_register();
-	register_pinned[bit_reg] = 1;
+    register_pinned[bit_reg] = 1;
     emit_asm ("    ;; --- Intrinsic: Read Gamepad Inputs, collate into one word ---\n");
     emit_asm ("MOV R%d, 0\n", dest_reg);
     emit_asm ("IN R%d, %s\n", bit_reg, "INP_GamepadLeft");
@@ -57,6 +57,6 @@ void  emit_get_gamepad_inputs_intrinsic (int  dest_reg)
     emit_asm ("OR R%d, R%d\n", dest_reg, bit_reg);
     emit_asm ("    ;; --- Intrinsic: Cast to Lua Float ---\n");
     emit_asm ("CIF R%d\n", dest_reg);
-	register_pinned[bit_reg] = 0;
+    register_pinned[bit_reg] = 0;
     unlock_register (bit_reg);
 }

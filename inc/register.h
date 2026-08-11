@@ -40,5 +40,6 @@ void  reset_spill_slots         (int);  // per-function spilling
 void  mark_register_live        (int,  int);
 void  update_register_live      (int);
 void  update_all_registers_live (void);
+void  update_if_register        (const char *);
 
 #endif

@@ -1,3 +1,5 @@
+--#api pico8
+--
 function main()
 	ioports.gpu.clear("black")
 

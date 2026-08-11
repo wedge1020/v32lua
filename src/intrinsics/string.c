@@ -89,3 +89,34 @@ bool emit_string_char_intrinsic(ASTNode *node, int dest_reg) {
 
     return true;
 }
+
+bool emit_tostring_intrinsic(ASTNode *node, int dest_reg) {
+    // Validate exactly 1 argument
+    ASTNode *arg = node->as.call.args_head;
+    if (!arg || arg->next != NULL) {
+        compiler_error(ERR_SYNTAX, node->line_number,
+            "tostring() expects exactly 1 argument");
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: tostring(value) ---\n");
+
+    // Evaluate argument into a pinned register
+    int arg_reg = allocate_pinned_register();
+    generate_asm(arg, arg_reg);
+
+    // Push argument onto stack for __builtin_tostring
+    emit_asm("    PUSH R%d             ; Arg 1: Value to convert\n", arg_reg);
+
+    // Call the runtime routine
+    emit_asm("    CALL __builtin_tostring\n");
+    emit_asm("    IADD SP, 1           ; Clean up 1 argument\n");
+
+    // Store result if needed
+    if (dest_reg != 0) {
+        emit_asm("    MOV R%d, R0         ; Store string result\n", dest_reg);
+    }
+
+    unlock_pinned_register(arg_reg);
+    return true;
+}

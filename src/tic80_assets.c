@@ -36,7 +36,7 @@ int  count_tic80_assets (TIC80AssetData *head)
 {
     int count    = 0;
     while (head != NULL)
-	{
+    {
         count++;
         head     = head -> next;
     }

@@ -80,14 +80,41 @@ void node_function_call(ASTNode *node, int dest_reg)
     // -------------------------------------------------------------------------
     // STEP 0: Hardware & Builtin Intrinsic Fast Path
     // -------------------------------------------------------------------------
-    if (try_emit_call_intrinsic(node, dest_reg)) {
+    if (try_emit_call_intrinsic(node, dest_reg))
+    {
         return; // Intrinsic handled - skip standard call generation
+    }
+
+    SymbolNode *target_sym = NULL;
+    const char *func_name = NULL;
+
+    if (node->as.call.target->type == NODE_IDENTIFIER) {
+        func_name = node->as.call.target->as.id.name;
+        target_sym = resolve_symbol(func_name);
+    } else {
+        char path_buf[256] = {0};
+        if (resolve_static_path(node->as.call.target, path_buf)) {
+            func_name = path_buf;
+            target_sym = resolve_symbol(func_name);
+        }
+    }
+
+    // If not an intrinsic, C native, or resolvable symbol → ERROR
+    //if (!try_emit_call_intrinsic(node, dest_reg) &&
+    //    !is_c_native_function(target_sym) &&
+    //    !target_sym) {
+    if (!try_emit_call_intrinsic(node, dest_reg) &&
+        !target_sym) {
+
+        compiler_error(ERR_SEMANTIC, node->line_number,
+            "Undeclared function: '%s'", func_name ? func_name : "<unknown>");
+        return;
     }
 
     // -------------------------------------------------------------------------
     // STEP 0.5: FFI Integration - Check for C Native Functions
     // -------------------------------------------------------------------------
-    SymbolNode *target_sym = NULL;
+    target_sym = NULL;
 
     // Resolve the target symbol
     if (node->as.call.target->type == NODE_IDENTIFIER) {

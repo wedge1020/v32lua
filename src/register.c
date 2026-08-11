@@ -179,3 +179,37 @@ void update_all_registers_live(void) {
         update_register_live(i);
     }
 }
+
+//////////////////////////////////////////////////////////////////////////////
+//
+// Helper to update liveness only if the operand is a valid register
+//
+void  update_if_register (const char *operand)
+{
+    //////////////////////////////////////////////////////////////////////////
+    //
+    // Safety check for NULL pointers
+    //
+    if (operand                               != NULL)
+    {
+        int reg_idx = -1;
+
+        //////////////////////////////////////////////////////////////////////
+        //
+        // 2. Try to parse the string as "R" followed by an integer.
+        // sscanf returns the number of successfully matched items.
+        //
+        if (sscanf (operand, "R%d", &reg_idx) == 1)
+        {
+            //////////////////////////////////////////////////////////////////
+            //
+            // 3. Boundary check to ensure it's a valid GPR before updating
+            //
+            if ((reg_idx                      >= 0) &&
+                (reg_idx                      <  NUM_GPRS))
+            {
+                update_register_live (reg_idx);
+            }
+        }
+    }
+}

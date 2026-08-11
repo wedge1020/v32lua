@@ -3,6 +3,27 @@
 // In emit.c, replace all 1024-byte buffers with 8192:
 #define EMIT_BUFFER_SIZE 8192
 
+/**
+ * Emits a line of Vircon32 assembly code.
+ *
+ * This function handles:
+ * - Formatting and outputting assembly instructions
+ * - Partitioning code from comments (at first semicolon)
+ * - Tracking debug information for each emitted instruction
+ * - Isolating operands (dest and src) for external analysis
+ *
+ * For standard instructions (Case C), operands are parsed and isolated:
+ * - dest: First operand (before comma), or NULL if none exists
+ * - src: Second operand (after comma), or NULL if none exists
+ * - Both are trimmed of whitespace
+ * - Works with registers (R0-R31), immediates, dereferences ([addr]), labels, etc.
+ *
+ * Optimization code has been removed - external tool will handle optimizations.
+ * Operand isolation is preserved for external analysis.
+ *
+ * @param format Printf-style format string for the assembly line
+ * @param ...    Variable arguments for the format string
+ */
 void emit_asm(const char *format, ...) {
     char raw_buf[EMIT_BUFFER_SIZE];
     va_list args;
@@ -11,12 +32,13 @@ void emit_asm(const char *format, ...) {
     va_end(args);
 
     // =========================================================================
-    // DETECT WAIT INSTRUCTION IN MAIN()
+    // SPECIAL HANDLING: Detect WAIT instruction in main()
+    // This is preserved as it's not optimization but runtime behavior detection
     // =========================================================================
     if (strcmp(get_current_function_name(), "main") == 0) {
         // Look for the "WAIT" instruction or opcode in the raw buffer
         if (strstr(raw_buf, "WAIT") != NULL) {
-            w_mainwait  = 0;
+            w_mainwait = 0;
         }
     }
 
@@ -57,13 +79,17 @@ void emit_asm(const char *format, ...) {
     // Flag used to signal if this line updates our debug instruction mapping
     bool record_instruction = false;
 
-    // --- CASE A: Pure Comment Line ---
+    // =========================================================================
+    // CASE A: Pure Comment Line
+    // =========================================================================
     if (*code_start == '\0' && comment_ptr != NULL) {
         // Print the comment exactly as written, preserving manual layout
         fprintf(out(), "%s\n", raw_buf);
     }
-    // --- CASE B: Assembly Label ---
-    // Colon immunity achieved: we only scan the isolated code string code_start!
+    // =========================================================================
+    // CASE B: Assembly Label (contains colon)
+    // Colon immunity: we only scan the isolated code string code_start!
+    // =========================================================================
     else if (strchr(code_start, ':') != NULL) {
         record_instruction = true;
         if (comment_ptr != NULL) {
@@ -72,13 +98,17 @@ void emit_asm(const char *format, ...) {
             fprintf(out(), "%s\n", code_start);
         }
     }
-    // --- CASE C: Standard Instruction ---
+    // =========================================================================
+    // CASE C: Standard Instruction
+    // This is where we parse and isolate operands for external use
+    // =========================================================================
     else {
         record_instruction = true;
         char *opcode = code_start;
         char *operands = NULL;
         char *first_space = strpbrk(opcode, " \t");
 
+        // --- Parse opcode and operands ---
         if (first_space != NULL) {
             *first_space = '\0'; // Terminate opcode string token
             operands = first_space + 1;
@@ -87,37 +117,72 @@ void emit_asm(const char *format, ...) {
             }
         }
 
-        // --- PEEPHOLE OPTIMIZER (-O1) ---
-        char dest_buf[EMIT_BUFFER_SIZE] = {0};
-        char src_buf[EMIT_BUFFER_SIZE]  = {0};
+        // =====================================================================
+        // OPERAND ISOLATION: Extract dest and src for external analysis
+        // These variables can be used by external tools for validation, analysis,
+        // or optimization. They are set to NULL when the operand doesn't exist.
+        // =====================================================================
+        char *dest = NULL;  // First operand (destination), or NULL
+        char *src = NULL;   // Second operand (source), or NULL
 
-        if (operands != NULL) {
+        if (operands != NULL && *operands != '\0') {
             char op_copy[EMIT_BUFFER_SIZE];
             strncpy(op_copy, operands, sizeof(op_copy) - 1);
-            char *comma = strchr(op_copy, ',');
-            if (comma != NULL) {
-                *comma = '\0';
-                strcpy(dest_buf, op_copy);
-                strcpy(src_buf, comma + 1);
-                trim_spaces(dest_buf);
-                trim_spaces(src_buf);
-            }
-        }
+            op_copy[sizeof(op_copy) - 1] = '\0'; // Ensure null-termination
 
-        if (o_optflag >= 1 && dest_buf[0] != '\0' && src_buf[0] != '\0') {
-            if (strcmp(opcode, "MOV") == 0) {
-                // Rule 1: Eliminate self-moves (e.g., MOV R0, R0 or MOV [var_x], [var_x])
-                if (strcmp(dest_buf, src_buf) == 0) {
-                    return; // Suppress instruction completely!
+            char *comma = strchr(op_copy, ',');
+
+            if (comma != NULL) {
+                // Two operands: dest, src
+                *comma = '\0';
+
+                // Extract and trim destination operand
+                char *dest_start = op_copy;
+                char *dest_end = comma;
+                while (dest_end > dest_start && isspace((unsigned char)*(dest_end - 1))) {
+                    *(--dest_end) = '\0';
                 }
-                // Rule 2: Eliminate redundant memory reloads (MOV A, B followed by MOV B, A)
-                if (strcmp(last_emitted_inst, "MOV") == 0 &&
-                    strcmp(dest_buf, last_emitted_src) == 0 &&
-                    strcmp(src_buf, last_emitted_dest) == 0) {
-                    return; // Suppress redundant reload!
+                while (*dest_start && isspace((unsigned char)*dest_start)) {
+                    dest_start++;
+                }
+                if (*dest_start != '\0') {
+                    dest = dest_start;
+                }
+
+                // Extract and trim source operand
+                char *src_start = comma + 1;
+                while (*src_start && isspace((unsigned char)*src_start)) {
+                    src_start++;
+                }
+                char *src_end = src_start + strlen(src_start);
+                while (src_end > src_start && isspace((unsigned char)*(src_end - 1))) {
+                    *(--src_end) = '\0';
+                }
+                if (*src_start != '\0') {
+                    src = src_start;
+                }
+            } else {
+                // Single operand: could be dest-only (e.g., "PUSH R0") or src-only
+                // We treat it as dest for consistency, src remains NULL
+                char *single_start = op_copy;
+                char *single_end = op_copy + strlen(op_copy);
+                while (single_end > single_start && isspace((unsigned char)*(single_end - 1))) {
+                    *(--single_end) = '\0';
+                }
+                while (*single_start && isspace((unsigned char)*single_start)) {
+                    single_start++;
+                }
+                if (*single_start != '\0') {
+                    dest = single_start;
+                    // src remains NULL
                 }
             }
         }
+        // If no operands at all (e.g., "HLT", "WAIT", "RET"), both remain NULL
+
+        // =====================================================================
+        // OUTPUT: Emit the instruction with proper formatting
+        // =====================================================================
 
         // Apply auto-formatting: 4-space indent, 5-char left-aligned opcode width
         fprintf(out(), "    %-5s", opcode);
@@ -141,41 +206,41 @@ void emit_asm(const char *format, ...) {
         }
         fprintf(out(), "\n");
 
-        // --- UPDATE PEEPHOLE TRACKING STATE ---
+        // =====================================================================
+        // UPDATE TRACKING STATE: Keep for external tools if needed
+        // These global variables track the last emitted instruction for reference
+        // =====================================================================
         if (strchr(code_start, ':') != NULL ||
             strncmp(opcode, "JMP", 3) == 0 || strncmp(opcode, "JT", 2) == 0 ||
             strncmp(opcode, "JF", 2) == 0 || strncmp(opcode, "CALL", 4) == 0 ||
             strncmp(opcode, "RET", 3) == 0) {
-            // Jumps, labels, and calls break straight-line execution flow; invalidate cache!
+            // Jumps, labels, and calls break straight-line execution flow
             last_emitted_inst[0] = '\0';
             last_emitted_dest[0] = '\0';
             last_emitted_src[0] = '\0';
         } else {
-            strncpy(last_emitted_inst, opcode, sizeof(last_emitted_inst) - 1);
-            strncpy(last_emitted_dest, dest_buf, sizeof(last_emitted_dest) - 1);
-            strncpy(last_emitted_src, src_buf, sizeof(last_emitted_src) - 1);
+            strncpy (last_emitted_inst, opcode, sizeof (last_emitted_inst) - 1);
+            strncpy (last_emitted_dest, dest ? dest : "", sizeof (last_emitted_dest) - 1);
+            strncpy (last_emitted_src,  src  ? src  : "", sizeof (last_emitted_src) - 1);
         }
-    }
 
-    // Add at the end of emit_asm(), before the debug hook:
-    for (int i = 0; i < NUM_GPRS; i++) {
-        update_register_live(i);
+        // =========================================================================
+        // UPDATE REGISTER LIVE TRACKING (only for registers actually touched)
+        // =========================================================================
+        update_if_register (dest);
+        update_if_register (src);
     }
 
     // =========================================================================
     // SECTION 2: INTEGRATED DEBUG REGISTRATION HOOK
     // =========================================================================
     // Only instructions and labels count towards our active program sequence line calculations.
-    if (g_debug_mode && record_instruction && temp_debug_stream != NULL)
-    {
-        if (g_current_label[0] != '\0')
-        {
+    if (g_debug_mode && record_instruction && temp_debug_stream != NULL) {
+        if (g_current_label[0] != '\0') {
             // Log entry point step-vector with its functional label context
             fprintf(temp_debug_stream, "%d,%d,%s\n", g_temp_asm_line, g_current_lua_line, g_current_label);
             g_current_label[0] = '\0'; // Reset label cache once committed
-        }
-        else
-        {
+        } else {
             // Log regular operational line steps
             fprintf(temp_debug_stream, "%d,%d\n", g_temp_asm_line, g_current_lua_line);
         }

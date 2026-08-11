@@ -329,15 +329,15 @@ ASTNode *fold_constants (ASTNode *node)
             // ==========================================
             // 2. UNARY OPERATIONS (e.g., -5 or !(1))
             // ==========================================
-			/*
-			case NODE_UNARY_MINUS:
-				// Length (#) and Unary Minus (-) push arguments and call built-ins!
-				if (node->as.unary.operator == OP_LEN || node->as.unary.operator == OP_UNM) {
-					return 1;
-				}
-				// Check if the operand itself requires stack space
-				return check_needs_stack(node->as.unary.operand);
-				*/
+            /*
+            case NODE_UNARY_MINUS:
+                // Length (#) and Unary Minus (-) push arguments and call built-ins!
+                if (node->as.unary.operator == OP_LEN || node->as.unary.operator == OP_UNM) {
+                    return 1;
+                }
+                // Check if the operand itself requires stack space
+                return check_needs_stack(node->as.unary.operand);
+                */
             /*
             case NODE_UNARY_MINUS: {
                 node -> as.unary.operand              = fold_constants (node -> as.unary.operand);
@@ -359,62 +359,62 @@ ASTNode *fold_constants (ASTNode *node)
                 //node -> as.mult_assign.expr  = fold_constants (node -> as.mult_assign.expr);
                 break;
 
-			case NODE_IF: {
-				// 1. Recursively fold the condition first
-				node->as.if_stmt.condition = fold_constants(node->as.if_stmt.condition);
+            case NODE_IF: {
+                // 1. Recursively fold the condition first
+                node->as.if_stmt.condition = fold_constants(node->as.if_stmt.condition);
 
-				int is_const = 0;
-				int truthy = is_constant_truthy(node->as.if_stmt.condition, &is_const);
+                int is_const = 0;
+                int truthy = is_constant_truthy(node->as.if_stmt.condition, &is_const);
 
-				if (is_const)
-				{
-					// We are stripping the IF node, but we MUST preserve the rest of the program
-					ASTNode *next_program_chain = fold_constants(node->next);
+                if (is_const)
+                {
+                    // We are stripping the IF node, but we MUST preserve the rest of the program
+                    ASTNode *next_program_chain = fold_constants(node->next);
 
-					if (truthy)
-					{
-						// Condition is always TRUE: Keep only the IF body, discard the ELSE body
-						ASTNode *optimized_body = fold_constants(node->as.if_stmt.if_body);
+                    if (truthy)
+                    {
+                        // Condition is always TRUE: Keep only the IF body, discard the ELSE body
+                        ASTNode *optimized_body = fold_constants(node->as.if_stmt.if_body);
 
-						// NOTE: If you aren't using an arena allocator, free the unused
-						// node, node->as.if_stmt.condition, and node->as.if_stmt.else_body here.
+                        // NOTE: If you aren't using an arena allocator, free the unused
+                        // node, node->as.if_stmt.condition, and node->as.if_stmt.else_body here.
 
-						return append_ast_chains(optimized_body, next_program_chain);
-					}
-					else
-					{
-						// Condition is always FALSE: Keep only the ELSE body, discard the IF body
-						ASTNode *optimized_else = fold_constants(node->as.if_stmt.else_body);
+                        return append_ast_chains(optimized_body, next_program_chain);
+                    }
+                    else
+                    {
+                        // Condition is always FALSE: Keep only the ELSE body, discard the IF body
+                        ASTNode *optimized_else = fold_constants(node->as.if_stmt.else_body);
 
-						return append_ast_chains(optimized_else, next_program_chain);
-					}
-				}
+                        return append_ast_chains(optimized_else, next_program_chain);
+                    }
+                }
 
-				// If the condition isn't constant, keep the IF structure but optimize both branches
-				node->as.if_stmt.if_body = fold_constants(node->as.if_stmt.if_body);
-				node->as.if_stmt.else_body = fold_constants(node->as.if_stmt.else_body);
-				break;
-			}
+                // If the condition isn't constant, keep the IF structure but optimize both branches
+                node->as.if_stmt.if_body = fold_constants(node->as.if_stmt.if_body);
+                node->as.if_stmt.else_body = fold_constants(node->as.if_stmt.else_body);
+                break;
+            }
 
-			case NODE_WHILE: {
-				// 1. Fold the loop condition
-				node->as.while_loop.condition = fold_constants(node->as.while_loop.condition);
+            case NODE_WHILE: {
+                // 1. Fold the loop condition
+                node->as.while_loop.condition = fold_constants(node->as.while_loop.condition);
 
-				int is_const = 0;
-				int truthy = is_constant_truthy(node->as.while_loop.condition, &is_const);
+                int is_const = 0;
+                int truthy = is_constant_truthy(node->as.while_loop.condition, &is_const);
 
-				if (is_const && !truthy)
-				{
-					// Condition is always FALSE: The loop body will never run.
-					// Bypass this node completely and jump straight to the next program statement.
-					return fold_constants(node->next);
-				}
+                if (is_const && !truthy)
+                {
+                    // Condition is always FALSE: The loop body will never run.
+                    // Bypass this node completely and jump straight to the next program statement.
+                    return fold_constants(node->next);
+                }
 
-				// NOTE: If the condition is always TRUE (infinite loop), we DO NOT prune the loop.
-				// We keep the loop, but still optimize the statements inside its body.
-				node->as.while_loop.body = fold_constants(node->as.while_loop.body);
-				break;
-			}
+                // NOTE: If the condition is always TRUE (infinite loop), we DO NOT prune the loop.
+                // We keep the loop, but still optimize the statements inside its body.
+                node->as.while_loop.body = fold_constants(node->as.while_loop.body);
+                break;
+            }
 
                 /*
             case NODE_BLOCK: {

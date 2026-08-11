@@ -32,7 +32,7 @@ bool emit_pico8_spr_intrinsic(ASTNode *node)
     // Args 6-5: flip_y, flip_x (default = false)
     for (int i = 6; i >= 5; i--) {
         int reg = allocate_register();
-		register_pinned[reg] = 1;
+        register_pinned[reg] = 1;
         if (arg_count > i) {
             generate_asm(args[i], reg);
             emit_asm("PUSH R%d ; Arg %d: %s\n", reg, i + 1, i == 6 ? "flip_y" : "flip_x");
@@ -40,14 +40,14 @@ bool emit_pico8_spr_intrinsic(ASTNode *node)
             emit_asm("MOV R%d, BOXED_FALSE ; Default %s\n", reg, i == 6 ? "flip_y" : "flip_x");
             emit_asm("PUSH R%d\n", reg);
         }
-		register_pinned[reg] = 0;
+        register_pinned[reg] = 0;
         unlock_register(reg);
     }
 
     // Args 4-3: h, w (default = 1.0)
     for (int i = 4; i >= 3; i--) {
         int reg = allocate_register();
-		register_pinned[reg] = 1;
+        register_pinned[reg] = 1;
         if (arg_count > i) {
             generate_asm(args[i], reg);
             emit_asm("PUSH R%d ; Arg %d: %s\n", reg, i + 1, i == 4 ? "h" : "w");
@@ -55,21 +55,21 @@ bool emit_pico8_spr_intrinsic(ASTNode *node)
             emit_asm("MOV R%d, 1.000000 ; Default %s\n", reg, i == 4 ? "h" : "w");
             emit_asm("PUSH R%d\n", reg);
         }
-		register_pinned[reg] = 0;
+        register_pinned[reg] = 0;
         unlock_register(reg);
     }
 
     // Args 2-0: y, x, n (required; pad with NIL if missing)
     for (int i = 2; i >= 0; i--) {
         int reg = allocate_register();
-		register_pinned[reg] = 1;
+        register_pinned[reg] = 1;
         if (arg_count > i) {
             generate_asm(args[i], reg);
         } else {
             emit_asm("MOV R%d, BOXED_NIL ; Missing required arg!\n", reg);
         }
         emit_asm("PUSH R%d ; Arg %d\n", reg, i + 1);
-		register_pinned[reg] = 0;
+        register_pinned[reg] = 0;
         unlock_register(reg);
     }
 
@@ -109,7 +109,7 @@ bool emit_pico8_btn_intrinsic(ASTNode *node, int dest_reg)
 
     // Arg 1: Player ID (default = 0)
     int reg = allocate_register();
-	register_pinned[reg] = 1;
+    register_pinned[reg] = 1;
     if (arg_count > 1) {
         generate_asm(args[1], reg);
         emit_asm("PUSH R%d ; Arg 2: Player ID\n", reg);
@@ -117,12 +117,12 @@ bool emit_pico8_btn_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("MOV R%d, 0.000000 ; Default Player 0\n", reg);
         emit_asm("PUSH R%d\n", reg);
     }
-	register_pinned[reg] = 0;
+    register_pinned[reg] = 0;
     unlock_register(reg);
 
     // Arg 0: Button ID (or BOXED_NIL for bitfield mode)
     reg = allocate_register();
-	register_pinned[reg] = 1;
+    register_pinned[reg] = 1;
     if (arg_count > 0) {
         generate_asm(args[0], reg);
         emit_asm("PUSH R%d ; Arg 1: Button ID\n", reg);
@@ -130,7 +130,7 @@ bool emit_pico8_btn_intrinsic(ASTNode *node, int dest_reg)
         emit_asm("MOV R%d, BOXED_NIL ; Trigger bitfield mode\n", reg);
         emit_asm("PUSH R%d\n", reg);
     }
-	register_pinned[reg] = 0;
+    register_pinned[reg] = 0;
     unlock_register(reg);
 
     // --- Call runtime subroutine and clean up stack ---
@@ -388,16 +388,16 @@ bool emit_pico8_cls_intrinsic(ASTNode *node) {
 
     if (arg == NULL) {
         // Default: clear to black (palette index 0)
-        //	emit_asm("MOV R1, 0x%.8X ; cls() with palette index 0\n",
-           //	      pico8_palette[0]);
+        //    emit_asm("MOV R1, 0x%.8X ; cls() with palette index 0\n",
+           //          pico8_palette[0]);
     }
     else if (arg->type == NODE_NUMBER) {
         double val = arg->as.number.val;
         int int_val = (int)val;
 
         if (int_val >= 0 && int_val < 16) {
-           //	 emit_asm("MOV R1, 0x%.8X ; Palette index %d\n",
-               //	      pico8_palette[int_val], int_val);
+           //     emit_asm("MOV R1, 0x%.8X ; Palette index %d\n",
+               //          pico8_palette[int_val], int_val);
         } else {
             // Treat as direct color value
             emit_asm("MOV R1, ");
