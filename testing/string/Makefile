@@ -12,7 +12,8 @@ ASM_OUTS = $(LUA_SRCS:.lua=.asm)
 # Translate the list of .lua source files into target .xml files
 XML_OUTS = $(LUA_SRCS:.lua=.xml)
 
-.PHONY: all debug clean asmcheck vbin v32 monofiles
+.PHONY: all debug clean asmcheck vbin v32 context $(LUA_SRCS)
+
 
 # Default target: compile, assemble, pack, and run all tests
 all:
@@ -25,12 +26,12 @@ all:
 		v32_file=$${base}.v32; \
 		xml_file=$${base}.xml; \
 		step1=0; step2=0; step3_xml=0; step3=0; step4=0; \
+		echo "$(COMPILER) $$lua_file -o $$asm_file"; \
 		$(COMPILER) $$lua_file -o $$asm_file > /dev/null 2>&1 && step1=1; \
 		[ $$step1 -eq 1 ] && assemble program -o $$vbin_file $$asm_file > /dev/null 2>&1 && step2=1; \
-		[ $$step2 -eq 1 ] && printf '<cart><program>%s.vbin</program></cart>\n' "$$base" > $$xml_file && step3_xml=1; \
-		[ $$step3_xml -eq 1 ] && packrom $$xml_file > /dev/null 2>&1 && step3=1; \
-		[ $$step3 -eq 1 ] && v32sim $$v32_file > /dev/null 2>&1 && step4=1; \
-		if [ $$step1 -eq 1 ] && [ $$step2 -eq 1 ] && [ $$step3 -eq 1 ] && [ $$step4 -eq 1 ]; then \
+		[ $$step2 -eq 1 ] && packrom $$xml_file > /dev/null 2>&1 && step3=1; \
+		[ $$step3 -eq 1 ] && v32sim $$v32_file > /dev/null 2>&1; \
+		if [ $$step1 -eq 1 ] && [ $$step2 -eq 1 ] && [ $$step3 -eq 1 ]; then \
 			echo "[  OK  ] $$lua_file"; \
 			success=$$((success + 5)); \
 		else \
@@ -68,6 +69,20 @@ debug:
 	echo ""; \
 	echo "Results: $$success / $$total"
 
+# Compile, assemble, pack, and run a single .lua file
+%.lua:
+	@base=$${@:.lua=}; \
+	asm_file=$${base}.asm; \
+	vbin_file=$${base}.vbin; \
+	v32_file=$${base}.v32; \
+	xml_file=$${base}.xml; \
+	\
+	$(COMPILER) $@ -o $$asm_file && \
+	assemble program -o $$vbin_file $$asm_file && \
+	printf '<cart><program>%s.vbin</program></cart>\n' "$$base" > $$xml_file && \
+	packrom $$xml_file && \
+	v32sim $$v32_file
+
 # Pattern rule: How to convert a .lua file into a .asm file (no debug by default)
 %.asm: %.lua $(COMPILER)
 	@echo "Compiling test case: $< -> $@"
@@ -98,38 +113,20 @@ v32: $(XML_OUTS)
 		fi; \
 	done
 
-# --- Monolithic Source Generation Rule ---
-monofiles:
-	@rm -f ../put/monofile_luatests.txt
-	@echo "-- ==========================================================================" >> ../put/monofile_luatests.txt
-	@echo "--              MONOLITHIC SOURCE: TESTS & PROBUCED ASSEMBLY                 " >> ../put/monofile_luatests.txt
-	@echo "-- ==========================================================================" >> ../put/monofile_luatests.txt
-	@echo "" >> ../put/monofile_luatests.txt
-	@for file in *.lua; do \
-		if [ -f "$$file" ]; then \
-			echo "-- --------------------------------------------------------------------------" >> ../put/monofile_luatests.txt; \
-			echo "-- TEST FILE: $$file" >> ../put/monofile_luatests.txt; \
-			echo "-- --------------------------------------------------------------------------" >> ../put/monofile_luatests.txt; \
-			cat "$$file" >> ../put/monofile_luatests.txt; \
-			echo "" >> ../put/monofile_luatests.txt; \
-			echo "-- --------------------------------------------------------------------------" >> ../put/monofile_luatests.txt; \
-			echo "" >> ../put/monofile_luatests.txt; \
+context:
+	@for asm_file in *.asm; do \
+		[ -f "$$asm_file" ] || continue; \
+		file_size=$$(stat -c%s "$$asm_file"); \
+		if [ $$file_size -le 45000 ]; then \
+			cp "$$asm_file" "$$asm_file.txt"; \
+		else \
+			cp "$$asm_file" "$$asm_file"; \
+			split -a 1 -b 45K -d "$$asm_file" "$${asm_file%.asm}_part"; \
+			for part in $${asm_file%.asm}_part*; do \
+				mv "$$part" "$$part.asm.txt"; \
+			done; \
 		fi; \
 	done
-	@echo "Successfully generated consolidated file: ../put/monofile_luatests.txt"
-	@echo "" >> ../put/monofile_assembly.txt
-	@for file in *.asm; do \
-		if [ -f "$$file" ]; then \
-			echo "-- --------------------------------------------------------------------------" >> ../put/monofile_assembly.txt; \
-			echo "-- PRODUCED ASSEMBLY FILE: $$file" >> ../put/monofile_assembly.txt; \
-			echo "-- --------------------------------------------------------------------------" >> ../put/monofile_assembly.txt; \
-			cat "$$file" >> ../put/monofile_assembly.txt; \
-			echo "" >> ../put/monofile_assembly.txt; \
-			echo "-- --------------------------------------------------------------------------" >> ../put/monofile_assembly.txt; \
-			echo "" >> ../put/monofile_assembly.txt; \
-		fi; \
-	done
-	@echo "Successfully generated consolidated file: ../put/monofile_assembly.txt"
 
 # Clean target drops all generated assembly and binary test files
 clean:
