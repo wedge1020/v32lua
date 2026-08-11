@@ -10,10 +10,20 @@ __builtin_table_new:
     PUSH BP
     MOV  BP, SP
 
+    ;; Save registers clobbered by __malloc
+    PUSH  R2
+    PUSH  R3
+    PUSH  R6
+
     MOV  R0, 4
     PUSH R0
     CALL __malloc
     IADD SP, 1
+
+    ;; Restore registers
+    POP   R6
+    POP   R3
+    POP   R2
 
     MOV  R1, R0
     IEQ  R1, 0
