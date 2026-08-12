@@ -196,20 +196,27 @@ __builtin_table_set:
     PUSH R7
     PUSH R8
     
-    MOV  R1, [BP+4]          ; R1 = Tagged Table Pointer (0x7F80xxxx)
-    MOV  R2, [BP+3]          ; R2 = Search Key (preserved throughout routine)
-    MOV  R3, [BP+2]          ; R3 = Value to store (preserved throughout routine)
+    MOV  R1, [BP+4]          ; R1 = Tagged Table Pointer
+    MOV  R2, [BP+3]          ; R2 = Search Key
+    MOV  R3, [BP+2]          ; R3 = Value to store
 
-    ;; --- SPECIAL CASE: Setting to nil (removes key, updates contiguous length) ---
+    ;; ✅ FIX: Unbox R1 EARLY (before nil handling!)
+    MOV  R4, R1
+    AND  R4, BOXED_DATA
+    IEQ  R4, BOXED_TABLE
+    JF   R4, __runtime_error_not_table
+    AND  R1, BOXED_PAYLOAD   ; R1 = raw RAM address
+
+    ;; --- Now nil handling can safely use [R1+1] ---
     MOV  R4, R3              ; Copy value to R4
     IEQ  R4, BOXED_NIL
-    JF   R4, __builtin_table_set_not_nil ; Not nil → normal processing
+    JF   R4, __builtin_table_set_not_nil
 
-    ;; --- Value IS nil: Check if key is a positive integer ---
+    ;; R1 is now unboxed → [R1+1] is valid!
     MOV  R4, R2              ; R4 = Key
     AND  R4, NAN_VALUE
     IEQ  R4, NAN_VALUE
-    JT   R4, __builtin_table_set_nil_done ; Tagged → skip (hash keys TODO)
+    JT   R4, __builtin_table_set_nil_done
 
     ;; Check for integer (no fractional part)
     MOV  R4, R2

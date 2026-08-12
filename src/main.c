@@ -191,6 +191,7 @@ int  main (int  argc, char** argv)
         register_global ("TIC80_MAP_BUFFER_PTR");
         register_global ("TIC80_MAP_WIDTH");
         register_global ("TIC80_MAP_HEIGHT");
+        register_global ("TIC80_PAUSE_FLAG");
     }
     
     // Perform full symbol pre-pass before code generation
