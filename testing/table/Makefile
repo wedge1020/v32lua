@@ -82,4 +82,4 @@ monofiles:
 
 # Clean target drops all generated assembly and binary test files
 clean:
-	rm -f *.asm *.vbin *.xml *.v32 *.debug *.txt
+	rm -f *.asm *.vbin *.xml *.v32 *.debug *.txt *.cmd *.out

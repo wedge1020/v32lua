@@ -617,52 +617,67 @@ void generate_program (ASTNode *head)
     {
         emit_asm ("MOV R0, var_TIC80_PAUSE_FLAG\n");
         emit_asm ("MOV R1, 0\n");
-        emit_asm ("MOV [R0], R1 ; initialize TIC80 pause flag\n");
+        emit_asm ("MOV [R0], R1 ; initialize pause flag to 0\n");
         emit_asm ("__start:\n");
-        emit_asm ("CALL __function_TIC ; Execute game loop tick\n");
-        emit_asm ("__pause:\n");
+
+        // Check START button rising edge
         emit_asm ("IN R0, INP_GamepadButtonStart\n");
-        emit_asm ("IGT R0, 0  ; check if START is pressed\n");
+        emit_asm ("IEQ R0, 1\n");
+        emit_asm ("JF R0, __check_flag ; No edge: check if we need TIC\n");
+
+        // Rising edge detected: toggle pause
         emit_asm ("MOV R1, var_TIC80_PAUSE_FLAG\n");
-        emit_asm ("MOV R1, [R1] ; read current pause flag\n");
-        emit_asm ("IGT R1, 0 ; is the TIC80 pause flag already enabled?\n");
+        emit_asm ("MOV R1, [R1]\n");
+        emit_asm ("IEQ R1, 0\n");
+        emit_asm ("JT R1, __do_pause\n");
+        emit_asm ("JMP __do_unpause\n");
+
+        // Normal frame: call TIC if not paused
+        emit_asm ("__check_flag:\n");
+        emit_asm ("MOV R1, var_TIC80_PAUSE_FLAG\n");
+        emit_asm ("MOV R1, [R1]\n");
+        emit_asm ("IEQ R1, 0\n");
+        emit_asm ("JF R1, __just_wait ; If paused, skip TIC\n");
+        emit_asm ("CALL __function_TIC\n");
+        emit_asm ("__just_wait:");
         emit_asm ("WAIT\n");
-        emit_asm ("JT R1, __pause_check ; already paused\n");
-        emit_asm ("JT R0, __TIC80_pause_setup ; set up a pause session\n");
         emit_asm ("JMP __start\n");
-        emit_asm ("__pause_check:\n");
-        //emit_asm ("IN R0, INP_GamepadButtonStart\n");
-        //emit_asm ("ILT R0, 0\n");
-        emit_asm ("JT R0, __TIC80_unpause\n");
-        emit_asm ("JMP __pause\n");
-        emit_asm ("__TIC80_pause_setup:\n");
-        emit_asm ("MOV R0, var_TIC80_PAUSE_FLAG\n");
-        emit_asm ("IN R1, GPU_MultiplyColor ; back up current color multiplier\n");
-        emit_asm ("MOV [R0], R1\n");
-        emit_asm ("MOV R1, 0x808080FF ; 50% gray multiplier\n");
+
+        // PAUSE: dim, render one frame, print, set flag
+        emit_asm ("__do_pause:\n");
+        emit_asm ("MOV R1, var_TIC80_COLOR_MULTIPLY\n");
+        emit_asm ("IN R2, GPU_MultiplyColor\n");
+        emit_asm ("MOV [R1], R2 ; Save current multiply\n");
+        emit_asm ("MOV R2, 0xFF404040 ; 50% gray\n");
+        emit_asm ("OUT GPU_MultiplyColor, R2\n");
+        emit_asm ("CALL __function_TIC ; Render ONE dimmed frame\n");
+        emit_asm ("MOV R1, 0xFFFFFFFF ; Restore for text\n");
         emit_asm ("OUT GPU_MultiplyColor, R1\n");
-        emit_asm ("CALL __function_TIC ; Execute game loop for color multiply\n");
-        emit_asm ("MOV R1, 1\n");
-        emit_asm ("MOV [R0], R1 ; set the TIC80 pause flag\n");
-        emit_asm ("MOV R1, 295\n");
+        emit_asm ("MOV R1, 275\n");
         emit_asm ("PUSH R1\n");
         emit_asm ("MOV R1, 170\n");
         emit_asm ("PUSH R1\n");
         emit_asm ("MOV R1, __const_str_pause\n");
-        emit_asm ("OR R1, BOXED_ROMSTRING ; box as a ROMSTRING\n");
+        emit_asm ("OR R1, BOXED_ROMSTRING\n");
         emit_asm ("PUSH R1\n");
-        emit_asm ("MOV R1, 0xFFFFFFFF ; full intensity\n");
-        emit_asm ("OUT GPU_MultiplyColor, R1\n");
-        emit_asm ("CALL __builtin_print ; display 'PAUSED' message\n");
+        emit_asm ("CALL __builtin_print\n");
         emit_asm ("IADD SP, 3\n");
-        emit_asm ("JMP __pause\n");
-        emit_asm ("__TIC80_unpause:\n");
-        emit_asm ("MOV R0, var_TIC80_PAUSE_FLAG\n");
-        emit_asm ("MOV R1, [R0] ; read saved color multiply value\n");
-        emit_asm ("OUT GPU_MultiplyColor, R1 ; restore game color multiply\n");
-        emit_asm ("MOV R1, 0 ; reset pause flag\n");
-        emit_asm ("MOV [R0], R1\n");
-        emit_asm ("JMP __start ; resume normal gameplay operations\n");
+        emit_asm ("MOV R1, var_TIC80_PAUSE_FLAG\n");
+        emit_asm ("MOV R2, 1\n");
+        emit_asm ("MOV [R1], R2 ; Set flag = 1\n");
+        emit_asm ("WAIT\n");
+        emit_asm ("JMP __start\n");
+
+        // UNPAUSE: restore color, clear flag
+        emit_asm ("__do_unpause:\n");
+        emit_asm ("MOV R1, var_TIC80_COLOR_MULTIPLY\n");
+        emit_asm ("MOV R2, [R1]\n");
+        emit_asm ("OUT GPU_MultiplyColor, R2 ; Restore\n");
+        emit_asm ("MOV R1, var_TIC80_PAUSE_FLAG\n");
+        emit_asm ("MOV R2, 0\n");
+        emit_asm ("MOV [R1], R2 ; Clear flag = 0\n");
+        emit_asm ("WAIT\n");
+        emit_asm ("JMP __start\n");
     }
 
     emit_asm ("HLT ; Safe-guard halt\n");
