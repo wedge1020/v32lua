@@ -186,7 +186,6 @@ __builtin_table_set:
     PUSH BP
     MOV  BP, SP
     
-    ;; --- Callee-Save: Preserve 8 working registers ---
     PUSH R1
     PUSH R2
     PUSH R3
@@ -200,64 +199,25 @@ __builtin_table_set:
     MOV  R2, [BP+3]          ; R2 = Search Key
     MOV  R3, [BP+2]          ; R3 = Value to store
 
-    ;; ✅ FIX: Unbox R1 EARLY (before nil handling!)
+    ;; --- Nil check FIRST (R1 still tagged) ---
+    MOV  R4, R3
+    IEQ  R4, BOXED_NIL
+    JF   R4, __builtin_table_set_not_nil
+
+    ;; --- Nil handling: unbox R1 HERE ---
+    MOV  R4, R1
+    AND  R4, BOXED_DATA
+    IEQ  R4, BOXED_TABLE
+    JF   R4, __runtime_error_not_table
+    AND  R1, BOXED_PAYLOAD   ; Now safe to use [R1+1]
+
+__builtin_table_set_not_nil:
+    ;; --- Unbox R1 HERE (still tagged) ---
     MOV  R4, R1
     AND  R4, BOXED_DATA
     IEQ  R4, BOXED_TABLE
     JF   R4, __runtime_error_not_table
     AND  R1, BOXED_PAYLOAD   ; R1 = raw RAM address
-
-    ;; --- Now nil handling can safely use [R1+1] ---
-    MOV  R4, R3              ; Copy value to R4
-    IEQ  R4, BOXED_NIL
-    JF   R4, __builtin_table_set_not_nil
-
-    ;; R1 is now unboxed → [R1+1] is valid!
-    MOV  R4, R2              ; R4 = Key
-    AND  R4, NAN_VALUE
-    IEQ  R4, NAN_VALUE
-    JT   R4, __builtin_table_set_nil_done
-
-    ;; Check for integer (no fractional part)
-    MOV  R4, R2
-    CFI  R4                  ; R4 = integer key
-    MOV  R5, R4
-    CIF  R5
-    INE  R5, R2
-    JT   R5, __builtin_table_set_nil_done ; Fractional → skip
-
-    ;; Check key >= 1
-    MOV  R5, R4
-    ILT  R5, 1
-    JT   R5, __builtin_table_set_nil_done ; < 1 → skip
-
-    ;; Key is positive integer: Update contiguous length if key <= current length
-    MOV  R5, [R1+1]          ; R5 = Current contiguous length
-    MOV  R6, R4
-    IGT  R6, R5              ; ✅ Use R6 for comparison (preserves R4)
-    JT   R6, __builtin_table_set_nil_done ; key > length → no change
-
-    ;; key <= length → set length to key-1
-    ISUB R4, 1               ; R4 = key - 1
-    MOV  [R1+1], R4          ; Update contiguous length
-    JMP  __builtin_table_set_done
-
-__builtin_table_set_nil_done:
-    ;; Skip storing nil (key removed from table)
-    JMP  __builtin_table_set_done
-
-__builtin_table_set_not_nil:
-
-    ;; --- 1. STRICT TABLE TYPE VALIDATION ---
-    ;; Ensure R1 is actually a Table before touching memory!
-    MOV  R4, R1
-    AND  R4, BOXED_DATA      ; Isolate upper tag bits
-    IEQ  R4, BOXED_TABLE      ; Is it tagged as a Table?
-    JF   R4, __runtime_error_not_table ; Trap if indexing a non-table!
-
-    ;; --- OPTIMIZATION: EARLY UNBOXING ---
-    ;; Strip tag immediately! R1 is now permanently the raw RAM heap address.
-    AND  R1, BOXED_PAYLOAD
 
     ;; --- 2. FAST-PATH VALIDATION (O(1) Contiguous Array Write) ---
     ;; FAST-PATH CHECK 1: Is Key an unboxed IEEE Float?

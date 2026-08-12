@@ -9,6 +9,7 @@ function test_table_instantiation()
     t1[1] = "first"
     t1[2] = "second"
     number_result1 = #t1  -- Expected: 2 (array length)
+	__rawasm__("__debug:")
     string_result1 = t1[1]  -- Expected: "first"
     string_result2 = t1[2]  -- Expected: "second"
 
@@ -71,24 +72,23 @@ end
 
 --[[
 === EXPECTED OUTPUT ===
-Global Variables:
 
-number_result1: 2
+number_result1: 2.0000
 string_result1: "first"
 string_result2: "second"
-number_result2: 3
+number_result2: 3.0000
 string_result3: "alpha"
 string_result4: "gamma"
 string_result5: "test"
-number_result3: 123
+number_result3: 123.0000
 boolean_result1: true
-number_result4: 2
+number_result4: 2.0000
 string_result6: "arr1"
 string_result7: "hash1"
-number_result5: 10
-number_result6: 20
+number_result5: 10.0000
+number_result6: 20.0000
 string_result8: "zero"
 string_result9: "negative"
-number_result7: 0
+number_result7: 0.0000
 
 --]]

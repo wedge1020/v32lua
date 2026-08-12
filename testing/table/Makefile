@@ -19,8 +19,10 @@ all: $(ASM_OUTS)
 
 # Pattern rule: How to convert a .lua file into a .asm file
 %.asm: %.lua $(COMPILER)
-	@echo "Compiling test case: $< -> $@"
-	$(COMPILER) -g $< -o $@
+	@../run_tests.sh $<
+
+#@echo "Compiling test case: $< -> $@"
+#$(COMPILER) -g $< -o $@
 
 # Assembly verification: Attempt to assemble all .asm files without halting on errors
 vbin: $(ASM_OUTS)
@@ -47,39 +49,6 @@ v32: $(XML_OUTS)
 		fi; \
 	done
 
-# --- Monolithic Source Generation Rule ---
-monofiles:
-	@rm -f ../put/monofile_luatests.txt
-	@echo "-- ==========================================================================" >> ../put/monofile_luatests.txt
-	@echo "--              MONOLITHIC SOURCE: TESTS & PROBUCED ASSEMBLY                 " >> ../put/monofile_luatests.txt
-	@echo "-- ==========================================================================" >> ../put/monofile_luatests.txt
-	@echo "" >> ../put/monofile_luatests.txt
-	@for file in *.lua; do \
-		if [ -f "$$file" ]; then \
-			echo "-- --------------------------------------------------------------------------" >> ../put/monofile_luatests.txt; \
-			echo "-- TEST FILE: $$file" >> ../put/monofile_luatests.txt; \
-			echo "-- --------------------------------------------------------------------------" >> ../put/monofile_luatests.txt; \
-			cat "$$file" >> ../put/monofile_luatests.txt; \
-			echo "" >> ../put/monofile_luatests.txt; \
-			echo "-- --------------------------------------------------------------------------" >> ../put/monofile_luatests.txt; \
-			echo "" >> ../put/monofile_luatests.txt; \
-		fi; \
-	done
-	@echo "Successfully generated consolidated file: ../put/monofile_luatests.txt"
-	@echo "" >> ../put/monofile_assembly.txt
-	@for file in *.asm; do \
-		if [ -f "$$file" ]; then \
-			echo "-- --------------------------------------------------------------------------" >> ../put/monofile_assembly.txt; \
-			echo "-- PRODUCED ASSEMBLY FILE: $$file" >> ../put/monofile_assembly.txt; \
-			echo "-- --------------------------------------------------------------------------" >> ../put/monofile_assembly.txt; \
-			cat "$$file" >> ../put/monofile_assembly.txt; \
-			echo "" >> ../put/monofile_assembly.txt; \
-			echo "-- --------------------------------------------------------------------------" >> ../put/monofile_assembly.txt; \
-			echo "" >> ../put/monofile_assembly.txt; \
-		fi; \
-	done
-	@echo "Successfully generated consolidated file: ../put/monofile_assembly.txt"
-
 # Clean target drops all generated assembly and binary test files
 clean:
-	rm -f *.asm *.vbin *.xml *.v32 *.debug *.txt *.cmd *.out
+	rm -f *.asm *.vbin *.xml *.v32 *.debug *.txt *.cmd *.out *.want* *.have*

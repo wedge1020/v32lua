@@ -1,4 +1,4 @@
---#title "superblock adventure"
+--#title "v32lua TIC80 API superblock adventure"
 --#api tic80
 --#version 0.1
 -- title:   superblock_adventure

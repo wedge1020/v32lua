@@ -105,9 +105,12 @@ void node_function_call(ASTNode *node, int dest_reg)
         }
     }
 
-    // If not an intrinsic or resolvable symbol -> ERROR
+    // Allow dynamic table lookups (NODE_TABLE_GET) to pass through
+    bool is_dynamic_table_call = (node->as.call.target->type == NODE_TABLE_GET);
+
     if (!try_emit_call_intrinsic(node, dest_reg) &&
-        !target_sym) {
+        !target_sym &&
+        !is_dynamic_table_call) {  // <-- Add this condition
 
         compiler_error(ERR_SEMANTIC, node->line_number,
             "Undeclared function: '%s'", func_name ? func_name : "<unknown>");

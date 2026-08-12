@@ -67,19 +67,18 @@ end
 --[[
 
 === EXPECTED OUTPUT ===
-Global Variables:
 string_result1: "new1"
 string_result2: "new2"
 string_result3: "old3"
 string_result4: "new_name"
-number_result1: 42
-number_result2: 1
-number_result3: 2
+number_result1: 42.0000
+number_result2: 1.0000
+number_result3: 2.0000
 string_result5: "array"
-number_result4: 10
+number_result4: 10.0000
 boolean_result1: true
-number_result5: 30
+number_result5: 30.0000
 string_result6: "fresh"
-number_result6: 0
+number_result6: 0.0000
 
 --]]

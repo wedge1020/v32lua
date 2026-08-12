@@ -57,17 +57,16 @@ end
 
 --[[
 === EXPECTED OUTPUT ===
-Global Variables:
 string_result1: "c"
-number_result1: 3
+number_result1: 3.0000
 string_result2: "a"
 string_result3: "c"
-number_result2: 3
+number_result2: 3.0000
 string_result4: "b"
-number_result3: 3
+number_result3: 3.0000
 string_result5: "only"
-number_result4: 1
+number_result4: 1.0000
 string_result6: "x"
 string_result7: "c"
-number_result5: 4
+number_result5: 4.0000
 ]]

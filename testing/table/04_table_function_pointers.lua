@@ -17,7 +17,9 @@ function test_table_function_pointers()
     number_result2 = t2.sum(4, 6)      -- Expected: 10
     number_result3 = t2.product(4, 6) -- Expected: 24
 
+
     -- === Test 3: Method-style calls ===
+	__rawasm__("__debug:")
     local t3 = {value = 10, double = function(self) return self.value * 2 end}
     number_result4 = t3.double(t3)  -- Expected: 20
 
@@ -56,13 +58,12 @@ end
 
 --[[
 === EXPECTED OUTPUT ===
-Global Variables:
-number_result1: 8
-number_result2: 10
-number_result3: 24
-number_result4: 20
+number_result1: 8.0000
+number_result2: 10.0000
+number_result3: 24.0000
+number_result4: 20.0000
 string_result1: "Hello, Vircon32"
-number_result5: 12
-number_result6: 10
-number_result7: 21
+number_result5: 12.0000
+number_result6: 10.0000
+number_result7: 21.0000
 ]]

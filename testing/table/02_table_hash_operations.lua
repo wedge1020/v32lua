@@ -68,17 +68,16 @@ end
 --[[
 
 === EXPECTED OUTPUT ===
-Global Variables:
 string_result1: "hero"
 string_result2: "mage"
-number_result1: 99
+number_result1: 99.0000
 string_result3: "zero"
 string_result4: "minus_one"
 string_result5: "minus_hundred"
 string_result6: "text"
 string_result7: "zero_key"
 string_result8: "array_start"
-number_result2: 1
+number_result2: 1.0000
 string_result9: "value"
 string_result10: "value"
 string_result11: "yes"
