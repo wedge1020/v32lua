@@ -60,6 +60,7 @@ char *mangle_method_name (const char *table_name, const char *method_name);
 %left '['
 %left '.'
 %left ':'
+%right TOKEN_FUNCTION
 
 %%
 
@@ -456,28 +457,44 @@ expr:
     | expr TOKEN_AND expr     { $$ = make_node(NODE_AND);        $$->as.binary.left = $1;     $$->as.binary.right = $3; }
     | expr TOKEN_OR expr      { $$ = make_node(NODE_OR);         $$->as.binary.left = $1;     $$->as.binary.right = $3; }
     | expr TOKEN_CONCAT expr  { $$ = make_node(NODE_CONCAT);     $$->as.binary.left = $1;     $$->as.binary.right = $3; }
-    | func_start '(' parameter_list ')' statement_list TOKEN_END
+    | TOKEN_FUNCTION '(' parameter_list ')' statement_list TOKEN_END
     {
         // Anonymous function expression: function(...) ... end
-        // Generate unique name for the anonymous function
         static int anon_counter = 0;
         char buf[64];
         snprintf(buf, sizeof(buf), "__anon_%d", anon_counter++);
 
-        // 1. Build the function definition
+        ASTNode* func_def = make_node(NODE_FUNCTION_DEF);
+        func_def->as.function_def.name = strdup(buf);
+        func_def->as.function_def.params = $3;
+        func_def->as.function_def.body = $5;
+
+        ASTNode* func_ptr = make_node(NODE_FUNCTION_POINTER);
+        func_ptr->as.func_ptr.mangled_name = strdup(buf);
+
+        func_ptr->next = func_def;
+        $$ = func_ptr;
+    }
+    | func_start '(' parameter_list ')' statement_list TOKEN_END
+    {
+        // Anonymous function expression: function(...) ... end
+        static int anon_counter = 0;
+        char buf[64];
+        snprintf(buf, sizeof(buf), "__anon_%d", anon_counter++);
+
         ASTNode* func_def = $1;
         func_def->as.function_def.name = strdup(buf);
         func_def->as.function_def.params = $3;
         func_def->as.function_def.body = $5;
 
-        // 2. Create function pointer node
         ASTNode* func_ptr = make_node(NODE_FUNCTION_POINTER);
         func_ptr->as.func_ptr.mangled_name = strdup(buf);
 
-        // 3. Chain: func_def -> func_ptr
-        // Pass 1 compiles func_def, pass 2 returns func_ptr as the expression value
-        func_def->next = func_ptr;
-        $$ = func_def;
+        // Chain func_ptr -> func_def so func_def gets compiled first
+        func_ptr->next = func_def;
+
+        // Return func_ptr as the expression value
+        $$ = func_ptr;  // CHANGED FROM func_def
     }
     ;
 

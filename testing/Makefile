@@ -1,4 +1,7 @@
 # --- Testing Directory Makefile ---
+# Find all subdirectories containing a Makefile
+# This dynamically filters out folders that do not need to be compiled
+SUBDIRS := $(dir $(wildcard */Makefile))
 
 # Path to the compiler binary relative to this testing directory
 COMPILER = ../bin/v32lua
@@ -82,4 +85,10 @@ monofiles:
 
 # Clean target drops all generated assembly and binary test files
 clean:
-	rm -f *.asm *.vbin *.xml *.v32 *.debug *.txt
+	@for dir in $(SUBDIRS); do \
+		echo "========================================"; \
+		echo "Cleaning directory: $$dir"; \
+		echo "========================================"; \
+		$(MAKE) -C $$dir clean; \
+	done
+	@rm -f *.asm *.vbin *.xml *.v32 *.debug *.txt
