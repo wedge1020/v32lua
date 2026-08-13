@@ -40,6 +40,8 @@ bool  emit_spu_cmd_intrinsic       (ASTNode *, int);
 bool  emit_hex_intrinsic(ASTNode *node, int dest_reg);
 void  emit_get_gamepad_inputs_intrinsic(int dest_reg);
 
+bool  emit_type_intrinsic (ASTNode *, int);
+
 //////////////////////////////////////////////////////////////////////////////
 //
 // pico-8 api intrinsics

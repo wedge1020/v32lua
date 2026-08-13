@@ -23,7 +23,7 @@
 #include "internals.h"
 #include "register.h"
 
-#define  VERSION         "20260812-dev"
+#define  VERSION         "20260813-dev"
 #define  AUTHOR          "Matthew Haas"
 #define  URL             "https://github.com/wedge1020/v32lua"
 

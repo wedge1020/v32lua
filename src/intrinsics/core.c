@@ -592,6 +592,11 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         return emit_ipairs_intrinsic(node);
     }
 
+	// type(x)
+	if (strcmp(func_name, "type") == 0) {
+		return emit_type_intrinsic(node, dest_reg);
+	}
+
     return 0; // Not an intrinsic
 }
 
@@ -730,4 +735,29 @@ int try_emit_table_get_intrinsic(ASTNode *table_expr, ASTNode *key_expr, int des
     }
 
     return 0; // Not a hardware port; fallback to dynamic lookup
+}
+
+bool emit_type_intrinsic(ASTNode *node, int dest_reg) {
+    ASTNode *arg = node->as.call.args_head;
+    if (!arg || arg->next != NULL) {
+        compiler_error(ERR_SYNTAX, node->line_number,
+            "type() expects exactly 1 argument");
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: type(value) ---\n");
+
+    int arg_reg = allocate_register();  // Regular register is fine
+    generate_asm(arg, arg_reg);
+
+    emit_asm("    PUSH R%d             ; Arg 1: Value to check\n", arg_reg);
+    emit_asm("    CALL __builtin_type\n");
+    emit_asm("    IADD SP, 1           ; Clean up 1 argument\n");
+
+    if (dest_reg != 0) {
+        emit_asm("    MOV R%d, R0         ; Store string result\n", dest_reg);
+    }
+
+    unlock_register(arg_reg);
+    return true;
 }

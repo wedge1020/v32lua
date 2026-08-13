@@ -7,11 +7,20 @@
 __const_str_nil:
     string "nil"
 
+__const_str_boolean:
+    string "boolean"
+
 __const_str_false:
     string "false"
 
 __const_str_true:
     string "true"
+
+__const_str_string:
+    string "string"
+
+__const_str_number:
+    string "number"
 
 __const_str_table:
     string "table"

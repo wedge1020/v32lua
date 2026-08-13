@@ -137,3 +137,96 @@ __builtin_len_done:
     POP  BP
     RET
 
+__builtin_type:
+    PUSH BP
+    MOV  BP, SP
+
+    MOV  R0, [BP+2]          ; Load argument into R0
+
+    ;; --- Check exact values for primitives FIRST ---
+    MOV  R1, R0
+    IEQ  R1, BOXED_NIL
+    JT   R1, __type_nil
+
+    MOV  R1, R0
+    IEQ  R1, BOXED_FALSE
+    JT   R1, __type_boolean
+
+    MOV  R1, R0
+    IEQ  R1, BOXED_TRUE
+    JT   R1, __type_boolean
+
+    ;; --- Check for number (unboxed float) ---
+    MOV  R1, R0
+    AND  R1, 0x7F800000      ; NaN/boxed tag mask
+    IEQ  R1, 0
+    JT   R1, __type_number
+
+    ;; --- Check for ROM string ---
+    MOV  R1, R0
+    AND  R1, BOXED_DATA
+    IEQ  R1, BOXED_ROMSTRING
+    JT   R1, __type_string
+
+    ;; --- Check for RAM string: tag 0xFFC00000 AND payload >= 4 ---
+    MOV  R1, R0
+    AND  R1, BOXED_DATA
+    IEQ  R1, 0xFFC00000      ; Same tag as NIL, but we already ruled out exact NIL
+    JF   R1, __type_check_table
+    MOV  R1, R0
+    AND  R1, BOXED_PAYLOAD   ; Extract lower 22 bits
+    IGE  R1, 4               ; RAM strings start at payload 4
+    JT   R1, __type_string
+
+__type_check_table:
+    ;; --- Check for table ---
+    MOV  R1, R0
+    AND  R1, BOXED_DATA
+    IEQ  R1, BOXED_TABLE
+    JT   R1, __type_table
+
+    ;; --- Check for function ---
+    MOV  R1, R0
+    AND  R1, BOXED_DATA
+    IEQ  R1, BOXED_FUNCTION
+    JT   R1, __type_function
+
+    ;; --- Fallthrough: unknown ---
+    MOV  R0, __const_str_nil
+    OR   R0, BOXED_ROMSTRING
+    JMP  __type_done
+
+__type_nil:
+    MOV  R0, __const_str_nil
+    OR   R0, BOXED_ROMSTRING
+    JMP  __type_done
+
+__type_boolean:
+    MOV  R0, __const_str_boolean
+    OR   R0, BOXED_ROMSTRING
+    JMP  __type_done
+
+__type_number:
+    MOV  R0, __const_str_number
+    OR   R0, BOXED_ROMSTRING
+    JMP  __type_done
+
+__type_string:
+    MOV  R0, __const_str_string
+    OR   R0, BOXED_ROMSTRING
+    JMP  __type_done
+
+__type_table:
+    MOV  R0, __const_str_table
+    OR   R0, BOXED_ROMSTRING
+    JMP  __type_done
+
+__type_function:
+    MOV  R0, __const_str_function
+    OR   R0, BOXED_ROMSTRING
+
+__type_done:
+    MOV  SP, BP
+    POP  BP
+    RET
+
