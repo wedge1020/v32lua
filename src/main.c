@@ -123,6 +123,7 @@ int  main (int  argc, char** argv)
     runtime_req.needs_memory_alloc  = true;  // Heap always needed
     runtime_req.needs_print         = true;
     runtime_req.needs_strings       = true;
+    runtime_req.needs_tables        = true;
 
     tic80_init_default_palette ();
 

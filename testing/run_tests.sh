@@ -6,8 +6,29 @@
 
 ##############################################################################
 ##
+## Declare/define pass() function
+##
+function pass()
+{
+    [ "${DEBUG}" = "true" ] && echo "OK"
+}
+
+##############################################################################
+##
+## Declare/define fail() function 
+##
+function fail()
+{
+    echo "FAIL"
+    echo "---------------------------------------------------------------"
+    exit
+}
+
+##############################################################################
+##
 ## Declare variables 
 ##
+[ -z "${DEBUG}" ] && DEBUG="false" || DEBUG="true"
 UNIT=$(echo "${1}" | cut -d'.' -f1)
 COMPILE="../bin/v32lua"
 COMPILE="v32lua"
@@ -20,16 +41,24 @@ RUNEVAL="v32sim"
 RFLAGS="-r -C ${UNIT}.cmd -L lua"
 
 if [ -r "${UNIT}.lua" ]; then
-    echo "==============================================================="
-    echo "building ${UNIT}:"
-    echo "---------------------------------------------------------------"
-    printf "compiling:  %30s (lua->asm)  ... " "${UNIT}"
-    ${COMPILE}  ${CFLAGS} -o ${UNIT}.asm  ${UNIT}.lua && echo "OK" || echo "FAIL"
-    printf "assembling: %30s (asm->vbin) ... " "${UNIT}"
-    ${ASSEMBLE} ${AFLAGS} -o ${UNIT}.vbin ${UNIT}.asm && echo "OK" || echo "FAIL"
-    printf "packaging:  %30s (vbin->v32) ... " "${UNIT}"
-    ${PACKAGE}  ${PFLAGS} -o ${UNIT}.v32  ${UNIT}.xml && echo "OK" || echo "FAIL"
+    echo    "==============================================================="
+    if [ "${DEBUG}" = "true" ]; then
+        echo    "building ${UNIT}: "
+        echo    "---------------------------------------------------------------"
+    else
+        printf "evaluating %46s: " "${UNIT}"
+    fi
+    [ "${DEBUG}" = "true" ] && printf "compiling:  %30s (lua->asm)  ... " "${UNIT}"
+    ${COMPILE}  ${CFLAGS} -o ${UNIT}.asm  ${UNIT}.lua 2>  ${UNIT}.err && pass || fail
+    [ "${DEBUG}" = "true" ] && printf "assembling: %30s (asm->vbin) ... " "${UNIT}"
+    ${ASSEMBLE} ${AFLAGS} -o ${UNIT}.vbin ${UNIT}.asm 2>  ${UNIT}.err && pass || fail
+    [ "${DEBUG}" = "true" ] && printf "packaging:  %30s (vbin->v32) ... " "${UNIT}"
+    ${PACKAGE}  ${PFLAGS} -o ${UNIT}.v32  ${UNIT}.xml 2>  ${UNIT}.err && pass || fail
     
+    #if [ "${DEBUG}" = "true" ]; then
+    #    echo    "---------------------------------------------------------------"
+    #fi
+
     echo -n                             >  ${UNIT}.cmd
     for entry in `cat ${UNIT}.asm | grep 'define.*var_' | sed 's/^%define  var_\([^ ][^ ]*\) *\(0x[0-9A-F][0-9A-F]*\)$/\1:\2/g'`; do
         name=$(echo  "${entry}" | cut -d':' -f1)
@@ -57,31 +86,35 @@ if [ -r "${UNIT}.lua" ]; then
     ${RUNEVAL} ${RFLAGS} ${UNIT}.v32    >  ${UNIT}.out
     cat ${UNIT}.out | grep ':.*:' | cut -d':' -f2,3 | sed 's/^\([^:]*\):\([^:]*\)$/\2: \1/g' > ${UNIT}.have
     
-	
+    
     result=$(diff ${UNIT}.want ${UNIT}.have | grep '<' | wc -l | tr -d ' ')
 
     if [ "${result}" -eq 0 ]; then 
-		passed="${total}"
+        passed="${total}"
         #echo "PASSED ${total} out of ${total} tests"
-		qual="PASS"
+        qual="PASS"
     else
         passed=$((${total}-${result}))
         #echo "PASSED ${passed} out of ${total} tests"
-		qual="FAIL"
+        qual="FAIL"
     fi
-    echo "---------------------------------------------------------------"
+
+    if [ "${DEBUG}" = "true" ]; then
+        echo "---------------------------------------------------------------"
+    fi
+
     printf "evaluating: %30s (%2s/%2s)     ... %4s\n" "${UNIT}" "${passed}" "${total}" "${qual}"
 
-	if [ "${qual}" = "FAIL" ]; then
-		echo "---------------------------------------------------------------"
-		echo "   expected                   | received"
-		echo "---------------------------------------------------------------"
-		#diff -y ${UNIT}.want ${UNIT}.have | sed 's/\t/    /g' | cut -c1-30 | sed 's/$/|/g' > ${UNIT}.have1
-		#diff -y ${UNIT}.want ${UNIT}.have | cut -d'|' -f2 | tr '\t' ' ' > ${UNIT}.want1
-		printf "%-30s\n" $(cat ${UNIT}.want | tr ' ' ';') | tr ';' ' ' > ${UNIT}.want1
-		paste ${UNIT}.want1 ${UNIT}.have
-	fi
-	echo "---------------------------------------------------------------"
+    if [ "${qual}" = "FAIL" ] && [ "${DEBUG}" = "true" ]; then
+        echo "---------------------------------------------------------------"
+        echo "   expected                   | received"
+        echo "---------------------------------------------------------------"
+        #diff -y ${UNIT}.want ${UNIT}.have | sed 's/\t/    /g' | cut -c1-30 | sed 's/$/|/g' > ${UNIT}.have1
+        #diff -y ${UNIT}.want ${UNIT}.have | cut -d'|' -f2 | tr '\t' ' ' > ${UNIT}.want1
+        printf "%-30s\n" $(cat ${UNIT}.want | tr ' ' ';') | tr ';' ' ' > ${UNIT}.want1
+        paste ${UNIT}.want1 ${UNIT}.have
+    fi
+    echo "---------------------------------------------------------------"
     #cat ${UNIT}.out
 
 else
