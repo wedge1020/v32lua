@@ -457,24 +457,6 @@ expr:
     | expr TOKEN_AND expr     { $$ = make_node(NODE_AND);        $$->as.binary.left = $1;     $$->as.binary.right = $3; }
     | expr TOKEN_OR expr      { $$ = make_node(NODE_OR);         $$->as.binary.left = $1;     $$->as.binary.right = $3; }
     | expr TOKEN_CONCAT expr  { $$ = make_node(NODE_CONCAT);     $$->as.binary.left = $1;     $$->as.binary.right = $3; }
-    | TOKEN_FUNCTION '(' parameter_list ')' statement_list TOKEN_END
-    {
-        // Anonymous function expression: function(...) ... end
-        static int anon_counter = 0;
-        char buf[64];
-        snprintf(buf, sizeof(buf), "__anon_%d", anon_counter++);
-
-        ASTNode* func_def = make_node(NODE_FUNCTION_DEF);
-        func_def->as.function_def.name = strdup(buf);
-        func_def->as.function_def.params = $3;
-        func_def->as.function_def.body = $5;
-
-        ASTNode* func_ptr = make_node(NODE_FUNCTION_POINTER);
-        func_ptr->as.func_ptr.mangled_name = strdup(buf);
-
-        func_ptr->next = func_def;
-        $$ = func_ptr;
-    }
     | func_start '(' parameter_list ')' statement_list TOKEN_END
     {
         // Anonymous function expression: function(...) ... end

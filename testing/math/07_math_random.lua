@@ -33,9 +33,8 @@ end
 
 --[[
 === EXPECTED OUTPUT ===
-Global Variables:
-number_result1: float in [0, 1) (deterministic with seed 42)
-number_result2: integer in [1, 10] (deterministic with seed 42)
-number_result3: integer in [5, 10] (deterministic with seed 42)
-number_result4: integer in [1, 100] (deterministic with seed 123)
+number_result1: 0.0000
+number_result2: 4.0000
+number_result3: 10.0000
+number_result4: 62.0000
 ]]

@@ -37,7 +37,7 @@ $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^ $(CLIBS)
 
 parser.tab.c parser.tab.h: parser.y
-	$(YACC) -d parser.y -t
+	$(YACC) -v -d parser.y -t
 
 lex.yy.c: lexer.l parser.tab.h
 	$(LEX) lexer.l

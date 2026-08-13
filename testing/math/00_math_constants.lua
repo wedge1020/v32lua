@@ -25,7 +25,6 @@ end
 
 --[[
 === EXPECTED OUTPUT ===
-Global Variables:
 number_result1: 3.141592653589793
 number_result2: 2.718281828459045
 number_result3: 3402823466385288.0 (or similar large value)

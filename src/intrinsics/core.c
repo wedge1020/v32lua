@@ -739,6 +739,14 @@ int try_emit_table_get_intrinsic(ASTNode *table_expr, ASTNode *key_expr, int des
 
 bool emit_type_intrinsic(ASTNode *node, int dest_reg) {
     ASTNode *arg = node->as.call.args_head;
+
+	// === DEBUG: Show what we actually parsed ===
+    fprintf(stderr, "[debug] emit_type_intrinsic(): args_head = %p\n", (void*)arg);
+    if (arg) {
+        fprintf(stderr, "[debug] emit_type_intrinsic(): arg->type = %d, arg->next = %p\n",
+                arg->type, (void*)arg->next);
+    }
+
     if (!arg || arg->next != NULL) {
         compiler_error(ERR_SYNTAX, node->line_number,
             "type() expects exactly 1 argument");

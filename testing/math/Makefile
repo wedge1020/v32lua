@@ -1,7 +1,7 @@
 # --- Testing Directory Makefile ---
 
 # Path to the compiler binary relative to this testing directory
-COMPILER = ../../bin/v32lua
+COMPILER = ../../bin/v32lua -w
 
 # Automatically find all .lua files in this directory
 LUA_SRCS = $(wildcard *.lua)
@@ -12,13 +12,37 @@ ASM_OUTS = $(LUA_SRCS:.lua=.asm)
 # Translate the list of .lua source files into target .xml files
 XML_OUTS = $(LUA_SRCS:.lua=.xml)
 
-.PHONY: all clean asmcheck
+.PHONY: all clean asmcheck asm report debug
 
 # Default target builds all the .asm files
 all: $(ASM_OUTS)
 
+# Compile each lua file in turn
+asm:
+	@for f in $(LUA_SRCS); do \
+		echo "Compiling test case: $$f -> $${f%.lua}.asm"; \
+		$(COMPILER) -g $$f -o $${f%.lua}.asm; \
+	done
+
+tests:
+	@for f in $(LUA_SRCS); do \
+		../run_tests.sh $$f; \
+	done
+
+# Run with VERBOSE=true for each file
+report:
+	@for f in $(LUA_SRCS); do \
+		VERBOSE="true" ../run_tests.sh $$f; \
+	done
+
+# Run with DEBUG=true for each file
+debug:
+	@for f in $(LUA_SRCS); do \
+		DEBUG="true" ../run_tests.sh $$f; \
+	done
+
 # Pattern rule: How to convert a .lua file into a .asm file
-%.asm: %.lua $(COMPILER)
+%.asm: %.lua
 	@echo "Compiling test case: $< -> $@"
 	$(COMPILER) -g $< -o $@
 
@@ -47,39 +71,6 @@ v32: $(XML_OUTS)
 		fi; \
 	done
 
-# --- Monolithic Source Generation Rule ---
-monofiles:
-	@rm -f ../put/monofile_luatests.txt
-	@echo "-- ==========================================================================" >> ../put/monofile_luatests.txt
-	@echo "--              MONOLITHIC SOURCE: TESTS & PROBUCED ASSEMBLY                 " >> ../put/monofile_luatests.txt
-	@echo "-- ==========================================================================" >> ../put/monofile_luatests.txt
-	@echo "" >> ../put/monofile_luatests.txt
-	@for file in *.lua; do \
-		if [ -f "$$file" ]; then \
-			echo "-- --------------------------------------------------------------------------" >> ../put/monofile_luatests.txt; \
-			echo "-- TEST FILE: $$file" >> ../put/monofile_luatests.txt; \
-			echo "-- --------------------------------------------------------------------------" >> ../put/monofile_luatests.txt; \
-			cat "$$file" >> ../put/monofile_luatests.txt; \
-			echo "" >> ../put/monofile_luatests.txt; \
-			echo "-- --------------------------------------------------------------------------" >> ../put/monofile_luatests.txt; \
-			echo "" >> ../put/monofile_luatests.txt; \
-		fi; \
-	done
-	@echo "Successfully generated consolidated file: ../put/monofile_luatests.txt"
-	@echo "" >> ../put/monofile_assembly.txt
-	@for file in *.asm; do \
-		if [ -f "$$file" ]; then \
-			echo "-- --------------------------------------------------------------------------" >> ../put/monofile_assembly.txt; \
-			echo "-- PRODUCED ASSEMBLY FILE: $$file" >> ../put/monofile_assembly.txt; \
-			echo "-- --------------------------------------------------------------------------" >> ../put/monofile_assembly.txt; \
-			cat "$$file" >> ../put/monofile_assembly.txt; \
-			echo "" >> ../put/monofile_assembly.txt; \
-			echo "-- --------------------------------------------------------------------------" >> ../put/monofile_assembly.txt; \
-			echo "" >> ../put/monofile_assembly.txt; \
-		fi; \
-	done
-	@echo "Successfully generated consolidated file: ../put/monofile_assembly.txt"
-
 # Clean target drops all generated assembly and binary test files
 clean:
-	rm -f *.asm *.vbin *.xml *.v32 *.debug *.txt
+	rm -f *.asm *.vbin *.xml *.v32 *.debug *.txt *.cmd *.out *.err *.want* *.have*

@@ -67,23 +67,22 @@ end
 
 --[[
 === EXPECTED OUTPUT ===
-Global Variables:
-number_result1: 0
-number_result2: 1
-number_result3: 1
-number_result4: -1
-number_result5: 0
-number_result6: ~1.0
-number_result7: 0
-number_result8: ~1.5708
-number_result9: 0
-number_result10: ~1.5708
-number_result11: 0
-number_result12: ~0.7854
-number_result13: ~0.7854
-number_result14: 0
-number_result15: 0
-number_result16: 180
-number_result17: 0
-number_result18: ~3.14159
+number_result1: 0.0000
+number_result2: 1.0000
+number_result3: 1.0000
+number_result4: -1.0000
+number_result5: 0.0000
+number_result6: 1.0000
+number_result7: 0.0000
+number_result8: 1.5708
+number_result9: 0.0000
+number_result10: 1.5708
+number_result11: 0.0000
+number_result12: 0.7854
+number_result13: 0.7854
+number_result14: 0.0000
+number_result15: 0.0000
+number_result16: 180.0000
+number_result17: 0.0000
+number_result18: 3.14159
 ]]
