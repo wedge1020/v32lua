@@ -71,7 +71,8 @@ program:
     ;
 
 statement_list:
-      stat_list { $$ = $1; }
+    /* empty */ { $$ = NULL; }
+    | stat_list { $$ = $1; }
     | stat_list last_statement {
         if ($1 == NULL) { 
             $$ = $2; 
@@ -223,6 +224,31 @@ statement:
     | TOKEN_ASM '(' TOKEN_STRING ')' { 
         $$ = make_node(NODE_ASM);
         $$->as.inline_asm.code = $3;
+    }
+    | TOKEN_LOCAL func_start TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END
+    {
+        // local function myfunc(...) ... end
+        // This is equivalent to: local myfunc = function(...) ... end
+
+        // 1. Get the pre-allocated function_def node from func_start
+        ASTNode* func_def = $2;
+        func_def->as.function_def.name = strdup($3);
+        func_def->as.function_def.params = $5;
+        func_def->as.function_def.body = $7;
+
+        // 2. Create function pointer node
+        ASTNode* func_ptr = make_node(NODE_FUNCTION_POINTER);
+        func_ptr->as.func_ptr.mangled_name = strdup($3);
+
+        // 3. Create local assignment: local myfunc = func_ptr
+        ASTNode* assign = make_node(NODE_MULTIPLE_ASSIGNMENT);
+        assign->as.mult_assign.targets_head = make_node_ident($3);
+        assign->as.mult_assign.values_head = func_ptr;
+        assign->as.mult_assign.is_local = 1;  // THIS IS THE KEY DIFFERENCE
+
+        // 4. Chain them: func_def -> assign
+        func_def->next = assign;
+        $$ = func_def;
     }
     | TOKEN_RAWASM '(' TOKEN_STRING ')' { 
         $$ = make_node(NODE_RAWASM);
