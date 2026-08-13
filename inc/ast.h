@@ -62,8 +62,10 @@ typedef struct astnode {
             int is_method_call;
         } call;
         
+        // In the func_ptr union:
         struct {
             char* mangled_name;
+            struct astnode* func_def;  // Function definition for anonymous functions
         } func_ptr;
         
         struct {

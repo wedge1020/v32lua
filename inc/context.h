@@ -10,10 +10,11 @@ typedef enum { SYM_GLOBAL, SYM_LOCAL } SymbolType;
 typedef struct SymbolNode {
     char* name;
     SymbolType type;
-    int location;             // RAM address for globals, BP offset for locals
+    int location;
     int is_function;
-    int arity;
+    int arity;              // -1 means variadic
     int is_c_native;
+    int is_variadic;        // NEW: 1 if function accepts ...
     struct SymbolNode* next;
 } SymbolNode;
 

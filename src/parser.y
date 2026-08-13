@@ -42,6 +42,7 @@ char *mangle_method_name (const char *table_name, const char *method_name);
 %token TOKEN_EQ TOKEN_NEQ TOKEN_LE TOKEN_GE TOKEN_LT TOKEN_GT TOKEN_CONCAT
 %token TOKEN_LOCAL TOKEN_IN TOKEN_DO TOKEN_NOT TOKEN_LEN UNARY_MINUS
 %token TOKEN_TRUE TOKEN_FALSE TOKEN_NIL TOKEN_FLOORDIV
+%token TOKEN_DOTS
 
 %type <ast_node> statement statement_list stat_list expr function_def return_stmt
 %type <ast_node> table_constructor function_call else_branch prefix_expr
@@ -106,16 +107,26 @@ stat_list:
     ;
 
 parameter_list:
-    /* empty */ { 
+    /* empty */ {
         $$ = NULL;
     }
-    | TOKEN_IDENTIFIER { 
-        $$ = make_node_ident($1); 
+    | TOKEN_IDENTIFIER {
+        $$ = make_node_ident($1);
+    }
+    | TOKEN_DOTS {
+        $$ = make_node_ident("...");  // Special marker for variadic
     }
     | parameter_list ',' TOKEN_IDENTIFIER {
         ASTNode* new_node = make_node_ident($3);
-        
-        // Chain the new parameter to the end of the list
+        ASTNode* current = $1;
+        while (current->next != NULL) {
+            current = current->next;
+        }
+        current->next = new_node;
+        $$ = $1;
+    }
+    | parameter_list ',' TOKEN_DOTS {
+        ASTNode* new_node = make_node_ident("...");
         ASTNode* current = $1;
         while (current->next != NULL) {
             current = current->next;
@@ -398,10 +409,10 @@ function_def:
     ;
 
 return_stmt:
-    TOKEN_RETURN expr {
+    TOKEN_RETURN expr_list {
         $$ = make_node(NODE_RETURN);
         $$->as.return_stmt.expressions_head = $2;
-        $$->as.return_stmt.parent_func_arg_count = 0; // Configured during type check
+        $$->as.return_stmt.parent_func_arg_count = 0;
     }
     ;
 
@@ -459,7 +470,6 @@ expr:
     | expr TOKEN_CONCAT expr  { $$ = make_node(NODE_CONCAT);     $$->as.binary.left = $1;     $$->as.binary.right = $3; }
     | func_start '(' parameter_list ')' statement_list TOKEN_END
     {
-        // Anonymous function expression: function(...) ... end
         static int anon_counter = 0;
         char buf[64];
         snprintf(buf, sizeof(buf), "__anon_%d", anon_counter++);
@@ -471,12 +481,9 @@ expr:
 
         ASTNode* func_ptr = make_node(NODE_FUNCTION_POINTER);
         func_ptr->as.func_ptr.mangled_name = strdup(buf);
+        func_ptr->as.func_ptr.func_def = func_def;  // Store here, NOT in next
 
-        // Chain func_ptr -> func_def so func_def gets compiled first
-        func_ptr->next = func_def;
-
-        // Return func_ptr as the expression value
-        $$ = func_ptr;  // CHANGED FROM func_def
+        $$ = func_ptr;
     }
     ;
 
