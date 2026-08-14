@@ -26,18 +26,37 @@ void  node_function_def (ASTNode *node)
     //reset_spill_slots(-(num_locals + NUM_GPRS));  // ✅ Initialize spill slots AFTER locals
     push_scope();
 
-    // =============================================================
+    // ============================================================
     // PARAMETER TRAVERSAL:
     // Arity is already safely stored on the symbol from Stage 4!
     // We only need to map parameters to stack offsets [BP + 2], etc.
-    // =============================================================
+    // ============================================================
     int param_offset = 2;
+    int is_variadic = 0;
     ASTNode *p = node->as.function_def.params;
     while (p != NULL) {
         if (p->type == NODE_IDENTIFIER) {
-            register_parameter(p->as.id.name, param_offset++);
+            // Skip "..." - it's a variadic marker, not a real parameter
+            if (strcmp(p->as.id.name, "...") == 0) {
+                is_variadic = 1;
+            } else {
+                register_parameter(p->as.id.name, param_offset++);
+            }
         }
         p = p->next;
+    }
+
+    // Mark function symbol as variadic
+    SymbolNode *sym = resolve_symbol(func_name);
+    if (sym) {
+        sym->is_variadic = is_variadic;
+        sym->arity = is_variadic ? -1 : (param_offset - 2);
+    }
+
+    // For variadic functions: reserve space for argument count at [BP-2]
+    if (is_variadic) {
+        emit_asm ("    ; --- Variadic function: reserve space for arg count ---\n");
+        emit_asm ("ISUB SP, 1 ; Space for argument count at [BP-2]\n");
     }
     // =============================================================
 
@@ -45,11 +64,11 @@ void  node_function_def (ASTNode *node)
     pop_scope();
 
     // --- Function Epilogue ---
-    emit_asm("__%s_return:\n", func_name);
-    emit_asm("MOV SP, BP\n");
-    emit_asm("POP BP\n");
-    emit_asm("RET\n");
-    emit_asm("\n");
+    emit_asm ("__%s_return:\n", func_name);
+    emit_asm ("MOV SP, BP\n");
+    emit_asm ("POP BP\n");
+    emit_asm ("RET\n");
+    emit_asm ("\n");
 
     pop_function_context();
 }
@@ -301,6 +320,18 @@ void node_function_call(ASTNode *node, int dest_reg)
         emit_asm("PUSH R%d ; Arg 1: self\n", table_reg);
         unlock_register(table_reg); // No longer needed
         total_arg_count++;
+    }
+
+    // -------------------------------------------------------------------------
+    // STEP 3.5: Push Argument Count for Variadic Functions
+    // -------------------------------------------------------------------------
+    if (target_sym && target_sym->is_variadic) {
+        emit_asm("    ; --- Variadic call: push argument count ---\n");
+        int arg_count_reg = allocate_register();
+        emit_asm("MOV R%d, %d ; Load total argument count\n", arg_count_reg, total_arg_count);
+        emit_asm("PUSH R%d ; Push arg count for variadic function\n", arg_count_reg);
+        unlock_register(arg_count_reg);
+        total_arg_count++; // Account for the arg count itself
     }
 
     // -------------------------------------------------------------------------

@@ -485,6 +485,9 @@ expr:
 
         $$ = func_ptr;
     }
+    | TOKEN_DOTS {
+        $$ = make_node_ident("...");
+    }
     ;
 
 function_call:
