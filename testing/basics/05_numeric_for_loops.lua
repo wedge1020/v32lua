@@ -30,7 +30,7 @@ function test_numeric_for_loops()
     for i = 1, 5, 0.5 do
         sum3 = sum3 + i
     end
-    number_result4 = sum3  -- Expected: ~35 (1+1.5+2+2.5+3+3.5+4+4.5+5)
+    number_result4 = sum3  -- Expected: 27 (1+1.5+2+2.5+3+3.5+4+4.5+5)
 
     -- === Test 5: Nested for loops ===
     local product = 0
@@ -39,7 +39,7 @@ function test_numeric_for_loops()
             product = product + (i * j)
         end
     end
-    number_result5 = product  -- Expected: 9 (1*1 + 1*2 + 2*1 + 2*2 + 3*1 + 3*2)
+    number_result5 = product  -- Expected: 18 (1*1 + 1*2 + 2*1 + 2*2 + 3*1 + 3*2)
 end
 
 function main()
@@ -60,7 +60,7 @@ end
 number_result1: 15.0000
 number_result2: 30.0000
 number_result3: 5.0000
-number_result4: 35.0000
-number_result5: 9.0000
+number_result4: 27.0000
+number_result5: 18.0000
 
 --]]
