@@ -1,7 +1,7 @@
 # --- Testing Directory Makefile ---
 
 # Path to the compiler binary relative to this testing directory
-COMPILER = ../../bin/v32lua -w
+COMPILER = ../../bin/v32lua -w -g
 
 # Automatically find all .lua files in this directory
 LUA_SRCS = $(wildcard *.lua)

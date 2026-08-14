@@ -9,20 +9,18 @@ void  node_relational (ASTNode *node, int  dest_reg)
     ensure_in_register (dest_reg);
     ensure_in_register (right_reg);
     
-    if (node -> as.binary.operator == OP_EQ || node -> as.binary.operator == OP_NEQ) {
-        emit_asm ("PUSH R%d\n", dest_reg);
-        emit_asm ("PUSH R%d\n", right_reg);
-        emit_asm ("CALL __builtin_eq\n");
-        emit_asm ("IADD SP, 2\n");
-        
-        if (node -> as.binary.operator == OP_NEQ)
-        {
-            emit_asm ("MOV R%d, R0\n", dest_reg);
-            emit_asm ("IEQ R%d, 0 ; Invert to true if it was false\n", dest_reg);
-        }
-        else
-        {
-            emit_asm ("MOV R%d, R0\n", dest_reg);
+    if (node->as.binary.operator == OP_EQ || node->as.binary.operator == OP_NEQ) {
+        emit_asm("PUSH R%d\n", dest_reg);
+        emit_asm("PUSH R%d\n", right_reg);
+        emit_asm("CALL __builtin_eq\n");
+        emit_asm("IADD SP, 2\n");
+
+        if (node->as.binary.operator == OP_NEQ) {
+            // Flip BOXED_FALSE ↔ BOXED_TRUE (they differ only in LSB)
+            emit_asm("MOV R%d, R0\n", dest_reg);
+            emit_asm("XOR R%d, 1\n", dest_reg);  // 0xFFC00001 ↔ 0xFFC00002
+        } else {
+            emit_asm("MOV R%d, R0\n", dest_reg);
         }
     }
     else

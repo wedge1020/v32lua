@@ -60,10 +60,11 @@ if [ -r "${UNIT}.lua" ]; then
     #fi
 
     echo -n                             >  ${UNIT}.cmd
-    for entry in `cat ${UNIT}.asm | grep 'define.*var_' | sed 's/^%define  var_\([^ ][^ ]*\) *\(0x[0-9A-F][0-9A-F]*\)$/\1:\2/g'`; do
+    for entry in `cat ${UNIT}.asm | grep 'define.*var_.*_' | sed 's/^%define  var_\([^ ][^ ]*\) *\(0x[0-9A-F][0-9A-F]*\)$/\1:\2/g'`; do
         name=$(echo  "${entry}" | cut -d':' -f1)
         value=$(echo "${entry}" | cut -d':' -f2)
         dtype=$(echo "${name}"  | cut -d'_' -f1)
+		#echo "entry: ${entry}, name: ${name}"
         if [ "${dtype}" = "number" ]; then
             echo "d/f ${value} ${name}" >> ${UNIT}.cmd
         elif [ "${dtype}" = "string" ]; then

@@ -390,14 +390,15 @@ SymbolNode *register_parameter (const char *name, int offset)
 void register_all_globals_prepass(ASTNode *node) {
     while (node != NULL) {
         switch (node->type) {
-            case NODE_FUNCTION_DEF:
-                // Register the function itself
-                mark_global_as_function(node->as.function_def.name,
-                                         node->as.function_def.params);
-
-                // ✅ NEW: Recurse into function body to find global assignments
-                register_all_globals_prepass(node->as.function_def.body);
-                break;
+			case NODE_FUNCTION_DEF:
+				// ONLY register as global if we're in the global scope
+				if (current_scope == global_scope)
+				{
+					mark_global_as_function(node->as.function_def.name,
+											 node->as.function_def.params);
+				}
+				register_all_globals_prepass(node->as.function_def.body);
+				break;
 
             case NODE_MULTIPLE_ASSIGNMENT:
                 if (!node->as.mult_assign.is_local) {
