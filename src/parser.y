@@ -114,23 +114,20 @@ parameter_list:
         $$ = make_node_ident($1);
     }
     | TOKEN_DOTS {
-        $$ = make_node_ident("...");  // Special marker for variadic
+        // Create a marker identifier - will be detected in function_def
+        $$ = make_node_ident("...");
     }
     | parameter_list ',' TOKEN_IDENTIFIER {
         ASTNode* new_node = make_node_ident($3);
         ASTNode* current = $1;
-        while (current->next != NULL) {
-            current = current->next;
-        }
+        while(current->next) current = current->next;
         current->next = new_node;
         $$ = $1;
     }
     | parameter_list ',' TOKEN_DOTS {
         ASTNode* new_node = make_node_ident("...");
         ASTNode* current = $1;
-        while (current->next != NULL) {
-            current = current->next;
-        }
+        while(current->next) current = current->next;
         current->next = new_node;
         $$ = $1;
     }
@@ -333,6 +330,17 @@ function_def:
         func_def->as.function_def.params = $4;
         func_def->as.function_def.body = $6;
 
+        // NEW: Check if parameter_list contains "..."
+        func_def->as.function_def.is_variadic = 0;
+        ASTNode *p = $4;
+        while (p != NULL) {
+            if (p->type == NODE_IDENTIFIER && strcmp(p->as.id.name, "...") == 0) {
+                func_def->as.function_def.is_variadic = 1;
+                break;
+            }
+            p = p->next;
+        }
+
         // 2. Instantiate a function pointer node for the address
         ASTNode* func_ptr = make_node(NODE_FUNCTION_POINTER);
         func_ptr->as.func_ptr.mangled_name = strdup($2);
@@ -440,7 +448,10 @@ prefix_expr:
     ;
 
 expr:
-    TOKEN_NUMBER {
+    TOKEN_DOTS {
+        $$ = make_node(NODE_VARIADIC_EXPR);
+    }
+    | TOKEN_NUMBER {
         $$ = make_node(NODE_NUMBER);
         $$->as.number.val = $1;
     }
@@ -484,9 +495,6 @@ expr:
         func_ptr->as.func_ptr.func_def = func_def;  // Store here, NOT in next
 
         $$ = func_ptr;
-    }
-    | TOKEN_DOTS {
-        $$ = make_node_ident("...");
     }
     ;
 

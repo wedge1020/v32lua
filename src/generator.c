@@ -400,6 +400,13 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 node_relational (node, dest_reg);
                 break;
 
+            case NODE_VARIADIC_EXPR:
+                // Don't register as variable!
+                // Instead, generate code to access variadic arguments
+                emit_asm("    ; Variadic expression - access from stack\n");
+                // You'll need to implement proper variadic arg access here
+                break;
+
             case NODE_STRING:
                 node_string (node, dest_reg);
                 runtime_req.needs_strings       = true;

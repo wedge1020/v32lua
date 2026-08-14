@@ -146,8 +146,8 @@ char *process_string_literal (const char *text, int  len)
 ">"                     { return TOKEN_GT;       }
 "#"                     { return TOKEN_LEN;      }
 "not"                   { return TOKEN_NOT;      }
-".."                    { return TOKEN_CONCAT;   }
 "..."                   { return TOKEN_DOTS;     }
+".."                    { return TOKEN_CONCAT;   }
 "__asm__"               { return TOKEN_ASM;      }
 "__rawasm__"            { return TOKEN_RAWASM;   }
 "+"                     { return '+'; }

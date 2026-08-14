@@ -54,6 +54,7 @@ typedef struct astnode {
             char* name;
             struct astnode* params;
             struct astnode* body;
+			int is_variadic;  // NEW
         } function_def;
 
         struct {

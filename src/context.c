@@ -155,29 +155,25 @@ SymbolNode* register_global (const char *name)
     return (sym);
 }
 
-void mark_global_as_function (const char *name, ASTNode *params)
-{
-    // Register it as a standard RAM variable first so it gets a valid pointer slot
-    SymbolNode *sym     = register_global (name);
-    sym -> is_function  = 1;
+void mark_global_as_function(const char *name, ASTNode *params) {
+    SymbolNode *sym = register_global(name);
+    sym->is_function = 1;
 
-    // --- NEW: Calculate and store arity during the pre-pass! ---
     int count = 0;
+    int has_variadic = 0;  // Track if we found "..."
     ASTNode *p = params;
     while (p != NULL) {
-        count++;
+        if (p->type == NODE_IDENTIFIER) {
+            if (strcmp(p->as.id.name, "...") == 0) {
+                has_variadic = 1;
+            } else {
+                count++;
+            }
+        }
         p = p->next;
     }
     sym->arity = count;
-}
-
-void mark_global_as_c_function (const char *name, int arity)
-{
-    // Register as global so symbol lookup succeeds cleanly
-    SymbolNode *sym    = register_global (name);
-    sym->is_function   = 1;
-    sym->is_c_native   = 1;
-    sym->arity         = arity;
+    sym->is_variadic = has_variadic;  // Set based on whether "..." was present
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
