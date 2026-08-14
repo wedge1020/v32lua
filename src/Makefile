@@ -57,6 +57,7 @@ context:
 	@cp -v runtime/math.s{,.txt}
 	@cp -v runtime/string.s{,.txt}
 	@cp -v runtime/print.s{,.txt}
+	@cp -v runtime/iters.s{,.txt}
 	@cp -v runtime/pico8.s{,.txt}
 	@cp -v runtime/tic80.s{,.txt}
 	@cp -v runtime/constant.s{,.txt}
