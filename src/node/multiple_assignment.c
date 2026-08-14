@@ -71,6 +71,13 @@ void  node_multiple_assignment (ASTNode *node)
             }
             char access_str[128];
             get_variable_access_string(curr_tgt->as.id.name, access_str);
+
+            // ✅ NEW DEBUG
+            if (g_verbose_debug) {
+                fprintf(stderr, "[debug] node_multiple_assignment() Assigning: %s -> %s (val_reg=R%d)\n",
+						curr_tgt->as.id.name, access_str, val_reg);
+			}
+
             emit_asm("MOV %s, R%d", access_str, val_reg);
         }
         else if (curr_tgt->type == NODE_TABLE_GET)

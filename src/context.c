@@ -73,39 +73,6 @@ SymbolNode *resolve_symbol (const char *name)
     return (NULL); // Not found anywhere
 }
 
-void register_all_globals_prepass(ASTNode *node) {
-    while (node != NULL) {
-        switch (node->type) {
-            case NODE_FUNCTION_DEF:
-                // Pass node->as.function_def.params along with the name!
-                mark_global_as_function(node->as.function_def.name, node->as.function_def.params);
-                break;
-
-            case NODE_MULTIPLE_ASSIGNMENT:
-                if (!node->as.mult_assign.is_local) {
-                    ASTNode *tgt = node->as.mult_assign.targets_head;
-                    while (tgt != NULL) {
-                        if (tgt->type == NODE_IDENTIFIER) {
-                            register_global(tgt->as.id.name);
-                        }
-                        tgt = tgt->next;
-                    }
-                }
-                break;
-
-            case NODE_CART_HINT:
-                if (node->as.cart_hint.resource_id != -1 && node->as.cart_hint.name != NULL) {
-                    register_global(node->as.cart_hint.name);
-                }
-                break;
-
-            default:
-                break;
-        }
-        node = node->next;
-    }
-}
-
 // Search ONLY the immediate current block scope (do not traverse parent pointers!)
 SymbolNode *resolve_local_symbol_current_scope (const char *name)
 {
@@ -422,4 +389,50 @@ SymbolNode *register_parameter (const char *name, int offset)
     current_scope->last = sym;
 
     return sym;
+}
+
+void register_all_globals_prepass(ASTNode *node) {
+    while (node != NULL) {
+        switch (node->type) {
+            case NODE_FUNCTION_DEF:
+                // Register the function itself
+                mark_global_as_function(node->as.function_def.name,
+                                         node->as.function_def.params);
+
+                // ✅ NEW: Recurse into function body to find global assignments
+                register_all_globals_prepass(node->as.function_def.body);
+                break;
+
+            case NODE_MULTIPLE_ASSIGNMENT:
+                if (!node->as.mult_assign.is_local) {
+                    ASTNode *tgt = node->as.mult_assign.targets_head;
+                    while (tgt != NULL) {
+                        if (tgt->type == NODE_IDENTIFIER) {
+                            register_global(tgt->as.id.name);
+                        }
+                        tgt = tgt->next;
+                    }
+                }
+                break;
+
+            // ✅ NEW: Recurse into control structures
+            case NODE_IF:
+                register_all_globals_prepass(node->as.if_stmt.if_body);
+                register_all_globals_prepass(node->as.if_stmt.else_body);
+                break;
+
+            case NODE_WHILE:
+                register_all_globals_prepass(node->as.while_loop.body);
+                break;
+
+            case NODE_FOR_NUMERIC:
+            case NODE_FOR_GENERIC:
+                register_all_globals_prepass(node->as.for_numeric.body);
+                break;
+
+            default:
+                break;
+        }
+        node = node->next;
+    }
 }
