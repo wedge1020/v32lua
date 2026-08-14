@@ -3,6 +3,29 @@
 void  node_function_def (ASTNode *node)
 {
     const char *func_name = node->as.function_def.name;
+
+    // ===== Register local function names before processing body =====
+    bool is_local_func = false;
+    if (node->next != NULL && node->next->type == NODE_MULTIPLE_ASSIGNMENT) {
+        is_local_func = node->next->as.mult_assign.is_local;
+    }
+
+    if (is_local_func) {
+        // Register in CURRENT scope (enclosing function), not the new one we're about to push
+        SymbolNode *sym = register_local(func_name);
+        sym->is_function = 1;
+
+        // Calculate and store arity
+        int count = 0;
+        ASTNode *p = node->as.function_def.params;
+        while (p != NULL) {
+            count++;
+            p = p->next;
+        }
+        sym->arity = count;
+    }
+    // ======================================================================
+
     push_function_context(func_name);
 
     if (g_debug_mode) {
