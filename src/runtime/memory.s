@@ -159,7 +159,7 @@ __builtin_type:
     ;; --- Check for number (unboxed float) ---
     MOV  R1, R0
     AND  R1, 0x7F800000      ; NaN/boxed tag mask
-    IEQ  R1, 0
+    INE  R1, 0x7F800000      ; NOT equal to NaN tag → it's a number
     JT   R1, __type_number
 
     ;; --- Check for ROM string ---

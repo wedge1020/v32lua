@@ -16,9 +16,8 @@ void  node_relational (ASTNode *node, int  dest_reg)
         emit_asm("IADD SP, 2\n");
 
         if (node->as.binary.operator == OP_NEQ) {
-            // Flip BOXED_FALSE ↔ BOXED_TRUE (they differ only in LSB)
             emit_asm("MOV R%d, R0\n", dest_reg);
-            emit_asm("XOR R%d, 1\n", dest_reg);  // 0xFFC00001 ↔ 0xFFC00002
+            emit_asm("XOR R%d, 3 ; Flip BOXED_FALSE (0xFFC00001) <-> BOXED_TRUE (0xFFC00002)\n", dest_reg);
         } else {
             emit_asm("MOV R%d, R0\n", dest_reg);
         }

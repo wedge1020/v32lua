@@ -71,9 +71,6 @@ if [ -r "${UNIT}.lua" ]; then
             echo "d/s ${value} ${name}" >> ${UNIT}.cmd
         elif [ "${dtype}" = "boolean" ]; then
             echo "d/B ${value} ${name}" >> ${UNIT}.cmd
-        else 
-            echo "invalid data type: ${dtype}"
-            exit 1
         fi
     done
     #echo "c"                            >> ${UNIT}.cmd

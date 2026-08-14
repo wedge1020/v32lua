@@ -4,42 +4,29 @@ void  node_function_def (ASTNode *node)
 {
     const char *func_name = node->as.function_def.name;
 
-    // ===== Register local function names before processing body =====
+    // ===== Register local function names =====
     bool is_local_func = false;
     if (node->next != NULL && node->next->type == NODE_MULTIPLE_ASSIGNMENT) {
         is_local_func = node->next->as.mult_assign.is_local;
     }
 
-    // =========================================================================
-    // INITIALIZE LOCAL FUNCTION VARIABLE
-    // =========================================================================
-    // If we're inside a function (not global scope), this is a local function
-    if (current_scope != global_scope)
-    {
-        // Ensure it's registered as local
-        SymbolNode *sym = resolve_symbol(func_name);
-        if (sym == NULL)
-        {
-            sym = register_local(func_name);
-            sym->is_function = 1;
-            // Calculate arity
-            int count = 0;
-            ASTNode *p = node->as.function_def.params;
-            while (p != NULL) {
-                if (p->type == NODE_IDENTIFIER && strcmp(p->as.id.name, "...") != 0) {
-                    count++;
-                }
-                p = p->next;
-            }
-            sym->arity = count;
+    if (is_local_func) {
+        SymbolNode *sym = register_local(func_name);
+        sym->is_function = 1;
+        int count = 0;
+        ASTNode *p = node->as.function_def.params;
+        while (p != NULL) {
+            count++;
+            p = p->next;
         }
+        sym->arity = count;
 
-        // Emit initialization: load function address into local variable
+        // ===== INITIALIZE LOCAL FUNCTION VARIABLE =====
         char access_str[128];
         get_variable_access_string(func_name, access_str);
         emit_asm("MOV R0, __function_%s\n", func_name);
-        emit_asm("OR R0, BOXED_FUNCTION ; Box as Function pointer\n");
-        emit_asm("MOV %s, R0         ; Store in local variable\n", access_str);
+        emit_asm("OR R0, BOXED_FUNCTION\n");
+        emit_asm("MOV %s, R0\n", access_str);
     }
 
     push_function_context(func_name);

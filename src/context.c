@@ -158,9 +158,10 @@ SymbolNode* register_global (const char *name)
 void mark_global_as_function(const char *name, ASTNode *params) {
     SymbolNode *sym = register_global(name);
     sym->is_function = 1;
+    //sym->location = -2;  // Special: -2 = function (use __function_name label, not RAM)
 
     int count = 0;
-    int has_variadic = 0;  // Track if we found "..."
+    int has_variadic = 0;
     ASTNode *p = params;
     while (p != NULL) {
         if (p->type == NODE_IDENTIFIER) {
@@ -173,7 +174,7 @@ void mark_global_as_function(const char *name, ASTNode *params) {
         p = p->next;
     }
     sym->arity = count;
-    sym->is_variadic = has_variadic;  // Set based on whether "..." was present
+    sym->is_variadic = has_variadic;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -181,64 +182,25 @@ void mark_global_as_function(const char *name, ASTNode *params) {
 // compose the variable prefix (function vs variable), since everything is
 // technically a variable in lua.
 //
-void  get_variable_access_string (const char *name, char *output_buffer)
-{
-    SymbolNode *sym             = resolve_symbol (name);
-    
-    ////////////////////////////////////////////////////////////////////////////////////
-    //
-    // If not found, auto-register it as a global variable
-    //
-    if (sym                    == NULL)
-    {
-        sym                     = register_global (name); 
+void get_variable_access_string(const char *name, char *output_buffer) {
+    SymbolNode *sym = resolve_symbol(name);
+
+    if (sym == NULL) {
+        sym = register_global(name);
     }
 
-    ////////////////////////////////////////////////////////////////////////////////////
-    //
-    // Check if it's a global symbol
-    //
-    if (sym -> type            == SYM_GLOBAL)
-    {
-        if (sym -> is_function == 1)
-        {
-            sprintf (output_buffer, "[func_%s]", sym -> name);
+    if (sym->type == SYM_GLOBAL) {
+        if (sym->is_function == 1) {
+            sprintf(output_buffer, "[func_%s]", sym->name);  // ← Keep brackets
+        } else {
+            sprintf(output_buffer, "[var_%s]", sym->name);
         }
-        else
-        {
-            sprintf (output_buffer, "[var_%s]", sym -> name);
-        }
-    }
-
-    ////////////////////////////////////////////////////////////////////////////////////
-    //
-    // else it is a local variable, use BP offset
-    //
-    else
-    {
-        ////////////////////////////////////////////////////////////////////////////////
-        //
-        // It's a parameter! (e.g. location -2 formats as [BP + 2])
-        //
-        // Assuming location is -1 for Arg 1, -2 for Arg 2...
-        // We need [BP + 2] for Arg 1, [BP + 3] for Arg 2...
-        //
-        if (sym ->location     <  0)
-        {
-            int  stack_offset   = (-(sym -> location));
-            sprintf (output_buffer, "[BP + %d]", stack_offset);
-        }
-
-        ////////////////////////////////////////////////////////////////////////////////
-        //
-        // It's a local variable! (e.g. location 1 formats as [BP - 1])
-        //
-        // Since local_offset_counter starts at 1, location is 1, 2, 3...
-        // We want [BP - 1], [BP - 2], [BP - 3]...
-        //
-        else
-        {
-            sprintf (output_buffer, "[BP - %d]", sym -> location);
+    } else {
+        if (sym->location < 0) {
+            int stack_offset = (-(sym->location));
+            sprintf(output_buffer, "[BP + %d]", stack_offset);
+        } else {
+            sprintf(output_buffer, "[BP - %d]", sym->location);
         }
     }
 }
@@ -390,15 +352,19 @@ SymbolNode *register_parameter (const char *name, int offset)
 void register_all_globals_prepass(ASTNode *node) {
     while (node != NULL) {
         switch (node->type) {
-			case NODE_FUNCTION_DEF:
-				// ONLY register as global if we're in the global scope
-				if (current_scope == global_scope)
-				{
-					mark_global_as_function(node->as.function_def.name,
-											 node->as.function_def.params);
-				}
-				register_all_globals_prepass(node->as.function_def.body);
-				break;
+            case NODE_FUNCTION_DEF:
+                // Check if next node is a local multiple assignment
+                bool is_local = false;
+                if (node->next != NULL && node->next->type == NODE_MULTIPLE_ASSIGNMENT) {
+                    is_local = node->next->as.mult_assign.is_local;
+                }
+
+                if (!is_local) {
+                    mark_global_as_function(node->as.function_def.name,
+                                             node->as.function_def.params);
+                }
+                register_all_globals_prepass(node->as.function_def.body);
+                break;
 
             case NODE_MULTIPLE_ASSIGNMENT:
                 if (!node->as.mult_assign.is_local) {

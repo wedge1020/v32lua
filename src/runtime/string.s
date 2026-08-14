@@ -32,7 +32,7 @@ __builtin_strcat:
     PUSH BP
     MOV  BP, SP
 
-    ;; === NEW: Type-check and coerce LEFT operand if needed ===
+    ;; === Type-check and coerce LEFT operand if needed ===
     MOV  R1, [BP+3]          ; Load Left value
     MOV  R3, R1
     AND  R3, BOXED_DATA      ; Extract tag
@@ -50,7 +50,7 @@ __builtin_strcat:
 
 __strcat_left_is_string:
 
-    ;; === NEW: Type-check and coerce RIGHT operand if needed ===
+    ;; === Type-check and coerce RIGHT operand if needed ===
     MOV  R1, [BP+2]          ; Load Right value
     MOV  R3, R1
     AND  R3, BOXED_DATA      ; Extract tag

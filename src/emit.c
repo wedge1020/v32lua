@@ -543,17 +543,19 @@ int   emit_variable_map (void)
         fprintf (out(), "%%define  TIC80_MAP_WIDTH  2\n");
         fprintf (out(), "%%define  TIC80_MAP_HEIGHT 3\n");
     }*/
-    
     SymbolNode *curr = global_scope ? global_scope->symbols : NULL;
-    while (curr != NULL)
-    {
-        if (curr->is_function)
-            fprintf(out(), "%%define  func_%-19s 0x%.8X\n", curr->name, curr->location);
-        else
-            fprintf(out(), "%%define  var_%-20s 0x%.8X\n",  curr->name, curr->location);
+    while (curr != NULL) {
+        if (curr->is_function) {
+            if (curr->location != -2) {  // Skip functions (they use labels, not RAM)
+                fprintf(out(), "%%define  func_%-19s 0x%.8X\n", curr->name, curr->location);
+            }
+        } else {
+            fprintf(out(), "%%define  var_%-19s 0x%.8X\n", curr->name, curr->location);
+        }
         lines_printed    = lines_printed + 1;
         curr = curr->next;
     }
+    
     fprintf(out(), "\n;; Highest used global RAM address: 0x%.8X\n", next_ram_address - 1);
     fprintf(out(), ";; Dynamic heap will start at runtime address: 0x%.8X\n\n", next_ram_address);
     lines_printed    = lines_printed + 2;
