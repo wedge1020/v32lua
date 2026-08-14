@@ -1,0 +1,59 @@
+# variant | range | ASM runtime | C runtime | lua runtime
+# --------+-------+-------------+-----------+-------------
+# brute   | 1024  | 0.3145s     | 0.4418s   | 1.570037s
+# +b      | 1024  | 0.0496s     | 0.0769s   | 0.247822s
+#   +o    | 1024  | 0.0786s     | 0.2231s   | 0.391716s
+#     +s  | 1024  | 0.0134s     | 0.0524s   | 0.062691s
+# +b+o    | 1024  | 0.0247s     | 0.0775s   | 0.123083s
+# +b  +s  | 1024  | 0.0040s     | 0.0192s   | 0.018190s
+#   +o+s  | 1024  | 0.0036s     | 0.0231s   | 0.016080s
+# +b+o+s  | 1024  | 0.0019s     | 0.0149s   | 0.008410s
+# 
+# Better (Faster) Equations
+# A from B: ((B - A) / B) * 100 or ((0.4418 - 0.3145) / 0.4418) * 100
+# B from C: ((C - B) / C) * 100 or ((1.570037 - 0.4418) / 1.570037) * 100
+# A from C: ((C - A) / C) * 100 or ((1.570037 - 0.3145) / 1.570037) * 100
+#
+# Slower Equations
+# B from A: ((B - A) / A) * 100 or ((0.4418 - 0.3145) / 0.3145) * 100
+# C from B: ((C - B) / B) * 100 or ((1.570037 - 0.4418) / 0.4418) * 100
+# C from A: ((C - A) / A) * 100 or ((1.570037 - 0.3145) / 0.3145) * 100
+
+echo "-------------------------------------------------------------------"
+for entry in `cat results | tr ' ' '_'`; do
+	name=$(echo  "${entry}" | cut -d':' -f1 | tr '_' ' ')
+	range=$(echo "${entry}" | cut -d':' -f2)
+	A=$(echo     "${entry}" | cut -d':' -f3)
+	C=$(echo     "${entry}" | cut -d':' -f4)
+	L=$(echo     "${entry}" | cut -d':' -f5)
+	CAQ="slower"
+	LCQ="slower"
+	LAQ="slower"
+
+	CA=$(echo "scale=2; ((${C}-${A})/${A}) * 100" | bc -l)
+	LC=$(echo "scale=2; ((${L}-${C})/${C}) * 100" | bc -l)
+	LA=$(echo "scale=2; ((${L}-${A})/${A}) * 100" | bc -l)
+
+	SIGN=$(echo "${CA}" | cut -c1)
+	if [ "${SIGN}" = '-' ]; then
+		CA=$(echo "scale=2; ((${C}-${A})/${C}) * 100" | bc -l | cut -c2-)
+		CAQ="FASTER"
+	fi
+
+	SIGN=$(echo "${LA}" | cut -c1)
+	if [ "${SIGN}" = '-' ]; then
+		LA=$(echo "scale=2; ((${L}-${A})/${L}) * 100" | bc -l | cut -c2-)
+		LAQ="FASTER"
+	fi
+
+	SIGN=$(echo "${LC}" | cut -c1)
+	if [ "${SIGN}" = '-' ]; then
+		LC=$(echo "scale=2; ((${L}-${C})/${L}) * 100" | bc -l | cut -c2-)
+		LCQ="FASTER"
+	fi
+
+	printf "[%11s],   C(%8ss) is %7s %6s than ASM(%8ss)\n" "${name}@${range}" "${C}" "${CA}%" "${CAQ}" "${A}"
+	printf "[%11s], lua(%8ss) is %7s %6s than   C(%8ss)\n" "${name}@${range}" "${L}" "${LC}%" "${LCQ}" "${C}"
+	printf "[%11s], lua(%8ss) is %7s %6s than ASM(%8ss)\n" "${name}@${range}" "${L}" "${LA}%" "${LAQ}" "${A}"
+	echo "-------------------------------------------------------------------"
+done
