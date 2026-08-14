@@ -245,17 +245,28 @@ statement:
         func_def->as.function_def.params = $5;
         func_def->as.function_def.body = $7;
 
-        // 2. Create function pointer node
+        // 2. Initialize and check variadic status for local functions
+        func_def->as.function_def.is_variadic = 0;
+        ASTNode *p = $5;
+        while (p != NULL) {
+            if (p->type == NODE_IDENTIFIER && strcmp(p->as.id.name, "...") == 0) {
+                func_def->as.function_def.is_variadic = 1;
+                break;
+            }
+            p = p->next;
+        }
+
+        // 3. Create function pointer node
         ASTNode* func_ptr = make_node(NODE_FUNCTION_POINTER);
         func_ptr->as.func_ptr.mangled_name = strdup($3);
 
-        // 3. Create local assignment: local myfunc = func_ptr
+        // 4. Create local assignment: local myfunc = func_ptr
         ASTNode* assign = make_node(NODE_MULTIPLE_ASSIGNMENT);
         assign->as.mult_assign.targets_head = make_node_ident($3);
         assign->as.mult_assign.values_head = func_ptr;
         assign->as.mult_assign.is_local = 1;  // THIS IS THE KEY DIFFERENCE
 
-        // 4. Chain them: func_def -> assign
+        // 5. Chain them: func_def -> assign
         func_def->next = assign;
         $$ = func_def;
     }
@@ -489,6 +500,17 @@ expr:
         func_def->as.function_def.name = strdup(buf);
         func_def->as.function_def.params = $3;
         func_def->as.function_def.body = $5;
+
+        // Initialize and check variadic status for anonymous functions
+        func_def->as.function_def.is_variadic = 0;
+        ASTNode *p = $3;
+        while (p != NULL) {
+            if (p->type == NODE_IDENTIFIER && strcmp(p->as.id.name, "...") == 0) {
+                func_def->as.function_def.is_variadic = 1;
+                break;
+            }
+            p = p->next;
+        }
 
         ASTNode* func_ptr = make_node(NODE_FUNCTION_POINTER);
         func_ptr->as.func_ptr.mangled_name = strdup(buf);

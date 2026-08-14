@@ -71,6 +71,14 @@ v32: $(XML_OUTS)
 		fi; \
 	done
 
+context:
+	@for f in $(ASM_OUTS); do \
+		split -a 1 -b 45K -d $$f.asm $$f_part; \
+		@for file in $$f_part?; do \
+			mv "$$file" "$$file.asm.txt"; \
+		done; \
+	done
+
 # Clean target drops all generated assembly and binary test files
 clean:
 	rm -f *.asm *.vbin *.xml *.v32 *.debug *.txt *.cmd *.out *.err *.want* *.have*

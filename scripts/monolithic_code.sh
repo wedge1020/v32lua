@@ -28,6 +28,6 @@ for src in `/bin/ls -1 src/*.c src/intrinsics/*.c src/node/*.c`; do
 	echo                                                     >> put/v32lua.c
 done
 
-cat src/runtime/memory.s src/runtime/exec.s src/runtime/table.s src/runtime/string.s src/runtime/print.s src/runtime/pico8.s src/runtime/tic80.s src/runtime/constant.s > put/runtime.s.txt
+cat src/runtime/memory.s src/runtime/exec.s src/runtime/table.s src/runtime/string.s src/runtime/print.s src/runtime/iters.s src/runtime/pico8.s src/runtime/tic80.s src/runtime/constant.s > put/runtime.s.txt
 
 exit 0

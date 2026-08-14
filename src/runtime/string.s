@@ -345,24 +345,22 @@ __builtin_tostring:
     
     MOV  R1, [BP+2]          ; Load argument from Base Pointer
 
+    ;; Pass through ROM Strings unchanged
     MOV  R3, R1
     AND  R3, BOXED_DATA
-
-    ;; Pass through ROM Strings unchanged
     IEQ  R3, BOXED_ROMSTRING
     JT   R3, __tostring_passthrough
 
+    ;; Check for RAM Strings
     MOV  R3, R1
     AND  R3, BOXED_DATA
-
-    ;; Check for RAM Strings
     IEQ  R3, BOXED_RAMSTRING
-    JF   R3, __tostring_check_primitives
+    JT   R3, __tostring_passthrough
 
-    MOV  R4, R1
-    AND  R4, BOXED_PAYLOAD
-    IGE  R4, 4
-    JT   R4, __tostring_passthrough  ; It is a RAM String: return unchanged!
+    ;MOV  R4, R1
+    ;AND  R4, BOXED_PAYLOAD
+    ;IGE  R4, 4
+    ;JT   R4, __tostring_passthrough  ; It is a RAM String: return unchanged!
 
 __tostring_check_primitives:
     ;; Check for nil/false/true

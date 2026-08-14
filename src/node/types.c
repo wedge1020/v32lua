@@ -30,59 +30,18 @@ void  node_string (ASTNode *node, int  dest_reg)
 
 void node_concat (ASTNode *node, int dest_reg)
 {
-    int left_reg = allocate_register();
-    int right_reg = allocate_register();
+    // Evaluate left operand into R0 and push immediately
+    generate_asm(node->as.binary.left, 0);
+    emit_asm("PUSH R0             ; Save left operand\n");
 
-    generate_asm(node->as.binary.left, left_reg);
-    generate_asm(node->as.binary.right, right_reg);
+    // Evaluate right operand into R0 and push immediately
+    generate_asm(node->as.binary.right, 0);
+    emit_asm("PUSH R0             ; Save right operand\n");
 
-    ensure_in_register(left_reg);
-    ensure_in_register(right_reg);
-
-    emit_asm("PUSH R%d\n", left_reg);
-    emit_asm("PUSH R%d\n", right_reg);
-
+    // Call __builtin_strcat (operands safely on stack)
     emit_asm("CALL __builtin_strcat\n");
     emit_asm("IADD SP, 2\n");
 
     if (dest_reg != 0)
         emit_asm("MOV R%d, R0\n", dest_reg);
-
-    unlock_register(left_reg);
-    unlock_register(right_reg);
 }
-/*
-void node_concat (ASTNode *node, int dest_reg)
-{
-    int left_reg = allocate_register();
-    generate_asm(node->as.binary.left, left_reg);
-
-    // Coerce left operand to string
-    emit_asm("PUSH R%d\n", left_reg);
-    emit_asm("CALL __builtin_tostring\n");
-    emit_asm("IADD SP, 1\n");
-    emit_asm("MOV R%d, R0\n", left_reg);
-
-    int right_reg = allocate_register();
-    generate_asm(node->as.binary.right, right_reg);
-
-    // Coerce right operand to string
-    emit_asm("PUSH R%d\n", right_reg);
-    emit_asm("CALL __builtin_tostring\n");
-    emit_asm("IADD SP, 1\n");
-    emit_asm("MOV R%d, R0\n", right_reg);
-
-    ensure_in_register(right_reg);
-
-    emit_asm("PUSH R%d\n", left_reg);
-    emit_asm("PUSH R%d\n", right_reg);
-
-    emit_asm("CALL __builtin_strcat\n");
-    emit_asm("IADD SP, 2\n");
-
-    if (dest_reg != 0)
-        emit_asm("MOV R%d, R0\n", dest_reg);
-
-    unlock_register(left_reg);
-    unlock_register(right_reg);
-}*/
