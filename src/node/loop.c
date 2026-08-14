@@ -404,10 +404,13 @@ void node_for_generic(ASTNode *node)
 
     // Assign loop variables from stack
     for (int i = 0; i < var_count && i < 3; i++) {
+        char var_access[128];
+        get_variable_access_string(var_names[i], var_access);
+
         // Pop value from stack (values are pushed in order: key, val1, val2...)
         emit_asm("MOV R0, [SP-%d]     ; Load value %d from stack\n", i, i);
         emit_asm("MOV %s, R0        ; Assign to loop variable '%s'\n",
-                 var_names[i], var_names[i]);
+                 var_access, var_names[i]);
     }
 
     // Clean up iterator results from stack

@@ -118,6 +118,24 @@
     runtime_print_end:
 #endif
 
+/* --- Iterators --- */
+#ifdef __APPLE__
+    .global _runtime_iters_start
+    _runtime_iters_start:
+#else
+    .global runtime_iters_start
+    runtime_iters_start:
+#endif
+    .incbin "runtime/iters.s"
+    .byte 0
+#ifdef __APPLE__
+    .global _runtime_iters_end
+    _runtime_iters_end:
+#else
+    .global runtime_iters_end
+    runtime_iters_end:
+#endif
+
 /* --- PICO-8 API (all-or-nothing) --- */
 #ifdef __APPLE__
     .global _runtime_pico8_start

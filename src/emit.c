@@ -627,6 +627,8 @@ void  emit_runtime_library (void)
         emit_embedded_asm (runtime_string_start);
     if (runtime_req.needs_print)
         emit_embedded_asm (runtime_print_start);
+    if (runtime_req.needs_iters)
+        emit_embedded_asm (runtime_iters_start);
 
     ////////////////////////////////////////////////////////////////////////////////////
     //

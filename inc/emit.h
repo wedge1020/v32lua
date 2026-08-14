@@ -8,6 +8,7 @@ extern const char runtime_table_start[];
 extern const char runtime_math_start[];
 extern const char runtime_string_start[];
 extern const char runtime_print_start[];
+extern const char runtime_iters_start[];
 extern const char runtime_pico8_start[];
 extern const char runtime_tic80_start[];
 extern const char runtime_constant_start[];
