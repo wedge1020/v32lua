@@ -61,3 +61,10 @@ dkms.conf
 .DS_Store
 cmd
 put/*
+*.tab.[ch]
+*.output
+*.yy.c
+.bak/
+*.new
+*.old
+bin/*
