@@ -383,12 +383,19 @@ void node_for_generic(ASTNode *node)
         register_pinned[i] = 0;
     }
 
-    // Push arguments for iterator call: state, current_key
-    get_variable_access_string(state_var, access_state);
-    emit_asm("PUSH %s           ; Arg 2: state\n", access_state);
+	// Push arguments for iterator call: state, current_key
+	int arg_reg = allocate_register();
+	mark_register_live(arg_reg, 2);
 
-    get_variable_access_string(key_var, access_key);
-    emit_asm("PUSH %s           ; Arg 1: current key\n", access_key);
+	get_variable_access_string(state_var, access_state);
+	emit_asm("MOV R%d, %s           ; Load state into register\n", arg_reg, access_state);
+	emit_asm("PUSH R%d               ; Arg 2: state\n", arg_reg);
+
+	get_variable_access_string(key_var, access_key);
+	emit_asm("MOV R%d, %s           ; Load current key into register\n", arg_reg, access_key);
+	emit_asm("PUSH R%d               ; Arg 1: current key\n", arg_reg);
+
+	unlock_register(arg_reg);
 
     // Call iterator function
     get_variable_access_string(iter_func_var, access_iter);

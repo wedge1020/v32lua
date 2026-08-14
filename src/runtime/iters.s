@@ -73,7 +73,8 @@ __next_array_first:
 __next_array_found:
     ;; Get value at index R5
     MOV  R6, [R1+2]          ; R6 = Array Data Pointer
-    ISUB R7, R5, 1           ; Convert to 0-based
+    MOV  R7, R5
+    ISUB R7, 1               ; Convert to 0-based
     IADD R6, R7
     MOV  R0, [R6]            ; Value
 
