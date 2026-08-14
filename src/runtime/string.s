@@ -340,92 +340,95 @@ __string_len_done:
 ;; Incoming Stack: [BP+2] = Target Value 
 ;; ---------------------------------------------------------------------------
 __builtin_tostring:
-    PUSH BP
-    MOV  BP, SP
-    
-    MOV  R1, [BP+2]          ; Load argument from Base Pointer
+    PUSH  BP
+    MOV   BP, SP
 
+    MOV   R1, [BP+2]          ; Load argument
+
+    ;; === PRIMITIVE CHECKS FIRST (exact value matches) ===
+    MOV   R6, R1
+    IEQ   R6, BOXED_NIL
+    JT    R6, __tostring_nil
+    MOV   R6, R1
+    IEQ   R6, BOXED_FALSE
+    JT    R6, __tostring_false
+    MOV   R6, R1
+    IEQ   R6, BOXED_TRUE
+    JT    R6, __tostring_true
+
+    ;; === STRING CHECKS ===
     ;; Pass through ROM Strings unchanged
-    MOV  R3, R1
-    AND  R3, BOXED_DATA
-    IEQ  R3, BOXED_ROMSTRING
-    JT   R3, __tostring_passthrough
+    MOV   R3, R1
+    AND   R3, BOXED_DATA
+    IEQ   R3, BOXED_ROMSTRING
+    JT    R3, __tostring_passthrough
 
-    ;; Check for RAM Strings
-    MOV  R3, R1
-    AND  R3, BOXED_DATA
-    IEQ  R3, BOXED_RAMSTRING
-    JT   R3, __tostring_passthrough
+    ;; RAM strings: MUST have tag=BOXED_RAMSTRING AND payload >= 4
+    MOV   R3, R1
+    AND   R3, BOXED_DATA
+    IEQ   R3, BOXED_RAMSTRING
+    JF    R3, __tostring_check_other  ; Not RAM string → check other types
 
-    ;MOV  R4, R1
-    ;AND  R4, BOXED_PAYLOAD
-    ;IGE  R4, 4
-    ;JT   R4, __tostring_passthrough  ; It is a RAM String: return unchanged!
+    MOV   R4, R1
+    AND   R4, BOXED_PAYLOAD
+    ILT   R4, 4
+    JT    R4, __tostring_check_other  ; Payload < 4 → not a valid RAM string
+    JMP   __tostring_passthrough      ; Valid RAM string → pass through
 
-__tostring_check_primitives:
-    ;; Check for nil/false/true
-    MOV  R6, R1
-    IEQ  R6, BOXED_NIL
-    JT   R6, __tostring_nil
-    MOV  R6, R1
-    IEQ  R6, BOXED_FALSE
-    JT   R6, __tostring_false
-    MOV  R6, R1
-    IEQ  R6, BOXED_TRUE
-    JT   R6, __tostring_true
+__tostring_check_other:
+    ;; Check for Table
+    MOV   R3, R1
+    AND   R3, BOXED_DATA
+    IEQ   R3, BOXED_TABLE
+    JT    R3, __tostring_table
 
-    ;; Check for Table/Function (optional - remove if you don't need them)
-    MOV  R3, R1
-    AND  R3, BOXED_DATA
-    IEQ  R3, BOXED_TABLE
-    JT   R3, __tostring_table
-
-    MOV  R3, R1                 ; this was missing, adding
-    AND  R3, BOXED_DATA         ; this was missing, adding
-    IEQ  R3, BOXED_FUNCTION
-    JT   R3, __tostring_function
+    ;; Check for Function
+    MOV   R3, R1
+    AND   R3, BOXED_DATA
+    IEQ   R3, BOXED_FUNCTION
+    JT    R3, __tostring_function
 
     ;; Fall through: It's a float
-    PUSH R1
-    CALL __builtin_ftoa
-    IADD SP, 1
-    OR   R0, BOXED_RAMSTRING
-    JMP  __tostring_done
+    PUSH  R1
+    CALL  __builtin_ftoa
+    IADD  SP, 1
+    OR    R0, BOXED_RAMSTRING
+    JMP   __tostring_done
 
 __tostring_nil:
-    MOV  R0, __const_str_nil ; Load address of static "nil" string 
-    OR   R0, BOXED_ROMSTRING      ; Box as String 
-    JMP  __tostring_done
+    MOV   R0, __const_str_nil
+    OR    R0, BOXED_ROMSTRING
+    JMP   __tostring_done
 
 __tostring_false:
-    MOV  R0, __const_str_false ; Load address of static "false" string 
-    OR   R0, BOXED_ROMSTRING      ; Box as String 
-    JMP  __tostring_done
+    MOV   R0, __const_str_false
+    OR    R0, BOXED_ROMSTRING
+    JMP   __tostring_done
 
 __tostring_true:
-    MOV  R0, __const_str_true ; Load address of static "true" string 
-    OR   R0, BOXED_ROMSTRING      ; Box as String 
-    JMP  __tostring_done
+    MOV   R0, __const_str_true
+    OR    R0, BOXED_ROMSTRING
+    JMP   __tostring_done
 
 __tostring_passthrough:
-    MOV  R0, R1                  ; Return string pointer exactly as received
-    MOV  SP, BP
-    POP  BP
+    MOV   R0, R1
+    MOV   SP, BP
+    POP   BP
     RET
 
 __tostring_table:
-    MOV  SP, BP
-    POP  BP
-    JMP  __string_format_table_address 
+    MOV   SP, BP
+    POP   BP
+    JMP   __string_format_table_address
 
 __tostring_function:
-    MOV  SP, BP
-    POP  BP
-    JMP  __string_format_function_address 
-    
+    MOV   SP, BP
+    POP   BP
+    JMP   __string_format_function_address
+
 __tostring_done:
-    MOV  SP, BP
-    POP  BP
+    MOV   SP, BP
+    POP   BP
     RET
 
 __string_format_table_address:
