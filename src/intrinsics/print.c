@@ -22,17 +22,6 @@ void emit_print_intrinsic(ASTNode *node)
     int reg_y    = allocate_register();
     int reg_val  = allocate_register();
 
-    // Now evaluate value - this may call __builtin_tostring or
-    // __builtin_strcat which clobbers registers
-    //
-    generate_asm (arg_val, reg_val);
-
-    // 4. Coerce the value to a string pointer
-    emit_asm ("PUSH R%d ; Push raw value to convert\n", reg_val);
-    emit_asm ("CALL __builtin_tostring\n");
-    emit_asm ("IADD SP, 1   ; Clean up string from the stack\n");
-    emit_asm ("MOV  R%d, R0 ; Overwrite raw value with the string pointer\n", reg_val);
-
     // Evaluate coordinates first
     generate_asm (arg_x, reg_x);
     generate_asm (arg_y, reg_y);
@@ -45,7 +34,16 @@ void emit_print_intrinsic(ASTNode *node)
     emit_asm ("    ;; --- Intrinsic: print(x, y, value) ---\n");
     emit_asm ("PUSH R%d ; Save X coordinate\n", reg_x);
     emit_asm ("PUSH R%d ; Save Y coordinate\n", reg_y);
-    emit_asm ("PUSH R%d ; Push value to convert\n", reg_val);
+
+    // Now evaluate value - this may call __builtin_tostring or
+    // __builtin_strcat which clobbers registers
+    //
+    generate_asm (arg_val, reg_val);
+
+    // 4. Coerce the value to a string pointer
+    emit_asm ("PUSH R%d ; Push raw value to convert\n", reg_val);
+    emit_asm ("CALL __builtin_tostring\n");
+    emit_asm ("MOV [SP], R0 ; overwrite raw value with the string pointer\n");
 
     // 6. Fire the printing routine and tear down the stack frame
     emit_asm("CALL __builtin_print\n");
