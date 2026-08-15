@@ -126,21 +126,35 @@ void  node_function_def (ASTNode *node)
 //   - arg_reg: Temporary for each argument evaluation
 //   - pad_reg: For padding missing arguments
 // ============================================================================
-void node_function_call(ASTNode *node, int dest_reg)
+void  node_function_call (ASTNode *node, int  dest_reg)
 {
     // -------------------------------------------------------------------------
     // STEP 0: Hardware & Builtin Intrinsic Fast Path
     // -------------------------------------------------------------------------
-    if (try_emit_call_intrinsic(node, dest_reg))
+    if (try_emit_call_intrinsic (node, dest_reg))
     {
         return; // Intrinsic handled - skip standard call generation
     }
 
     // -------------------------------------------------------------------------
-    // STEP 0.5: Check for Undeclared Functions
+    // STEP 0.5: Resolve Target Symbol
     // -------------------------------------------------------------------------
-    SymbolNode *target_sym = NULL;
-    const char *func_name = NULL;
+    SymbolNode *target_sym             = NULL;
+    const char *func_name              = NULL;
+    bool        is_dynamic_table_call  = (node -> as.call.target -> type == NODE_TABLE_GET);
+
+    if (g_verbose_debug)
+    {
+        fprintf (stderr, "[debug] node_function_call() Function call: ");
+        if (node -> as.call.target -> type == NODE_IDENTIFIER)
+        {
+            fprintf (stderr, "identifier '%s'\n", node -> as.call.target -> as.id.name);
+        }
+        else
+        {
+            fprintf (stderr, "complex target (type=%d)\n", node -> as.call.target -> type);
+        }
+    }
 
     if (node->as.call.target->type == NODE_IDENTIFIER) {
         func_name = node->as.call.target->as.id.name;
@@ -153,20 +167,18 @@ void node_function_call(ASTNode *node, int dest_reg)
         }
     }
 
-    // Allow dynamic table lookups (NODE_TABLE_GET) to pass through
-    bool is_dynamic_table_call = (node->as.call.target->type == NODE_TABLE_GET);
-
-    if (!try_emit_call_intrinsic(node, dest_reg) &&
-        !target_sym &&
-        !is_dynamic_table_call) {  // <-- Add this condition
-
+    // ✅ FALLBACK: Try intrinsics again if symbol not found
+    if (!target_sym && !is_dynamic_table_call) {
+        if (try_emit_call_intrinsic(node, dest_reg)) {
+            return; // Intrinsic caught on fallback
+        }
         compiler_error(ERR_SEMANTIC, node->line_number,
             "Undeclared function: '%s'", func_name ? func_name : "<unknown>");
         return;
     }
 
     // -------------------------------------------------------------------------
-    // STEP 0.75: Full Symbol Resolution for FFI
+    // STEP 0.75: Full Symbol Resolution for FFI (REST OF YOUR EXISTING CODE)
     // -------------------------------------------------------------------------
     target_sym = NULL;
 

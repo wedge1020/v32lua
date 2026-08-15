@@ -151,10 +151,9 @@ bool emit_string_format_intrinsic(ASTNode *node, int dest_reg) {
         arg_count++;
     }
 
-    // Push terminator
-    emit_asm("PUSH R0             ; BOXED_NIL terminator\n");
+    // Push terminator (ONLY ONCE)
     emit_asm("MOV R0, BOXED_NIL\n");
-    emit_asm("PUSH R0\n");
+    emit_asm("PUSH R0             ; BOXED_NIL terminator\n");
 
     emit_asm("CALL __builtin_string_format\n");
     emit_asm("IADD SP, %d           ; Clean up arguments\n", arg_count + 2);
