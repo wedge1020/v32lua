@@ -18,39 +18,34 @@ void emit_print_intrinsic(ASTNode *node)
     }
 
     // 2. Allocate registers and evaluate each argument expression
-    int reg_x = allocate_register();
-    int reg_y = allocate_register();
-    int reg_val = allocate_register();
+    int reg_x    = allocate_register();
+    int reg_y    = allocate_register();
+    int reg_val  = allocate_register();
+
+    // Now evaluate value - this may call __builtin_tostring or
+    // __builtin_strcat which clobbers registers
+    //
+    generate_asm (arg_val, reg_val);
+
+    // 4. Coerce the value to a string pointer
+    emit_asm ("PUSH R%d ; Push raw value to convert\n", reg_val);
+    emit_asm ("CALL __builtin_tostring\n");
+    emit_asm ("IADD SP, 1   ; Clean up string from the stack\n");
+    emit_asm ("MOV  R%d, R0 ; Overwrite raw value with the string pointer\n", reg_val);
 
     // Evaluate coordinates first
-    generate_asm(arg_x, reg_x);
-    generate_asm(arg_y, reg_y);
-
-    // Save coordinates on stack before evaluating value (which may call strcat)
-    emit_asm("PUSH R%d ; Save X coordinate\n", reg_x);
-    emit_asm("PUSH R%d ; Save Y coordinate\n", reg_y);
-
-    // Now evaluate value - this may call __builtin_strcat which clobbers registers
-    generate_asm(arg_val, reg_val);
-
-    // Restore coordinates from stack
-    emit_asm("POP R%d ; Restore Y coordinate\n", reg_y);
-    emit_asm("POP R%d ; Restore X coordinate\n", reg_x);
-
-    emit_asm("    ;; --- Intrinsic: print(x, y, value) ---\n");
+    generate_asm (arg_x, reg_x);
+    generate_asm (arg_y, reg_y);
 
     // 3. Convert text coordinates from Lua Floats to Hardware Integers
-    emit_asm("CFI R%d ; Convert X to hardware integer\n", reg_x);
-    emit_asm("CFI R%d ; Convert Y to hardware integer\n", reg_y);
+    emit_asm ("CFI R%d ; Convert X to hardware integer\n", reg_x);
+    emit_asm ("CFI R%d ; Convert Y to hardware integer\n", reg_y);
 
-    // 4. Push arguments to the stack (Left-to-Right layout)
-    emit_asm("PUSH R%d ; Push X coordinate\n", reg_x);
-    emit_asm("PUSH R%d ; Push Y coordinate\n", reg_y);
-    emit_asm("PUSH R%d ; Push raw value to convert\n", reg_val);
-
-    // 5. Coerce the value to a string pointer
-    emit_asm("CALL __builtin_tostring\n");
-    emit_asm("MOV  [SP], R0 ; Overwrite raw value with the string pointer\n");
+    // 5. Push arguments to the stack (Left-to-Right layout)
+    emit_asm ("    ;; --- Intrinsic: print(x, y, value) ---\n");
+    emit_asm ("PUSH R%d ; Save X coordinate\n", reg_x);
+    emit_asm ("PUSH R%d ; Save Y coordinate\n", reg_y);
+    emit_asm ("PUSH R%d ; Push value to convert\n", reg_val);
 
     // 6. Fire the printing routine and tear down the stack frame
     emit_asm("CALL __builtin_print\n");

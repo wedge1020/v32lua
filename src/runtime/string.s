@@ -408,8 +408,10 @@ __tostring_check_other:
 
     ;; Fall through: It's a float
     PUSH  R1
+    MOV   R0, -1
+    PUSH  R0             ; default precision (6 digits, or omitted if whole)
     CALL  __builtin_ftoa
-    IADD  SP, 1
+    IADD  SP, 2
     OR    R0, BOXED_RAMSTRING
     JMP   __tostring_done
 
@@ -466,7 +468,18 @@ __string_format_table_address:
 
 ;; ---------------------------------------------------------------------------
 ;; Built-in: Float to ASCII (Full Floating Point Support)
-;; Incoming Stack: [BP+2] = Raw IEEE754 Float
+;; Incoming Stack: [BP+3] = Raw IEEE754 Float (value to convert)
+;;                 [BP+2] = Precision (raw hardware integer). Pass -1 for
+;;                          "default" behavior (existing tostring() behavior):
+;;                          6 fractional digits, but the decimal point and all
+;;                          fractional digits are omitted entirely when the
+;;                          value is a whole number. Pass 0..N for an explicit
+;;                          precision (printf "%.Nf" semantics): the value is
+;;                          ROUNDED (not truncated) to N fractional digits,
+;;                          the decimal point + digits are always printed
+;;                          unless N==0, and rounding correctly carries into
+;;                          the integer part (e.g. ftoa(9.999, 2) -> "10.00").
+;;                          Precision is clamped to a max of 17.
 ;; Returns: R0 = Raw Heap Pointer to null-terminated ASCII string
 ;; Registers: R0-R13 (R14/BP and R15/SP preserved)
 ;; ---------------------------------------------------------------------------
@@ -474,61 +487,144 @@ __builtin_ftoa:
     PUSH BP
     MOV  BP, SP
 
-    ;; --- Allocate buffer (32 bytes for integer + fractional + null) ---
-    MOV  R0, 32
+    ;; --- Allocate buffer ---
+    ;; 48 words: sign + integer digits + '.' + up to 17 (clamped) frac digits
+    ;; + null, with headroom. (Was 32; bumped since precision can now be large.)
+    MOV  R0, 48
     PUSH R0
     CALL __malloc
     IADD SP, 1
 
-    ;; 1. Trap OOM to prevent HEAP_POINTER corruption at address 0
     MOV  R4, R0
     IEQ  R4, 0
     JT   R4, __oom_handler
 
-    ;; R2 is unused in this routine- use it to lock in the base pointer
-    MOV  R2, R0
-    MOV  R9, R2              ; R9 = write head
+    MOV  R2, R0                 ; R2 = locked-in base pointer
+    MOV  R9, R2                 ; R9 = write head
 
-    ;; --- Unbox the float value first ---
-    MOV  R3, [BP+2]          ; R3 = value from stack
+    MOV  R3, [BP+3]             ; R3 = value
+    MOV  R8, [BP+2]             ; R8 = requested precision (-1 = default)
 
-    ;; --- Handle sign ---
-    MOV  R4, R3              ; Copy to R4 for sign check
+    ;; --- Clamp precision to 17 so a pathological caller can't overflow the buffer ---
+    MOV  R4, R8
+    INE  R4, -1
+    JF   R4, __ftoa_precision_clamped   ; precision == -1 -> nothing to clamp
+    MOV  R4, R8
+    IGT  R4, 17
+    JF   R4, __ftoa_precision_clamped   ; precision <= 17 -> nothing to clamp
+    MOV  R8, 17
+__ftoa_precision_clamped:
+
+    ;; --- Sign ---
+    MOV  R4, R3
     FLT  R4, 0.0
     JF   R4, __ftoa_positive
-
-    ;; Negative: write '-' and use absolute value
-    MOV  R5, 45              ; ASCII '-'
+    MOV  R5, 45                 ; ASCII '-'
     MOV  [R9], R5
     IADD R9, 1
-    FABS R3                  ; R3 = |float value|
+    FABS R3
     JMP  __ftoa_extract_int
-
 __ftoa_positive:
-    ;; --- Extract integer part ---
 __ftoa_extract_int:
-    MOV  R4, R3              ; Copy float to R4
-    CFI  R4                  ; Convert to integer (truncates toward zero)
-    MOV  R7, R4              ; Use R7 for integer value
+    MOV  R4, R3
+    CFI  R4                     ; truncate toward zero
+    MOV  R7, R4                 ; R7 = integer part (may still be bumped by rounding)
 
-    ;; Check if integer part is zero
-    MOV  R5, R7
-    INE  R5, 0
-    JT   R5, __ftoa_write_int_digits
+    MOV  R6, R3
+    CFI  R6
+    CIF  R6
+    MOV  R5, R3
+    FSUB R5, R6                 ; R5 = fractional part (0 <= R5 < 1)
 
-    ;; Integer part is zero: write single '0'
-    MOV  R5, 48              ; ASCII '0'
-    MOV  [R9], R5
+    ;; --- Decide effective precision ---
+    MOV  R12, R8                ; R12 = effective precision digit count
+    MOV  R4, R8
+    INE  R4, -1
+    JT   R4, __ftoa_precision_explicit
+
+    ;; --- Default mode: 6 digits, but omit '.' entirely if negligible ---
+    MOV  R12, 6
+    MOV  R6, R5
+    MOV  R4, 0.000001
+    FLT  R6, R4
+    JF   R6, __ftoa_scale_and_round     ; fraction not negligible -> format it
+    JMP  __ftoa_write_int_only           ; whole number in default mode -> skip '.'
+
+__ftoa_precision_explicit:
+    MOV  R4, R12
+    IEQ  R4, 0
+    JF   R4, __ftoa_scale_and_round
+    ;; precision == 0: round to nearest integer, no '.' at all (printf %.0f)
+    MOV  R6, R5
+    MOV  R4, 0.5
+    FLT  R6, R4
+    JT   R6, __ftoa_write_int_only       ; frac < 0.5, no rounding needed
+    IADD R7, 1                            ; round the integer part up
+    JMP  __ftoa_write_int_only
+
+    ;; ==========================================================
+    ;; Scale fraction by 10^precision and round-half-up
+    ;; ==========================================================
+__ftoa_scale_and_round:
+    MOV  R6, 1.0                ; R6 = running power-of-ten (float)
+    MOV  R13, 1                  ; R13 = running power-of-ten (integer)
+    MOV  R4, R12                 ; R4 = countdown
+__ftoa_pow10_loop:
+    MOV  R11, R4                 ; compare a COPY -- IEQ is destructive and R4 must survive
+    IEQ  R11, 0
+    JT   R11, __ftoa_pow10_done
+    MOV  R10, 10.0
+    FMUL R6, R10
+    MOV  R10, 10
+    IMUL R13, R10
+    IADD R4, -1
+    JMP  __ftoa_pow10_loop
+__ftoa_pow10_done:
+
+    MOV  R4, R5
+    FMUL R4, R6                  ; R4 = frac * 10^precision
+    MOV  R10, 0.5
+    FADD R4, R10                 ; round-half-up
+    CFI  R4                      ; R4 = rounded fractional digits (integer)
+
+    ;; --- Carry: rounding pushed the fraction up to a whole unit ---
+    MOV  R6, R4
+    IGE  R6, R13
+    JF   R6, __ftoa_push_frac
+    IADD R7, 1                   ; carry into the integer part
+    MOV  R4, 0                   ; fractional digits reset to zero
+__ftoa_push_frac:
+    PUSH R4                      ; save rounded fractional digits across int-write
+    PUSH R12                     ; save precision digit count across int-write
+    MOV  R4, 1
+    PUSH R4                      ; has_fraction = 1
+    JMP  __ftoa_write_int_common
+
+__ftoa_write_int_only:
+    MOV  R4, 0
+    PUSH R4                      ; dummy fractional digits (unused)
+    PUSH R4                      ; dummy precision (unused)
+    PUSH R4                      ; has_fraction = 0
+    JMP  __ftoa_write_int_common
+
+    ;; ==========================================================
+    ;; Shared: write integer digits (destroys R7; R4/R5/R6/R10-R13 free
+    ;; to use as scratch here, since the real fraction data is on the stack)
+    ;; ==========================================================
+__ftoa_write_int_common:
+    MOV  R6, R7
+    INE  R6, 0
+    JT   R6, __ftoa_int_nonzero
+
+    MOV  R6, 48                  ; ASCII '0'
+    MOV  [R9], R6
     IADD R9, 1
-    MOV  R6, R9              ; R6 = start of integer digits (points to '0')
-    JMP  __ftoa_check_fraction
+    JMP  __ftoa_int_digits_done
 
-__ftoa_write_int_digits:
-    MOV  R6, R9              ; R6 = start of integer digits (for reversal)
-
-    ;; Extract digits in reverse order (LSB first)
+__ftoa_int_nonzero:
+    MOV  R6, R9                  ; R6 = start of integer digits (for reversal)
 __ftoa_int_loop:
-    MOV  R5, R7              ; Copy current integer value
+    MOV  R5, R7
     INE  R5, 0
     JF   R5, __ftoa_reverse_int
 
@@ -537,25 +633,18 @@ __ftoa_int_loop:
     IADD R5, 48
     MOV  [R9], R5
     IADD R9, 1
-
-    ; Preserve R7 in a temporary before division
-    MOV  R12, R7
-    IDIV R12, 10             ; Divide temporary, not R7
-    MOV  R7, R12             ; Update R7 with result
+    IDIV R7, 10
     JMP  __ftoa_int_loop
 
-    ;; Reverse integer digits (they were written LSB first)
 __ftoa_reverse_int:
-    MOV  R10, R6             ; R10 = start of digits
+    MOV  R10, R6
     MOV  R11, R9
-    ISUB R11, 1              ; R11 = end of digits
+    ISUB R11, 1
 __ftoa_reverse_int_loop:
-    ;; 3. Protect R10 from destructive comparison!
-    MOV  R4, R10
-    IGE  R4, R11
-    JT   R4, __ftoa_check_fraction
+    MOV  R5, R10
+    IGE  R5, R11
+    JT   R5, __ftoa_int_digits_done
 
-    ;; Swap [R10] and [R11]
     MOV  R12, [R10]
     MOV  R13, [R11]
     MOV  [R10], R13
@@ -564,63 +653,46 @@ __ftoa_reverse_int_loop:
     IADD R10, 1
     ISUB R11, 1
     JMP  __ftoa_reverse_int_loop
+__ftoa_int_digits_done:
 
-__ftoa_check_fraction:
-    ;; --- Check if there's a fractional part ---
-    MOV  R5, R3              ; Original float
+    ;; --- Restore the fraction data, decide whether it's needed ---
+    POP  R6                      ; has_fraction flag
+    POP  R12                     ; precision digit count
+    POP  R4                      ; rounded fractional digits
+    INE  R6, 0
+    JF   R6, __ftoa_done         ; has_fraction == 0 -> done, no '.' at all
 
-    ;; 4. R7 was destroyed by the division loop!
-    ;; Re-extract the integer safely from the original float.
-    MOV  R6, R3
-    CFI  R6                  ; Convert to int
-    CIF  R6                  ; Cast back to float
-    FSUB R5, R6              ; R5 = precise fractional part
-
-    ;; If fractional part is very small, we're done
-    MOV  R4, R5              ; ← Backup fractional part to R4
-    MOV  R6, 0.000001
-    FLT  R4, R6
-    JT   R4, __ftoa_done
-
-    ;; Write decimal point
-    MOV  R6, 46              ; ASCII '.'
+    ;; --- Write decimal point ---
+    MOV  R6, 46                  ; ASCII '.'
     MOV  [R9], R6
     IADD R9, 1
 
-    ;; Scale fractional part to integer (6 decimal places)
-    MOV  R6, 1000000.0
-    FMUL R5, R6              ; R5 = fractional * 1,000,000
-    CFI  R5                  ; Convert to integer
-
-    ;; Save start of fractional digits for reversal
-    MOV  R1, R9              ; R1 = start of fractional digits
-
-    ;; Extract fractional digits (LSB first, will reverse later)
-    MOV  R6, 6               ; Counter for 6 digits
+    ;; --- Write exactly R12 fractional digits (LSB-first, then reverse) ---
+    MOV  R1, R9                  ; R1 = start of fractional digits (for reversal)
+    MOV  R6, R12                 ; R6 = digit countdown
 __ftoa_extract_frac:
-    MOV  R12, R5
-    IMOD R12, 10
-    IADD R12, 48
-    MOV  [R9], R12
+    MOV  R11, R6                 ; compare a COPY -- IEQ is destructive and R6 must survive
+    IEQ  R11, 0
+    JT   R11, __ftoa_reverse_frac
+
+    MOV  R10, R4
+    IMOD R10, 10
+    IADD R10, 48
+    MOV  [R9], R10
     IADD R9, 1
-
-    IDIV R5, 10
+    IDIV R4, 10
     ISUB R6, 1
-    MOV  R4, R6
-    IGT  R4, 0
-    JT   R4, __ftoa_extract_frac
+    JMP  __ftoa_extract_frac
 
-    ;; Reverse fractional digits
-    MOV  R10, R1             ; R10 = start of fractional digits
+__ftoa_reverse_frac:
+    MOV  R10, R1
     MOV  R11, R9
     ISUB R11, 1
 __ftoa_reverse_frac_loop:
-    ;; 5. Protect R10 from destructive comparison again!
-    MOV  R4, R10
-    IGE  R4, R11
-    JT   R4, __ftoa_done
+    MOV  R5, R10
+    IGE  R5, R11
+    JT   R5, __ftoa_done
 
-    ;; Swap [R10] and [R11]
     MOV  R12, [R10]
     MOV  R13, [R11]
     MOV  [R10], R13
@@ -630,13 +702,10 @@ __ftoa_reverse_frac_loop:
     ISUB R11, 1
     JMP  __ftoa_reverse_frac_loop
 
-    ;; --- Null-terminate and return ---
 __ftoa_done:
     MOV  R10, 0
-    MOV  [R9], R10           ; Null terminator
-
-    ;; Return the securely preserved base pointer
-    MOV  R0, R2
+    MOV  [R9], R10               ; null terminator
+    MOV  R0, R2                  ; return base pointer
     MOV  SP, BP
     POP  BP
     RET
@@ -835,96 +904,206 @@ __string_format_len_done:
 
 __string_format_loop:
     MOV  R3, [R1]
-    IEQ  R3, 0
-    JT   R3, __string_format_done
+    MOV  R2, R3
+    IEQ  R2, 0
+    JT   R2, __string_format_done
 
-    IEQ  R3, 37           ; '%'
-    JF   R3, __string_format_copy_char
+    MOV  R2, R3
+    IEQ  R2, 37           ; '%'
+    JF   R2, __string_format_copy_char
 
     IADD R1, 1
     MOV  R3, [R1]
-    IEQ  R3, 37
-    JT   R3, __string_format_literal_percent
+    MOV  R2, R3
+    IEQ  R2, 37
+    JT   R2, __string_format_literal_percent
 
+    ;; --- Skip width digits (parsed, but padding is not implemented) ---
+__string_format_skip_width:
+    MOV  R2, R3
+    ISUB R2, 48
+    ILT  R2, 0
+    JT   R2, __string_format_check_dot
+    MOV  R2, R3
+    ISUB R2, 48
+    IGT  R2, 9
+    JT   R2, __string_format_check_dot
+    IADD R1, 1
+    MOV  R3, [R1]
+    JMP  __string_format_skip_width
+
+    ;; --- Optional ".NN" precision ---
+__string_format_check_dot:
+    MOV  R12, -1                ; R12 = parsed precision; -1 means "unspecified"
+    MOV  R2, R3
+    IEQ  R2, 46                 ; '.'
+    JF   R2, __string_format_dispatch_specifier
+
+    IADD R1, 1
+    MOV  R3, [R1]
+    MOV  R12, 0
+__string_format_precision_digits:
+    MOV  R2, R3
+    ISUB R2, 48
+    ILT  R2, 0
+    JT   R2, __string_format_dispatch_specifier
+    MOV  R2, R3
+    ISUB R2, 48
+    IGT  R2, 9
+    JT   R2, __string_format_dispatch_specifier
+
+    MOV  R2, 10
+    IMUL R12, R2
+    MOV  R2, R3
+    ISUB R2, 48
+    IADD R12, R2
+
+    IADD R1, 1
+    MOV  R3, [R1]
+    JMP  __string_format_precision_digits
+
+    ;; --- Now that we're at a real specifier char, consume the argument ---
+__string_format_dispatch_specifier:
     MOV  R0, [R6]
     IADD R6, 1
 
-    IEQ  R3, 100          ; 'd'
-    JT   R3, __string_format_handle_di
-    IEQ  R3, 105          ; 'i'
-    JT   R3, __string_format_handle_di
-    IEQ  R3, 117          ; 'u'
-    JT   R3, __string_format_handle_u
-    IEQ  R3, 102          ; 'f'
-    JT   R3, __string_format_handle_f
-    IEQ  R3, 101          ; 'e'
-    JT   R3, __string_format_handle_efg
-    IEQ  R3, 69           ; 'E'
-    JT   R3, __string_format_handle_efg
-    IEQ  R3, 103          ; 'g'
-    JT   R3, __string_format_handle_efg
-    IEQ  R3, 71           ; 'G'
-    JT   R3, __string_format_handle_efg
-    IEQ  R3, 115          ; 's'
-    JT   R3, __string_format_handle_s
-    IEQ  R3, 99           ; 'c'
-    JT   R3, __string_format_handle_c
-    IEQ  R3, 113          ; 'q'
-    JT   R3, __string_format_handle_q
+    MOV  R2, R3
+    IEQ  R2, 100          ; 'd'
+    JT   R2, __string_format_handle_di
+    MOV  R2, R3
+    IEQ  R2, 105          ; 'i'
+    JT   R2, __string_format_handle_di
+    MOV  R2, R3
+    IEQ  R2, 117          ; 'u'
+    JT   R2, __string_format_handle_u
+    MOV  R2, R3
+    IEQ  R2, 102          ; 'f'
+    JT   R2, __string_format_handle_f
+    MOV  R2, R3
+    IEQ  R2, 101          ; 'e'
+    JT   R2, __string_format_handle_efg
+    MOV  R2, R3
+    IEQ  R2, 69           ; 'E'
+    JT   R2, __string_format_handle_efg
+    MOV  R2, R3
+    IEQ  R2, 103          ; 'g'
+    JT   R2, __string_format_handle_efg
+    MOV  R2, R3
+    IEQ  R2, 71           ; 'G'
+    JT   R2, __string_format_handle_efg
+    MOV  R2, R3
+    IEQ  R2, 115          ; 's'
+    JT   R2, __string_format_handle_s
+    MOV  R2, R3
+    IEQ  R2, 99           ; 'c'
+    JT   R2, __string_format_handle_c
+    MOV  R2, R3
+    IEQ  R2, 113          ; 'q'
+    JT   R2, __string_format_handle_q
     JMP  __string_format_write_char
 
 __string_format_literal_percent:
     MOV  R3, 37
-    JMP  __string_format_write_char
+    JMP  __string_format_copy_char   ; FIX: was "JMP write_char", which skipped
+                                       ; the actual write -- "%%" wrote nothing.
 
 __string_format_handle_di:
-    IEQ  R0, BOXED_NIL
-    JT   R0, __string_format_arg_nil
-    CFI  R0
-    PUSH R0
+    MOV  R2, R0
+    IEQ  R2, BOXED_NIL
+    JT   R2, __string_format_arg_nil
+    PUSH R1                     ; save loop state: ftoa clobbers R1/R4/R5/R6 internally
+    PUSH R4
+    PUSH R5
+    PUSH R6
+    PUSH R0                     ; value (kept as float -- no CFI: %d no longer
+                                  ; feeds raw integer bits into ftoa's float ops)
+    MOV  R2, 0
+    PUSH R2                     ; force precision 0: round to integer, no '.'
     CALL __builtin_ftoa
-    IADD SP, 1
+    IADD SP, 2
+    POP  R6
+    POP  R5
+    POP  R4
+    POP  R1
     MOV  R7, R0
     JMP  __string_format_copy_string
 
 __string_format_handle_u:
-    IEQ  R0, BOXED_NIL
-    JT   R0, __string_format_arg_nil
-    CFI  R0
+    MOV  R2, R0
+    IEQ  R2, BOXED_NIL
+    JT   R2, __string_format_arg_nil
+    PUSH R1
+    PUSH R4
+    PUSH R5
+    PUSH R6
     PUSH R0
+    MOV  R2, 0
+    PUSH R2
     CALL __builtin_ftoa
-    IADD SP, 1
+    IADD SP, 2
+    POP  R6
+    POP  R5
+    POP  R4
+    POP  R1
     MOV  R7, R0
     JMP  __string_format_copy_string
 
 __string_format_handle_f:
-    IEQ  R0, BOXED_NIL
-    JT   R0, __string_format_arg_nil
-    PUSH R0
+    MOV  R2, R0
+    IEQ  R2, BOXED_NIL
+    JT   R2, __string_format_arg_nil
+    PUSH R1
+    PUSH R4
+    PUSH R5
+    PUSH R6
+    PUSH R0                     ; value
+    PUSH R12                    ; precision parsed from the format string (-1 if none)
     CALL __builtin_ftoa
-    IADD SP, 1
+    IADD SP, 2
+    POP  R6
+    POP  R5
+    POP  R4
+    POP  R1
     MOV  R7, R0
     JMP  __string_format_copy_string
 
 __string_format_handle_efg:
-    IEQ  R0, BOXED_NIL
-    JT   R0, __string_format_arg_nil
+    ;; NOTE: still fixed-point via ftoa, same as before this fix -- true
+    ;; scientific notation / shortest-representation formatting for %e/%g is
+    ;; not implemented. This fix only makes it respect precision like %f now
+    ;; does; it does not add exponent formatting.
+    MOV  R2, R0
+    IEQ  R2, BOXED_NIL
+    JT   R2, __string_format_arg_nil
+    PUSH R1
+    PUSH R4
+    PUSH R5
+    PUSH R6
     PUSH R0
+    PUSH R12
     CALL __builtin_ftoa
-    IADD SP, 1
+    IADD SP, 2
+    POP  R6
+    POP  R5
+    POP  R4
+    POP  R1
     MOV  R7, R0
     JMP  __string_format_copy_string
 
 __string_format_handle_s:
-    IEQ  R0, BOXED_NIL
-    JT   R0, __string_format_arg_nil
+    MOV  R2, R0
+    IEQ  R2, BOXED_NIL
+    JT   R2, __string_format_arg_nil
+    PUSH R1                     ; save loop state: __unbox_string clobbers R1
     CALL __unbox_string
+    POP  R1
     MOV  R7, R0
     JMP  __string_format_copy_string
 
 __string_format_handle_c:
-    IEQ  R0, BOXED_NIL
-    JT   R0, __string_format_arg_nil
+    MOV  R2, R0
+    IEQ  R2, BOXED_NIL
+    JT   R2, __string_format_arg_nil
     CFI  R0
     AND  R0, 255
     MOV  [R5], R0
@@ -933,17 +1112,21 @@ __string_format_handle_c:
     JMP  __string_format_loop
 
 __string_format_handle_q:
-    IEQ  R0, BOXED_NIL
-    JT   R0, __string_format_arg_nil
+    MOV  R2, R0
+    IEQ  R2, BOXED_NIL
+    JT   R2, __string_format_arg_nil
+    PUSH R1                     ; save loop state: __unbox_string clobbers R1
     CALL __unbox_string
+    POP  R1
     MOV  R7, R0
     MOV  R3, 34
     MOV  [R5], R3
     IADD R5, 1
-    CALL __string_format_copy_string
+    CALL __string_format_copy_string_inner
     MOV  R3, 34
     MOV  [R5], R3
     IADD R5, 1
+    IADD R1, 1
     JMP  __string_format_loop
 
 __string_format_arg_nil:
@@ -959,10 +1142,13 @@ __string_format_arg_nil:
     IADD R1, 1
     JMP  __string_format_loop
 
+    ;; --- Used by %d/%i/%u/%f/%e/%g/%s: copies a C string from R7, then
+    ;;     resumes the outer format loop at the next format-string char ---
 __string_format_copy_string:
     MOV  R3, [R7]
-    IEQ  R3, 0
-    JT   R3, __string_format_after_copy
+    MOV  R2, R3
+    IEQ  R2, 0
+    JT   R2, __string_format_after_copy
     MOV  [R5], R3
     IADD R5, 1
     IADD R7, 1
@@ -970,6 +1156,21 @@ __string_format_copy_string:
 __string_format_after_copy:
     IADD R1, 1
     JMP  __string_format_loop
+
+    ;; --- Used by %q only: same copy, but returns to its caller (via RET)
+    ;;     instead of resuming the outer loop, since %q still has a closing
+    ;;     quote to write first ---
+__string_format_copy_string_inner:
+    MOV  R3, [R7]
+    MOV  R2, R3
+    IEQ  R2, 0
+    JT   R2, __string_format_copy_string_inner_done
+    MOV  [R5], R3
+    IADD R5, 1
+    IADD R7, 1
+    JMP  __string_format_copy_string_inner
+__string_format_copy_string_inner_done:
+    RET
 
 __string_format_copy_char:
     MOV  [R5], R3
