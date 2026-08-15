@@ -550,7 +550,7 @@ int   emit_variable_map (void)
                 fprintf(out(), "%%define  func_%-19s 0x%.8X\n", curr->name, curr->location);
             }
         } else {
-            fprintf(out(), "%%define  var_%-19s 0x%.8X\n", curr->name, curr->location);
+            fprintf(out(), "%%define  var_%-20s 0x%.8X\n", curr->name, curr->location);
         }
         lines_printed    = lines_printed + 1;
         curr = curr->next;
