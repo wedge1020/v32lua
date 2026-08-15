@@ -163,28 +163,46 @@ __builtin_strcmp:
     POP  R1                  ; R1 = Unboxed Left pointer
 
 __strcmp_loop:
-    MOV  R3, [R1]
-    MOV  R4, [R2]
+    MOV  R3, [R1]           ; Load left char
+    MOV  R4, [R2]           ; Load right char
 
-    ;; If characters differ, return difference (R3 - R4)
-    INE  R3, R4
-    JT   R3, __strcmp_diff
+    ; Check for end of left string
+    MOV  R5, R3             ; Use R5 as temp to preserve R3
+    IEQ  R5, 0
+    JT   R5, __strcmp_check_right_end
 
-    ;; If end of string reached, strings are equal (return 0)
-    IEQ  R3, 0
-    JT   R3, __strcmp_equal
+    ; Check for end of right string
+    MOV  R5, R4             ; Use R5 as temp to preserve R4
+    IEQ  R5, 0
+    JT   R5, __strcmp_diff  ; Left not at end, right at end → unequal
 
+    ; Characters differ?
+    MOV  R5, R3             ; Use R5 as temp
+    INE  R5, R4             ; R5 = 1 if R3 != R4, else 0
+    JT   R5, __strcmp_diff
+
+    ; Characters equal, advance both pointers
     IADD R1, 1
     IADD R2, 1
     JMP  __strcmp_loop
 
+__strcmp_check_right_end:
+    MOV  R5, R4
+    IEQ  R5, 0
+    JT   R5, __strcmp_equal
+    JMP  __strcmp_diff
+
 __strcmp_diff:
-    ISUB R3, R4
-    MOV  R0, R3              ; Return <0 if Left < Right, >0 if Left > Right
+    MOV  R0, R3
+    ISUB R0, R4        ; R0 = R3 - R4
+    MOV  SP, BP
+    POP  BP
     RET
 
 __strcmp_equal:
     MOV  R0, 0
+    MOV  SP, BP
+    POP  BP
     RET
 
 ;; ---------------------------------------------------------------------------
@@ -417,14 +435,18 @@ __tostring_passthrough:
     RET
 
 __tostring_table:
-    MOV   SP, BP
+    MOV   R0, __const_str_table  ; Load result directly
+    OR    R0, BOXED_ROMSTRING
+    MOV   SP, BP                 ; Restore stack
     POP   BP
-    JMP   __string_format_table_address
+    RET                           ; Return to caller
 
 __tostring_function:
-    MOV   SP, BP
+    MOV   R0, __const_str_function  ; Load result directly
+    OR    R0, BOXED_FUNCTION
+    MOV   SP, BP                 ; Restore stack
     POP   BP
-    JMP   __string_format_function_address
+    RET                           ; Return to caller
 
 __tostring_done:
     MOV   SP, BP
@@ -436,17 +458,6 @@ __string_format_table_address:
     MOV  BP, SP
 
     MOV  R0, __const_str_table
-    OR   R0, BOXED_ROMSTRING      ; Box raw pointer as a valid Lua String
-
-    MOV  SP, BP
-    POP  BP
-    RET
-
-__string_format_function_address:
-    PUSH BP
-    MOV  BP, SP
-
-    MOV  R0, __const_str_function
     OR   R0, BOXED_ROMSTRING      ; Box raw pointer as a valid Lua String
 
     MOV  SP, BP
@@ -521,15 +532,16 @@ __ftoa_int_loop:
     INE  R5, 0
     JF   R5, __ftoa_reverse_int
 
-    ;; Get next digit (LSB)
     MOV  R5, R7
     IMOD R5, 10
-    IADD R5, 48              ; Convert to ASCII
+    IADD R5, 48
     MOV  [R9], R5
     IADD R9, 1
 
-    ;; Divide by 10 for next iteration
-    IDIV R7, 10              ; R7 is consumed here
+    ; Preserve R7 in a temporary before division
+    MOV  R12, R7
+    IDIV R12, 10             ; Divide temporary, not R7
+    MOV  R7, R12             ; Update R7 with result
     JMP  __ftoa_int_loop
 
     ;; Reverse integer digits (they were written LSB first)
