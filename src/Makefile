@@ -51,20 +51,20 @@ lex.yy.c: lexer.l parser.tab.h
 	$(CC) $(CFLAGS) -Wa,--noexecstack -c $< -o $@
 
 context:
-	@cp -v runtime/memory.s{,.txt}
-	@cp -v runtime/exec.s{,.txt}
-	@cp -v runtime/table.s{,.txt}
-	@cp -v runtime/math.s{,.txt}
-	@cp -v runtime/string.s{,.txt}
-	@cp -v runtime/print.s{,.txt}
-	@cp -v runtime/iters.s{,.txt}
-	@cp -v runtime/pico8.s{,.txt}
-	@cp -v runtime/tic80.s{,.txt}
-	@cp -v runtime/constant.s{,.txt}
-	@cp -v Makefile  Makefile.txt
-	@cp -v lexer.l   lexer.l.txt
-	@cp -v parser.y  parser.y.txt
-	@cp -v runtime_embed.S runtime_embed.S.txt
+	@cp -v runtime/memory.s   runtime/memory.s.txt
+	@cp -v runtime/exec.s     runtime/exec.s.txt
+	@cp -v runtime/table.s    runtime/table.s.txt
+	@cp -v runtime/math.s     runtime/math.s.txt
+	@cp -v runtime/string.s   runtime/string.s.txt
+	@cp -v runtime/print.s    runtime/print.s.txt
+	@cp -v runtime/iters.s    runtime/iters.s.txt
+	@cp -v runtime/pico8.s    runtime/pico8.s.txt
+	@cp -v runtime/tic80.s    runtime/tic80.s.txt
+	@cp -v runtime/constant.s runtime/constant.s.txt
+	@cp -v Makefile           Makefile.txt
+	@cp -v lexer.l            lexer.l.txt
+	@cp -v parser.y           parser.y.txt
+	@cp -v runtime_embed.S    runtime_embed.S.txt
 
 clean:
 	rm -f $(TARGET) $(OBJS) parser.tab.c parser.tab.h lex.yy.c ../monolithic_source.c *.txt runtime/*.txt intrinsics/*.txt node/*.txt *.output

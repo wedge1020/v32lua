@@ -239,6 +239,28 @@ statement:
         // local function myfunc(...) ... end
         // This is equivalent to: local myfunc = function(...) ... end
 
+                // 1. Get the pre-allocated function_def node from func_start
+        ASTNode* func_def = $2;
+        func_def->as.function_def.name = strdup($3);
+        func_def->as.function_def.params = $5;
+        func_def->as.function_def.body = $7;
+
+        // 2. Initialize and check variadic status
+        func_def->as.function_def.is_variadic = 0;
+        ASTNode *p = $5;
+        while (p != NULL) {
+            if (p->type == NODE_IDENTIFIER && strcmp(p->as.id.name, "...") == 0) {
+                func_def->as.function_def.is_variadic = 1;
+                break;
+            }
+            p = p->next;
+        }
+
+        // ✅ SILENTLY IGNORE 'local': Just return the function_def node directly
+        // (No assignment node created, no is_local flag set)
+        $$ = func_def;
+
+        /* until we pursue actual local functions, comment this out
         // 1. Get the pre-allocated function_def node from func_start
         ASTNode* func_def = $2;
         func_def->as.function_def.name = strdup($3);
@@ -268,7 +290,7 @@ statement:
 
         // 5. Chain them: func_def -> assign
         func_def->next = assign;
-        $$ = func_def;
+        $$ = func_def;*/
     }
     | TOKEN_RAWASM '(' TOKEN_STRING ')' { 
         $$ = make_node(NODE_RAWASM);

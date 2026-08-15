@@ -349,9 +349,20 @@ SymbolNode *register_parameter (const char *name, int offset)
     return sym;
 }
 
-void register_all_globals_prepass(ASTNode *node) {
-    while (node != NULL) {
-        switch (node->type) {
+void  register_all_globals_prepass (ASTNode *node)
+{
+    while (node != NULL)
+    {
+        switch (node -> type)
+        {
+            case NODE_FUNCTION_DEF:
+                // ✅ Always register as global (local keyword is silently ignored)
+                mark_global_as_function(node->as.function_def.name,
+                                         node->as.function_def.params);
+                register_all_globals_prepass(node->as.function_def.body);
+                break;
+
+            /* once we get local functions implemented...
             case NODE_FUNCTION_DEF:
                 // Check if next node is a local multiple assignment
                 bool is_local = false;
@@ -365,6 +376,7 @@ void register_all_globals_prepass(ASTNode *node) {
                 }
                 register_all_globals_prepass(node->as.function_def.body);
                 break;
+                */
 
             case NODE_MULTIPLE_ASSIGNMENT:
                 if (!node->as.mult_assign.is_local) {

@@ -4,7 +4,10 @@ void  node_function_def (ASTNode *node)
 {
     const char *func_name = node->as.function_def.name;
 
+    mark_global_as_function(func_name, node->as.function_def.params);
+
     // ===== Register local function names =====
+    /*
     bool is_local_func = false;
     if (node->next != NULL && node->next->type == NODE_MULTIPLE_ASSIGNMENT) {
         is_local_func = node->next->as.mult_assign.is_local;
@@ -27,7 +30,7 @@ void  node_function_def (ASTNode *node)
         emit_asm("MOV R0, __function_%s\n", func_name);
         emit_asm("OR R0, BOXED_FUNCTION\n");
         emit_asm("MOV %s, R0\n", access_str);
-    }
+    }*/
 
     push_function_context(func_name);
 
