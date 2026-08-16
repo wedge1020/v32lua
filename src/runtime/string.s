@@ -887,15 +887,17 @@ __string_format_len_done:
     IADD R0, R2
     IADD R0, R2            ; *3 for expansion
     IADD R0, 64           ; + safety margin
+
     PUSH R0
     CALL __malloc
     IADD SP, 1
     MOV  R4, R0            ; R4 = result buffer
-    IEQ  R4, 0
-    JT   R4, __string_format_oom
+    MOV  R3, R4             ; scratch copy -- IEQ is destructive, R4 must survive
+    IEQ  R3, 0
+    JT   R3, __string_format_oom
 
     MOV  R5, R4            ; R5 = write pointer
-    MOV  R1, [BP+2]
+    MOV  R0, [BP+2]         ; FIX: was "MOV R1, [BP+2]" -- __unbox_string reads R0
     CALL __unbox_string
     MOV  R1, R0            ; R1 = format string
 

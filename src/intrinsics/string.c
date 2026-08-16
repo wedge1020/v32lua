@@ -139,7 +139,7 @@ bool emit_string_format_intrinsic(ASTNode *node, int dest_reg) {
     generate_asm(arg, fmt_reg);
     emit_asm("PUSH R%d             ; Arg 1: Format string\n", fmt_reg);
 
-    // Push format arguments
+    // Push format arguments (left-to-right evaluation, matching Lua semantics)
     arg = arg->next;
     int arg_count = 0;
     while (arg) {
@@ -154,6 +154,25 @@ bool emit_string_format_intrinsic(ASTNode *node, int dest_reg) {
     // Push terminator (ONLY ONCE)
     emit_asm("MOV R0, BOXED_NIL\n");
     emit_asm("PUSH R0             ; BOXED_NIL terminator\n");
+
+    // --- Reverse the pushed block -----------------------------------
+    // __builtin_string_format expects [BP+2]=format string, [BP+3]=first
+    // format arg, [BP+4]=second, etc. We just pushed (format, arg1, ...,
+    // argN, NIL) in that natural left-to-right order, which -- since the
+    // LAST-pushed item always ends up at the LOWEST stack offset on this
+    // CPU -- puts the format string at the HIGHEST offset instead of the
+    // lowest. Reversing via direct indexed swaps (rather than re-pushing)
+    // doesn't touch argument evaluation, so evaluation order and any
+    // argument side effects are unaffected; this only reorders
+    // already-computed values sitting on the stack.
+    int total = arg_count + 2;  // format string + args + terminator
+    for (int i = 0; i < total / 2; i++) {
+        int j = total - 1 - i;
+        emit_asm("MOV R0, [SP+%d]\n", i);
+        emit_asm("MOV R1, [SP+%d]\n", j);
+        emit_asm("MOV [SP+%d], R1\n", i);
+        emit_asm("MOV [SP+%d], R0\n", j);
+    }
 
     emit_asm("CALL __builtin_string_format\n");
     emit_asm("IADD SP, %d           ; Clean up arguments\n", arg_count + 2);
