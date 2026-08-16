@@ -855,8 +855,8 @@ __builtin_min:
 ;; ===========================================================================
 ;; Built-in: math.frexp(x)
 ;;
-;; Decomposes x into mantissa and exponent: x = m * 2^e
-;; where 0.5 <= |m| < 1.0
+;; Decomposes x into mantissa and exponent: x = m * 2^e, where
+;; 0.5 <= |m| < 1.0 (m == 0, e == 0 when x == 0).
 ;;
 ;; Lua usage: math.frexp(x) -> returns (m, e)
 ;;
@@ -867,37 +867,66 @@ __builtin_min:
 ;;   R0 = mantissa m as Lua float
 ;;   R1 = exponent e as Lua float
 ;;
-;; Note: For simplicity, this returns x as mantissa and 0 as exponent.
-;;       A full implementation would require bit manipulation.
-;; Clobbers: R0-R2
+;; Clobbers: R0-R4
 ;; ===========================================================================
 __builtin_frexp:
-    PUSH BP
-    MOV  BP, SP
+    PUSH  BP
+    MOV   BP, SP
 
-    ;; --- Load x from stack ---
-    MOV  R0, [BP+2]           ; R0 = x
+    MOV   R0, [BP+2]           ; R0 = x
 
-    ;; --- Check for zero ---
-    MOV  R1, R0
-    IEQ  R1, 0
-    JT   R1, _frexp_zero
+    ;; --- Special case: x == 0 -> (0, 0) ---
+    MOV   R1, R0
+    IEQ   R1, 0
+    JT    R1, __frexp_zero
 
-    ;; --- For non-zero x, return x as mantissa and 0 as exponent ---
-    ;; Note: This is a simplified implementation.
-    ;; A proper implementation would extract the exponent bits.
-    MOV  R1, 0.0              ; exponent = 0
-    JMP  _frexp_done
+    ;; --- Work with the absolute value; restore sign at the end ---
+    MOV   R2, R0                ; R2 = sign-preserving copy of original x
+    FABS  R0                    ; R0 = |x|
 
-_frexp_zero:
-    MOV  R0, 0.0              ; mantissa = 0
-    MOV  R1, 0.0              ; exponent = 0
+    MOV   R3, 0                 ; R3 = exponent counter (integer)
 
-_frexp_done:
-    ;; --- Return mantissa in R0, exponent in R1 ---
-    ;; Note: Lua expects two return values. The caller handles this.
-    MOV  SP, BP
-    POP  BP
+    ;; --- While |x| >= 1.0: halve it, exponent++ ---
+__frexp_shrink_loop:
+    MOV   R4, R0
+    FLT   R4, 1.0                ; R4 = (R0 < 1.0) ? 1 : 0
+    JT    R4, __frexp_grow_loop  ; R0 < 1.0 already -> move to the grow phase
+
+    MOV   R4, 2.0
+    FDIV  R0, R4                 ; R0 = R0 / 2
+    IADD  R3, 1                  ; exponent++
+    JMP   __frexp_shrink_loop
+
+    ;; --- While |x| < 0.5: double it, exponent-- ---
+__frexp_grow_loop:
+    MOV   R4, R0
+    FLT   R4, 0.5                ; R4 = (R0 < 0.5) ? 1 : 0
+    JF    R4, __frexp_apply_sign ; R0 >= 0.5 already -> normalized
+
+    MOV   R4, 2.0
+    FMUL  R0, R4                 ; R0 = R0 * 2
+    ISUB  R3, 1                  ; exponent--
+    JMP   __frexp_grow_loop
+
+__frexp_apply_sign:
+    ;; --- Reapply the original sign to the normalized mantissa ---
+    MOV   R4, R2
+    FLT   R4, 0.0                ; was the original x negative?
+    JF    R4, __frexp_done
+    XOR   R0, 0x80000000         ; flip mantissa's sign bit back to negative
+
+__frexp_done:
+    MOV   R1, R3
+    CIF   R1                    ; R1 = exponent as Lua float
+    MOV   SP, BP
+    POP   BP
+    RET
+
+__frexp_zero:
+    MOV   R0, 0.0
+    MOV   R1, 0.0
+    MOV   SP, BP
+    POP   BP
     RET
 
 ;; ===========================================================================
@@ -917,29 +946,21 @@ _frexp_done:
 ;; Clobbers: R0-R3
 ;; ===========================================================================
 __builtin_ldexp:
-    PUSH BP
-    MOV  BP, SP
-
-    ;; --- Load m and e from stack ---
-    MOV  R0, [BP+2]           ; R0 = m
-    MOV  R1, [BP+3]           ; R1 = e
-
-    ;; --- Compute 2^e ---
-    MOV  R2, 2.0
-    POW  R2, R1              ; R2 = 2^e
-
-    ;; --- Multiply by m: m * 2^e ---
-    FMUL R0, R2              ; R0 = m * 2^e
-
-    ;; --- Return result ---
-    MOV  SP, BP
-    POP  BP
+    PUSH  BP
+    MOV   BP, SP
+    MOV   R0, [BP+3]           ; R0 = m (first pushed argument)
+    MOV   R1, [BP+2]           ; R1 = e (second pushed argument)
+    MOV   R2, 2.0
+    POW   R2, R1              ; R2 = 2^e
+    FMUL  R0, R2              ; R0 = m * 2^e
+    MOV   SP, BP
+    POP   BP
     RET
 
 ;; ===========================================================================
 ;; Built-in: math.modf(x)
 ;;
-;; Splits x into integer and fractional parts, both returned as floats.
+;; Splits x into integer and fractional parts (both signed the same as x).
 ;;
 ;; Lua usage: math.modf(x) -> returns (integer, fractional)
 ;;
@@ -948,34 +969,30 @@ __builtin_ldexp:
 ;;
 ;; Returns:
 ;;   R0 = integer part as Lua float
+;;   R1 = fractional part as Lua float
 ;;
-;; Note: For Lua's multiple return values, the fractional part would be
-;;       handled by the caller. This returns only the integer part.
 ;; Clobbers: R0-R2
 ;; ===========================================================================
 __builtin_modf:
-    PUSH BP
-    MOV  BP, SP
+    PUSH  BP
+    MOV   BP, SP
 
-    ;; --- Load x from stack ---
-    MOV  R0, [BP+2]           ; R0 = x
+    MOV   R0, [BP+2]           ; R0 = x
 
-    ;; --- Extract integer part (truncates toward zero) ---
-    MOV  R1, R0
-    CFI  R1                  ; R1 = integer part (as integer)
-    CIF  R1                  ; R1 = integer part (as float)
+    ;; --- Integer part (truncates toward zero) ---
+    MOV   R2, R0
+    CFI   R2                   ; R2 = integer part (as integer)
+    CIF   R2                   ; R2 = integer part (as float)
 
-    ;; --- Compute fractional part: x - integer_part ---
-    MOV  R2, R0
-    FSUB R2, R1              ; R2 = fractional part
+    ;; --- Fractional part = x - integer_part ---
+    MOV   R1, R0
+    FSUB  R1, R2                ; R1 = fractional part -- explicitly returned now,
+                                 ; not left as an incidental leftover register value
 
-    ;; --- Return integer part in R0 ---
-    ;; Note: Fractional part is in R2 but not returned here.
-    ;;       Lua's multiple return values need special handling.
-    MOV  R0, R1
+    ;; --- Return: R0 = integer part, R1 = fractional part ---
+    MOV   R0, R2
 
-    ;; --- Return result ---
-    MOV  SP, BP
-    POP  BP
+    MOV   SP, BP
+    POP   BP
     RET
 

@@ -25,21 +25,36 @@ asm:
 	done
 
 tests:
+	@echo "==============================================================="
+	@echo "v32lua basic functionality (variables and operators)"
+	@echo "==============================================================="
 	@for f in $(LUA_SRCS); do \
 		../run_tests.sh $$f; \
 	done
+	@echo "==============================================================="
+	@echo
 
 # Run with VERBOSE=true for each file
 report:
+	@echo "==============================================================="
+	@echo "v32lua basic functionality (variables and operators)"
+	@echo "==============================================================="
 	@for f in $(LUA_SRCS); do \
 		VERBOSE="true" ../run_tests.sh $$f; \
 	done
+	@echo "==============================================================="
+	@echo
 
 # Run with DEBUG=true for each file
 debug:
+	@echo "==============================================================="
+	@echo "v32lua basic functionality (variables and operators)"
+	@echo "==============================================================="
 	@for f in $(LUA_SRCS); do \
 		DEBUG="true" ../run_tests.sh $$f; \
 	done
+	@echo "==============================================================="
+	@echo
 
 # Pattern rule: How to convert a .lua file into a .asm file
 %.asm: %.lua
@@ -71,14 +86,6 @@ v32: $(XML_OUTS)
 		fi; \
 	done
 
-context:
-	@for f in $(ASM_OUTS); do \
-		split -a 1 -b 45K -d $$f.asm $$f_part; \
-		@for file in $$f_part?; do \
-			mv "$$file" "$$file.asm.txt"; \
-		done; \
-	done
-
 # Clean target drops all generated assembly and binary test files
 clean:
-	rm -f *.asm *.vbin *.xml *.v32 *.debug *.txt *.cmd *.out *.err *.want* *.have*
+	rm -f *.asm *.vbin *.xml *.v32 *.debug *.txt *.cmd *.out *.err *.want* *.have* *.output

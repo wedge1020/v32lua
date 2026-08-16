@@ -54,13 +54,14 @@ typedef struct astnode {
             char* name;
             struct astnode* params;
             struct astnode* body;
-			int is_variadic;  // NEW
+            int is_variadic;  // NEW
         } function_def;
 
         struct {
             struct astnode* target;
             struct astnode* args_head; // Linked list of arguments
             int is_method_call;
+            int return_count; // track number of return values
         } call;
         
         // In the func_ptr union:

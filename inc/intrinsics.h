@@ -118,9 +118,9 @@ bool  emit_math_log10_intrinsic      (ASTNode *, int);
 bool  emit_math_cosh_intrinsic       (ASTNode *, int);
 bool  emit_math_sinh_intrinsic       (ASTNode *, int);
 bool  emit_math_tanh_intrinsic       (ASTNode *, int);
-bool  emit_math_frexp_intrinsic      (ASTNode *, int);
-bool  emit_math_ldexp_intrinsic      (ASTNode *, int);
-bool  emit_math_modf_intrinsic       (ASTNode *, int);
+int   emit_math_modf_intrinsic       (ASTNode *, int);
+int   emit_math_frexp_intrinsic      (ASTNode *, int);
+int   emit_math_ldexp_intrinsic      (ASTNode *, int);
 
 //////////////////////////////////////////////////////////////////////////////	
 //

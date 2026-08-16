@@ -37,7 +37,7 @@ sysinstall: bin/$(TARGET)
 # Run the test compilations. 
 # We explicitly depend on the compiler binary ('src/compiler') being built first!
 tests: bin/$(TARGET)
-	$(MAKE) -C testing tests
+	@$(MAKE) -C testing tests
 
 # Checkmassembler outputs
 # We explicitly depend on the compiler binary ('src/compiler') being built first!

@@ -31,15 +31,23 @@ tests:
 	@for f in $(LUA_SRCS); do \
 		../run_tests.sh $$f; \
 	done
+	@echo "==============================================================="
+	@echo
 
 # Run with VERBOSE=true for each file
 report:
+	@echo "==============================================================="
+	@echo "v32lua math library"
+	@echo "==============================================================="
 	@for f in $(LUA_SRCS); do \
 		VERBOSE="true" ../run_tests.sh $$f; \
 	done
 
 # Run with DEBUG=true for each file
 debug:
+	@echo "==============================================================="
+	@echo "v32lua math library"
+	@echo "==============================================================="
 	@for f in $(LUA_SRCS); do \
 		DEBUG="true" ../run_tests.sh $$f; \
 	done

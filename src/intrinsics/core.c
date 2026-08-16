@@ -571,17 +571,35 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
 
     // math.frexp(x)
     if (strcmp(func_name, "math.frexp") == 0) {
-        return emit_math_frexp_intrinsic(node, dest_reg);
+        int ret_count = emit_math_frexp_intrinsic(node, dest_reg);
+        if (ret_count > 0) {
+            // Store return count in node for multiple assignment handling
+            node->as.call.return_count = ret_count;
+            return ret_count;
+        }
+        return 0;
     }
 
-    // math.ldexp(m, e)
+    // math.ldexp(x)
     if (strcmp(func_name, "math.ldexp") == 0) {
-        return emit_math_ldexp_intrinsic(node, dest_reg);
+        int ret_count = emit_math_ldexp_intrinsic(node, dest_reg);
+        if (ret_count > 0) {
+            // Store return count in node for multiple assignment handling
+            node->as.call.return_count = ret_count;
+            return ret_count;
+        }
+        return 0;
     }
 
     // math.modf(x)
     if (strcmp(func_name, "math.modf") == 0) {
-        return emit_math_modf_intrinsic(node, dest_reg);
+        int ret_count = emit_math_modf_intrinsic(node, dest_reg);
+        if (ret_count > 0) {
+            // Store return count in node for multiple assignment handling
+            node->as.call.return_count = ret_count;
+            return ret_count;
+        }
+        return 0;
     }
 
     // loop iters

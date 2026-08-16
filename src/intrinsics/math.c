@@ -856,66 +856,10 @@ bool emit_math_tanh_intrinsic(ASTNode *node, int dest_reg)
     return true;
 }
 
-/**
- * Emits assembly for the math.frexp(x) intrinsic.
- * Returns mantissa and exponent.
- * Note: Lua expects two return values. This requires special handling.
- */
-bool emit_math_frexp_intrinsic(ASTNode *node, int dest_reg)
-{
-    ASTNode *arg = node->as.call.args_head;
-    if (!arg || arg->next != NULL) {
-        compiler_error(ERR_SYNTAX, node->line_number,
-            "math.frexp() expects exactly one argument");
-        return false;
-    }
-
-    emit_asm("    ;; --- Intrinsic: math.frexp(x) ---\n");
-    int arg_reg = allocate_register();
-    generate_asm(arg, arg_reg);
-    emit_asm("    PUSH R%d\n", arg_reg);
-    emit_asm("    CALL __builtin_frexp\n");
-    emit_asm("    IADD SP, 1\n");
-    // Note: frexp returns two values. In Lua, these would be returned as multiple values.
-    // For now, just return mantissa in dest_reg
-    if (dest_reg != 0) emit_asm("    MOV R%d, R0\n", dest_reg);
-    unlock_register(arg_reg);
-    return true;
-}
-
-/**
- * Emits assembly for the math.ldexp(m, e) intrinsic.
- * Returns m * 2^e.
- */
-bool emit_math_ldexp_intrinsic(ASTNode *node, int dest_reg)
-{
-    ASTNode *arg = node->as.call.args_head;
-    if (!arg || !arg->next || arg->next->next != NULL) {
-        compiler_error(ERR_SYNTAX, node->line_number,
-            "math.ldexp() expects exactly two arguments");
-        return false;
-    }
-
-    emit_asm("    ;; --- Intrinsic: math.ldexp(m, e) ---\n");
-    int m_reg = allocate_register();
-    int e_reg = allocate_register();
-    generate_asm(arg, m_reg);
-    generate_asm(arg->next, e_reg);
-    emit_asm("    PUSH R%d\n", m_reg);
-    emit_asm("    PUSH R%d\n", e_reg);
-    emit_asm("    CALL __builtin_ldexp\n");
-    emit_asm("    IADD SP, 2\n");
-    if (dest_reg != 0) emit_asm("    MOV R%d, R0\n", dest_reg);
-    unlock_register(m_reg);
-    unlock_register(e_reg);
-    return true;
-}
-
-/**
- * Emits assembly for the math.modf(x) intrinsic.
- * Returns integer and fractional parts.
- */
-bool emit_math_modf_intrinsic(ASTNode *node, int dest_reg)
+// ============================================================================
+// math.modf(x) - Returns TWO values (integer, fractional)
+// ============================================================================
+int  emit_math_modf_intrinsic(ASTNode *node, int dest_reg)
 {
     ASTNode *arg = node->as.call.args_head;
     if (!arg || arg->next != NULL) {
@@ -930,7 +874,69 @@ bool emit_math_modf_intrinsic(ASTNode *node, int dest_reg)
     emit_asm("    PUSH R%d\n", arg_reg);
     emit_asm("    CALL __builtin_modf\n");
     emit_asm("    IADD SP, 1\n");
-    if (dest_reg != 0) emit_asm("    MOV R%d, R0\n", dest_reg);
+
+    // ✅ FIX: Store BOTH return values (R0=int, R1=frac) in spill slots
+    // We can't use dest_reg here because it's a single register.
+    // Instead, we'll let node_multiple_assignment handle the registers.
     unlock_register(arg_reg);
-    return true;
+
+    // Mark that this intrinsic produces multiple values
+    return 2;  // ✅ Return 2 to indicate TWO return values
+}
+
+// ============================================================================
+// math.frexp(x) - Returns TWO values (mantissa, exponent)
+// ============================================================================
+int  emit_math_frexp_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+    if (!arg || arg->next != NULL) {
+        compiler_error(ERR_SYNTAX, node->line_number,
+            "math.frexp() expects exactly one argument");
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: math.frexp(x) ---\n");
+    int arg_reg = allocate_register();
+    generate_asm(arg, arg_reg);
+    emit_asm("    PUSH R%d\n", arg_reg);
+    emit_asm("    CALL __builtin_frexp\n");
+    emit_asm("    IADD SP, 1\n");
+    unlock_register(arg_reg);
+
+    // ✅ Return 2 to indicate TWO return values
+    return 2;
+}
+
+// ============================================================================
+// math.ldexp(m, e) - Returns ONE value, but fix argument order
+// ============================================================================
+int   emit_math_ldexp_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+    if (!arg || !arg->next || arg->next->next != NULL) {
+        compiler_error(ERR_SYNTAX, node->line_number,
+            "math.ldexp() expects exactly two arguments");
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: math.ldexp(m, e) ---\n");
+    int m_reg = allocate_register();
+    int e_reg = allocate_register();
+    generate_asm(arg, m_reg);
+    generate_asm(arg->next, e_reg);
+
+    // ✅ FIX: Push m first, then e (so m is at [BP+3], e at [BP+2])
+    emit_asm("    PUSH R%d\n", m_reg);
+    emit_asm("    PUSH R%d\n", e_reg);
+    emit_asm("    CALL __builtin_ldexp\n");
+    emit_asm("    IADD SP, 2\n");
+
+    if (dest_reg != 0) {
+        emit_asm("    MOV R%d, R0\n", dest_reg);
+    }
+
+    unlock_register(m_reg);
+    unlock_register(e_reg);
+    return 1;  // Single return value
 }

@@ -1,38 +1,95 @@
 #include "v32lua.h"
 
-void  node_multiple_assignment (ASTNode *node)
+void node_multiple_assignment(ASTNode *node)
 {
     ASTNode *curr_tgt             = node -> as.mult_assign.targets_head;
     ASTNode *curr_val             = node -> as.mult_assign.values_head;
     int      val_reg              = -1;
 
-	// --- Intercept Bare Local Declarations (e.g., "local x, y") ---
-	if (node -> as.mult_assign.is_local && node -> as.mult_assign.values_head == NULL)
-	{
-		while (curr_tgt != NULL)
-		{
-			if (curr_tgt -> type == NODE_IDENTIFIER)
-			{
-				// Register local symbol and initialize to canonical Nil (BOXED_NIL)
-				SymbolNode *sym = register_local(curr_tgt -> as.id.name);
-				char access_str[128];
-				get_variable_access_string(sym->name, access_str);
+    // --- Intercept Bare Local Declarations ---
+    if (node->as.mult_assign.is_local && node->as.mult_assign.values_head == NULL) {
+        while (curr_tgt != NULL)
+        {
+            if (curr_tgt -> type == NODE_IDENTIFIER)
+            {
+                // Register local symbol and initialize to canonical Nil (BOXED_NIL)
+                SymbolNode *sym = register_local(curr_tgt -> as.id.name);
+                char access_str[128];
+                get_variable_access_string(sym->name, access_str);
 
-				emit_asm("    ;; Bare local '%s' initialized to nil", sym->name);
+                emit_asm("    ;; Bare local '%s' initialized to nil", sym->name);
 
-				// FIX: Use register intermediary for MOV
-				int temp_reg = allocate_pinned_register();
-				emit_asm("MOV R%d, BOXED_NIL", temp_reg);
-				emit_asm("MOV %s, R%d", access_str, temp_reg);
-				unlock_pinned_register(temp_reg);
-			}
-			curr_tgt = curr_tgt -> next;
-		}
-		return;
-	}
+                // FIX: Use register intermediary for MOV
+                int temp_reg = allocate_pinned_register();
+                emit_asm("MOV R%d, BOXED_NIL", temp_reg);
+                emit_asm("MOV %s, R%d", access_str, temp_reg);
+                unlock_pinned_register(temp_reg);
+            }
+            curr_tgt = curr_tgt -> next;
+        }
+        return;
+    }
+
+    // =========================================================================
+    // Check if RHS is a single function call that returns multiple values
+    // =========================================================================
+    if (curr_val != NULL && curr_val->next == NULL && curr_val->type == NODE_FUNCTION_CALL) {
+        // Determine the return count STATICALLY from the callee's name, via
+        // the same lookup table the intrinsic dispatcher itself is built on
+        // (see get_builtin_return_count() / builtin_return_counts[]).
+        //
+        // We can NOT read curr_val->as.call.return_count here -- that field
+        // is only populated as a SIDE EFFECT once generate_asm() actually
+        // walks into the matching math.modf/frexp/ldexp intrinsic branch,
+        // which hasn't happened yet at this point. Reading it now always
+        // sees its untouched default, so the multi-return branch below
+        // never fired -- every call silently fell through to the
+        // single-target path instead.
+        char callee_path[256] = {0};
+        int  return_count     = 1;
+
+        if (resolve_static_path(curr_val->as.call.target, callee_path)) {
+            return_count = get_builtin_return_count(callee_path);
+        }
+
+        if (return_count > 1) {
+            // This is a multi-return function call (e.g., math.modf, math.frexp)
+            generate_asm(curr_val, 0);  // dest_reg=0 means don't store to single reg
+
+            // Assign return values from R0, R1, R2, ... to targets
+            int reg_index = 0;
+            while (curr_tgt != NULL && reg_index < return_count) {
+                char access_str[128];
+                get_variable_access_string(curr_tgt->as.id.name, access_str);
+
+                emit_asm("MOV R2, R%d", reg_index);  // Read from R0, R1, etc.
+                emit_asm("MOV %s, R2", access_str);
+                unlock_pinned_register(2);  // Clean up R2
+
+                curr_tgt = curr_tgt->next;
+                reg_index++;
+            }
+
+            // Pad remaining targets with NIL
+            while (curr_tgt != NULL) {
+                char access_str[128];
+                get_variable_access_string(curr_tgt->as.id.name, access_str);
+
+                int temp_reg = allocate_pinned_register();
+                emit_asm("MOV R%d, BOXED_NIL", temp_reg);
+                emit_asm("MOV %s, R%d", access_str, temp_reg);
+                unlock_pinned_register(temp_reg);
+
+                curr_tgt = curr_tgt->next;
+            }
+
+            return;  // Early exit - we handled all assignments
+        }
+    }
 
     // --- Standard & Multiple Assignment Evaluation ---
-    while (curr_tgt != NULL) {
+    while (curr_tgt != NULL)
+    {
         // =========================================================================
         // 1. ATTEMPT HARDWARE INTRINSIC FIRST (Immediate Folding / Lazy Evaluation)
         // =========================================================================
@@ -80,8 +137,8 @@ void  node_multiple_assignment (ASTNode *node)
             // ✅ NEW DEBUG
             if (g_verbose_debug) {
                 fprintf(stderr, "[debug] node_multiple_assignment() Assigning: %s -> %s (val_reg=R%d)\n",
-						curr_tgt->as.id.name, access_str, val_reg);
-			}
+                        curr_tgt->as.id.name, access_str, val_reg);
+            }
 
             emit_asm("MOV %s, R%d", access_str, val_reg);
         }
