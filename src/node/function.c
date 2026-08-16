@@ -6,6 +6,18 @@ void  node_function_def (ASTNode *node)
 
     mark_global_as_function(func_name, node->as.function_def.params);
 
+    // Nested/local functions are compiled inline, in the middle of the
+    // enclosing function's code. Unlike top-level functions (only ever
+    // reached via CALL), straight-line execution would otherwise fall
+    // directly into the body and hit its RET without ever having been
+    // CALLed, popping garbage off the stack as a "return address."
+    // Guard it with a jump around the whole definition. Top-level scope
+    // has an empty context stack, so this only fires for nested defs.
+    bool is_nested_def = (context_stack_head != NULL);
+    if (is_nested_def) {
+        emit_asm("JMP __%s_skip\n", func_name);
+    }
+
     // ===== Register local function names =====
     /*
     bool is_local_func = false;
@@ -100,6 +112,10 @@ void  node_function_def (ASTNode *node)
     emit_asm ("\n");
 
     pop_function_context();
+
+    if (is_nested_def) {
+        emit_asm("__%s_skip:\n", func_name);
+    }
 }
 
 // ============================================================================

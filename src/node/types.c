@@ -6,6 +6,19 @@ void  node_identifier (ASTNode *node, int  dest_reg)
     //
     // Dynamically lookup identifier location
     //
+    SymbolNode *sym = resolve_symbol (node -> as.id.name);
+
+    // Function values are constant code addresses, not data sitting in a
+    // RAM slot -- nested/local functions never get their global slot
+    // initialized (only top-level functions do, in
+    // __global_scope_initialization). Load and box the address directly
+    // instead of indirecting through memory that may be uninitialized.
+    if (sym != NULL && sym->is_function) {
+        emit_asm ("MOV R%d, __function_%s\n", dest_reg, node -> as.id.name);
+        emit_asm ("OR  R%d, BOXED_FUNCTION ; Box as Function\n", dest_reg);
+        return;
+    }
+
     char  var_access[256];
     get_variable_access_string (node -> as.id.name, var_access);
     emit_asm ("MOV R%d, %s\n", dest_reg, var_access);
