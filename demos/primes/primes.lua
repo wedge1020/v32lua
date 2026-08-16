@@ -301,7 +301,6 @@ function main()
             --
             if flag[alg]       == true then
                 x               = x + 80
-				__rawasm__("__debug:")
                 print(x, y, qty[alg])
             end
 

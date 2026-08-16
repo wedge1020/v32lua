@@ -10,7 +10,7 @@
 ##
 function pass()
 {
-    [ "${DEBUG}" = "true" ] && echo "OK"
+    [ "${DEBUG}" = "true" ] && echo "OK" || echo -n
 }
 
 ##############################################################################
@@ -42,12 +42,12 @@ RUNEVAL="v32sim"
 RFLAGS="-r -C ${UNIT}.cmd -L lua"
 
 if [ -r "${UNIT}.lua" ]; then
-    echo    "==============================================================="
     if [ "${DEBUG}" = "true" ]; then
+        echo    "==============================================================="
         echo    "building ${UNIT}: "
         echo    "---------------------------------------------------------------"
-    else
-        printf "evaluating %46s: " "${UNIT}"
+    #else
+    #    printf "evaluating %46s: " "${UNIT}"
     fi
     progress=0
     [ "${DEBUG}" = "true" ] && printf "compiling:  %30s (lua->asm)  ... " "${UNIT}"
@@ -117,7 +117,10 @@ if [ -r "${UNIT}.lua" ]; then
         printf "%-30s\n" $(cat ${UNIT}.want | tr ' ' ';') | tr ';' ' ' > ${UNIT}.want1
         paste ${UNIT}.want1 ${UNIT}.have
     fi
-    echo "---------------------------------------------------------------"
+
+    if [ "${DEBUG}" = "true" ]; then
+        echo "---------------------------------------------------------------"
+    fi
     #cat ${UNIT}.out
 
 else

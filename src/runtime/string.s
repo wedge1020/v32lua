@@ -224,6 +224,7 @@ __builtin_eq:
 
     ;; --- Check if both operands are raw numbers (not tagged) ---
     ;; In NaN-boxing: numbers are raw floats, other types have BOXED_DATA tag
+    MOV  R1, [BP+3]
     MOV  R3, R1
     AND  R3, BOXED_DATA
     INE  R3, 0               ; Non-zero = tagged (not a number)
@@ -251,6 +252,7 @@ __eq_both_numbers:
 __eq_check_left_string:
     ;; Validate LEFT Operand is a String (Tag 0x7FC0... or 0xFFC0... with
     ;; payload >= 4)
+    MOV  R1, [BP+3]
     MOV  R3, R1
     AND  R3, BOXED_DATA
     IEQ  R3, BOXED_ROMSTRING
@@ -293,6 +295,7 @@ __eq_strcmp_loop:
     JT   R3, __eq_return_false   ; Characters differ -> strings not equal
 
     ;; Check for null terminator (0x00)
+    MOV  R3, [R1]
     IEQ  R3, 0
     JT   R3, __eq_return_true    ; Both hit null terminator: strings equal!
 
