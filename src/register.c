@@ -108,7 +108,18 @@ int ensure_in_register(int reg)
 // Locks a register (marks as allocated but not pinned)
 void lock_register(int reg)
 {
-    if (reg >= 0 && reg < NUM_GPRS) register_inventory[reg] = 1;
+    if (reg >= 0 && reg < NUM_GPRS) {
+        register_inventory[reg] = 1;
+        // A freshly-allocated register has use_distance == 0, which Phase 2
+        // of allocate_register() treats as "dead" and will silently hand
+        // back out to the very next caller with NO spill at all. Locking a
+        // register is supposed to protect it from exactly this kind of
+        // casual reuse (callers still allocate around it, it just isn't a
+        // free-for-all target) -- so mark it long-lived. It remains
+        // spillable under real pressure via Phase 3, which correctly saves
+        // and (via ensure_in_register) restores its value.
+        register_use_distance[reg] = 10000;
+    }
 }
 
 // Unlocks a register (marks as free)
@@ -230,6 +241,15 @@ int allocate_register(void)
     // Spill the selected candidate if it was allocated
     if (register_inventory[best_candidate]) {
         spill_register(best_candidate);
+        // spill_register() just recorded a pending spill slot so the OLD
+        // occupant's value can be restored later via ensure_in_register().
+        // But this register is about to be handed out fresh, for a brand
+        // new and unrelated value -- if we leave the flag set, the first
+        // ensure_in_register() call the NEW owner makes (e.g. right after
+        // computing its own value into this register) will wrongly reload
+        // the OLD spilled value on top of it. Clear it: only a future
+        // spill of the NEW value should set this flag again.
+        spill_slot_for_reg[best_candidate] = 0;
     }
 
     // Allocate the register

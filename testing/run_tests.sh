@@ -21,6 +21,7 @@ function fail()
 {
     echo "FAIL"
     echo "---------------------------------------------------------------"
+    cat ${UNIT}.err
     exit
 }
 
@@ -48,11 +49,14 @@ if [ -r "${UNIT}.lua" ]; then
     else
         printf "evaluating %46s: " "${UNIT}"
     fi
+    progress=0
     [ "${DEBUG}" = "true" ] && printf "compiling:  %30s (lua->asm)  ... " "${UNIT}"
     ${COMPILE}  ${CFLAGS} -o ${UNIT}.asm  ${UNIT}.lua 2>  ${UNIT}.err && pass || fail
+    progress=1
     [ "${DEBUG}" = "true" ] && printf "assembling: %30s (asm->vbin) ... " "${UNIT}"
     ${ASSEMBLE} ${AFLAGS} -o ${UNIT}.vbin ${UNIT}.asm 2>  ${UNIT}.err && pass || fail
     [ "${DEBUG}" = "true" ] && printf "packaging:  %30s (vbin->v32) ... " "${UNIT}"
+    progress=2
     ${PACKAGE}  ${PFLAGS} -o ${UNIT}.v32  ${UNIT}.xml 2>  ${UNIT}.err && pass || fail
     
     #if [ "${DEBUG}" = "true" ]; then
@@ -60,11 +64,12 @@ if [ -r "${UNIT}.lua" ]; then
     #fi
 
     echo -n                             >  ${UNIT}.cmd
+    progress=3
     for entry in `cat ${UNIT}.asm | grep 'define.*var_.*_' | sed 's/^%define  var_\([^ ][^ ]*\) *\(0x[0-9A-F][0-9A-F]*\)$/\1:\2/g'`; do
         name=$(echo  "${entry}" | cut -d':' -f1)
         value=$(echo "${entry}" | cut -d':' -f2)
         dtype=$(echo "${name}"  | cut -d'_' -f1)
-		#echo "entry: ${entry}, name: ${name}"
+        #echo "entry: ${entry}, name: ${name}"
         if [ "${dtype}" = "number" ]; then
             echo "d/f ${value} ${name}" >> ${UNIT}.cmd
         elif [ "${dtype}" = "string" ]; then

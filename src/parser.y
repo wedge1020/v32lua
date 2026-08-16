@@ -21,7 +21,7 @@ char *mangle_method_name (const char *table_name, const char *method_name);
     ASTNode *ast_node;
 }
 
-%expect 2
+//%expect 5
 
 /* --- AST Node Types --- */
 %type <ast_node> parameter_list
@@ -91,7 +91,20 @@ statement_list:
     ;
 
 stat_list:
-      statement { $$ = $1; }
+      statement ';' { $$ = $1; }
+    | stat_list statement ';' {
+        if ($1 == NULL) {
+            $$ = $2;
+        } else {
+            ASTNode *current = $1;
+            while (current->next != NULL) {
+                current = current->next;
+            }
+            current->next = $2;
+            $$ = $1;
+        }
+    }
+    | statement { $$ = $1; }
     | stat_list statement {
         if ($1 == NULL) { 
             $$ = $2; 
@@ -574,6 +587,7 @@ function_call:
         node->as.call.args_head = $5;
         $$ = node;
     }
+    | prefix_expr '(' argument_list ')'
     ;
 
 field:

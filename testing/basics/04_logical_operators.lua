@@ -160,10 +160,10 @@ boolean_result08: false
 boolean_result09: true
 boolean_result10: true
 boolean_result11: false
-boolean_result12: true (or 2)
-boolean_result13: false (or 0)
-boolean_result14: true (or 1)
-boolean_result15: true (or 1)
+boolean_result12: true
+boolean_result13: false
+boolean_result14: true
+boolean_result15: true
 boolean_result16: false
 boolean_result17: true
 boolean_result18: true

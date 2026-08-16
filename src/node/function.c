@@ -412,7 +412,13 @@ void  node_function_call (ASTNode *node, int  dest_reg)
             emit_asm("OR R%d, 0x7FF00000 ; Apply Lua Number tag\n", dest_reg);
         }
     } else {
-        // --- Lua Function Call (via __builtin_exec trampoline) ---
+		// --- Lua Function Call (via __builtin_exec trampoline) ---
+        // Argument evaluation above may have needed target_reg's register
+        // number for something else, in which case allocate_register()
+        // correctly spilled target_reg's value to preserve it. Reload it
+        // now if that happened -- a no-op if it's still in-register.
+        ensure_in_register (target_reg);
+
         // Move target to R0 for __builtin_exec (validation & execution)
         emit_asm("MOV R0, R%d ; Prepare boxed target for validation\n", target_reg);
 

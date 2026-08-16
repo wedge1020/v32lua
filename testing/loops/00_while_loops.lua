@@ -1,19 +1,19 @@
 --#title "v32lua while loops unit test"
---@ Vircon32 Lua While Loops Unit Test
---@ Tests while loop control flow.
+--@ Vircon32 Lua While Loops Unit Test - Comprehensive Coverage
+--@ Tests all while loop scenarios including edge cases and interactions.
 --@ Results are stored in global variables for automated memory scraping.
 
 function test_while_loops()
-    -- === Test 1: Basic while loop (count up) ===
+    -- === Test 00: Basic while loop (count up) ===
     local i = 1
     local sum = 0
     while i <= 5 do
         sum = sum + i
         i = i + 1
     end
-    number_result1 = sum  -- Expected: 15 (1+2+3+4+5)
+    number_result00 = sum
 
-    -- === Test 2: While loop with break ===
+    -- === Test 01: While loop with break ===
     local j = 1
     while true do
         if j >= 3 then
@@ -21,9 +21,18 @@ function test_while_loops()
         end
         j = j + 1
     end
-    number_result2 = j  -- Expected: 3
+    number_result01 = j
 
-    -- === Test 3: Nested while loops ===
+    -- === Test 02: While loop countdown ===
+    local k = 10
+    local iterations = 0
+    while k > 0 do
+        iterations = iterations + 1
+        k = k - 2
+    end
+    number_result02 = iterations
+
+    -- === Test 03: Nested while loops ===
     local outer = 1
     local inner_sum = 0
     while outer <= 3 do
@@ -34,35 +43,272 @@ function test_while_loops()
         end
         outer = outer + 1
     end
-    number_result3 = inner_sum  -- Expected: 6 (3 outer * 2 inner)
+    number_result03 = inner_sum
 
-    -- === Test 4: While loop condition ===
-    local k = 10
-    local iterations = 0
-    while k > 0 do
-        iterations = iterations + 1
-        k = k - 2
+    -- === Test 04: While with complex condition (AND) ===
+    local a, b = 5, 10
+    local complex_count = 0
+    while a < 10 and b > 5 do
+        complex_count = complex_count + 1
+        a = a + 1
+        b = b - 1
     end
-    number_result4 = iterations  -- Expected: 5 (10,8,6,4,2)
+    number_result04 = complex_count
+
+    -- === Test 05: While with complex condition (OR) ===
+    local x, y = 0, 10
+    local or_count = 0
+    while x == 0 or y > 0 do
+        or_count = or_count + 1
+        x = x + 1
+        y = y - 1
+        if or_count >= 5 then break end
+    end
+    number_result05 = or_count
+
+    -- === Test 06: While with function call in condition ===
+    local counter = 0
+    local function get_value()
+        counter = counter + 1
+        return counter
+    end
+    local func_count = 0
+    while get_value() <= 3 do
+        func_count = func_count + 1
+    end
+    number_result06 = func_count
+
+    -- === Test 07: While with side effects in condition ===
+    local side_effect = 0
+    local val = 0
+    while (function() val = val + 1; return val end)() <= 5 do
+        side_effect = side_effect + 1
+    end
+    number_result07 = side_effect
+
+    -- === Test 08: While true (infinite) with break ===
+    local infinite_counter = 0
+    while true do
+        infinite_counter = infinite_counter + 1
+        if infinite_counter >= 10 then
+            break
+        end
+    end
+    number_result08 = infinite_counter
+
+    -- === Test 09: Empty while loop body ===
+    local empty_var = 5
+    while empty_var > 0 do
+        empty_var = empty_var - 1
+    end
+    number_result09 = empty_var
+
+    -- === Test 10: While with no body (just condition) ===
+    local no_body = 3
+    while no_body > 0 do
+        no_body = no_body - 1
+    end
+    number_result10 = no_body
+
+    -- === Test 11: Multiple breaks in different branches ===
+    local multi_break = 1
+    while multi_break <= 10 do
+        if multi_break == 3 then
+            break
+        elseif multi_break == 5 then
+            break
+        end
+        multi_break = multi_break + 1
+    end
+    number_result11 = multi_break
+
+    -- === Test 12: Break in nested while loops (inner) ===
+    local outer2 = 1
+    local inner_break = 0
+    while outer2 <= 5 do
+        local inner2 = 1
+        while inner2 <= 5 do
+            inner_break = outer2 * 10 + inner2
+            if inner2 == 3 then
+                break
+            end
+            inner2 = inner2 + 1
+        end
+        outer2 = outer2 + 1
+    end
+    number_result12 = inner_break
+
+    -- === Test 13: Break in nested while loops (outer) ===
+    local outer3 = 1
+    local outer_break_val = 0
+    while outer3 <= 5 do
+        local inner3 = 1
+        while inner3 <= 5 do
+            if outer3 == 2 and inner3 == 2 then
+                outer_break_val = outer3 * 100 + inner3
+                break
+            end
+            inner3 = inner3 + 1
+        end
+        if outer3 == 2 then
+            break
+        end
+        outer3 = outer3 + 1
+    end
+    number_result13 = outer_break_val
+
+    -- === Test 14: While with comparison operators ===
+    local comp = 1
+    local comp_count = 0
+    while comp ~= 10 do
+        comp_count = comp_count + 1
+        comp = comp + 1
+    end
+    number_result14 = comp_count
+
+    -- === Test 15: While with less than or equal ===
+    local le = 1
+    local le_count = 0
+    while le <= 5 do
+        le_count = le_count + 1
+        le = le + 1
+    end
+    number_result15 = le_count
+
+    -- === Test 16: While with greater than or equal ===
+    local ge = 10
+    local ge_count = 0
+    while ge >= 5 do
+        ge_count = ge_count + 1
+        ge = ge - 1
+    end
+    number_result16 = ge_count
+
+    -- === Test 17: While with string length condition ===
+    local str = ""
+    local str_count = 0
+    while #str < 5 do
+        str_count = str_count + 1
+        str = str .. "x"
+    end
+    number_result17 = str_count
+
+    -- === Test 18: While with boolean flag ===
+    local flag = true
+    local flag_count = 0
+    while flag do
+        flag_count = flag_count + 1
+        if flag_count >= 3 then
+            flag = false
+        end
+    end
+    number_result18 = flag_count
+
+    -- === Test 19: While with nil check ===
+    local nil_val = {1, 2, 3}
+    local nil_count = 0
+    while nil_val[1] ~= nil do
+        nil_count = nil_count + 1
+        table.remove(nil_val, 1)
+    end
+    number_result19 = nil_count
+
+    -- === Test 20: While with arithmetic in condition ===
+    local arith = 1
+    local arith_count = 0
+    while arith * arith <= 25 do
+        arith_count = arith_count + 1
+        arith = arith + 1
+    end
+    number_result20 = arith_count
+
+    -- === Test 21: While with modulo condition ===
+    local mod = 0
+    local mod_count = 0
+    while mod % 3 ~= 0 or mod == 0 do
+        mod_count = mod_count + 1
+        mod = mod + 1
+        if mod >= 10 then break end
+    end
+    number_result21 = mod_count
+
+    -- === Test 22: While with table iteration pattern ===
+    local tbl = {1, 2, 3, 4, 5}
+    local idx = 1
+    local tbl_sum = 0
+    while tbl[idx] ~= nil do
+        tbl_sum = tbl_sum + tbl[idx]
+        idx = idx + 1
+    end
+    number_result22 = tbl_sum
+
+    -- === Test 23: While with variable modification in condition ===
+    local mod_cond = 1
+    local mod_cond_count = 0
+    while mod_cond <= 5 do
+        mod_cond_count = mod_cond_count + mod_cond
+        mod_cond = mod_cond + 1
+    end
+    number_result23 = mod_cond_count
 end
 
 function main()
     ioports.gpu.clear("black")
     test_while_loops()
 
-    print(100, 00,  "--- While Loops Test ---")
-    print(100, 20,  "Test 1 - Sum 1-5: " ..     number_result1)
-    print(100, 40,  "Test 2 - Break at 3: " ..   number_result2)
-    print(100, 60,  "Test 3 - Nested sum: " ..  number_result3)
-    print(100, 80,  "Test 4 - Iterations: " ..  number_result4)
+    print(000, 00,  "--- While Loops Expanded Test ---")
+    print(000, 020, "Test 00 - Count up sum: " ..    number_result00)
+    print(000, 040, "Test 01 - Break at 3: " ..      number_result01)
+    print(000, 060, "Test 02 - Countdown iter: " ..   number_result02)
+    print(000, 080, "Test 03 - Nested sum: " ..     number_result03)
+    print(000, 100, "Test 04 - AND cond: " ..        number_result04)
+    print(000, 120, "Test 05 - OR cond: " ..         number_result05)
+    print(000, 140, "Test 06 - Func call: " ..       number_result06)
+    print(000, 160, "Test 07 - Side effect: " ..      number_result07)
+    print(000, 180, "Test 08 - While true: " ..      number_result08)
+    print(000, 200, "Test 09 - Empty body: " ..      number_result09)
+    print(000, 220, "Test 10 - No body: " ..        number_result10)
+    print(000, 240, "Test 11 - Multi break: " ..     number_result11)
+    print(000, 260, "Test 12 - Inner break: " ..     number_result12)
+    print(200, 020, "Test 13 - Outer break: " ..     number_result13)
+    print(200, 040, "Test 14 - Not equal: " ..      number_result14)
+    print(200, 060, "Test 15 - Less/equal: " ..     number_result15)
+    print(200, 080, "Test 16 - Greater/equal: " ..   number_result16)
+    print(200, 100, "Test 17 - Str length: " ..      number_result17)
+    print(200, 120, "Test 18 - Bool flag: " ..      number_result18)
+    print(200, 140, "Test 19 - Nil check: " ..      number_result19)
+    print(200, 160, "Test 20 - Arithmetic: " ..      number_result20)
+    print(200, 180, "Test 21 - Modulo: " ..         number_result21)
+    print(200, 200, "Test 22 - Table iter: " ..      number_result22)
+    print(200, 220, "Test 23 - Mod in cond: " ..     number_result23)
 end
 
 --[[
 === EXPECTED OUTPUT ===
 
-number_result1: 15.0000
-number_result2: 3.0000
-number_result3: 6.0000
-number_result4: 5.0000
+number_result00: 15.0000
+number_result01: 3.0000
+number_result02: 5.0000
+number_result03: 6.0000
+number_result04: 5.0000
+number_result05: 5.0000
+number_result06: 3.0000
+number_result07: 5.0000
+number_result08: 10.0000
+number_result09: 0.0000
+number_result10: 0.0000
+number_result11: 3.0000
+number_result12: 13.0000 (outer=1, inner=3 -> 1*10+3)
+number_result13: 22.0000 (outer=2, inner=2 -> 2*100+2)
+number_result14: 9.0000
+number_result15: 5.0000
+number_result16: 6.0000
+number_result17: 5.0000
+number_result18: 3.0000
+number_result19: 3.0000
+number_result20: 5.0000 (1,2,3,4,5 -> 5 iterations)
+number_result21: 10.0000 (0-9 inclusive)
+number_result22: 15.0000
+number_result23: 15.0000 (1+2+3+4+5)
 
 --]]
