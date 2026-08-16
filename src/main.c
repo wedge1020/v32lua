@@ -196,6 +196,13 @@ int  main (int  argc, char** argv)
         register_global ("TIC80_PAUSE_FLAG");
         register_global ("TIC80_COLOR_MULTIPLY");
     }
+
+    if (runtime_req.needs_pico8)
+    {
+        // TIC-80 map buffer pointer - must be registered before prepass
+        register_global ("PICO8_MAP_BUFFER_PTR");
+    }
+
     
     // Perform full symbol pre-pass before code generation
     register_all_globals_prepass(root_node);
