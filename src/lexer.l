@@ -166,6 +166,7 @@ char *process_string_literal (const char *text, int  len)
 "]"                     { return ']'; }
 "."                     { return '.'; }
 ":"                     { return ':'; }
+";"                     { return ';'; }
 
 [a-zA-Z_][a-zA-Z0-9_]*  { 
                             yylval.string_val  = strdup (yytext); 
