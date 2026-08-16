@@ -40,23 +40,32 @@ function test_logical_operators()
     -- === Test 11: NOT - double negation false ===
     boolean_result11 = (not (not false))
 
-    -- === Test 12: AND with numeric truthy values ===
-    boolean_result12 = (1 and 2)
+	-- === Test 12: AND with numeric truthy values - 'and' returns the      ===
+    -- === actual operand, not a coerced boolean. Both truthy, so it        ===
+    -- === evaluates and returns the second operand: 2.                     ===
+    number_result12 = (1 and 2)              -- expect: 2
 
-    -- === Test 13: AND with numeric falsy value (0) ===
-    boolean_result13 = (0 and 1)
+    -- === Test 13: AND where the left operand is 0. In Lua, 0 is TRUTHY    ===
+    -- === (only nil/false are falsy) -- unlike C/JS/Python -- so this      ===
+    -- === still evaluates and returns the second operand: 1.               ===
+    number_result13 = (0 and 1)              -- expect: 1
 
-    -- === Test 14: OR with numeric truthy values ===
-    boolean_result14 = (1 or 2)
+    -- === Test 14: OR with two truthy values short-circuits on the first  ===
+    -- === operand and returns it as-is: 1.                                 ===
+    number_result14 = (1 or 2)               -- expect: 1
 
-    -- === Test 15: OR with numeric falsy value (0) ===
-    boolean_result15 = (0 or 1)
+    -- === Test 15: OR where the left operand is 0. Since 0 is truthy in   ===
+    -- === Lua, 'or' short-circuits immediately on the LEFT operand and    ===
+    -- === returns it unchanged: 0. (Classic Lua gotcha for anyone         ===
+    -- === expecting C/JS-style falsy zero.)                                ===
+    number_result15 = (0 or 1)               -- expect: 0
 
-    -- === Test 16: NOT with numeric truthy value ===
-    boolean_result16 = (not 1)
+    -- === Test 16: NOT with numeric truthy value - unaffected, unchanged  ===
+    boolean_result16 = (not 1)               -- expect: false
 
-    -- === Test 17: NOT with numeric falsy value (0) ===
-    boolean_result17 = (not 0)
+    -- === Test 17: NOT with 0. Since 0 is truthy in Lua, 'not 0' is       ===
+    -- === false.                                                          ===
+    boolean_result17 = (not 0)               -- expect: false
 
     -- === Test 18: Combined AND/OR - (true and false) or true ===
     boolean_result18 = ((true and false) or true)
@@ -115,34 +124,34 @@ function main()
     test_logical_operators()
 
     print(000, 00,  "--- Logical Operators Test ---")
-    print(000, 020, "Test 00 - AND T&T: " ..         tostring(boolean_result00))
-    print(000, 040, "Test 01 - AND T&F: " ..         tostring(boolean_result01))
-    print(000, 060, "Test 02 - AND F&T: " ..         tostring(boolean_result02))
-    print(000, 080, "Test 03 - AND F&F: " ..         tostring(boolean_result03))
-    print(000, 100, "Test 04 - OR T|T: " ..          tostring(boolean_result04))
-    print(000, 120, "Test 05 - OR T|F: " ..          tostring(boolean_result05))
-    print(000, 140, "Test 06 - OR F|T: " ..          tostring(boolean_result06))
-    print(000, 160, "Test 07 - OR F|F: " ..          tostring(boolean_result07))
-    print(000, 180, "Test 08 - NOT T: " ..           tostring(boolean_result08))
-    print(000, 200, "Test 09 - NOT F: " ..           tostring(boolean_result09))
-    print(000, 220, "Test 10 - NOT NOT T: " ..       tostring(boolean_result10))
-    print(000, 240, "Test 11 - NOT NOT F: " ..       tostring(boolean_result11))
-    print(000, 260, "Test 12 - AND num T: " ..        tostring(boolean_result12))
-    print(200, 020, "Test 13 - AND num F: " ..        tostring(boolean_result13))
-    print(200, 040, "Test 14 - OR num T: " ..         tostring(boolean_result14))
-    print(200, 060, "Test 15 - OR num F: " ..         tostring(boolean_result15))
-    print(200, 080, "Test 16 - NOT num T: " ..        tostring(boolean_result16))
-    print(200, 100, "Test 17 - NOT num F: " ..        tostring(boolean_result17))
-    print(200, 120, "Test 18 - (T&F)|T: " ..          tostring(boolean_result18))
-    print(200, 140, "Test 19 - T&(F|T): " ..          tostring(boolean_result19))
-    print(200, 160, "Test 20 - (T|F)&T: " ..          tostring(boolean_result20))
-    print(200, 180, "Test 21 - T|(F&T): " ..          tostring(boolean_result21))
-    print(200, 200, "Test 22 - T&T|F&T: " ..          tostring(boolean_result22))
-    print(200, 220, "Test 23 - NOT(T&F)|F: " ..       tostring(boolean_result23))
-    print(200, 240, "Test 24 - AND short T: " ..      number_result24)
-    print(200, 260, "Test 25 - AND short F: " ..      number_result25)
-    print(200, 280, "Test 26 - OR short T: " ..       number_result26)
-    print(200, 300, "Test 27 - OR short F: " ..       number_result27)
+    print(000, 020, "Test 00 - AND T&T: " ..     tostring(boolean_result00))
+    print(000, 040, "Test 01 - AND T&F: " ..     tostring(boolean_result01))
+    print(000, 060, "Test 02 - AND F&T: " ..     tostring(boolean_result02))
+    print(000, 080, "Test 03 - AND F&F: " ..     tostring(boolean_result03))
+    print(000, 100, "Test 04 - OR T|T: " ..      tostring(boolean_result04))
+    print(000, 120, "Test 05 - OR T|F: " ..      tostring(boolean_result05))
+    print(000, 140, "Test 06 - OR F|T: " ..      tostring(boolean_result06))
+    print(000, 160, "Test 07 - OR F|F: " ..      tostring(boolean_result07))
+    print(000, 180, "Test 08 - NOT T: " ..       tostring(boolean_result08))
+    print(000, 200, "Test 09 - NOT F: " ..       tostring(boolean_result09))
+    print(000, 220, "Test 10 - NOT NOT T: " ..   tostring(boolean_result10))
+    print(000, 240, "Test 11 - NOT NOT F: " ..   tostring(boolean_result11))
+	print(000, 260, "Test 12 - AND num T: " ..   tostring(number_result12))
+    print(200, 020, "Test 13 - AND num F: " ..   tostring(number_result13))
+    print(200, 040, "Test 14 - OR num T: " ..    tostring(number_result14))
+    print(200, 060, "Test 15 - OR num F: " ..    tostring(number_result15))
+    print(200, 080, "Test 16 - NOT num T: " ..   tostring(boolean_result16))
+    print(200, 100, "Test 17 - NOT num F: " ..   tostring(boolean_result17))
+    print(200, 120, "Test 18 - (T&F)|T: " ..     tostring(boolean_result18))
+    print(200, 140, "Test 19 - T&(F|T): " ..     tostring(boolean_result19))
+    print(200, 160, "Test 20 - (T|F)&T: " ..     tostring(boolean_result20))
+    print(200, 180, "Test 21 - T|(F&T): " ..     tostring(boolean_result21))
+    print(200, 200, "Test 22 - T&T|F&T: " ..     tostring(boolean_result22))
+    print(200, 220, "Test 23 - NOT(T&F)|F: " ..  tostring(boolean_result23))
+    print(200, 240, "Test 24 - AND short T: " .. number_result24)
+    print(200, 260, "Test 25 - AND short F: " .. number_result25)
+    print(200, 280, "Test 26 - OR short T: " ..  number_result26)
+    print(200, 300, "Test 27 - OR short F: " ..  number_result27)
 end
 
 --[[
@@ -160,12 +169,12 @@ boolean_result08: false
 boolean_result09: true
 boolean_result10: true
 boolean_result11: false
-boolean_result12: true
-boolean_result13: false
-boolean_result14: true
-boolean_result15: true
+number_result12: 2.0000
+number_result13: 1.0000
+number_result14: 1.0000
+number_result15: 0.0000
 boolean_result16: false
-boolean_result17: true
+boolean_result17: false
 boolean_result18: true
 boolean_result19: true
 boolean_result20: true

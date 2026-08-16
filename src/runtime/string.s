@@ -144,68 +144,6 @@ __strcat_finish:
     RET
 
 ;; ---------------------------------------------------------------------------
-;; Built-in: Lexicographical String Comparison (strcmp)
-;; Incoming: R1 = Unboxed string (left), R2 = Unboxed string (right)
-;; Returns: R0 = Raw integer (-1 if Left < Right
-;;                             0 if Equal
-;;                             1 if Left > Right)
-;; ---------------------------------------------------------------------------
-__builtin_strcmp:
-    ;; Unbox Left Operand into R1
-    MOV  R0, R1
-    CALL __unbox_string
-    PUSH R0                  ; Save unboxed Left pointer on stack safely
-
-    ;; Unbox Right Operand into R2
-    MOV  R0, R2
-    CALL __unbox_string
-    MOV  R2, R0              ; R2 = Unboxed Right pointer
-    POP  R1                  ; R1 = Unboxed Left pointer
-
-__strcmp_loop:
-    MOV  R3, [R1]           ; Load left char
-    MOV  R4, [R2]           ; Load right char
-
-    ; Check for end of left string
-    MOV  R5, R3             ; Use R5 as temp to preserve R3
-    IEQ  R5, 0
-    JT   R5, __strcmp_check_right_end
-
-    ; Check for end of right string
-    MOV  R5, R4             ; Use R5 as temp to preserve R4
-    IEQ  R5, 0
-    JT   R5, __strcmp_diff  ; Left not at end, right at end → unequal
-
-    ; Characters differ?
-    MOV  R5, R3             ; Use R5 as temp
-    INE  R5, R4             ; R5 = 1 if R3 != R4, else 0
-    JT   R5, __strcmp_diff
-
-    ; Characters equal, advance both pointers
-    IADD R1, 1
-    IADD R2, 1
-    JMP  __strcmp_loop
-
-__strcmp_check_right_end:
-    MOV  R5, R4
-    IEQ  R5, 0
-    JT   R5, __strcmp_equal
-    JMP  __strcmp_diff
-
-__strcmp_diff:
-    MOV  R0, R3
-    ISUB R0, R4        ; R0 = R3 - R4
-    MOV  SP, BP
-    POP  BP
-    RET
-
-__strcmp_equal:
-    MOV  R0, 0
-    MOV  SP, BP
-    POP  BP
-    RET
-
-;; ---------------------------------------------------------------------------
 ;; Universal Equality (==): Returns raw integer 1 (true) or 0 (false) in R0
 ;; Incoming Stack: [BP+3] = Left_Val, [BP+2] = Right_Val
 ;; Handles: bitwise-identical values (fast path), string comparisons, and
@@ -315,6 +253,138 @@ __eq_return_false:
     MOV  SP, BP                  ; Stack Restore
     POP  BP
     RET
+
+;; ---------------------------------------------------------------------------
+;; Universal Relational Comparison (<, <=, >, >=)
+;; Incoming Stack: [BP+3] = Left_Val (boxed), [BP+2] = Right_Val (boxed)
+;; Returns: R0 = raw integer -1 (Left < Right), 0 (Left == Right), 1 (Left > Right)
+;; Handles: numeric comparison (raw IEEE 754 floats) and lexicographic
+;;          string comparison. Traps the CPU on mismatched/uncomparable types
+;;          (e.g. number vs string, table vs number).
+;; Clobbers: R0-R6
+;; ---------------------------------------------------------------------------
+__builtin_relcmp:
+    PUSH BP
+    MOV  BP, SP
+
+    MOV  R1, [BP+3]            ; Left
+    MOV  R2, [BP+2]            ; Right
+
+    ;; --- Is Left a number? A boxed/tagged value has ALL exponent bits set
+    ;; (the quiet-NaN pattern); a finite float never does. Mask out just the
+    ;; exponent field (no sign bit!) and compare against that exact pattern -
+    ;; same test used by __builtin_type elsewhere in this runtime.
+    MOV  R3, R1
+    AND  R3, NAN_VALUE          ; 0x7F800000 - isolate exponent bits only
+    IEQ  R3, NAN_VALUE          ; R3 = 1 if Left is NaN-tagged (boxed)
+    JT   R3, __relcmp_check_left_string
+
+    ;; --- Left is a number: Right must also be a number ---
+    MOV  R3, R2
+    AND  R3, NAN_VALUE
+    IEQ  R3, NAN_VALUE
+    JT   R3, __relcmp_error     ; number vs tagged value -> uncomparable
+
+    ;; --- Both operands are raw floats: compare numerically ---
+    MOV  R4, R1                 ; preserve Left (FLT overwrites its dest reg)
+    FLT  R1, R2                 ; R1 = (Left < Right) ? 1 : 0
+    JT   R1, __relcmp_less
+
+    MOV  R1, R4                 ; restore Left
+    FGT  R1, R2                 ; R1 = (Left > Right) ? 1 : 0
+    JT   R1, __relcmp_greater
+
+    JMP  __relcmp_equal
+
+    ;; --- Left is tagged: it must be a String for a valid comparison ---
+__relcmp_check_left_string:
+    MOV  R3, R1
+    AND  R3, BOXED_DATA
+    IEQ  R3, BOXED_ROMSTRING
+    JT   R3, __relcmp_check_right_string
+
+    MOV  R3, R1
+    AND  R3, BOXED_DATA
+    IEQ  R3, BOXED_RAMSTRING
+    JF   R3, __relcmp_error     ; Left tagged but not a String -> error
+
+__relcmp_check_right_string:
+    MOV  R3, R2
+    AND  R3, BOXED_DATA
+    IEQ  R3, BOXED_ROMSTRING
+    JT   R3, __relcmp_strings
+
+    MOV  R3, R2
+    AND  R3, BOXED_DATA
+    IEQ  R3, BOXED_RAMSTRING
+    JF   R3, __relcmp_error     ; Right is not a String -> mismatched types
+
+    ;; --- Both operands are Strings: unbox and compare lexicographically ---
+__relcmp_strings:
+    MOV  R0, R1
+    CALL __unbox_string
+    PUSH R0                     ; Save unboxed Left pointer
+
+    MOV  R0, R2
+    CALL __unbox_string
+    MOV  R2, R0                 ; R2 = unboxed Right pointer
+    POP  R1                     ; R1 = unboxed Left pointer
+
+__relcmp_strloop:
+    MOV  R3, [R1]                ; Left char
+    MOV  R4, [R2]                ; Right char
+
+    MOV  R5, R3                  ; scratch: has Left hit NUL?
+    IEQ  R5, 0
+    JT   R5, __relcmp_check_right_end
+
+    MOV  R5, R4                  ; scratch: has Right hit NUL?
+    IEQ  R5, 0
+    JT   R5, __relcmp_greater    ; Left longer than Right -> Left > Right
+
+    MOV  R5, R3                  ; scratch: do characters differ?
+    INE  R5, R4
+    JT   R5, __relcmp_strdiff
+
+    IADD R1, 1
+    IADD R2, 1
+    JMP  __relcmp_strloop
+
+__relcmp_check_right_end:
+    MOV  R5, R4
+    IEQ  R5, 0
+    JT   R5, __relcmp_equal      ; both hit NUL together -> equal strings
+    JMP  __relcmp_less           ; Left shorter than Right -> Left < Right
+
+__relcmp_strdiff:
+    MOV  R5, R3
+    ILT  R5, R4                  ; R5 = (LeftChar < RightChar) ? 1 : 0
+    JT   R5, __relcmp_less
+    JMP  __relcmp_greater
+
+__relcmp_less:
+    MOV  R0, -1
+    MOV  SP, BP
+    POP  BP
+    RET
+
+__relcmp_greater:
+    MOV  R0, 1
+    MOV  SP, BP
+    POP  BP
+    RET
+
+__relcmp_equal:
+    MOV  R0, 0
+    MOV  SP, BP
+    POP  BP
+    RET
+
+__relcmp_error:
+    ;; Trap CPU: attempted <, <=, >, or >= on incompatible/non-comparable
+    ;; types (e.g. number vs string, table vs number, etc.)
+    HLT
+    JMP  __relcmp_error
 
 ;; ---------------------------------------------------------------------------
 ;; Length Operator Dispatch (#): Returns length as an IEEE 754 Float in R0 

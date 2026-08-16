@@ -89,7 +89,6 @@ if [ -r "${UNIT}.lua" ]; then
     ${RUNEVAL} ${RFLAGS} ${UNIT}.v32    >  ${UNIT}.out
     cat ${UNIT}.out | grep ':.*:' | cut -d':' -f2,3 | sed 's/^\([^:]*\):\([^:]*\)$/\2: \1/g' > ${UNIT}.have
     
-    
     result=$(diff ${UNIT}.want ${UNIT}.have | grep '<' | wc -l | tr -d ' ')
 
     if [ "${result}" -eq 0 ]; then 
@@ -114,8 +113,15 @@ if [ -r "${UNIT}.lua" ]; then
         echo "---------------------------------------------------------------"
         #diff -y ${UNIT}.want ${UNIT}.have | sed 's/\t/    /g' | cut -c1-30 | sed 's/$/|/g' > ${UNIT}.have1
         #diff -y ${UNIT}.want ${UNIT}.have | cut -d'|' -f2 | tr '\t' ' ' > ${UNIT}.want1
-        printf "%-30s\n" $(cat ${UNIT}.want | tr ' ' ';') | tr ';' ' ' > ${UNIT}.want1
-        paste ${UNIT}.want1 ${UNIT}.have
+        printf "%-30s| \n" $(cat ${UNIT}.want | tr ' ' ';') | tr ';' ' ' > ${UNIT}.want1
+        paste ${UNIT}.want1 ${UNIT}.have | tr -d '\t' | tr ' ' ';' > ${UNIT}.output
+        for entry in `cat ${UNIT}.output`; do
+            want=$(echo "${entry}" | tr ';' ' ' | cut -d'|' -f1 | sed 's/  *$//')
+            have=$(echo "${entry}" | tr ';' ' ' | cut -d'|' -f2 | sed 's/^ //')
+            if [ ! "${want}" = "${have}" ]; then
+                echo "${entry}" | tr ';' ' '
+            fi
+        done
     fi
 
     if [ "${DEBUG}" = "true" ]; then

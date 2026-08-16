@@ -8,7 +8,7 @@ void  node_relational (ASTNode *node, int  dest_reg)
 
     ensure_in_register (dest_reg);
     ensure_in_register (right_reg);
-    
+
     if (node->as.binary.operator == OP_EQ || node->as.binary.operator == OP_NEQ) {
         emit_asm("PUSH R%d\n", dest_reg);
         emit_asm("PUSH R%d\n", right_reg);
@@ -24,28 +24,43 @@ void  node_relational (ASTNode *node, int  dest_reg)
     }
     else
     {
+        // Ordering operators (<, <=, >, >=) have to work for BOTH numbers
+        // and strings. A raw FLT/FGT on the register only makes sense when
+        // it holds an actual float -- a boxed string holds a tagged
+        // *pointer*, so comparing it directly with FLT/FGT compares
+        // meaningless bit patterns instead of string contents. Route
+        // through the type-aware runtime comparator instead, then turn
+        // its signed result (-1 / 0 / 1) into a Lua boolean.
+        emit_asm("PUSH R%d\n", dest_reg);
+        emit_asm("PUSH R%d\n", right_reg);
+        emit_asm("CALL __builtin_relcmp\n");
+        emit_asm("IADD SP, 2\n");
+
         switch (node -> as.binary.operator)
         {
             case OP_LT:
-                emit_asm ("FLT R%d, R%d\n", dest_reg, right_reg);
+                emit_asm ("ILT R0, 0 ; true if relcmp result < 0\n");
                 break;
 
             case OP_LE:
-                emit_asm ("FLE R%d, R%d\n", dest_reg, right_reg);
+                emit_asm ("IGT R0, 0 ; (result > 0) ...\n");
+                emit_asm ("XOR R0, 1 ; ...inverted: LE means 'not greater'\n");
                 break;
 
             case OP_GT:
-                emit_asm ("FGT R%d, R%d\n", dest_reg, right_reg);
+                emit_asm ("IGT R0, 0 ; true if relcmp result > 0\n");
                 break;
 
             case OP_GE:
-                emit_asm ("FGE R%d, R%d\n", dest_reg, right_reg);
+                emit_asm ("ILT R0, 0 ; (result < 0) ...\n");
+                emit_asm ("XOR R0, 1 ; ...inverted: GE means 'not less'\n");
                 break;
 
             default:
                 break;
         }
 
+        emit_asm ("MOV R%d, R0\n", dest_reg);
         emit_asm ("IADD R%d, BOXED_BOOLEAN ; Box as Lua Boolean (False/True)\n", dest_reg);
     }
     unlock_register (right_reg);

@@ -230,7 +230,7 @@ void  node_function_call (ASTNode *node, int  dest_reg)
     // was causing the exhaustion issue.
     // -------------------------------------------------------------------------
     int total_arg_count = 0;
-    int target_reg = allocate_register();  // NOT pinned - allows emergency spilling
+    int target_reg = allocate_pinned_register();  // NOT pinned - allows emergency spilling
     lock_register(target_reg);             // Still protected from normal reuse
     int table_reg = -1; // Only used for method calls
 
@@ -397,7 +397,7 @@ void  node_function_call (ASTNode *node, int  dest_reg)
     if (is_c_call) {
         // --- Direct C ABI Call ---
         // Unlock target_reg before cleanup (no longer needed)
-        unlock_register(target_reg);
+        unlock_pinned_register(target_reg);
 
         emit_asm("    ; --- Direct C ABI Call ---\n");
         emit_asm("CALL _%s ; Call C symbol directly\n", target_sym->name);
@@ -423,7 +423,7 @@ void  node_function_call (ASTNode *node, int  dest_reg)
         emit_asm("MOV R0, R%d ; Prepare boxed target for validation\n", target_reg);
 
         // Unlock target_reg now that we've moved its value to R0
-        unlock_register(target_reg);
+        unlock_pinned_register(target_reg);
 
         // Call the Lua function executor (handles tag validation & tail-call)
         emit_asm("CALL __builtin_exec ; Validate and execute\n");

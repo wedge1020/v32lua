@@ -174,7 +174,7 @@ string_result13: "nil"
 string_result14: "nil"
 string_result15: "nil"
 string_result16: "nil"
-string_result17: "nil"
+string_result17: "nilhello"
 boolean_result18: false
 boolean_result19: false
 boolean_result20: false
