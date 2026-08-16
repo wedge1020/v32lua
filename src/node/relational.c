@@ -36,32 +36,44 @@ void  node_relational (ASTNode *node, int  dest_reg)
         emit_asm("CALL __builtin_relcmp\n");
         emit_asm("IADD SP, 2\n");
 
-        switch (node -> as.binary.operator)
-        {
-            case OP_LT:
-                emit_asm ("ILT R0, 0 ; true if relcmp result < 0\n");
-                break;
+		switch (node -> as.binary.operator)
+		{
+			case OP_LT:
+				// True only if relcmp's result is EXACTLY -1. A sentinel (2)
+				// never matches, so incomparable operands correctly read false.
+				emit_asm ("IEQ R0, -1 ; true only if Left < Right\n");
+				break;
 
-            case OP_LE:
-                emit_asm ("IGT R0, 0 ; (result > 0) ...\n");
-                emit_asm ("XOR R0, 1 ; ...inverted: LE means 'not greater'\n");
-                break;
+			case OP_GT:
+				emit_asm ("IEQ R0, 1 ; true only if Left > Right\n");
+				break;
 
-            case OP_GT:
-                emit_asm ("IGT R0, 0 ; true if relcmp result > 0\n");
-                break;
+			case OP_LE:
+				// LE = (result == -1) OR (result == 0). Computed with explicit
+				// exact matches rather than inverting GT -- inverting would make
+				// LE/GE come out true for an incomparable-operands sentinel,
+				// since a fixed sentinel is unavoidably either > 0 or < 0.
+				emit_asm ("MOV R%d, R0 ; save raw relcmp result\n", right_reg);
+				emit_asm ("IEQ R0, -1 ; is it Less?\n");
+				emit_asm ("MOV R%d, R%d ; recover raw result\n", dest_reg, right_reg);
+				emit_asm ("IEQ R%d, 0 ; is it Equal?\n", dest_reg);
+				emit_asm ("OR R0, R%d ; Less OR Equal\n", dest_reg);
+				break;
 
-            case OP_GE:
-                emit_asm ("ILT R0, 0 ; (result < 0) ...\n");
-                emit_asm ("XOR R0, 1 ; ...inverted: GE means 'not less'\n");
-                break;
+			case OP_GE:
+				emit_asm ("MOV R%d, R0 ; save raw relcmp result\n", right_reg);
+				emit_asm ("IEQ R0, 1 ; is it Greater?\n");
+				emit_asm ("MOV R%d, R%d ; recover raw result\n", dest_reg, right_reg);
+				emit_asm ("IEQ R%d, 0 ; is it Equal?\n", dest_reg);
+				emit_asm ("OR R0, R%d ; Greater OR Equal\n", dest_reg);
+				break;
 
-            default:
-                break;
-        }
+			default:
+				break;
+		}
 
-        emit_asm ("MOV R%d, R0\n", dest_reg);
-        emit_asm ("IADD R%d, BOXED_BOOLEAN ; Box as Lua Boolean (False/True)\n", dest_reg);
+		emit_asm ("MOV R%d, R0\n", dest_reg);
+		emit_asm ("IADD R%d, BOXED_BOOLEAN ; Box as Lua Boolean (False/True)\n", dest_reg);
     }
     unlock_register (right_reg);
 }

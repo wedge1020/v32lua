@@ -1,7 +1,7 @@
 # --- Testing Directory Makefile ---
 
 # Path to the compiler binary relative to this testing directory
-COMPILER = ../../bin/v32lua
+COMPILER = ../../bin/v32lua -w -g
 
 # Automatically find all .lua files in this directory
 LUA_SRCS = $(wildcard *.lua)
@@ -12,17 +12,39 @@ ASM_OUTS = $(LUA_SRCS:.lua=.asm)
 # Translate the list of .lua source files into target .xml files
 XML_OUTS = $(LUA_SRCS:.lua=.xml)
 
-.PHONY: all clean asmcheck
+.PHONY: all clean asmcheck asm report debug
 
 # Default target builds all the .asm files
 all: $(ASM_OUTS)
 
-# Pattern rule: How to convert a .lua file into a .asm file
-%.asm: %.lua $(COMPILER)
-	@../run_tests.sh $<
+# Compile each lua file in turn
+asm:
+	@for f in $(LUA_SRCS); do \
+		echo "Compiling test case: $$f -> $${f%.lua}.asm"; \
+		$(COMPILER) -g $$f -o $${f%.lua}.asm; \
+	done
 
-#@echo "Compiling test case: $< -> $@"
-#$(COMPILER) -g $< -o $@
+tests:
+	@for f in $(LUA_SRCS); do \
+		../run_tests.sh $$f; \
+	done
+
+# Run with VERBOSE=true for each file
+report:
+	@for f in $(LUA_SRCS); do \
+		VERBOSE="true" ../run_tests.sh $$f; \
+	done
+
+# Run with DEBUG=true for each file
+debug:
+	@for f in $(LUA_SRCS); do \
+		DEBUG="true" ../run_tests.sh $$f; \
+	done
+
+# Pattern rule: How to convert a .lua file into a .asm file
+%.asm: %.lua
+	@echo "Compiling test case: $< -> $@"
+	$(COMPILER) -g $< -o $@
 
 # Assembly verification: Attempt to assemble all .asm files without halting on errors
 vbin: $(ASM_OUTS)
@@ -49,6 +71,14 @@ v32: $(XML_OUTS)
 		fi; \
 	done
 
+context:
+	@for f in $(ASM_OUTS); do \
+		split -a 1 -b 45K -d $$f.asm $$f_part; \
+		@for file in $$f_part?; do \
+			mv "$$file" "$$file.asm.txt"; \
+		done; \
+	done
+
 # Clean target drops all generated assembly and binary test files
 clean:
-	rm -f *.asm *.vbin *.xml *.v32 *.debug *.txt *.cmd *.out *.want* *.have*
+	rm -f *.asm *.vbin *.xml *.v32 *.debug *.txt *.cmd *.out *.err *.want* *.have*

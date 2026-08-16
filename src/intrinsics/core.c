@@ -425,7 +425,7 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         return emit_tostring_intrinsic(node, dest_reg);
     }
 
-	// string.format(format, ...)
+    // string.format(format, ...)
     if (strcmp(func_name, "string.format") == 0)
     {
         runtime_req.needs_strings = true;
@@ -592,10 +592,10 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         return emit_ipairs_intrinsic(node);
     }
 
-	// type(x)
-	if (strcmp(func_name, "type") == 0) {
-		return emit_type_intrinsic(node, dest_reg);
-	}
+    // type(x)
+    if (strcmp(func_name, "type") == 0) {
+        return emit_type_intrinsic(node, dest_reg);
+    }
 
     return 0; // Not an intrinsic
 }
@@ -688,6 +688,37 @@ int try_emit_table_get_intrinsic(ASTNode *table_expr, ASTNode *key_expr, int des
         return 0;
     }
 
+    // --- Compile-time math constants: math.pi / math.e / math.huge ---
+    // These are plain property reads, not function calls, so they never
+    // went through the math.* dispatcher used for math.sin()/math.cos().
+    // Without this branch they'd fall through to the generic dynamic
+    // table lookup below, which tries to read a "math" table out of the
+    // global var_math slot -- a slot nothing in this compiler ever
+    // initializes, since there's no real Lua table backing the math
+    // library. That read fails __builtin_table_get's type check and
+    // traps the whole VM (__runtime_error_not_table -> HLT). Resolve
+    // these directly as ROM constant loads instead, the same way
+    // math.sin()/math.cos() are resolved as intrinsics rather than real
+    // function calls.
+    if (strcmp (base_path, "math") == 0) {
+        const char *key = key_expr->as.string_val.value;
+
+        if (strcmp (key, "pi") == 0 || strcmp (key, "e") == 0 || strcmp (key, "huge") == 0) {
+            runtime_req.needs_math = true; // ensure __const_math_* labels get embedded
+
+            if (dest_reg != 0) {
+                emit_asm ("    ;; --- Intrinsic: math.%s (constant) ---\n", key);
+                // NOTE the brackets: __const_math_pi etc. are ROM data
+                // labels, so this must DEREFERENCE them to get the
+                // actual float value, not just load the label's address
+                // (see the companion fix for __builtin_cos/tan/deg/rad,
+                // which had the exact same missing-bracket bug).
+                emit_asm ("    MOV R%d, [__const_math_%s]\n", dest_reg, key);
+            }
+            return 1;
+        }
+    }
+
     // Build full path first
     char full_path[512];
     snprintf(full_path, sizeof(full_path), "%s.%s", base_path, key_expr->as.string_val.value);
@@ -740,7 +771,7 @@ int try_emit_table_get_intrinsic(ASTNode *table_expr, ASTNode *key_expr, int des
 bool emit_type_intrinsic(ASTNode *node, int dest_reg) {
     ASTNode *arg = node->as.call.args_head;
 
-	// === DEBUG: Show what we actually parsed ===
+    // === DEBUG: Show what we actually parsed ===
     fprintf(stderr, "[debug] emit_type_intrinsic(): args_head = %p\n", (void*)arg);
     if (arg) {
         fprintf(stderr, "[debug] emit_type_intrinsic(): arg->type = %d, arg->next = %p\n",

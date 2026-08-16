@@ -188,25 +188,19 @@ __builtin_sqrt:
 ;; Returns:
 ;;   R0 = cos(x) as Lua float
 ;;
-;; Clobbers: R0-R2
+;; Clobbers: R0-R1
 ;; ===========================================================================
 __builtin_cos:
-    PUSH BP
-    MOV  BP, SP
+    PUSH  BP
+    MOV   BP, SP
 
-    ;; --- Load x from stack ---
-    MOV  R0, [BP+2]           ; R0 = x
+    MOV   R0, [BP+2]                 ; R0 = x
+    MOV   R1, [__const_math_pi_over_2]  ; dereference: actual PI/2 value, not its address
+    FADD  R0, R1                     ; R0 = x + PI/2
+    SIN   R0                         ; R0 = sin(x + PI/2) = cos(x)
 
-    ;; --- Add PI/2 to x ---
-    MOV  R1, __const_math_pi_over_2
-    FADD R0, R1              ; R0 = x + PI/2
-
-    ;; --- Compute sin(x + PI/2) which equals cos(x) ---
-    SIN  R0                  ; R0 = sin(x + PI/2) = cos(x)
-
-    ;; --- Return result ---
-    MOV  SP, BP
-    POP  BP
+    MOV   SP, BP
+    POP   BP
     RET
 
 ;; ===========================================================================
@@ -255,29 +249,24 @@ __builtin_sin:
 ;; Clobbers: R0-R3
 ;; ===========================================================================
 __builtin_tan:
-    PUSH BP
-    MOV  BP, SP
+    PUSH  BP
+    MOV   BP, SP
 
-    ;; --- Load x from stack ---
-    MOV  R0, [BP+2]           ; R0 = x
+    MOV   R0, [BP+2]                 ; R0 = x
 
-    ;; --- Compute sin(x) ---
-    MOV  R1, R0
-    SIN  R1                  ; R1 = sin(x)
+    MOV   R1, R0
+    SIN   R1                         ; R1 = sin(x)
 
-    ;; --- Compute cos(x) = sin(x + PI/2) ---
-    MOV  R2, R0
-    MOV  R3, __const_math_pi_over_2
-    FADD R2, R3              ; R2 = x + PI/2
-    SIN  R2                  ; R2 = cos(x)
+    MOV   R2, R0
+    MOV   R3, [__const_math_pi_over_2]  ; dereference here too
+    FADD  R2, R3                     ; R2 = x + PI/2
+    SIN   R2                         ; R2 = cos(x)
 
-    ;; --- Compute tan(x) = sin(x) / cos(x) ---
-    MOV  R0, R1              ; R0 = sin(x)
-    FDIV R0, R2              ; R0 = sin(x) / cos(x) = tan(x)
+    MOV   R0, R1
+    FDIV  R0, R2                     ; R0 = sin(x) / cos(x) = tan(x)
 
-    ;; --- Return result ---
-    MOV  SP, BP
-    POP  BP
+    MOV   SP, BP
+    POP   BP
     RET
 
 ;; ===========================================================================
@@ -296,38 +285,39 @@ __builtin_tan:
 ;; Clobbers: R0-R4
 ;; ===========================================================================
 __builtin_asin:
-    PUSH BP
-    MOV  BP, SP
+    PUSH  BP
+    MOV   BP, SP
 
     ;; --- Load x from stack ---
-    MOV  R0, [BP+2]           ; R0 = x
+    MOV   R0, [BP+2]           ; R0 = x
+    MOV   R4, R0                ; R4 = x, preserved across __builtin_sqrt below --
+                                 ; that call returns its result in R0, so R0 can
+                                 ; NOT be trusted to still hold x once it returns.
 
     ;; --- Compute x^2 ---
-    MOV  R1, R0
-    FMUL R1, R0              ; R1 = x * x = x^2
+    MOV   R1, R0
+    FMUL  R1, R0               ; R1 = x * x = x^2
 
     ;; --- Compute 1 - x^2 ---
-    MOV  R2, 1.0
-    FSUB R2, R1              ; R2 = 1.0 - x^2
+    MOV   R2, 1.0
+    FSUB  R2, R1               ; R2 = 1.0 - x^2
 
     ;; --- Compute sqrt(1 - x^2) via runtime call ---
-    PUSH R2
-    CALL __builtin_sqrt
-    IADD SP, 1
-    MOV  R2, R0              ; R2 = sqrt(1 - x^2)
+    PUSH  R2
+    CALL  __builtin_sqrt
+    IADD  SP, 1
+    MOV   R1, R0                ; R1 = sqrt(1 - x^2) = x-coordinate for atan2
 
-    ;; --- Compute atan2(x, sqrt(1-x^2)) ---
-    ;; ATAN2 takes: DSTREG, SRCREG where result stored in DSTREG
-    ;; We want: atan2(y=x, x=sqrt(1-x^2))
-    MOV  R1, R2              ; R1 = sqrt(1-x^2) = x coordinate
-    MOV  R2, R0              ; R2 = x = y coordinate
-    ATAN2 R2, R1             ; R2 = atan2(y=x, x=sqrt(1-x^2)) = asin(x)
+    ;; --- Compute atan2(x, sqrt(1-x^2)) = asin(x) ---
+    ;; ATAN2 Rd, Rs computes atan2(Rd, Rs), result stored in Rd.
+    MOV   R2, R4                ; R2 = original x, recovered from R4 (NOT R0!) = y-coordinate
+    ATAN2 R2, R1                ; R2 = atan2(y=x, x=sqrt(1-x^2)) = asin(x)
 
-    MOV  R0, R2              ; Return result in R0
+    MOV   R0, R2                ; Return result in R0
 
     ;; --- Return result ---
-    MOV  SP, BP
-    POP  BP
+    MOV   SP, BP
+    POP   BP
     RET
 
 ;; ===========================================================================
@@ -447,26 +437,21 @@ __builtin_atan2:
 ;; Returns:
 ;;   R0 = degrees as Lua float
 ;;
-;; Clobbers: R0-R2
+;; Clobbers: R0-R1
 ;; ===========================================================================
 __builtin_deg:
-    PUSH BP
-    MOV  BP, SP
+    PUSH  BP
+    MOV   BP, SP
 
-    ;; --- Load x from stack ---
-    MOV  R0, [BP+2]           ; R0 = x (radians)
+    MOV   R0, [BP+2]                 ; R0 = x (radians)
+    MOV   R1, 180.0
+    FMUL  R0, R1                     ; R0 = x * 180
 
-    ;; --- Multiply by 180 ---
-    MOV  R1, 180.0
-    FMUL R0, R1              ; R0 = x * 180
+    MOV   R1, [__const_math_pi]      ; dereference: actual PI value
+    FDIV  R0, R1                     ; R0 = x * 180 / PI
 
-    ;; --- Divide by PI ---
-    MOV  R1, __const_math_pi
-    FDIV R0, R1              ; R0 = x * 180 / PI
-
-    ;; --- Return result ---
-    MOV  SP, BP
-    POP  BP
+    MOV   SP, BP
+    POP   BP
     RET
 
 ;; ===========================================================================
@@ -482,26 +467,21 @@ __builtin_deg:
 ;; Returns:
 ;;   R0 = radians as Lua float
 ;;
-;; Clobbers: R0-R2
+;; Clobbers: R0-R1
 ;; ===========================================================================
 __builtin_rad:
-    PUSH BP
-    MOV  BP, SP
+    PUSH  BP
+    MOV   BP, SP
 
-    ;; --- Load x from stack ---
-    MOV  R0, [BP+2]           ; R0 = x (degrees)
+    MOV   R0, [BP+2]                 ; R0 = x (degrees)
+    MOV   R1, [__const_math_pi]      ; dereference: actual PI value
+    FMUL  R0, R1                     ; R0 = x * PI
 
-    ;; --- Multiply by PI ---
-    MOV  R1, __const_math_pi
-    FMUL R0, R1              ; R0 = x * PI
+    MOV   R1, 180.0
+    FDIV  R0, R1                     ; R0 = x * PI / 180
 
-    ;; --- Divide by 180 ---
-    MOV  R1, 180.0
-    FDIV R0, R1              ; R0 = x * PI / 180
-
-    ;; --- Return result ---
-    MOV  SP, BP
-    POP  BP
+    MOV   SP, BP
+    POP   BP
     RET
 
 ;; ===========================================================================
@@ -517,25 +497,19 @@ __builtin_rad:
 ;; Returns:
 ;;   R0 = e^x as Lua float
 ;;
-;; Clobbers: R0-R2
+;; Clobbers: R0-R1
 ;; ===========================================================================
 __builtin_exp:
-    PUSH BP
-    MOV  BP, SP
+    PUSH  BP
+    MOV   BP, SP
 
-    ;; --- Load x from stack ---
-    MOV  R0, [BP+2]           ; R0 = x
+    MOV   R0, [BP+2]           ; R0 = x
+    MOV   R1, [__const_math_e]  ; dereference: actual e value, not its address
+    POW   R1, R0               ; R1 = e^x
+    MOV   R0, R1               ; Return in R0
 
-    ;; --- Load e constant ---
-    MOV  R1, __const_math_e
-
-    ;; --- Compute pow(e, x) ---
-    POW  R1, R0              ; R1 = e^x
-    MOV  R0, R1              ; Return in R0
-
-    ;; --- Return result ---
-    MOV  SP, BP
-    POP  BP
+    MOV   SP, BP
+    POP   BP
     RET
 
 ;; ===========================================================================
@@ -654,38 +628,36 @@ __builtin_pow:
 ;; Returns:
 ;;   R0 = cosh(x) as Lua float
 ;;
-;; Clobbers: R0-R3
+;; Clobbers: R0-R2
 ;; ===========================================================================
 __builtin_cosh:
-    PUSH BP
-    MOV  BP, SP
-
-    ;; --- Load x from stack ---
-    MOV  R0, [BP+2]           ; R0 = x
+    PUSH  BP
+    MOV   BP, SP
 
     ;; --- Compute exp(x) ---
-    PUSH R0
-    CALL __builtin_exp
-    IADD SP, 1
-    MOV  R1, R0              ; R1 = exp(x)
+    MOV   R0, [BP+2]           ; R0 = x
+    PUSH  R0
+    CALL  __builtin_exp
+    IADD  SP, 1
+    PUSH  R0                    ; Save exp(x) on the STACK -- same reasoning as
+                                 ; in __builtin_sinh above.
 
     ;; --- Compute exp(-x) ---
-    MOV  R2, [BP+2]          ; Reload x
-    FSGN R2                  ; R2 = -x
-    PUSH R2
-    CALL __builtin_exp
-    IADD SP, 1
-    MOV  R2, R0              ; R2 = exp(-x)
+    MOV   R0, [BP+2]           ; Reload x
+    FSGN  R0                   ; R0 = -x
+    PUSH  R0
+    CALL  __builtin_exp
+    IADD  SP, 1
+    MOV   R2, R0                ; R2 = exp(-x)
 
     ;; --- Compute (exp(x) + exp(-x)) / 2 ---
-    MOV  R0, R1              ; R0 = exp(x)
-    FADD R0, R2              ; R0 = exp(x) + exp(-x)
-    MOV  R1, 2.0
-    FDIV R0, R1              ; R0 = (exp(x) + exp(-x)) / 2
+    POP   R0                    ; R0 = exp(x), recovered safely from the stack
+    FADD  R0, R2
+    MOV   R1, 2.0
+    FDIV  R0, R1
 
-    ;; --- Return result ---
-    MOV  SP, BP
-    POP  BP
+    MOV   SP, BP
+    POP   BP
     RET
 
 ;; ===========================================================================
@@ -701,38 +673,38 @@ __builtin_cosh:
 ;; Returns:
 ;;   R0 = sinh(x) as Lua float
 ;;
-;; Clobbers: R0-R3
+;; Clobbers: R0-R2
 ;; ===========================================================================
 __builtin_sinh:
-    PUSH BP
-    MOV  BP, SP
-
-    ;; --- Load x from stack ---
-    MOV  R0, [BP+2]           ; R0 = x
+    PUSH  BP
+    MOV   BP, SP
 
     ;; --- Compute exp(x) ---
-    PUSH R0
-    CALL __builtin_exp
-    IADD SP, 1
-    MOV  R1, R0              ; R1 = exp(x)
+    MOV   R0, [BP+2]           ; R0 = x
+    PUSH  R0
+    CALL  __builtin_exp
+    IADD  SP, 1
+    PUSH  R0                    ; Save exp(x) on the STACK -- the second call to
+                                 ; __builtin_exp below uses R1 as scratch
+                                 ; internally, so a plain register here can't be
+                                 ; trusted to survive that call.
 
     ;; --- Compute exp(-x) ---
-    MOV  R2, [BP+2]          ; Reload x
-    FSGN R2                  ; R2 = -x
-    PUSH R2
-    CALL __builtin_exp
-    IADD SP, 1
-    MOV  R2, R0              ; R2 = exp(-x)
+    MOV   R0, [BP+2]           ; Reload x
+    FSGN  R0                   ; R0 = -x
+    PUSH  R0
+    CALL  __builtin_exp
+    IADD  SP, 1
+    MOV   R2, R0                ; R2 = exp(-x)
 
     ;; --- Compute (exp(x) - exp(-x)) / 2 ---
-    MOV  R0, R1              ; R0 = exp(x)
-    FSUB R0, R2              ; R0 = exp(x) - exp(-x)
-    MOV  R1, 2.0
-    FDIV R0, R1              ; R0 = (exp(x) - exp(-x)) / 2
+    POP   R0                    ; R0 = exp(x), recovered safely from the stack
+    FSUB  R0, R2
+    MOV   R1, 2.0
+    FDIV  R0, R1
 
-    ;; --- Return result ---
-    MOV  SP, BP
-    POP  BP
+    MOV   SP, BP
+    POP   BP
     RET
 
 ;; ===========================================================================
@@ -748,35 +720,35 @@ __builtin_sinh:
 ;; Returns:
 ;;   R0 = tanh(x) as Lua float
 ;;
-;; Clobbers: R0-R3
+;; Clobbers: R0-R2
 ;; ===========================================================================
 __builtin_tanh:
-    PUSH BP
-    MOV  BP, SP
-
-    ;; --- Load x from stack ---
-    MOV  R0, [BP+2]           ; R0 = x
+    PUSH  BP
+    MOV   BP, SP
 
     ;; --- Compute sinh(x) ---
-    PUSH R0
-    CALL __builtin_sinh
-    IADD SP, 1
-    MOV  R1, R0              ; R1 = sinh(x)
+    MOV   R0, [BP+2]           ; R0 = x
+    PUSH  R0
+    CALL  __builtin_sinh
+    IADD  SP, 1
+    PUSH  R0                    ; Save sinh(x) on the STACK -- __builtin_cosh
+                                 ; below uses R1/R2 as scratch internally, so a
+                                 ; plain register can't be trusted to survive it
+                                 ; (this is exactly what produced tanh(0)=2.0).
 
     ;; --- Compute cosh(x) ---
-    MOV  R0, [BP+2]          ; Reload x
-    PUSH R0
-    CALL __builtin_cosh
-    IADD SP, 1
-    MOV  R2, R0              ; R2 = cosh(x)
+    MOV   R0, [BP+2]           ; Reload x
+    PUSH  R0
+    CALL  __builtin_cosh
+    IADD  SP, 1
+    MOV   R2, R0                ; R2 = cosh(x)
 
     ;; --- Compute tanh(x) = sinh(x) / cosh(x) ---
-    MOV  R0, R1              ; R0 = sinh(x)
-    FDIV R0, R2              ; R0 = sinh(x) / cosh(x)
+    POP   R0                    ; R0 = sinh(x), recovered safely from the stack
+    FDIV  R0, R2
 
-    ;; --- Return result ---
-    MOV  SP, BP
-    POP  BP
+    MOV   SP, BP
+    POP   BP
     RET
 
 ;; ===========================================================================

@@ -25,6 +25,9 @@ asm:
 	done
 
 tests:
+	@echo "==============================================================="
+	@echo "v32lua math library"
+	@echo "==============================================================="
 	@for f in $(LUA_SRCS); do \
 		../run_tests.sh $$f; \
 	done
@@ -73,4 +76,4 @@ v32: $(XML_OUTS)
 
 # Clean target drops all generated assembly and binary test files
 clean:
-	rm -f *.asm *.vbin *.xml *.v32 *.debug *.txt *.cmd *.out *.err *.want* *.have*
+	rm -f *.asm *.vbin *.xml *.v32 *.debug *.txt *.cmd *.out *.err *.want* *.have* *.output

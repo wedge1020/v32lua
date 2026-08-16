@@ -83,6 +83,15 @@ monofiles:
 	done
 	@echo "Successfully generated consolidated file: ../put/monofile_assembly.txt"
 
+tests:
+	$(MAKE) -C basics tests
+	$(MAKE) -C if_statements tests
+	$(MAKE) -C loops tests
+	$(MAKE) -C functions tests
+	$(MAKE) -C math tests
+	$(MAKE) -C string tests
+	$(MAKE) -C table tests
+
 # Clean target drops all generated assembly and binary test files
 clean:
 	@for dir in $(SUBDIRS); do \

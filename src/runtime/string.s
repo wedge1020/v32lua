@@ -381,10 +381,16 @@ __relcmp_equal:
     RET
 
 __relcmp_error:
-    ;; Trap CPU: attempted <, <=, >, or >= on incompatible/non-comparable
-    ;; types (e.g. number vs string, table vs number, etc.)
-    HLT
-    JMP  __relcmp_error
+    ;; Operands are of incompatible/non-comparable types (e.g. nil vs
+    ;; number, table vs number, nil vs string). Rather than halting the
+    ;; whole VM over one bad comparison, ordering operators on
+    ;; non-comparable operands simply evaluate to false -- return a
+    ;; sentinel that can never equal -1, 0, or 1 so <, <=, >, and >= all
+    ;; consistently come out false at the call site.
+    MOV  R0, 2
+    MOV  SP, BP
+    POP  BP
+    RET
 
 ;; ---------------------------------------------------------------------------
 ;; Length Operator Dispatch (#): Returns length as an IEEE 754 Float in R0 

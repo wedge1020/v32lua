@@ -1,7 +1,7 @@
 # --- Testing Directory Makefile ---
 
 # Path to the compiler binary relative to this testing directory
-COMPILER = ../../bin/v32lua
+COMPILER = ../../bin/v32lua -w -g
 
 # Automatically find all .lua files in this directory
 LUA_SRCS = $(wildcard *.lua)
@@ -12,88 +12,46 @@ ASM_OUTS = $(LUA_SRCS:.lua=.asm)
 # Translate the list of .lua source files into target .xml files
 XML_OUTS = $(LUA_SRCS:.lua=.xml)
 
-.PHONY: all debug clean asmcheck vbin v32 context $(LUA_SRCS)
+.PHONY: all clean asmcheck asm report debug
 
+# Default target builds all the .asm files
+all: $(ASM_OUTS)
 
-# Default target: compile, assemble, pack, and run all tests
-all:
-	@echo "=== Running all tests ==="; \
-	success=0; total=0; \
-	for lua_file in $(LUA_SRCS); do \
-		base=$${lua_file%.lua}; \
-		asm_file=$${base}.asm; \
-		vbin_file=$${base}.vbin; \
-		v32_file=$${base}.v32; \
-		xml_file=$${base}.xml; \
-		step1=0; step2=0; step3_xml=0; step3=0; step4=0; \
-		echo "$(COMPILER) $$lua_file -o $$asm_file"; \
-		$(COMPILER) $$lua_file -o $$asm_file > /dev/null 2>&1 && step1=1; \
-		[ $$step1 -eq 1 ] && assemble program -o $$vbin_file $$asm_file > /dev/null 2>&1 && step2=1; \
-		[ $$step2 -eq 1 ] && packrom $$xml_file > /dev/null 2>&1 && step3=1; \
-		[ $$step3 -eq 1 ] && v32sim $$v32_file > /dev/null 2>&1; \
-		if [ $$step1 -eq 1 ] && [ $$step2 -eq 1 ] && [ $$step3 -eq 1 ]; then \
-			echo "[  OK  ] $$lua_file"; \
-			success=$$((success + 5)); \
-		else \
-			echo "[ FAIL ] $$lua_file"; \
-		fi; \
-		total=$$((total + 5)); \
-	done; \
-	echo ""; \
-	echo "Results: $$success / $$total"
+# Compile each lua file in turn
+asm:
+	@for f in $(LUA_SRCS); do \
+		echo "Compiling test case: $$f -> $${f%.lua}.asm"; \
+		$(COMPILER) -g $$f -o $${f%.lua}.asm; \
+	done
 
-# Debug target: same pipeline with debug flags
+tests:
+	@for f in $(LUA_SRCS); do \
+		../run_tests.sh $$f; \
+	done
+
+# Run with VERBOSE=true for each file
+report:
+	@for f in $(LUA_SRCS); do \
+		VERBOSE="true" ../run_tests.sh $$f; \
+	done
+
+# Run with DEBUG=true for each file
 debug:
-	@echo "=== Running all tests (debug mode) ==="; \
-	success=0; total=0; \
-	for lua_file in $(LUA_SRCS); do \
-		base=$${lua_file%.lua}; \
-		asm_file=$${base}.asm; \
-		vbin_file=$${base}.vbin; \
-		v32_file=$${base}.v32; \
-		xml_file=$${base}.xml; \
-		step1=0; step2=0; step3_xml=0; step3=0; step4=0; \
-		$(COMPILER) -g $$lua_file -o $$asm_file > /dev/null 2>&1 && step1=1; \
-		[ $$step1 -eq 1 ] && assemble -g program -o $$vbin_file $$asm_file > /dev/null 2>&1 && step2=1; \
-		[ $$step2 -eq 1 ] && printf '<cart><program>%s.vbin</program></cart>\n' "$$base" > $$xml_file && step3_xml=1; \
-		[ $$step3_xml -eq 1 ] && packrom $$xml_file > /dev/null 2>&1 && step3=1; \
-		[ $$step3 -eq 1 ] && v32sim $$v32_file > /dev/null 2>&1 && step4=1; \
-		if [ $$step1 -eq 1 ] && [ $$step2 -eq 1 ] && [ $$step3 -eq 1 ] && [ $$step4 -eq 1 ]; then \
-			echo "[  OK  ] $$lua_file"; \
-			success=$$((success + 5)); \
-		else \
-			echo "[ FAIL ] $$lua_file"; \
-		fi; \
-		total=$$((total + 5)); \
-	done; \
-	echo ""; \
-	echo "Results: $$success / $$total"
+	@for f in $(LUA_SRCS); do \
+		DEBUG="true" ../run_tests.sh $$f; \
+	done
 
-# Compile, assemble, pack, and run a single .lua file
-%.lua:
-	@base=$${@:.lua=}; \
-	asm_file=$${base}.asm; \
-	vbin_file=$${base}.vbin; \
-	v32_file=$${base}.v32; \
-	xml_file=$${base}.xml; \
-	\
-	$(COMPILER) $@ -o $$asm_file && \
-	assemble program -o $$vbin_file $$asm_file && \
-	printf '<cart><program>%s.vbin</program></cart>\n' "$$base" > $$xml_file && \
-	packrom $$xml_file && \
-	v32sim $$v32_file
-
-# Pattern rule: How to convert a .lua file into a .asm file (no debug by default)
-%.asm: %.lua $(COMPILER)
+# Pattern rule: How to convert a .lua file into a .asm file
+%.asm: %.lua
 	@echo "Compiling test case: $< -> $@"
-	$(COMPILER) $< -o $@
+	$(COMPILER) -g $< -o $@
 
 # Assembly verification: Attempt to assemble all .asm files without halting on errors
 vbin: $(ASM_OUTS)
 	@echo "--- Verifying Vircon32 Assembly ---"
 	@for f in $(ASM_OUTS); do \
 		out=$${f%.asm}.vbin; \
-		if assemble program -o $$out $$f > /dev/null 2>&1; then \
+		if assemble -g program -o $$out $$f > /dev/null 2>&1; then \
 			printf "[  OK  ] %-25s -> %s\n" "$$f" "$$out"; \
 		else \
 			printf "[ FAIL ] %-25s\n" "$$f"; \
@@ -114,20 +72,13 @@ v32: $(XML_OUTS)
 	done
 
 context:
-	@for asm_file in *.asm; do \
-		[ -f "$$asm_file" ] || continue; \
-		file_size=$$(stat -c%s "$$asm_file"); \
-		if [ $$file_size -le 45000 ]; then \
-			cp "$$asm_file" "$$asm_file.txt"; \
-		else \
-			cp "$$asm_file" "$$asm_file"; \
-			split -a 1 -b 45K -d "$$asm_file" "$${asm_file%.asm}_part"; \
-			for part in $${asm_file%.asm}_part*; do \
-				mv "$$part" "$$part.asm.txt"; \
-			done; \
-		fi; \
+	@for f in $(ASM_OUTS); do \
+		split -a 1 -b 45K -d $$f.asm $$f_part; \
+		@for file in $$f_part?; do \
+			mv "$$file" "$$file.asm.txt"; \
+		done; \
 	done
 
 # Clean target drops all generated assembly and binary test files
 clean:
-	rm -f *.asm *.vbin *.xml *.v32 *.debug *.txt
+	rm -f *.asm *.vbin *.xml *.v32 *.debug *.txt *.cmd *.out *.err *.want* *.have*
