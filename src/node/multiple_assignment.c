@@ -71,14 +71,15 @@ void node_multiple_assignment(ASTNode *node)
                 if (curr_tgt->type == NODE_IDENTIFIER) {
                     emit_asm("MOV R2, R%d ; Read return value %d", reg_index, reg_index);
 
+                    int  tmp_reg    = allocate_register ();
                     if (node->as.mult_assign.is_local) {
                         SymbolNode *sym = register_local(curr_tgt->as.id.name);
-                        emit_initialize_local(sym, 2);   // may allocate a box
+                        emit_initialize_local(sym, tmp_reg);   // may allocate a box
                     } else {
-                        emit_store_variable(curr_tgt->as.id.name, 2);   // writes through the box if boxed
+                        emit_store_variable(curr_tgt->as.id.name, tmp_reg);   // writes through the box if boxed
                     }
 
-                    unlock_register(2);  // Clean up R2
+                    unlock_register(tmp_reg);
                 }
 
                 curr_tgt = curr_tgt->next;

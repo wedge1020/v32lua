@@ -90,13 +90,13 @@ void  node_function_def (ASTNode *node)
                 // body captures a heap cell that outlives this frame instead
                 // of a stack slot that doesn't.
                 if (param_sym->is_boxed) {
-                    int tmp_reg = allocate_pinned_register();
+                    int tmp_reg = allocate_register();
                     char raw_access[256];
                     get_variable_access_string(param_sym->name, raw_access);
                     emit_asm("MOV R%d, %s ; load raw incoming value for '%s'\n",
                              tmp_reg, raw_access, param_sym->name);
                     emit_initialize_local(param_sym, tmp_reg);
-                    unlock_pinned_register(tmp_reg);
+                    unlock_register(tmp_reg);
                 }
             }
         }

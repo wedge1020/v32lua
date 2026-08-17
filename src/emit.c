@@ -535,14 +535,10 @@ int   emit_variable_map (void)
     fprintf (out(), "%%define  BOXED_TOMBSTONE          0xFFC00003 ; future feature\n");
     fprintf (out(), "%%define  BOXED_PAYLOAD            0x003FFFFF\n");
     fprintf (out(), "%%define  TABLE_ARRAYSIZE          0x0000FFFF\n");
+    fprintf (out(), "%%define  BOXED_CLOSURE_FLAG       0x00200000\n");
+    fprintf (out(), "%%define  CLOSURE_ADDR_MASK        0x001FFFFF\n");
     fprintf (out(), "%%define  HEAP_POINTER             0x00000000\n");
-    /*
-    if (runtime_req.needs_tic80)
-    {
-        fprintf (out(), "%%define  MAP_BUFFER_PTR   1\n");
-        fprintf (out(), "%%define  TIC80_MAP_WIDTH  2\n");
-        fprintf (out(), "%%define  TIC80_MAP_HEIGHT 3\n");
-    }*/
+
     SymbolNode *curr = global_scope ? global_scope->symbols : NULL;
     while (curr != NULL) {
         if (curr->is_function) {
@@ -831,18 +827,31 @@ void  emit_initialize_local (SymbolNode *sym, int  value_reg)
 
     //////////////////////////////////////////////////////////////////////////
     //
-    // __malloc clobbers registers internally -- spill/reload value_reg
-    // around the call rather than assuming it survives, matching how the
-    // rest of the compiler already treats calls as clobbering.
+    // __malloc clobbers R0-R3 and R6 internally (see runtime.s). We cannot
+    // rely on spill_register()/ensure_in_register() to protect value_reg
+    // across that call: spill_register() explicitly refuses to touch a
+    // PINNED register (that's what pinning means), and value_reg IS pinned
+    // on some call paths -- e.g. node_multiple_assignment's standard
+    // assignment branch always passes a pinned val_reg here. When that
+    // happens spill_register() silently becomes a no-op and, if value_reg
+    // lands on R1/R2/R3/R6, __malloc clobbers it before we read it back --
+    // the box ends up initialized with __malloc's internal state instead
+    // of the value we meant to store, intermittently, depending on which
+    // register the allocator happened to hand out.
     //
-    spill_register (value_reg);
+    // A raw PUSH/POP sidesteps register_pinned[] entirely -- it's the same
+    // idiom __builtin_table_new already uses in runtime.s to protect its
+    // own registers across this same call, and it's correct regardless of
+    // whether value_reg is pinned, spilled, or anything else.
+    //
+    emit_asm ("PUSH R%d ; preserve value across __malloc", value_reg);
 
     emit_asm ("MOV R0, 1");
     emit_asm ("PUSH R0 ; box size = 1 word");
     emit_asm ("CALL __malloc");
     emit_asm ("IADD SP, 1 ; clean up malloc argument");
 
-    ensure_in_register (value_reg);
+    emit_asm ("POP R%d ; restore value saved before __malloc", value_reg);
     emit_asm ("MOV [R0], R%d ; store initial value into the box", value_reg);
     emit_asm ("MOV %s, R0 ; slot now holds the box pointer",      access_str);
 }
