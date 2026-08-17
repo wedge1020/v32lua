@@ -289,25 +289,25 @@ number_result03: 2.0000
 number_result04: 3.0000
 number_result05: 0.0000
 number_result06: 0.0000
-number_result07: 3.0000 (ipairs stops at first nil)
-number_result08: 9.0000 (1+0+3+0+5)
-number_result09: 4.0000 (1,2,3,10)
-number_result10: 146.0000 (1+2+3+100)
-number_result11: 0.0000 (no array part)
-number_result12: 3.0000 (nil values at indices 2,4)
+number_result07: 3.0000
+number_result08: 9.0000
+number_result09: 4.0000
+number_result10: 146.0000
+number_result11: 0.0000
+number_result12: 3.0000
 number_result13: 3.0000
 string_result02: "b"
-number_result14: 21.0000 (1+2+3+4+5+6)
-number_result15: 21.0000 (1+2+3+4+5+6)
-number_result16: 60.0000 (10+20+30)
-number_result17: 100.0000 (40+30+20+10)
-number_result18: 5.0000 (ipairs uses original length)
-number_result19: 3.0000 (pairs may iterate added keys or not, depending on implementation)
+number_result14: 21.0000
+number_result15: 21.0000
+number_result16: 60.0000
+number_result17: 100.0000
+number_result18: 5.0000
+number_result19: 3.0000
 number_result20: 42.0000
 number_result21: 99.0000
 number_result22: 3.0000
 number_result23: 2.0000
-number_result24: 12.0000 (1+1 + 2+2 + 3+3)
-number_result25: 3.0000 (ipairs starts at 1, ignores 0)
+number_result24: 12.0000
+number_result25: 3.0000
 
 --]]

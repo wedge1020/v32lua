@@ -47,13 +47,12 @@ end
 
 --[[
 === EXPECTED OUTPUT ===
-Global Variables:
-number_result1: 0
-number_result2: 1
-number_result3: 5
-number_result4: 11
-number_result5: 9
-number_result6: 4
-number_result7: 10
-number_result8: 3
+number_result1: 0.0000
+number_result2: 1.0000
+number_result3: 5.0000
+number_result4: 11.0000
+number_result5: 9.0000
+number_result6: 4.0000
+number_result7: 10.0000
+number_result8: 3.0000
 ]]

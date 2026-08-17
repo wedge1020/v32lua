@@ -39,10 +39,13 @@ bool emit_string_byte_intrinsic(ASTNode *node, int dest_reg) {
             emit_asm("PUSH R0\n");
         }
     } else {
-        // Default: no indices provided
-        emit_asm("PUSH R0             ; No start index (nil)\n");
+        // For default case (no indices):
         emit_asm("MOV R0, BOXED_NIL\n");
-        emit_asm("PUSH R0\n");
+        emit_asm("PUSH R0             ; No start index (nil)\n");
+        emit_asm("PUSH R0             ; No end index (nil)\n");
+
+        // For case with start index but no end index:
+        emit_asm("MOV R0, BOXED_NIL\n");
         emit_asm("PUSH R0             ; No end index (nil)\n");
     }
 
@@ -79,10 +82,13 @@ bool emit_string_char_intrinsic(ASTNode *node, int dest_reg) {
         arg = arg->next;
     }
 
-    // Call runtime routine
-    emit_asm("CALL __builtin_string_char\n");
-    emit_asm("IADD SP, %d           ; Clean up %d arguments\n", arg_count, arg_count);
+    // Add NIL terminator
+    emit_asm("MOV R0, BOXED_NIL\n");
+    emit_asm("PUSH R0             ; BOXED_NIL terminator\n");
 
+    // Update cleanup count
+    emit_asm("CALL __builtin_string_char\n");
+    emit_asm("IADD SP, %d           ; Clean up %d arguments\n", arg_count + 1, arg_count + 1);
     if (dest_reg != 0) {
         emit_asm("MOV R%d, R0         ; Store result\n", dest_reg);
     }

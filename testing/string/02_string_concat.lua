@@ -51,7 +51,6 @@ end
 
 --[[
 === EXPECTED OUTPUT ===
-Global Variables:
 string_result1: "HelloWorld"
 string_result2: "Hello World"
 string_result3: "Test"
@@ -60,5 +59,5 @@ string_result5: "True: true"
 string_result6: "False: false"
 string_result7: "Nil: nil"
 string_result8: "ABCD"
-number_result1: 15
+number_result1: 15.0000
 ]]

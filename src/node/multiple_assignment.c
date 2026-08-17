@@ -13,7 +13,7 @@ void node_multiple_assignment(ASTNode *node)
                 SymbolNode *sym = register_local(curr_tgt->as.id.name);
                 int temp_reg = allocate_register();
                 emit_asm("MOV R%d, BOXED_NIL", temp_reg);
-                emit_initialize_local(sym, temp_reg);   // was: get_variable_access_string + MOV
+                emit_initialize_local(sym, temp_reg);
                 unlock_register(temp_reg);
             }
             curr_tgt = curr_tgt->next;
@@ -25,17 +25,14 @@ void node_multiple_assignment(ASTNode *node)
     // Check if RHS is a single function call that returns multiple values
     // =========================================================================
     if (curr_val != NULL && curr_val->next == NULL && curr_val->type == NODE_FUNCTION_CALL) {
-        // Determine the return count STATICALLY from the callee's name, via
-        // the same lookup table the intrinsic dispatcher itself is built on
-        // (see get_builtin_return_count() / builtin_return_counts[]).
-        //
-        // We can NOT read curr_val->as.call.return_count here -- that field
-        // is only populated as a SIDE EFFECT once generate_asm() actually
-        // walks into the matching math.modf/frexp/ldexp intrinsic branch,
-        // which hasn't happened yet at this point. Reading it now always
-        // sees its untouched default, so the multi-return branch below
-        // never fired -- every call silently fell through to the
-        // single-target path instead.
+        // Determine the return count STATICALLY. First check the builtin
+        // table (math.modf/frexp/etc.), then -- if that comes back as the
+        // default of 1 -- check whether it's a plain call to a
+        // user-defined function we've already tracked a real return_count
+        // for (see count_max_return_values() / mark_global_as_function()).
+        // Only ONE of these should ever win; do not repeat the builtin
+        // lookup after the user-defined check, or it silently overwrites
+        // whatever the user-defined check found.
         char callee_path[256] = {0};
         int  return_count     = 1;
 
@@ -43,35 +40,51 @@ void node_multiple_assignment(ASTNode *node)
             return_count = get_builtin_return_count(callee_path);
         }
 
+        if (return_count == 1 && curr_val->as.call.target->type == NODE_IDENTIFIER) {
+            SymbolNode *callee_sym = resolve_symbol(curr_val->as.call.target->as.id.name);
+            if (callee_sym != NULL && callee_sym->is_function && callee_sym->return_count > 1) {
+                return_count = callee_sym->return_count;
+            }
+        }
+
         if (return_count > 1) {
-            // This is a multi-return function call (e.g., math.modf, math.frexp)
+            // This is a multi-return function call (e.g., math.modf, math.frexp,
+            // or a user-defined function with more than one 'return' expression)
             generate_asm(curr_val, 0);  // dest_reg=0 means don't store to single reg
 
             // -----------------------------------------------------------------
-            // Assign return values from R0, R1, R2, ... to targets.
-            //
-            // Two bugs fixed here vs. the previous version:
-            //   1. `local a, b = math.modf(x)` never called register_local()
-            //      for a/b -- they fell through get_variable_access_string()'s
-            //      auto-register-as-global fallback instead, so a "local"
-            //      declared this way silently became a global.
-            //   2. Even once registered, a raw get_variable_access_string()
-            //      + MOV bypasses boxing entirely -- if a closure later
-            //      captures one of these targets, the box pointer would get
-            //      clobbered with the raw return value instead of the value
-            //      being written through it.
-            // Both are fixed the same way the standard assignment branch
-            // above was: register the symbol (for locals) and route the
-            // store through emit_initialize_local()/emit_store_variable(),
-            // which already know how to do the plain thing when the target
-            // isn't boxed.
+            // Assign return values from R0, R2, R3, ... to targets, following
+            // the SAME layout node_return() uses to produce them: value 0 in
+            // R0, value 1 in R2, value 2 in R3 (R1 is never used for this).
+            // Each value is copied into its OWN freshly allocated register
+            // before being handed to emit_initialize_local()/
+            // emit_store_variable() -- do not read from one register and
+            // store from a different, uninitialized one.
             // -----------------------------------------------------------------
             int reg_index = 0;
             while (curr_tgt != NULL && reg_index < return_count) {
                 if (curr_tgt->type == NODE_IDENTIFIER) {
-                    emit_asm("MOV R2, R%d ; Read return value %d", reg_index, reg_index);
+                    int tmp_reg = allocate_register();
 
-                    int  tmp_reg    = allocate_register ();
+                    if (reg_index == 0) {
+                        emit_asm("MOV R%d, R0 ; Read return value 0", tmp_reg);
+                    } else if (reg_index == 1) {
+                        emit_asm("MOV R%d, R2 ; Read return value 1", tmp_reg);
+                    } else if (reg_index == 2) {
+                        emit_asm("MOV R%d, R3 ; Read return value 2", tmp_reg);
+                    } else {
+                        // node_return() places value 3+ on the stack at
+                        // [BP + 2 + arg_count + (index - 3)], relative to
+                        // the CALLEE's own frame -- retrieving that correctly
+                        // from here would need the callee's arg_count, which
+                        // isn't available at this call site. Rather than
+                        // guess and risk silently reading the wrong stack
+                        // slot, fail loudly until this is deliberately
+                        // implemented.
+                        compiler_error(ERR_INTERNAL, -1,
+                            "Multi-return assignment with more than 3 values is not yet supported");
+                    }
+
                     if (node->as.mult_assign.is_local) {
                         SymbolNode *sym = register_local(curr_tgt->as.id.name);
                         emit_initialize_local(sym, tmp_reg);   // may allocate a box
@@ -87,8 +100,7 @@ void node_multiple_assignment(ASTNode *node)
             }
 
             // -----------------------------------------------------------------
-            // Pad remaining targets with NIL -- same fix applied: register
-            // locals properly and route through the boxed-aware helpers.
+            // Pad remaining targets with NIL.
             // -----------------------------------------------------------------
             while (curr_tgt != NULL) {
                 if (curr_tgt->type == NODE_IDENTIFIER) {
@@ -115,67 +127,50 @@ void node_multiple_assignment(ASTNode *node)
     // --- Standard & Multiple Assignment Evaluation ---
     while (curr_tgt != NULL)
     {
-        // =========================================================================
-        // 1. ATTEMPT HARDWARE INTRINSIC FIRST (Immediate Folding / Lazy Evaluation)
-        // =========================================================================
-        // Only check if we are targeting a table property AND have a valid value node
         if (curr_tgt->type == NODE_TABLE_GET && curr_val != NULL) {
             if (try_emit_table_set_intrinsic(curr_tgt->as.table_get.table_expr,
                                              curr_tgt->as.table_get.key,
                                              curr_val))
             {
-                // Intrinsic successfully emitted (either folded to immediate or 
-                // evaluated on-demand)! Advance pointers and skip standard allocation.
                 curr_tgt = curr_tgt->next;
                 curr_val = curr_val->next;
                 continue;
             }
         }
 
-        // =========================================================================
-        // 2. STANDARD EVALUATION (Identifiers, Fallback Dynamic Tables, or Nils)
-        // =========================================================================
         val_reg = allocate_pinned_register();
-
-        // ✅ Value register used immediately for assignment
         mark_register_live(val_reg, 1);
 
         if (curr_val != NULL) {
-            // Evaluate the right-hand expression into our temporary register
             generate_asm(curr_val, val_reg);
             curr_val = curr_val->next;
         } else {
-            // Lua rule: If values run out, remaining targets are assigned nil
             emit_asm("MOV R%d, BOXED_NIL ; Pad missing value with Nil", val_reg);
         }
 
         ensure_in_register(val_reg);
 
-        // Assign evaluated value to the target
         if (curr_tgt->type == NODE_IDENTIFIER) {
             if (node->as.mult_assign.is_local) {
                 SymbolNode *sym = register_local(curr_tgt->as.id.name);
 
-                // ✅ NEW DEBUG
                 if (g_verbose_debug) {
                     fprintf(stderr, "[debug] node_multiple_assignment() Declaring local: %s (val_reg=R%d, boxed=%d)\n",
                             curr_tgt->as.id.name, val_reg, sym->is_boxed);
                 }
 
-                emit_initialize_local(sym, val_reg);   // may allocate a box
+                emit_initialize_local(sym, val_reg);
             } else {
-                // ✅ NEW DEBUG
                 if (g_verbose_debug) {
                     fprintf(stderr, "[debug] node_multiple_assignment() Assigning: %s (val_reg=R%d)\n",
                             curr_tgt->as.id.name, val_reg);
                 }
 
-                emit_store_variable(curr_tgt->as.id.name, val_reg);   // writes through the box if boxed
+                emit_store_variable(curr_tgt->as.id.name, val_reg);
             }
         }
         else if (curr_tgt->type == NODE_TABLE_GET)
         {
-            // Fallback: Dynamic heap table assignment (table[key] = value) -- unchanged
             int table_reg = allocate_pinned_register();
             int key_reg   = allocate_pinned_register();
 

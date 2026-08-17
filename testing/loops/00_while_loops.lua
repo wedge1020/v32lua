@@ -12,6 +12,7 @@ function test_while_loops()
         i = i + 1
     end
     number_result00 = sum
+	__rawasm__("__debug0:")
 
     -- === Test 01: While loop with break ===
     local j = 1
@@ -22,6 +23,7 @@ function test_while_loops()
         j = j + 1
     end
     number_result01 = j
+	__rawasm__("__debug1:")
 
     -- === Test 02: While loop countdown ===
     local k = 10
@@ -31,6 +33,7 @@ function test_while_loops()
         k = k - 2
     end
     number_result02 = iterations
+	__rawasm__("__debug2:")
 
     -- === Test 03: Nested while loops ===
     local outer = 1
@@ -44,6 +47,7 @@ function test_while_loops()
         outer = outer + 1
     end
     number_result03 = inner_sum
+	__rawasm__("__debug3:")
 
     -- === Test 04: While with complex condition (AND) ===
     local a, b = 5, 10
@@ -54,6 +58,7 @@ function test_while_loops()
         b = b - 1
     end
     number_result04 = complex_count
+	__rawasm__("__debug4:")
 
     -- === Test 05: While with complex condition (OR) ===
     local x, y = 0, 10
@@ -65,6 +70,7 @@ function test_while_loops()
         if or_count >= 5 then break end
     end
     number_result05 = or_count
+	__rawasm__("__debug5:")
 
     -- === Test 06: While with function call in condition ===
     local counter = 0
@@ -77,6 +83,7 @@ function test_while_loops()
         func_count = func_count + 1
     end
     number_result06 = func_count
+	__rawasm__("__debug6:")
 
     -- === Test 07: While with side effects in condition ===
     local side_effect = 0
@@ -85,6 +92,7 @@ function test_while_loops()
         side_effect = side_effect + 1
     end
     number_result07 = side_effect
+	__rawasm__("__debug7:")
 
     -- === Test 08: While true (infinite) with break ===
     local infinite_counter = 0
@@ -95,6 +103,7 @@ function test_while_loops()
         end
     end
     number_result08 = infinite_counter
+	__rawasm__("__debug8:")
 
     -- === Test 09: Empty while loop body ===
     local empty_var = 5
@@ -102,6 +111,7 @@ function test_while_loops()
         empty_var = empty_var - 1
     end
     number_result09 = empty_var
+	__rawasm__("__debug9:")
 
     -- === Test 10: While with no body (just condition) ===
     local no_body = 3
@@ -109,6 +119,7 @@ function test_while_loops()
         no_body = no_body - 1
     end
     number_result10 = no_body
+	__rawasm__("__debug10:")
 
     -- === Test 11: Multiple breaks in different branches ===
     local multi_break = 1
@@ -121,6 +132,7 @@ function test_while_loops()
         multi_break = multi_break + 1
     end
     number_result11 = multi_break
+	__rawasm__("__debug11:")
 
     -- === Test 12: Break in nested while loops (inner) ===
     local outer2 = 1
@@ -137,6 +149,7 @@ function test_while_loops()
         outer2 = outer2 + 1
     end
     number_result12 = inner_break
+	__rawasm__("__debug12:")
 
     -- === Test 13: Break in nested while loops (outer) ===
     local outer3 = 1
@@ -156,6 +169,7 @@ function test_while_loops()
         outer3 = outer3 + 1
     end
     number_result13 = outer_break_val
+	__rawasm__("__debug13:")
 
     -- === Test 14: While with comparison operators ===
     local comp = 1
@@ -165,6 +179,7 @@ function test_while_loops()
         comp = comp + 1
     end
     number_result14 = comp_count
+	__rawasm__("__debug14:")
 
     -- === Test 15: While with less than or equal ===
     local le = 1
@@ -174,6 +189,7 @@ function test_while_loops()
         le = le + 1
     end
     number_result15 = le_count
+	__rawasm__("__debug15:")
 
     -- === Test 16: While with greater than or equal ===
     local ge = 10
@@ -183,6 +199,7 @@ function test_while_loops()
         ge = ge - 1
     end
     number_result16 = ge_count
+	__rawasm__("__debug16:")
 
     -- === Test 17: While with string length condition ===
     local str = ""
@@ -192,6 +209,7 @@ function test_while_loops()
         str = str .. "x"
     end
     number_result17 = str_count
+	__rawasm__("__debug17:")
 
     -- === Test 18: While with boolean flag ===
     local flag = true
@@ -203,6 +221,7 @@ function test_while_loops()
         end
     end
     number_result18 = flag_count
+	__rawasm__("__debug18:")
 
     -- === Test 19: While with nil check ===
     local nil_val = {1, 2, 3}
@@ -212,6 +231,7 @@ function test_while_loops()
         table.remove(nil_val, 1)
     end
     number_result19 = nil_count
+	__rawasm__("__debug19:")
 
     -- === Test 20: While with arithmetic in condition ===
     local arith = 1
@@ -221,6 +241,7 @@ function test_while_loops()
         arith = arith + 1
     end
     number_result20 = arith_count
+	__rawasm__("__debug20:")
 
     -- === Test 21: While with modulo condition ===
     local mod = 0
@@ -231,6 +252,7 @@ function test_while_loops()
         if mod >= 10 then break end
     end
     number_result21 = mod_count
+	__rawasm__("__debug21:")
 
     -- === Test 22: While with table iteration pattern ===
     local tbl = {1, 2, 3, 4, 5}
@@ -241,6 +263,7 @@ function test_while_loops()
         idx = idx + 1
     end
     number_result22 = tbl_sum
+	__rawasm__("__debug22:")
 
     -- === Test 23: While with variable modification in condition ===
     local mod_cond = 1
@@ -250,6 +273,7 @@ function test_while_loops()
         mod_cond = mod_cond + 1
     end
     number_result23 = mod_cond_count
+	__rawasm__("__debug23:")
 end
 
 function main()
@@ -306,9 +330,9 @@ number_result16: 6.0000
 number_result17: 5.0000
 number_result18: 3.0000
 number_result19: 3.0000
-number_result20: 5.0000 (1,2,3,4,5 -> 5 iterations)
-number_result21: 10.0000 (0-9 inclusive)
+number_result20: 5.0000
+number_result21: 10.0000
 number_result22: 15.0000
-number_result23: 15.0000 (1+2+3+4+5)
+number_result23: 15.0000
 
 --]]

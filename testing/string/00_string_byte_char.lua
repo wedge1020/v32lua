@@ -53,13 +53,12 @@ end
 
 --[[
 === EXPECTED OUTPUT ===
-Global Variables:
-number_result1: 65
-number_result2: 97
-number_result3: 48
-number_result4: 72
-number_result5: 101
-number_result6: 111
+number_result1: 65.0000
+number_result2: 97.0000
+number_result3: 48.0000
+number_result4: 72.0000
+number_result5: 101.0000
+number_result6: 111.0000
 number_result7: nil
 string_result1: "A"
 string_result2: "a"

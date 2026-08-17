@@ -98,14 +98,13 @@ __builtin_table_get:
     ILT  R4, 1               ; Destructive test: Is integer key < 1?
     JT   R4, __builtin_table_get_fallback ; Zero or negative keys go to fallback!
 
-    ;; FAST-PATH CHECK 4: Is Key within CAPACITY AND array allocated?
-    MOV  R5, [R1]            ; R5 = Flags from Table Header Word 0
-    AND  R5, TABLE_ARRAYSIZE ; Extract capacity from lower bits
+    ;; FAST-PATH CHECK 4: Is Key within LENGTH AND array allocated?
+    MOV  R5, [R1+1]          ; R5 = Array LENGTH (Word 1) — not capacity!
     MOV  R6, [R1+2]          ; R6 = Array Data Pointer
-    IEQ  R6, 0               ; Is array NULL?
-    JT   R6, __builtin_table_get_fallback ; If no array, use hash lookup
-    MOV  R4, R3              ; Copy integer index R3 to scratch R4
-    IGT  R4, R5              ; Is Key > Capacity?
+    IEQ  R6, 0
+    JT   R6, __builtin_table_get_fallback
+    MOV  R4, R3
+    IGT  R4, R5              ; Is Key > Length?
     JT   R4, __builtin_table_get_fallback
 
     ;; --- FAST-PATH EXECUTION: O(1) Contiguous Array Read ---
@@ -985,7 +984,10 @@ __table_remove_at_position:
     ;; --- Check if array exists ---
     MOV  R6, R5
     IEQ  R6, 0
-    JT   R6, __table_remove_not_found
+    JT   R6, __table_remove_hash_path   ; No array (the common case: __builtin_table_set's
+                                     ; reallocation path is currently a stub, so array-
+                                     ; backed tables never actually exist) -> use the
+                                     ; hash-backed slow path instead of silently no-op'ing.
 
     ;; --- Calculate address of element to remove ---
     MOV  R6, R5
@@ -999,35 +1001,97 @@ __table_remove_at_position:
     MOV  R8, R4              ; R8 = position to remove
 
 __table_remove_shift_loop:
-    ;; If we're removing the last element, no shifting needed
     MOV  R9, R8
     ILT  R9, R3
     JF   R9, __table_remove_update_length
 
-    ;; Calculate source address (next element)
     MOV  R9, R5
-    IADD R9, R8              ; Source = array_ptr + position
+    IADD R9, R8
     ISUB R9, 1
 
-    ;; Calculate destination address (current position)
     MOV  R10, R5
     IADD R10, R8
-    ISUB R10, 2              ; Dest = array_ptr + (position - 1)
+    ISUB R10, 2
 
-    ;; Copy next element to current position
     MOV  R11, [R9]
     MOV  [R10], R11
 
-    ;; Move to next position
     IADD R8, 1
     JMP  __table_remove_shift_loop
 
 __table_remove_update_length:
-    ;; --- Decrement length ---
     ISUB R3, 1
-    MOV  [R1+1], R3          ; Update length in table header
+    MOV  [R1+1], R3
 
-    ;; --- Return the removed value ---
+    MOV  R0, R7
+    JMP  __table_remove_done
+
+;; ---------------------------------------------------------------------------
+;; HASH PATH: element lives in the hash bucket, not the (currently always-
+;; empty) contiguous array. Shift down via table_get/table_set instead of
+;; touching array memory directly. NOTE: table_get only callee-saves R1-R7,
+;; so every value that must survive a sub-CALL here is kept in R1-R7 -- R8+
+;; is NOT safe to hold state in across these calls.
+;; ---------------------------------------------------------------------------
+__table_remove_hash_path:
+    ;; value_to_return = get(table, position)
+    MOV  R5, R4
+    CIF  R5                   ; R5 = float(position)
+    MOV  R6, R1
+    OR   R6, BOXED_TABLE      ; R6 = re-tagged table pointer
+    PUSH R6
+    PUSH R5
+    CALL __builtin_table_get
+    IADD SP, 2
+    MOV  R7, R0               ; R7 = value to return (preserved: within R1-R7)
+
+    MOV  R2, R4                ; R2 = shift index i, starting at position
+__table_remove_hash_shift_loop:
+    MOV  R5, R2
+    ILT  R5, R3                ; i < length ?
+    JF   R5, __table_remove_hash_shift_done
+
+    ;; tmp = get(table, i+1)
+    MOV  R5, R2
+    IADD R5, 1
+    CIF  R5
+    MOV  R6, R1
+    OR   R6, BOXED_TABLE
+    PUSH R6
+    PUSH R5
+    CALL __builtin_table_get
+    IADD SP, 2
+    MOV  R5, R0                ; R5 = fetched value
+
+    ;; set(table, i, tmp)
+    MOV  R6, R1
+    OR   R6, BOXED_TABLE
+    MOV  R0, R2
+    CIF  R0                    ; R0 = float(i)
+    PUSH R6
+    PUSH R0
+    PUSH R5
+    CALL __builtin_table_set
+    IADD SP, 3
+
+    IADD R2, 1
+    JMP  __table_remove_hash_shift_loop
+
+__table_remove_hash_shift_done:
+    ;; clear the vacated tail slot: set(table, length, nil)
+    MOV  R6, R1
+    OR   R6, BOXED_TABLE
+    MOV  R0, R3
+    CIF  R0                    ; R0 = float(length)
+    PUSH R6
+    PUSH R0
+    MOV  R0, BOXED_NIL
+    PUSH R0
+    CALL __builtin_table_set
+    IADD SP, 3
+
+    ISUB R3, 1
+    MOV  [R1+1], R3
     MOV  R0, R7
     JMP  __table_remove_done
 

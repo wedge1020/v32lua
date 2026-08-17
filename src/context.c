@@ -232,6 +232,7 @@ void  mark_global_as_function (ASTNode *def_node)
     sym -> def_node           = def_node;   // lets node_identifier() find the
                                             // upvalue list when loading this 
                                             // function by its bare name
+    sym -> return_count       = count_max_return_values (def_node -> as.function_def.body);
     ptmp                      = params;
     while (ptmp              != NULL)
     {
@@ -551,4 +552,65 @@ SymbolNode *register_upvalue (const char *name, int offset)
     current_scope->last = sym;
 
     return sym;
+}
+
+// ============================================================================
+// count_max_return_values: scan a function's own body (NOT descending into
+// nested function definitions -- those get their own count when THEY are
+// processed) for 'return' statements, and return the largest number of
+// expressions any one of them returns. Different branches of a function
+// can legally return different counts in Lua; the call site only needs to
+// know the maximum so it knows how many stack/register slots to read.
+// ============================================================================
+int count_max_return_values (ASTNode *node)
+{
+    int max_count = 1; // No explicit return, or a bare 'return', still
+                        // behaves like one value (nil) at a single-target
+                        // site -- matches the existing default elsewhere.
+    while (node != NULL) {
+        switch (node->type) {
+            case NODE_RETURN: {
+                int count = 0;
+                for (ASTNode *e = node->as.return_stmt.expressions_head; e != NULL; e = e->next) {
+                    count++;
+                }
+                if (count > max_count) max_count = count;
+                break;
+            }
+            case NODE_IF: {
+                int a = count_max_return_values(node->as.if_stmt.if_body);
+                int b = count_max_return_values(node->as.if_stmt.else_body);
+                if (a > max_count) max_count = a;
+                if (b > max_count) max_count = b;
+                break;
+            }
+            case NODE_WHILE: {
+                int c = count_max_return_values(node->as.while_loop.body);
+                if (c > max_count) max_count = c;
+                break;
+            }
+            case NODE_FOR_NUMERIC: {
+                int c = count_max_return_values(node->as.for_numeric.body);
+                if (c > max_count) max_count = c;
+                break;
+            }
+            case NODE_FOR_GENERIC: {
+                int c = count_max_return_values(node->as.for_generic.body);
+                if (c > max_count) max_count = c;
+                break;
+            }
+            case NODE_DO_BLOCK: {
+                int c = count_max_return_values(node->as.do_block.body);
+                if (c > max_count) max_count = c;
+                break;
+            }
+            case NODE_FUNCTION_DEF:
+                // Boundary: a nested function's own returns are its own.
+                break;
+            default:
+                break;
+        }
+        node = node->next;
+    }
+    return max_count;
 }

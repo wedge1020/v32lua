@@ -831,11 +831,14 @@ __string_byte_default_end:
 __string_byte_validate:
     ;; Validate indices are within bounds
     ;; Get string length
-    MOV  R0, R1
-    CALL __builtin_string_len
-    CIF  R0                 ; Already a float
-    MOV  R4, R0            ; R4 = length as float
-    CFI  R4                 ; Convert to integer
+	PUSH  R1
+	CALL  __builtin_string_len
+	IADD  SP, 1
+	MOV   R4, R0
+
+    ;CIF  R0                 ; Already a float
+    ;MOV  R4, R0            ; R4 = length as float
+    ;CFI  R4                 ; Convert to integer
 
     ;; Check start >= 0 and start < length
     ILT  R2, 0

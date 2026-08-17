@@ -9,9 +9,22 @@ void  node_break (void)
         exit (1);
     }
 
-    LoopType type       = current_loop_type ();
-    const char *prefix  = (type == LOOP_TYPE_FOR_NUMERIC) ? "for" : "while";
-    emit_asm ("JMP __%s_%s_end_%d\n", get_current_function_name (), prefix, current_id);
+    // Each loop type builds its own exit label with a different tag (see
+    // node_while/node_for_numeric/node_for_generic) -- 'while' and 'for'
+    // are NOT interchangeable prefixes, and for_gen has a THIRD tag of its
+    // own. A two-way ternary here silently mapped LOOP_TYPE_FOR_GENERIC
+    // onto the 'while' label, which node_for_generic never actually
+    // defines -- 'break' inside a generic for loop jumped to a label that
+    // didn't exist: an unresolved-label error at assembly time.
+    LoopType    type = current_loop_type ();
+    const char *tag;
+    switch (type) {
+        case LOOP_TYPE_FOR_NUMERIC: tag = "for";     break;
+        case LOOP_TYPE_FOR_GENERIC: tag = "for_gen"; break;
+        case LOOP_TYPE_WHILE:
+        default:                    tag = "while";   break;
+    }
+    emit_asm ("JMP __%s_%s_end_%d\n", get_current_function_name (), tag, current_id);
 }
 
 void  node_return (ASTNode *node)

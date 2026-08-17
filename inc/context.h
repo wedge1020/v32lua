@@ -16,6 +16,7 @@ typedef struct SymbolNode
     int         arity;
     int         is_c_native;
     int         is_variadic;
+    int         return_count;
     bool        is_boxed;     // slot holds a box pointer, not the value
     ASTNode    *def_node;     // for is_function symbols
     struct SymbolNode* next;
@@ -72,9 +73,9 @@ typedef struct {
     // Core features
     bool needs_memory_alloc;  // Always true for heap
     bool needs_exec;
-	bool needs_print;
-	bool needs_math;
-	bool needs_iters;
+    bool needs_print;
+    bool needs_math;
+    bool needs_iters;
     bool needs_strings;
     bool needs_tables;
 
@@ -146,5 +147,6 @@ bool        name_list_contains           (NameList   *, const char *);
 bool        name_list_add                (NameList  **, const char *);
 int         name_list_length             (NameList   *);
 SymbolNode *register_upvalue             (const char *, int);
+int         count_max_return_values      (ASTNode *);
 
 #endif
