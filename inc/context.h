@@ -5,47 +5,63 @@
 // --- Scoped Symbol Table (Replaces flat GlobalVarNode list) ---
 // ============================================================================
 
-typedef enum { SYM_GLOBAL, SYM_LOCAL } SymbolType;
+typedef enum { SYM_GLOBAL, SYM_LOCAL, SYM_UPVALUE } SymbolType;
 
-typedef struct SymbolNode {
-    char* name;
-    SymbolType type;
-    int location;
-    int is_function;
-    int arity;              // -1 means variadic
-    int is_c_native;
-    int is_variadic;        // NEW: 1 if function accepts ...
+typedef struct SymbolNode
+{
+    char       *name;
+    SymbolType  type;
+    int         location;
+    int         is_function;
+    int         arity;
+    int         is_c_native;
+    int         is_variadic;
+    bool        is_boxed;     // slot holds a box pointer, not the value
+    ASTNode    *def_node;     // for is_function symbols
     struct SymbolNode* next;
 } SymbolNode;
 
-typedef struct ScopeNode {
-    SymbolNode* symbols;      // Variables declared in this specific scope
-    SymbolNode* last;         // last symbol in list
-    int local_offset_counter; // Tracks [BP - 1], [BP - 2], etc., for this function
-    struct ScopeNode* parent; // Pointer to the enclosing scope
-} ScopeNode;
+// A simple, dedup-on-insert linked set of names. Used both as the scratch
+// "currently bound" set during free-variable analysis and as the resolved
+// upvalues/boxed_locals list attached to a NODE_FUNCTION_DEF.
+//
+typedef struct namelist
+{
+    char            *name;
+    struct namelist *next;
+} NameList;
 
 // ============================================================================
 // --- Function Context Stack ---
 // ============================================================================
-typedef struct FunctionContextNode {
-    const char* name;
-    int label_counter;
-    struct FunctionContextNode* next;
+typedef struct FunctionContextNode
+{
+    const char                 *name;
+    int                         label_counter;
+    ASTNode                    *def_node;      // function_def this context belongs
+    struct FunctionContextNode *next;
 } FunctionContextNode;
+
+typedef struct ScopeNode
+{
+    SymbolNode       *symbols;              // Variables declared in scope
+    SymbolNode       *last;                 // last symbol in list
+    int               local_offset_counter; // Tracks [BP - 1], [BP - 2]
+    struct ScopeNode *parent;               // Pointer to the enclosing scope
+} ScopeNode;
 
 // ============================================================================
 // --- Runtime Module Configuration ---
 // ============================================================================
 typedef struct {
     // Core features
-    bool needs_tables;
-    bool needs_strings;
-    bool needs_exec;
     bool needs_memory_alloc;  // Always true for heap
+    bool needs_exec;
 	bool needs_print;
 	bool needs_math;
 	bool needs_iters;
+    bool needs_strings;
+    bool needs_tables;
 
     // API modes (mutually exclusive)
     bool needs_pico8;
@@ -88,15 +104,15 @@ int         get_next_label               (void);
 void        init_global_scope            (void);
 SymbolNode *resolve_symbol               (const char *);
 int         add_string_literal           (const char *);
-void        register_all_globals_prepass (ASTNode *);
+void        register_all_globals_prepass (ASTNode    *);
 SymbolNode *register_global              (const char *);
 SymbolNode *register_local               (const char *);
 SymbolNode *register_parameter           (const char *, int);
-void        mark_global_as_function      (const char *, ASTNode *);
+void        mark_global_as_function      (ASTNode    *);
 void        mark_global_as_c_function    (const char *, int);
 const char *get_current_function_name    (void);
-void        get_variable_access_string   (const char *, char *);
-void        push_function_context        (const char *);
+void        get_variable_access_string   (const char *, char       *);
+void        push_function_context        (const char *, ASTNode    *);
 void        pop_function_context         (void);
 void        pop_scope                    (void);
 void        push_scope                   (void);
@@ -104,5 +120,12 @@ LoopType    current_loop_type            (void);
 void        push_loop                    (int,          LoopType);
 void        pop_loop                     (void);
 int         current_loop                 (void);
+void        analyze_closures             (ASTNode    *);
+SymbolNode *register_upvalue             (const char *, int);
+void        emit_load_variable           (const char *, int);
+void        emit_store_variable          (const char *, int);
+void        emit_initialize_local        (SymbolNode *, int);
+void        emit_load_function_value     (ASTNode    *, const char *, int);
+bool        name_list_contains           (NameList   *, const char *);
 
 #endif

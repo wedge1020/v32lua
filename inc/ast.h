@@ -51,10 +51,13 @@ typedef struct astnode {
         } if_stmt;
 
         struct {
-            char* name;
-            struct astnode* params;
-            struct astnode* body;
-            int is_variadic;  // NEW
+            char            *name;
+            struct astnode  *params;
+            struct astnode  *body;
+            int              is_variadic;
+            struct namelist *upvalues;       // Names captured from enclosing function
+            int              upvalue_count;  // Cached length of `upvalues`.
+            struct namelist *boxed_locals;   // Names of THIS function's own locals/params
         } function_def;
 
         struct {

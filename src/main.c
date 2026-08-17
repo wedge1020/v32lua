@@ -208,6 +208,7 @@ int  main (int  argc, char** argv)
     register_all_globals_prepass(root_node);
 
     // --- AST OPTIMIZATION PASSES ---
+	/*
     if (o_optflag            >= 1)
     {
         bool  ast_changed     = true;
@@ -223,7 +224,7 @@ int  main (int  argc, char** argv)
             // e.g., g_optimizations_performed++ whenever a node mutates.
             int before_count = o_optimizations_performed;
         
-            clear_const_table();
+            //clear_const_table();
             root_node = propagate_constants(root_node);
             root_node = fold_constants(root_node);
         
@@ -236,7 +237,7 @@ int  main (int  argc, char** argv)
         if (g_debug_mode) {
             printf("[Optimizer] Converged after %d iteration(s).\n", iter);
         }
-    }
+    }*/
 
     // --- Stage 5: Emitter ---
     log_stage(5, "emitter", verbose);

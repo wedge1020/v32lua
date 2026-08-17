@@ -4,7 +4,7 @@ void  node_function_def (ASTNode *node)
 {
     const char *func_name = node->as.function_def.name;
 
-    mark_global_as_function(func_name, node->as.function_def.params);
+    mark_global_as_function (node);
 
     // Nested/local functions are compiled inline, in the middle of the
     // enclosing function's code. Unlike top-level functions (only ever
@@ -44,7 +44,7 @@ void  node_function_def (ASTNode *node)
         emit_asm("MOV %s, R0\n", access_str);
     }*/
 
-    push_function_context(func_name);
+    push_function_context (func_name, node);
 
     if (g_debug_mode) {
         snprintf(g_current_label, sizeof(g_current_label), "func_%s", func_name);
@@ -412,7 +412,7 @@ void  node_function_call (ASTNode *node, int  dest_reg)
             emit_asm("OR R%d, 0x7FF00000 ; Apply Lua Number tag\n", dest_reg);
         }
     } else {
-		// --- Lua Function Call (via __builtin_exec trampoline) ---
+        // --- Lua Function Call (via __builtin_exec trampoline) ---
         // Argument evaluation above may have needed target_reg's register
         // number for something else, in which case allocate_register()
         // correctly spilled target_reg's value to preserve it. Reload it

@@ -18,6 +18,23 @@ void init_global_scope(void) {
     current_scope = global_scope;
 }
 
+//////////////////////////////////////////////////////////////////////////////
+//
+// Like push_scope(), but for the OUTERMOST scope of a function body. Its
+// parent is the global scope only -- never the enclosing function's local
+// scope. Cross-function references must always go through the explicit
+// upvalue mechanism (SYM_UPVALUE symbols registered by register_upvalue),
+// never through a raw scope-chain walk into a frame that may not even be
+// on the stack anymore by the time this function runs.
+//
+void  push_function_scope (void)
+{
+    ScopeNode *new_scope               = (ScopeNode *) calloc (1, sizeof (ScopeNode));
+    new_scope -> parent                = global_scope;
+    new_scope -> local_offset_counter  = 1;
+    current_scope                      = new_scope;
+}
+
 void push_scope(void) {
     ScopeNode* new_scope = (ScopeNode*)calloc(1, sizeof(ScopeNode));
     new_scope->parent = current_scope;
@@ -90,35 +107,47 @@ SymbolNode *resolve_local_symbol_current_scope (const char *name)
     return NULL;
 }
 
-
 // Add a local variable to the *current* scope
 SymbolNode *register_local (const char* name)
 {
-    // ONLY check if it's already declared in this exact block scope!
-    SymbolNode *sym = resolve_local_symbol_current_scope (name);
-    if (sym != NULL)
+    SymbolNode *sym                      = resolve_local_symbol_current_scope (name);
+    if (sym                             != NULL)
+        return sym;
+
+    sym                                  = (SymbolNode *) calloc (1, sizeof (SymbolNode));
+    sym -> name                          = strdup(name);
+    sym -> type                          = SYM_LOCAL;
+    sym -> location                      = current_scope -> local_offset_counter;
+    current_scope -> local_offset_counter++;
+
+    //////////////////////////////////////////////////////////////////////////
+    //
+    // if the enclosing function's pre-pass found that a nested closure
+    // captures this name, mark it boxed. Every read/write of this local
+    // will go through emit_load_variable()/emit_store_variable() from now
+    // on instead of a bare MOV.
+    //
+    if ((context_stack_head             != NULL) &&
+        (context_stack_head -> def_node != NULL))
     {
-        return sym; // Already registered in this scope
+        NameList *boxed                  = context_stack_head -> def_node -> as.function_def.boxed_locals;
+        if (name_list_contains(boxed, name))
+        {
+            sym -> is_boxed              = true;
+        }
     }
 
-    sym           = (SymbolNode *) calloc (1, sizeof (SymbolNode));
-    sym->name     = strdup (name);
-    sym->type     = SYM_LOCAL;
-    sym->location = current_scope->local_offset_counter;
-                                                                             
-    current_scope->local_offset_counter++;
-    
-    if (current_scope->last == NULL)
+    if (current_scope -> last           == NULL)
     {
-        current_scope->symbols = sym;
+        current_scope -> symbols         = sym;
     }
     else
     {
-        current_scope->last->next = sym;
+        current_scope -> last -> next    = sym;
     }
-    current_scope->last = sym;
+    current_scope -> last                = sym;
 
-    return sym;
+    return (sym);
 }
 
 SymbolNode* register_global (const char *name)
@@ -155,26 +184,41 @@ SymbolNode* register_global (const char *name)
     return (sym);
 }
 
-void mark_global_as_function(const char *name, ASTNode *params) {
-    SymbolNode *sym = register_global(name);
-    sym->is_function = 1;
-    //sym->location = -2;  // Special: -2 = function (use __function_name label, not RAM)
+void  mark_global_as_function (ASTNode *def_node)
+{
+    if (def_node             == NULL)
+        return;
 
-    int count = 0;
-    int has_variadic = 0;
-    ASTNode *p = params;
-    while (p != NULL) {
-        if (p->type == NODE_IDENTIFIER) {
-            if (strcmp(p->as.id.name, "...") == 0) {
-                has_variadic = 1;
-            } else {
-                count++;
+    const char *name          = def_node -> as.function_def.name;
+    ASTNode    *params        = def_node -> as.function_def.params;
+    ASTNode    *ptmp          = NULL;
+    SymbolNode *sym           = register_global (name);
+    int         count         = 0;
+    int         has_variadic  = 0;
+
+    sym -> is_function        = 1;
+    sym -> def_node           = def_node;   // lets node_identifier() find the
+                                            // upvalue list when loading this 
+                                            // function by its bare name
+    ptmp                      = params;
+    while (ptmp              != NULL)
+    {
+        if (ptmp -> type     == NODE_IDENTIFIER)
+        {
+            if (0            == strcmp (ptmp -> as.id.name, "..."))
+            {
+                has_variadic  = 1;
+            }
+            else
+            {
+                count         = count + 1;
             }
         }
-        p = p->next;
+        ptmp                  = ptmp -> next;
     }
-    sym->arity = count;
-    sym->is_variadic = has_variadic;
+
+    sym -> arity              = count;
+    sym -> is_variadic        = has_variadic;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -217,20 +261,25 @@ int get_next_label (void)
     return context_stack_head->label_counter++;
 }
 
-void push_function_context(const char* name) {
-    FunctionContextNode* new_node = (FunctionContextNode*)malloc(sizeof(FunctionContextNode));
-    if (new_node == NULL) {
-        compiler_error(ERR_INTERNAL, -1, "Out of memory allocating function context for '%s'", name);
+void  push_function_context (const char *name, ASTNode *def_node)
+{
+    FunctionContextNode *new_node  = (FunctionContextNode *) malloc (sizeof (FunctionContextNode));
+    if (new_node                  == NULL)
+    {
+        compiler_error (ERR_INTERNAL, -1,
+                        "Out of memory allocating function context for '%s'", name);
     }
     
-    new_node->name = name; 
-    new_node->label_counter = 0; 
+    new_node -> name               = name; 
+    new_node -> label_counter      = 0; 
+    new_node -> def_node           = def_node;
     
-    new_node->next = context_stack_head;
-    context_stack_head = new_node;
+    new_node -> next               = context_stack_head;
+    context_stack_head             = new_node;
 }
 
-void pop_function_context(void) {
+void  pop_function_context (void)
+{
     if (context_stack_head == NULL) {
         compiler_error(ERR_INTERNAL, -1, "Function context stack underflow (tried to pop global scope)");
     }
@@ -357,9 +406,8 @@ void  register_all_globals_prepass (ASTNode *node)
         {
             case NODE_FUNCTION_DEF:
                 // ✅ Always register as global (local keyword is silently ignored)
-                mark_global_as_function(node->as.function_def.name,
-                                         node->as.function_def.params);
-                register_all_globals_prepass(node->as.function_def.body);
+                mark_global_as_function (node);
+                register_all_globals_prepass (node->as.function_def.body);
                 break;
 
             /* once we get local functions implemented...
@@ -371,8 +419,7 @@ void  register_all_globals_prepass (ASTNode *node)
                 }
 
                 if (!is_local) {
-                    mark_global_as_function(node->as.function_def.name,
-                                             node->as.function_def.params);
+                    mark_global_as_function (node);
                 }
                 register_all_globals_prepass(node->as.function_def.body);
                 break;
@@ -410,4 +457,67 @@ void  register_all_globals_prepass (ASTNode *node)
         }
         node = node->next;
     }
+}
+
+// ============================================================================
+// NameList helpers -- a tiny dedup-on-insert set used by the closure
+// analysis pass and by the resolved upvalue/boxed_locals lists it produces.
+// ============================================================================
+
+bool name_list_contains (NameList *list, const char *name)
+{
+    for (NameList *n = list; n != NULL; n = n->next) {
+        if (strcmp(n->name, name) == 0) return true;
+    }
+    return false;
+}
+
+// Adds `name` to *list if not already present. Returns true if it was
+// actually added (useful for counting).
+bool name_list_add (NameList **list, const char *name)
+{
+    if (name_list_contains(*list, name)) return false;
+
+    NameList *n = (NameList *) malloc(sizeof(NameList));
+    if (n == NULL) {
+        compiler_error(ERR_INTERNAL, -1, "Out of memory building upvalue list");
+    }
+    n->name = strdup(name);
+    n->next = *list;
+    *list   = n;
+    return true;
+}
+
+int name_list_length (NameList *list)
+{
+    int count = 0;
+    for (NameList *n = list; n != NULL; n = n->next) count++;
+    return count;
+}
+
+// Register a received upvalue as a hidden trailing parameter. Identical in
+// shape to register_parameter() (same negative-offset [BP+N] addressing),
+// but tagged SYM_UPVALUE and always boxed: the slot holds a box pointer,
+// never a raw value, because the box is what makes it shared with the
+// enclosing function's copy of the same variable.
+SymbolNode *register_upvalue (const char *name, int offset)
+{
+    SymbolNode *sym = (SymbolNode *) calloc(1, sizeof(SymbolNode));
+    if (!sym) {
+        compiler_error(ERR_INTERNAL, -1, "Out of memory allocating upvalue '%s'", name);
+    }
+
+    sym->name     = strdup(name);
+    sym->type     = SYM_UPVALUE;
+    sym->location = -offset;   // same convention as register_parameter
+    sym->is_boxed = true;
+
+    if (current_scope->last == NULL) {
+        current_scope->symbols = sym;
+    } else {
+        current_scope->last->next = sym;
+    }
+    current_scope->last = sym;
+
+    return sym;
 }

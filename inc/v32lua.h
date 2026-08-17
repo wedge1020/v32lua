@@ -18,34 +18,47 @@
 #include "ast.h"
 #include "context.h"
 #include "intrinsics.h"
-#include "optimize.h"
 #include "generate.h"
 #include "internals.h"
 #include "register.h"
+#include "closures.h"
 
-#define  VERSION         "20260816-dev"
-#define  AUTHOR          "Matthew Haas"
-#define  URL             "https://github.com/wedge1020/v32lua"
+#define  VERSION             "20260817-dev"
+#define  AUTHOR              "Matthew Haas"
+#define  URL                 "https://github.com/wedge1020/v32lua"
 
-#define  MATH_PI         3.14159265358979323846
-#define  MATH_HUGE       (1.0 / 0.0)  // Infinity in IEEE 754
+#define  MATH_PI             3.14159265358979323846
+#define  MATH_HUGE           (1.0 / 0.0)  // Infinity in IEEE 754
 
-#define  V32_CART_PAGE   0x20000000
-#define  NAN_VALUE       0x7F800000
-#define  BOXED_CATEGORY  0x80000000 // sign bit used for RAM (1) vs ROM (0)
-#define  BOXED_TYPE      0x00400000 // quiet-NaN used for TABLE/FUNCTION (0) vs STRING (1)
-#define  BOXED_DATA      0xFFC00000 // common bitmask to indicate boxed data
-#define  BOXED_FUNCTION  0x7F800000 // bitmask for boxed lua function (ROM)
-#define  BOXED_ROMSTRING 0x7FC00000 // bitmank for boxed lua string literal (ROM)
-#define  BOXED_TABLE     0xFF800000 // bitmask for boxed lua table (RAM)
-#define  BOXED_RAMSTRING 0xFFC00000 // starting at offset 4 (includes nil/false/true)
-#define  BOXED_NIL       0xFFC00000
-#define  BOXED_FALSE     0xFFC00001
-#define  BOXED_BOOLEAN   0xFFC00001 // mathing our way to true/false
-#define  BOXED_TRUE      0xFFC00002
-#define  BOXED_TOMBSTONE 0xFFC00003 // future feature
-#define  BOXED_PAYLOAD   0x003FFFFF
-#define  TABLE_ARRAYSIZE 0x0000FFFF
+#define  V32_CART_PAGE       0x20000000
+#define  NAN_VALUE           0x7F800000
+#define  BOXED_CATEGORY      0x80000000 // sign bit used for RAM (1) vs ROM (0)
+#define  BOXED_TYPE          0x00400000 // quiet-NaN used for TABLE/FUNCTION (0) vs STRING (1)
+#define  BOXED_DATA          0xFFC00000 // common bitmask to indicate boxed data
+#define  BOXED_FUNCTION      0x7F800000 // bitmask for boxed lua function (ROM)
+#define  BOXED_ROMSTRING     0x7FC00000 // bitmank for boxed lua string literal (ROM)
+#define  BOXED_TABLE         0xFF800000 // bitmask for boxed lua table (RAM)
+#define  BOXED_RAMSTRING     0xFFC00000 // starting at offset 4 (includes nil/false/true)
+#define  BOXED_NIL           0xFFC00000
+#define  BOXED_FALSE         0xFFC00001
+#define  BOXED_BOOLEAN       0xFFC00001 // mathing our way to true/false
+#define  BOXED_TRUE          0xFFC00002
+#define  BOXED_TOMBSTONE     0xFFC00003 // future feature
+#define  BOXED_PAYLOAD       0x003FFFFF
+#define  TABLE_ARRAYSIZE     0x0000FFFF
+
+// One spare bit inside a BOXED_FUNCTION payload. Ordinary functions leave it
+// 0 (payload = ROM code address, exactly as before). A closure sets it, and
+// the remaining payload bits become a RAM address of a closure record
+// instead. This keeps closures indistinguishable from plain functions to
+// type()/print()/everything else -- only __builtin_exec needs to know.
+//
+// ASSUMPTION TO VERIFY: this steals bit 21, leaving 21 bits (~2MB) of heap
+// address space for closure records. Check that against Vircon32's actual
+// RAM size before relying on it -- if RAM is larger than that, pick a
+// different bit or widen the check.
+#define  BOXED_CLOSURE_FLAG  0x00200000
+#define  CLOSURE_ADDR_MASK   0x001FFFFF
 
 extern int g_verbose_debug;      // verbose real-time debug output
 
