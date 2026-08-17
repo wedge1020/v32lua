@@ -11,10 +11,10 @@ void node_multiple_assignment(ASTNode *node)
         while (curr_tgt != NULL) {
             if (curr_tgt->type == NODE_IDENTIFIER) {
                 SymbolNode *sym = register_local(curr_tgt->as.id.name);
-                int temp_reg = allocate_pinned_register();
+                int temp_reg = allocate_register();
                 emit_asm("MOV R%d, BOXED_NIL", temp_reg);
                 emit_initialize_local(sym, temp_reg);   // was: get_variable_access_string + MOV
-                unlock_pinned_register(temp_reg);
+                unlock_register(temp_reg);
             }
             curr_tgt = curr_tgt->next;
         }
@@ -47,29 +47,62 @@ void node_multiple_assignment(ASTNode *node)
             // This is a multi-return function call (e.g., math.modf, math.frexp)
             generate_asm(curr_val, 0);  // dest_reg=0 means don't store to single reg
 
-            // Assign return values from R0, R1, R2, ... to targets
+            // -----------------------------------------------------------------
+            // Assign return values from R0, R1, R2, ... to targets.
+            //
+            // Two bugs fixed here vs. the previous version:
+            //   1. `local a, b = math.modf(x)` never called register_local()
+            //      for a/b -- they fell through get_variable_access_string()'s
+            //      auto-register-as-global fallback instead, so a "local"
+            //      declared this way silently became a global.
+            //   2. Even once registered, a raw get_variable_access_string()
+            //      + MOV bypasses boxing entirely -- if a closure later
+            //      captures one of these targets, the box pointer would get
+            //      clobbered with the raw return value instead of the value
+            //      being written through it.
+            // Both are fixed the same way the standard assignment branch
+            // above was: register the symbol (for locals) and route the
+            // store through emit_initialize_local()/emit_store_variable(),
+            // which already know how to do the plain thing when the target
+            // isn't boxed.
+            // -----------------------------------------------------------------
             int reg_index = 0;
             while (curr_tgt != NULL && reg_index < return_count) {
-                char access_str[128];
-                get_variable_access_string(curr_tgt->as.id.name, access_str);
+                if (curr_tgt->type == NODE_IDENTIFIER) {
+                    emit_asm("MOV R2, R%d ; Read return value %d", reg_index, reg_index);
 
-                emit_asm("MOV R2, R%d", reg_index);  // Read from R0, R1, etc.
-                emit_asm("MOV %s, R2", access_str);
-                unlock_pinned_register(2);  // Clean up R2
+                    if (node->as.mult_assign.is_local) {
+                        SymbolNode *sym = register_local(curr_tgt->as.id.name);
+                        emit_initialize_local(sym, 2);   // may allocate a box
+                    } else {
+                        emit_store_variable(curr_tgt->as.id.name, 2);   // writes through the box if boxed
+                    }
+
+                    unlock_register(2);  // Clean up R2
+                }
 
                 curr_tgt = curr_tgt->next;
                 reg_index++;
             }
 
-            // Pad remaining targets with NIL
+            // -----------------------------------------------------------------
+            // Pad remaining targets with NIL -- same fix applied: register
+            // locals properly and route through the boxed-aware helpers.
+            // -----------------------------------------------------------------
             while (curr_tgt != NULL) {
-                char access_str[128];
-                get_variable_access_string(curr_tgt->as.id.name, access_str);
+                if (curr_tgt->type == NODE_IDENTIFIER) {
+                    int temp_reg = allocate_register();
+                    emit_asm("MOV R%d, BOXED_NIL ; Pad missing return value with Nil", temp_reg);
 
-                int temp_reg = allocate_pinned_register();
-                emit_asm("MOV R%d, BOXED_NIL", temp_reg);
-                emit_asm("MOV %s, R%d", access_str, temp_reg);
-                unlock_pinned_register(temp_reg);
+                    if (node->as.mult_assign.is_local) {
+                        SymbolNode *sym = register_local(curr_tgt->as.id.name);
+                        emit_initialize_local(sym, temp_reg);
+                    } else {
+                        emit_store_variable(curr_tgt->as.id.name, temp_reg);
+                    }
+
+                    unlock_register(temp_reg);
+                }
 
                 curr_tgt = curr_tgt->next;
             }

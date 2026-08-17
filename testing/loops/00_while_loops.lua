@@ -298,8 +298,8 @@ number_result08: 10.0000
 number_result09: 0.0000
 number_result10: 0.0000
 number_result11: 3.0000
-number_result12: 13.0000 (outer=1, inner=3 -> 1*10+3)
-number_result13: 22.0000 (outer=2, inner=2 -> 2*100+2)
+number_result12: 53.0000
+number_result13: 202.0000
 number_result14: 9.0000
 number_result15: 5.0000
 number_result16: 6.0000
