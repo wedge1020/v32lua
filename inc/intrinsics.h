@@ -129,4 +129,10 @@ int   emit_math_ldexp_intrinsic      (ASTNode *, int);
 bool  emit_pairs_intrinsic      (ASTNode *);
 bool  emit_ipairs_intrinsic     (ASTNode *);
 
+//////////////////////////////////////////////////////////////////////////////	
+//
+// table library
+//
+int   emit_table_remove_intrinsic    (ASTNode *, int);
+
 #endif

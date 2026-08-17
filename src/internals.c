@@ -138,3 +138,13 @@ void compiler_warning (ErrorType type, int line_num, const char* format, ...)
         }
     }
 }
+
+// Helper function to look up return count
+int get_builtin_return_count(const char *func_name) {
+    for (int i = 0; builtin_return_counts[i].name != NULL; i++) {
+        if (strcmp(func_name, builtin_return_counts[i].name) == 0) {
+            return builtin_return_counts[i].return_count;
+        }
+    }
+    return 1;  // Default to single return value
+}

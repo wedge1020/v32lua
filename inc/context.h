@@ -116,6 +116,7 @@ void        push_function_context        (const char *, ASTNode    *);
 void        pop_function_context         (void);
 void        pop_scope                    (void);
 void        push_scope                   (void);
+void        push_function_scope          (void);
 LoopType    current_loop_type            (void);
 void        push_loop                    (int,          LoopType);
 void        pop_loop                     (void);
@@ -127,5 +128,8 @@ void        emit_store_variable          (const char *, int);
 void        emit_initialize_local        (SymbolNode *, int);
 void        emit_load_function_value     (ASTNode    *, const char *, int);
 bool        name_list_contains           (NameList   *, const char *);
+bool        name_list_add                (NameList  **, const char *);
+int         name_list_length             (NameList   *);
+SymbolNode *register_upvalue             (const char *, int);
 
 #endif

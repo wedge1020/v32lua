@@ -379,11 +379,21 @@ SymbolNode *register_parameter (const char *name, int offset)
     if (!sym) {
         compiler_error(ERR_INTERNAL, -1, "Out of memory allocating parameter");
     }
-    
+
     sym->name     = strdup (name);
     sym->type     = SYM_LOCAL;
     sym->location = -offset; // Store as negative so we know it's a parameter!
-    
+
+    // NEW: same check register_local() already does. A parameter captured
+    // by a nested closure needs to end up boxed too -- see node_function_def
+    // below for the entry-time step that actually allocates the box.
+    if (context_stack_head != NULL && context_stack_head->def_node != NULL) {
+        NameList *boxed = context_stack_head->def_node->as.function_def.boxed_locals;
+        if (name_list_contains(boxed, name)) {
+            sym->is_boxed = true;
+        }
+    }
+
     // Cleanly append to the scope list and maintain 'last'
     if (current_scope->last == NULL)
     {

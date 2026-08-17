@@ -587,7 +587,13 @@ function_call:
         node->as.call.args_head = $5;
         $$ = node;
     }
-    | prefix_expr '(' argument_list ')'
+	| prefix_expr '(' argument_list ')' {
+		ASTNode* node = make_node(NODE_FUNCTION_CALL);
+		node->as.call.target = $1;
+		node->as.call.is_method_call = 0;
+		node->as.call.args_head = $3;
+		$$ = node;
+	}
     ;
 
 field:

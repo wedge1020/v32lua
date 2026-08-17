@@ -81,11 +81,33 @@ void  node_function_def (ASTNode *node)
             if (strcmp(p->as.id.name, "...") == 0) {
                 is_variadic = 1;
             } else {
-                register_parameter(p->as.id.name, param_offset++);
+                SymbolNode *param_sym = register_parameter(p->as.id.name, param_offset++);
+
+                // A captured parameter arrives as a raw value -- the caller
+                // pushed it as an ordinary argument, unboxed. Box it here,
+                // once, at entry, exactly like a captured local gets boxed
+                // at its declaration -- so any closure defined later in this
+                // body captures a heap cell that outlives this frame instead
+                // of a stack slot that doesn't.
+                if (param_sym->is_boxed) {
+                    int tmp_reg = allocate_pinned_register();
+                    char raw_access[256];
+                    get_variable_access_string(param_sym->name, raw_access);
+                    emit_asm("MOV R%d, %s ; load raw incoming value for '%s'\n",
+                             tmp_reg, raw_access, param_sym->name);
+                    emit_initialize_local(param_sym, tmp_reg);
+                    unlock_pinned_register(tmp_reg);
+                }
             }
         }
         p = p->next;
     }
+
+    // Real, user-visible arity -- snapshot it BEFORE the upvalue loop below
+    // advances param_offset further. Upvalues are invisible to Lua-level
+    // call sites (they're supplied by the closure record, not by the
+    // caller's explicit argument list), so they must never leak into arity.
+    int explicit_param_count = param_offset - 2;
 
     // continue the same offset sequence for received upvalues, so
     // they land contiguously right after the normal parameters on the
@@ -100,7 +122,7 @@ void  node_function_def (ASTNode *node)
     SymbolNode *sym = resolve_symbol(func_name);
     if (sym) {
         sym->is_variadic = is_variadic;
-        sym->arity = is_variadic ? -1 : (param_offset - 2);
+        sym->arity = is_variadic ? -1 : explicit_param_count;   // was (param_offset - 2)
     }
 
     // For variadic functions: reserve space for argument count at [BP-2]
@@ -167,6 +189,7 @@ void  node_function_call (ASTNode *node, int  dest_reg)
     SymbolNode *target_sym             = NULL;
     const char *func_name              = NULL;
     bool        is_dynamic_table_call  = (node -> as.call.target -> type == NODE_TABLE_GET);
+    bool        is_named_target        = (node -> as.call.target -> type == NODE_IDENTIFIER);
 
     if (g_verbose_debug)
     {
@@ -189,6 +212,7 @@ void  node_function_call (ASTNode *node, int  dest_reg)
         if (resolve_static_path(node->as.call.target, path_buf)) {
             func_name = path_buf;
             target_sym = resolve_symbol(func_name);
+            is_named_target = true;  // resolved to a real dotted name, e.g. a.b.c
         }
     }
 
@@ -197,9 +221,19 @@ void  node_function_call (ASTNode *node, int  dest_reg)
         if (try_emit_call_intrinsic(node, dest_reg)) {
             return; // Intrinsic caught on fallback
         }
-        compiler_error(ERR_SEMANTIC, node->line_number,
-            "Undeclared function: '%s'", func_name ? func_name : "<unknown>");
-        return;
+
+        // Only a hard error if the target was SUPPOSED to have a name (a bare
+        // identifier or a resolvable dotted path) and simply isn't declared.
+        // If the target is an arbitrary expression instead -- a function
+        // literal, an IIFE, the result of another call -- there's no name to
+        // look up in the first place. That's a normal dynamic call; fall
+        // through to the generic "evaluate target, then CALL __builtin_exec"
+        // path further down, which already handles it correctly.
+        if (is_named_target) {
+            compiler_error(ERR_SEMANTIC, node->line_number,
+                "Undeclared function: '%s'", func_name ? func_name : "<unknown>");
+            return;
+        }
     }
 
     // -------------------------------------------------------------------------

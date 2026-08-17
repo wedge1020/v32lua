@@ -539,9 +539,12 @@ void generate_program (ASTNode *head)
     ASTNode *current             = NULL;
     char     buffer[1024];
     char    *check               = NULL;
-    int      final_line_offset   = 0; 
+    int      final_line_offset   = 0;
 
-	//analyze_closures (program_root);
+    // Must run before ANY codegen below touches NODE_FUNCTION_DEF bodies --
+    // register_local()/register_parameter() consult the boxed_locals list
+    // this populates the first time they see a captured name.
+    analyze_closures (head);
 
     // =========================================================================
     // 1. CONDITIONAL ENTRY POINT CHECKS

@@ -120,22 +120,28 @@ void node_multiple_assignment(ASTNode *node)
         // Assign evaluated value to the target
         if (curr_tgt->type == NODE_IDENTIFIER) {
             if (node->as.mult_assign.is_local) {
-                register_local(curr_tgt->as.id.name);
-            }
-            char access_str[128];
-            get_variable_access_string(curr_tgt->as.id.name, access_str);
+                SymbolNode *sym = register_local(curr_tgt->as.id.name);
 
-            // ✅ NEW DEBUG
-            if (g_verbose_debug) {
-                fprintf(stderr, "[debug] node_multiple_assignment() Assigning: %s -> %s (val_reg=R%d)\n",
-                        curr_tgt->as.id.name, access_str, val_reg);
-            }
+                // ✅ NEW DEBUG
+                if (g_verbose_debug) {
+                    fprintf(stderr, "[debug] node_multiple_assignment() Declaring local: %s (val_reg=R%d, boxed=%d)\n",
+                            curr_tgt->as.id.name, val_reg, sym->is_boxed);
+                }
 
-            emit_asm("MOV %s, R%d", access_str, val_reg);
+                emit_initialize_local(sym, val_reg);   // may allocate a box
+            } else {
+                // ✅ NEW DEBUG
+                if (g_verbose_debug) {
+                    fprintf(stderr, "[debug] node_multiple_assignment() Assigning: %s (val_reg=R%d)\n",
+                            curr_tgt->as.id.name, val_reg);
+                }
+
+                emit_store_variable(curr_tgt->as.id.name, val_reg);   // writes through the box if boxed
+            }
         }
         else if (curr_tgt->type == NODE_TABLE_GET)
         {
-            // Fallback: Dynamic heap table assignment (table[key] = value)
+            // Fallback: Dynamic heap table assignment (table[key] = value) -- unchanged
             int table_reg = allocate_pinned_register();
             int key_reg   = allocate_pinned_register();
 
