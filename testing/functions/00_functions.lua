@@ -4,36 +4,48 @@
 --@ Results are stored in global variables for automated memory scraping.
 
 function test_functions_basic()
+	tally = 0
     -- === Test 00: Parameterless function with no return ===
     local function no_params_no_return()
         -- Just sets a global
         number_result00 = 42
     end
     no_params_no_return()
+	__rawasm__("__debug0:")
+	tally = tally + 1
+
 
     -- === Test 01: Parameterless function with return ===
     local function no_params_with_return()
         return 100
     end
     number_result01 = no_params_with_return()
+	__rawasm__("__debug1:")
+	tally = tally + 1
 
     -- === Test 02: Function with single parameter ===
     local function single_param(x)
         return x * 2
     end
     number_result02 = single_param(25)
+	__rawasm__("__debug2:")
+	tally = tally + 1
 
     -- === Test 03: Function with multiple parameters ===
     local function multi_param(a, b, c)
         return a + b + c
     end
     number_result03 = multi_param(1, 2, 3)
+	__rawasm__("__debug3:")
+	tally = tally + 1
 
     -- === Test 04: Function with single return value ===
     local function single_return(x)
         return x + 10
     end
     number_result04 = single_return(5)
+	__rawasm__("__debug4:")
+	tally = tally + 1
 
     -- === Test 05: Function with multiple return values ===
     local function multi_return(a, b)
@@ -42,6 +54,8 @@ function test_functions_basic()
     local sum, product = multi_return(4, 5)
     number_result05 = sum
     number_result06 = product
+	__rawasm__("__debug5:")
+	tally = tally + 1
 
     -- === Test 06: Function with no parameters, returns nil ===
     local function returns_nil()
@@ -49,6 +63,8 @@ function test_functions_basic()
     end
     local result = returns_nil()
     boolean_result06 = (result == nil)
+	__rawasm__("__debug6:")
+	tally = tally + 1
 
     -- === Test 07: Function with default parameter behavior (using local) ===
     local function with_local_param(x)
@@ -56,6 +72,8 @@ function test_functions_basic()
         return y
     end
     number_result07 = with_local_param(10)
+	__rawasm__("__debug7:")
+	tally = tally + 1
 
     -- === Test 08: Function calling another function ===
     local function helper(x)
@@ -65,6 +83,8 @@ function test_functions_basic()
         return helper(x) + 1
     end
     number_result08 = caller(5)
+	__rawasm__("__debug8:")
+	tally = tally + 1
 
     -- === Test 09: Function with early return ===
     local function early_return(x)
@@ -74,9 +94,13 @@ function test_functions_basic()
         return 0
     end
     number_result09 = early_return(10)
+	__rawasm__("__debug9:")
+	tally = tally + 1
 
     -- === Test 10: Function with early return (false case) ===
     number_result10 = early_return(-5)
+	__rawasm__("__debug10:")
+	tally = tally + 1
 
     -- === Test 11: Function with conditional return ===
     local function conditional_return(x)
@@ -87,45 +111,61 @@ function test_functions_basic()
         end
     end
     string_result11 = conditional_return(4)
+	__rawasm__("__debug11:")
+	tally = tally + 1
 
     -- === Test 12: Function with arithmetic operations ===
     local function arithmetic(a, b)
         return (a + b) * (a - b)
     end
     number_result12 = arithmetic(10, 3)
+	__rawasm__("__debug12:")
+	tally = tally + 1
 
     -- === Test 13: Function with boolean return ===
     local function is_positive(x)
         return x > 0
     end
     boolean_result13 = is_positive(5)
+	__rawasm__("__debug13:")
+	tally = tally + 1
 
     -- === Test 14: Function with boolean return (false) ===
     boolean_result14 = is_positive(-5)
+	__rawasm__("__debug14:")
+	tally = tally + 1
 
     -- === Test 15: Function with string parameter ===
     local function string_length(s)
         return #s
     end
     number_result15 = string_length("hello")
+	__rawasm__("__debug15:")
+	tally = tally + 1
 
     -- === Test 16: Function with string concatenation ===
     local function concat_strings(a, b)
         return a .. b
     end
     string_result16 = concat_strings("hello", "world")
+	__rawasm__("__debug16:")
+	tally = tally + 1
 
     -- === Test 17: Function with comparison in return ===
     local function is_greater(a, b)
         return a > b
     end
     boolean_result17 = is_greater(10, 5)
+	__rawasm__("__debug17:")
+	tally = tally + 1
 
     -- === Test 18: Function with logical operations ===
     local function logical_and(a, b)
         return a and b
     end
     boolean_result18 = logical_and(true, false)
+	__rawasm__("__debug18:")
+	tally = tally + 1
 
     -- === Test 19: Function with multiple statements ===
     local function multiple_statements(x)
@@ -134,6 +174,8 @@ function test_functions_basic()
         return temp
     end
     number_result19 = multiple_statements(5)
+	__rawasm__("__debug19:")
+	tally = tally + 1
 
     -- === Test 20: Function with local variable shadowing ===
     local outer = 10
@@ -142,6 +184,8 @@ function test_functions_basic()
         return outer
     end
     number_result20 = shadow_test(20)
+	__rawasm__("__debug20:")
+	tally = tally + 1
 
     -- === Test 21: Function returning function result ===
     local function get_value()
@@ -151,18 +195,24 @@ function test_functions_basic()
         return get_value()
     end
     number_result21 = return_function_result()
+	__rawasm__("__debug21:")
+	tally = tally + 1
 
     -- === Test 22: Function with expression as parameter ===
     local function square(x)
         return x * x
     end
     number_result22 = square(2 + 3)
+	__rawasm__("__debug22:")
+	tally = tally + 1
 
     -- === Test 23: Function with chained calls ===
     local function add_one(x)
         return x + 1
     end
     number_result23 = add_one(add_one(add_one(5)))
+	__rawasm__("__debug23:")
+	tally = tally + 1
 end
 
 function main()

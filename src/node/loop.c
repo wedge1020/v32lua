@@ -62,16 +62,30 @@ void  node_for_numeric (ASTNode *node)
     // -------------------------------------------------------------------------
     push_scope();
 
-    // Generate unique names for loop control variables
-    char limit_var[64], step_var[64], index_var[64];
+    // Generate unique names for loop control variables. NOTE: 'control_var'
+    // is the loop's own hidden driving counter -- it is what STEP 4 checks
+    // against the limit and what STEP 6 increments. It is completely
+    // separate from 'index_var' (the user-visible Lua loop variable `i`).
+    //
+    // Lua semantics require that assigning to the loop variable inside the
+    // body (e.g. `i = 100`) NEVER affects iteration. Previously this
+    // function used index_var for both roles, so a body-side write to `i`
+    // silently corrupted the loop's own bookkeeping and could terminate
+    // iteration early. Now the loop drives itself entirely off control_var
+    // (raw, unboxed, never visible to Lua source -- same category as
+    // limit_var/step_var) and simply copies control_var's value into
+    // index_var fresh at the top of every iteration, so the body can do
+    // whatever it wants with `i` without any effect on the loop.
+    char limit_var[64], step_var[64], control_var[64], index_var[64];
     snprintf(limit_var, sizeof(limit_var), "__limit_%d", label_id);
     snprintf(step_var, sizeof(step_var), "__step_%d", label_id);
+    snprintf(control_var, sizeof(control_var), "__ctrl_%d", label_id);
     strcpy(index_var, node->as.for_numeric.index_name);
 
-    // Access strings for stack frame references (limit/step are compiler-
-    // synthetic names Lua source can never capture, so they're never boxed --
-    // raw access for those two stays exactly as before).
-    char access_limit[128], access_step[128];
+    // Access strings for stack frame references (limit/step/control are all
+    // compiler-synthetic names Lua source can never capture, so they're
+    // never boxed -- raw access for these three).
+    char access_limit[128], access_step[128], access_control[128];
 
     // -------------------------------------------------------------------------
     // STEP 2: Evaluate loop bounds and store as stack locals
@@ -105,11 +119,19 @@ void  node_for_numeric (ASTNode *node)
     get_variable_access_string(step_var, access_step);
     emit_asm("MOV %s, R%d ; Save loop step to stack", access_step, scratch);
 
-    // Evaluate and store INDEX (start value) -- this is the declaration site,
-    // so route it through emit_initialize_local(): boxes it if analyze_closures
-    // found it captured, plain MOV otherwise. Keep the SymbolNode around --
-    // we need it again at the increment step below.
+    // Evaluate and store the hidden CONTROL variable (start value). This is
+    // the loop's real driver -- raw stack slot, never boxed, never touched
+    // by anything the Lua body can name.
     generate_asm(node->as.for_numeric.start_expr, scratch);
+    register_local(control_var);
+    get_variable_access_string(control_var, access_control);
+    emit_asm("MOV %s, R%d ; Save loop control counter to stack", access_control, scratch);
+
+    // Register the user-visible INDEX variable too. Its actual value gets
+    // populated from control_var at the top of each iteration (STEP 4b
+    // below), but we register + initialize it here as well so it exists
+    // with a sane value even if the loop body never runs a single iteration
+    // (e.g. `for i = 10, 1 do ... end`) and something after the loop reads it.
     SymbolNode *index_sym = register_local(index_var);
     emit_initialize_local(index_sym, scratch);
 
@@ -123,17 +145,24 @@ void  node_for_numeric (ASTNode *node)
 
     emit_asm("%s:\n", start_label);
 
-    // -------------------------------------------------------------------------
-    // STEP 4: Loop condition check
+        // -------------------------------------------------------------------------
+    // STEP 4: Loop condition check (against the hidden control variable)
     // -------------------------------------------------------------------------
     int r_idx = allocate_register();
     int r_lim = allocate_register();
+    int r_idx_val = allocate_register();   // NEW: FGT/FLT below is destructive and
+                                            // overwrites r_idx with its 0/1 boolean
+                                            // result -- this register keeps an
+                                            // untouched copy of the actual control
+                                            // value for STEP 4b to publish into `i`.
 
     mark_register_live(r_idx, 5);
     mark_register_live(r_lim, 5);
+    mark_register_live(r_idx_val, 5);
 
-    // Load index (possibly boxed) and limit (never boxed) into registers.
-    emit_load_variable(index_var, r_idx);
+    // Load control counter (never boxed) and limit (never boxed) into registers.
+    emit_asm("MOV R%d, %s", r_idx, access_control);
+    emit_asm("MOV R%d, R%d ; preserve control value -- FGT/FLT below is destructive", r_idx_val, r_idx);
     emit_asm("MOV R%d, %s", r_lim, access_limit);
 
     if (is_static_step) {
@@ -141,9 +170,9 @@ void  node_for_numeric (ASTNode *node)
         ensure_in_register(r_lim);
 
         if (static_step_val >= 0.0) {
-            emit_asm("FGT R%d, R%d ; Check if index > limit (exit condition)", r_idx, r_lim);
+            emit_asm("FGT R%d, R%d ; Check if control > limit (exit condition)", r_idx, r_lim);
         } else {
-            emit_asm("FLT R%d, R%d ; Check if index < limit (exit condition)", r_idx, r_lim);
+            emit_asm("FLT R%d, R%d ; Check if control < limit (exit condition)", r_idx, r_lim);
         }
         emit_asm("JT R%d, %s ; Jump to end if loop condition fails", r_idx, end_label);
     } else {
@@ -161,11 +190,11 @@ void  node_for_numeric (ASTNode *node)
         emit_asm("FGE R%d, 0.000000 ; Check if step >= 0", r_step);
         emit_asm("JT R%d, %s ; Jump if step is positive", r_step, pos_lbl);
 
-        emit_asm("FLT R%d, R%d ; index < limit?", r_idx, r_lim);
+        emit_asm("FLT R%d, R%d ; control < limit?", r_idx, r_lim);
         emit_asm("JMP %s ; Jump to check", chk_lbl);
 
         emit_asm("%s:\n", pos_lbl);
-        emit_asm("FGT R%d, R%d ; index > limit?", r_idx, r_lim);
+        emit_asm("FGT R%d, R%d ; control > limit?", r_idx, r_lim);
 
         emit_asm("%s:\n", chk_lbl);
         emit_asm("JT R%d, %s ; Exit if condition met", r_idx, end_label);
@@ -173,8 +202,17 @@ void  node_for_numeric (ASTNode *node)
         unlock_register(r_step);
     }
 
+    // -------------------------------------------------------------------------
+    // STEP 4b: Publish the (preserved, pre-comparison) control counter into
+    // the user-visible index variable for this iteration. r_idx itself is
+    // NOT safe to use here -- FGT/FLT above destructively overwrote it with
+    // their 0/1 comparison result. r_idx_val still holds the real value.
+    // -------------------------------------------------------------------------
+    emit_initialize_local(index_sym, r_idx_val);
+
     unlock_register(r_idx);
     unlock_register(r_lim);
+    unlock_register(r_idx_val);
 
     // -------------------------------------------------------------------------
     // STEP 5: Execute loop body
@@ -182,7 +220,9 @@ void  node_for_numeric (ASTNode *node)
     generate_block(node->as.for_numeric.body);
 
     // -------------------------------------------------------------------------
-    // STEP 6: Increment index and loop back
+    // STEP 6: Increment the hidden control variable and loop back. Note
+    // this reads/writes control_var, NOT index_var -- so anything the body
+    // did to `i` is irrelevant to iteration.
     // -------------------------------------------------------------------------
     int r_calc = allocate_register();
     int r_st = allocate_register();
@@ -190,21 +230,17 @@ void  node_for_numeric (ASTNode *node)
     mark_register_live(r_calc, 2);
     mark_register_live(r_st, 2);
 
-    // Load current index (possibly boxed) and step (never boxed).
-    emit_load_variable(index_var, r_calc);
+    emit_asm("MOV R%d, %s", r_calc, access_control);
     emit_asm("MOV R%d, %s", r_st, access_step);
 
     ensure_in_register(r_calc);
     ensure_in_register(r_st);
 
-    emit_asm("FADD R%d, R%d ; index += step", r_calc, r_st);
+    emit_asm("FADD R%d, R%d ; control += step", r_calc, r_st);
 
-    // Store the new value back. Deliberately emit_initialize_local(), not
-    // emit_store_variable(): when index_sym is boxed this allocates a BRAND
-    // NEW box for this iteration rather than writing through last
-    // iteration's box, so closures created in different iterations each
-    // keep their own value.
-    emit_initialize_local(index_sym, r_calc);
+    // Plain raw store back into the hidden control slot -- no boxing, no
+    // closure semantics, this variable is never Lua-visible.
+    emit_asm("MOV %s, R%d ; Save incremented control counter", access_control, r_calc);
 
     unlock_register(r_calc);
     unlock_register(r_st);

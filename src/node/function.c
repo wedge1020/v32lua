@@ -337,6 +337,29 @@ void  node_function_call (ASTNode *node, int  dest_reg)
     }
 
     // -------------------------------------------------------------------------
+    // STEP 1.75: Protect target_reg across argument evaluation
+    // -------------------------------------------------------------------------
+    // Any argument expression below may itself be (or contain) a nested
+    // function call -- e.g. `add_one(add_one(add_one(5)))`. Each nested call
+    // emits its own "CALL __builtin_exec", which tail-jumps into a
+    // separately-compiled Lua function body free to clobber target_reg's
+    // physical register number as its own internal scratch space.
+    //
+    // Force the spill NOW (mirroring exactly how table_reg is already
+    // handled a few lines above) rather than leaving it to chance under
+    // register pressure. This uses the allocator's own tracked spill slot,
+    // not a raw stack PUSH/POP -- the existing ensure_in_register(target_reg)
+    // at STEP 4 already reloads it correctly from there; a hand-rolled
+    // PUSH/POP would operate on the same dynamic operand stack argument
+    // evaluation and nested calls also use, invisibly to the allocator,
+    // and risks corrupting unrelated spill/reload addressing for anything
+    // that happens in between.
+    // -------------------------------------------------------------------------
+    if (!is_c_call) {
+        spill_register(target_reg);
+    }
+
+    // -------------------------------------------------------------------------
     // STEP 2: Evaluate & Push Explicit Arguments (Right-to-Left)
     // -------------------------------------------------------------------------
     // Count explicit arguments

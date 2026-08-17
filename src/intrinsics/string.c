@@ -11,45 +11,68 @@ bool emit_string_byte_intrinsic(ASTNode *node, int dest_reg) {
 
     emit_asm("    ;; --- Intrinsic: string.byte(s [, i [, j]]) ---\n");
 
-    // Evaluate string argument
+    // ============================================================
+    // PHASE 1: Evaluate all arguments into registers first
+    // This ensures we don't lose track of register allocations
+    // ============================================================
     int str_reg = allocate_pinned_register();
     generate_asm(arg, str_reg);
 
-    // Push string onto stack
-    emit_asm("PUSH R%d             ; Arg 1: String\n", str_reg);
-
-    // Handle optional start index (arg 2)
+    int start_reg = 0;
+    bool has_start = false;
     arg = arg->next;
     if (arg) {
-        int idx_reg = allocate_pinned_register();
-        generate_asm(arg, idx_reg);
-        emit_asm("PUSH R%d             ; Arg 2: Start index\n", idx_reg);
-        unlock_pinned_register(idx_reg);
+        start_reg = allocate_pinned_register();
+        generate_asm(arg, start_reg);
+        has_start = true;
 
-        // Handle optional end index (arg 3)
+        int end_reg = 0;
+        bool has_end = false;
         arg = arg->next;
         if (arg) {
-            idx_reg = allocate_pinned_register();
-            generate_asm(arg, idx_reg);
-            emit_asm("PUSH R%d             ; Arg 3: End index\n", idx_reg);
-            unlock_pinned_register(idx_reg);
-        } else {
-            emit_asm("PUSH R0             ; No end index (nil)\n");
-            emit_asm("MOV R0, BOXED_NIL\n");
-            emit_asm("PUSH R0\n");
+            end_reg = allocate_pinned_register();
+            generate_asm(arg, end_reg);
+            has_end = true;
         }
-    } else {
-        // For default case (no indices):
-        emit_asm("MOV R0, BOXED_NIL\n");
-        emit_asm("PUSH R0             ; No start index (nil)\n");
-        emit_asm("PUSH R0             ; No end index (nil)\n");
 
-        // For case with start index but no end index:
+        // =========================================================
+        // PHASE 2: Push arguments in REVERSE order
+        //
+        // VIRCON32 STACK BEHAVIOR: PUSH decrements SP *before* storing
+        // So pushing A, B, C results in stack: [SP] = C, [SP+1] = B, [SP+2] = A
+        //
+        // Runtime __builtin_string_byte expects:
+        //   [BP+2] = string (first argument)
+        //   [BP+3] = start index (second argument)
+        //   [BP+4] = end index (third argument)
+        //
+        // To achieve this, we push in reverse: end, start, string
+        // This way after CALL: [BP+2] = string, [BP+3] = start, [BP+4] = end
+        // =========================================================
+        if (has_end) {
+            emit_asm("PUSH R%d             ; Arg 3: End index\n", end_reg);
+            unlock_pinned_register(end_reg);
+        } else {
+            // No end index provided - use nil
+            emit_asm("MOV R0, BOXED_NIL\n");
+            emit_asm("PUSH R0             ; No end index (nil)\n");
+        }
+
+        emit_asm("PUSH R%d             ; Arg 2: Start index\n", start_reg);
+        unlock_pinned_register(start_reg);
+    } else {
+        // No start or end indices - both default to nil
         emit_asm("MOV R0, BOXED_NIL\n");
         emit_asm("PUSH R0             ; No end index (nil)\n");
+        emit_asm("PUSH R0             ; No start index (nil)\n");
     }
 
-    // Call runtime routine
+    // Push string LAST so it ends up at [BP+2] after CALL
+    emit_asm("PUSH R%d             ; Arg 1: String\n", str_reg);
+
+    // =========================================================
+    // PHASE 3: Call runtime and clean up
+    // =========================================================
     emit_asm("CALL __builtin_string_byte\n");
     emit_asm("IADD SP, 3           ; Clean up 3 arguments\n");
 
@@ -72,23 +95,50 @@ bool emit_string_char_intrinsic(ASTNode *node, int dest_reg) {
 
     emit_asm("    ;; --- Intrinsic: string.char(b1, b2, ..., bn) ---\n");
 
-    // Push all arguments onto stack (right-to-left for C ABI)
+    // ============================================================
+    // PHASE 1: Evaluate all arguments into registers first
+    // We need to hold all registers until we push in reverse order
+    // ============================================================
     arg = node->as.call.args_head;
-    while (arg) {
-        int arg_reg = allocate_pinned_register();
-        generate_asm(arg, arg_reg);
-        emit_asm("PUSH R%d             ; Byte value\n", arg_reg);
-        unlock_pinned_register(arg_reg);
+    int *arg_regs = malloc(arg_count * sizeof(int));
+    for (int i = 0; i < arg_count && arg; i++) {
+        arg_regs[i] = allocate_pinned_register();
+        generate_asm(arg, arg_regs[i]);
         arg = arg->next;
     }
 
-    // Add NIL terminator
+    // ============================================================
+    // PHASE 2: Push arguments in REVERSE order
+    //
+    // Runtime __builtin_string_char expects:
+    //   [BP+2] = first byte argument
+    //   [BP+3] = second byte argument
+    //   ...
+    //   [BP+2+N] = BOXED_NIL (terminator)
+    //
+    // It scans forward from [BP+2] until it hits NIL.
+    //
+    // To achieve this with downward-growing stack:
+    // Push NIL first, then argN, argN-1, ..., arg1
+    // This results in stack: arg1, arg2, ..., argN, NIL
+    // After CALL: [BP+2] = arg1, [BP+3] = arg2, ..., [BP+2+N] = NIL
+    // ============================================================
     emit_asm("MOV R0, BOXED_NIL\n");
     emit_asm("PUSH R0             ; BOXED_NIL terminator\n");
 
-    // Update cleanup count
+    // Push arguments from last to first
+    for (int i = arg_count - 1; i >= 0; i--) {
+        emit_asm("PUSH R%d             ; Byte value\n", arg_regs[i]);
+        unlock_pinned_register(arg_regs[i]);
+    }
+    free(arg_regs);
+
+    // ============================================================
+    // PHASE 3: Call runtime and clean up
+    // ============================================================
     emit_asm("CALL __builtin_string_char\n");
     emit_asm("IADD SP, %d           ; Clean up %d arguments\n", arg_count + 1, arg_count + 1);
+
     if (dest_reg != 0) {
         emit_asm("MOV R%d, R0         ; Store result\n", dest_reg);
     }
