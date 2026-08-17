@@ -812,7 +812,9 @@ __builtin_string_byte:
     IEQ   R2, BOXED_NIL      ; Check if start index is NIL
     JT    R2, __string_byte_default_start
 
-    ;; Start index provided - convert from Lua 1-based to 0-based
+    ;; Start index provided - the IEQ above destructively overwrote R2 with
+    ;; its own 0/1 result, so reload the real argument before converting it.
+    MOV   R2, [BP+3]
     CFI   R2                 ; Convert float to integer
     ISUB  R2, 1              ; Convert to 0-based index
     JMP   __string_byte_check_end
@@ -826,7 +828,8 @@ __string_byte_check_end:
     IEQ   R3, BOXED_NIL
     JT    R3, __string_byte_default_end
 
-    ;; End index provided - convert from Lua 1-based to 0-based
+    ;; Same fix: reload R3 before converting, IEQ above clobbered it.
+    MOV   R3, [BP+4]
     CFI   R3
     ISUB  R3, 1
     JMP   __string_byte_validate
@@ -836,24 +839,36 @@ __string_byte_default_end:
 
     ;; --- Step 4: Validate indices are within string bounds ---
 __string_byte_validate:
-    ;; Get string length - MUST push string pointer on stack first!
-    PUSH  R1                  ; ⚠️ FIX: Push string before calling length function
+    ;; __builtin_string_len clobbers R0-R2 internally with no callee-save,
+    ;; so R1 (our string pointer) does not survive this CALL unless we
+    ;; explicitly preserve it ourselves -- pushing it as the argument does
+    ;; NOT count as preserving it, since it's never popped back.
+    PUSH  R1                  ; preserve string pointer across the CALL below
+    PUSH  R1                  ; Arg 1 for __builtin_string_len
     CALL  __builtin_string_len
-    IADD  SP, 1               ; Clean up the pushed argument
+    IADD  SP, 1               ; Clean up the length-call's own argument
     MOV   R4, R0              ; R4 = length as float
-    CFI   R4                  ; ⚠️ FIX: Convert float length to integer for comparisons
+    CFI   R4                  ; Convert float length to integer for comparisons
+    POP   R1                  ; restore string pointer
 
-    ;; Validate: start >= 0 AND start < length
-    ILT   R2, 0
-    JT    R2, __string_byte_error
-    IGE   R2, R4
-    JT    R2, __string_byte_error
+    ;; Validate: start >= 0 AND start < length. Use a scratch register (R5)
+    ;; for these comparisons -- R2/R3 are still needed below at Step 5 to
+    ;; compute the byte address, and ILT/IGE destructively overwrite their
+    ;; left operand with the 0/1 boolean result.
+    MOV   R5, R2
+    ILT   R5, 0
+    JT    R5, __string_byte_error
+    MOV   R5, R2
+    IGE   R5, R4
+    JT    R5, __string_byte_error
 
     ;; Validate: end >= start AND end < length
-    ILT   R3, R2
-    JT    R3, __string_byte_error
-    IGE   R3, R4
-    JT    R3, __string_byte_error
+    MOV   R5, R3
+    ILT   R5, R2
+    JT    R5, __string_byte_error
+    MOV   R5, R3
+    IGE   R5, R4
+    JT    R5, __string_byte_error
 
     ;; --- Step 5: Return byte at validated position ---
     IADD  R1, R2              ; R1 = string pointer + start offset

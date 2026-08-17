@@ -73,7 +73,7 @@ void spill_register(int reg)
 // Forces a register to spill even if it's pinned
 // Used for emergency register recovery when inventory is exhausted
 // FIX 3: New function for emergency spilling
-static void force_spill_register(int reg)
+void force_spill_register(int reg)
 {
     if (reg < 0 || reg >= NUM_GPRS) return;
 

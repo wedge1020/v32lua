@@ -35,6 +35,7 @@ void  unlock_pinned_register    (int);
 int   is_register_locked        (int);
 int   allocate_register         (void);
 void  spill_register            (int);  // Spill a register to stack
+void  force_spill_register      (int);
 int   ensure_in_register        (int);  // Load if spilled
 void  reset_spill_slots         (int);  // per-function spilling
 void  mark_register_live        (int,  int);

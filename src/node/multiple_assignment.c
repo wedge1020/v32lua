@@ -53,37 +53,55 @@ void node_multiple_assignment(ASTNode *node)
             generate_asm(curr_val, 0);  // dest_reg=0 means don't store to single reg
 
             // -----------------------------------------------------------------
-            // Assign return values from R0, R2, R3, ... to targets, following
-            // the SAME layout node_return() uses to produce them: value 0 in
-            // R0, value 1 in R2, value 2 in R3 (R1 is never used for this).
-            // Each value is copied into its OWN freshly allocated register
-            // before being handed to emit_initialize_local()/
-            // emit_store_variable() -- do not read from one register and
-            // store from a different, uninitialized one.
+            // PASS 1: Copy ALL raw return values (R0, R2, R3) out of their
+            // fixed registers into freshly allocated, protected temp
+            // registers FIRST, as one uninterrupted block, before touching
+            // any target's storage.
+            //
+            // Lock the raw return-value registers themselves BEFORE
+            // allocating any tmp_reg. Without this, allocate_register()
+            // could hand back R2 (or R3) as the tmp_reg for return value 0,
+            // clobbering it before return value 1 is ever read out of it --
+            // the same hazard as before, just one level further in. Locking
+            // R0/R2/R3 up front makes them ineligible for that allocation
+            // entirely, so every tmp_reg is guaranteed to land somewhere
+            // else until all raw values are safely copied out.
+            // -----------------------------------------------------------------
+            int extract_count = return_count;
+            if (extract_count > 3) {
+                compiler_error(ERR_INTERNAL, -1,
+                    "Multi-return assignment with more than 3 values is not yet supported");
+                extract_count = 3; // keep going defensively after reporting
+            }
+
+            int raw_regs[3] = {0, 2, 3}; // physical registers node_return() places values in
+
+            for (int i = 0; i < extract_count; i++) {
+                lock_register(raw_regs[i]);
+            }
+
+            int tmp_regs[3];
+            for (int i = 0; i < extract_count; i++) {
+                tmp_regs[i] = allocate_register();
+                mark_register_live(tmp_regs[i], extract_count + 2); // survive the whole copy+store pass
+
+                emit_asm("MOV R%d, R%d ; Read return value %d", tmp_regs[i], raw_regs[i], i);
+            }
+
+            // Raw registers are now fully copied out -- safe to release.
+            for (int i = 0; i < extract_count; i++) {
+                unlock_register(raw_regs[i]);
+            }
+
+            // -----------------------------------------------------------------
+            // PASS 2: Every return value is now safely parked in its own
+            // protected register, in order. Storing can no longer clobber a
+            // still-pending return value -- there isn't one anymore.
             // -----------------------------------------------------------------
             int reg_index = 0;
-            while (curr_tgt != NULL && reg_index < return_count) {
+            while (curr_tgt != NULL && reg_index < extract_count) {
                 if (curr_tgt->type == NODE_IDENTIFIER) {
-                    int tmp_reg = allocate_register();
-
-                    if (reg_index == 0) {
-                        emit_asm("MOV R%d, R0 ; Read return value 0", tmp_reg);
-                    } else if (reg_index == 1) {
-                        emit_asm("MOV R%d, R2 ; Read return value 1", tmp_reg);
-                    } else if (reg_index == 2) {
-                        emit_asm("MOV R%d, R3 ; Read return value 2", tmp_reg);
-                    } else {
-                        // node_return() places value 3+ on the stack at
-                        // [BP + 2 + arg_count + (index - 3)], relative to
-                        // the CALLEE's own frame -- retrieving that correctly
-                        // from here would need the callee's arg_count, which
-                        // isn't available at this call site. Rather than
-                        // guess and risk silently reading the wrong stack
-                        // slot, fail loudly until this is deliberately
-                        // implemented.
-                        compiler_error(ERR_INTERNAL, -1,
-                            "Multi-return assignment with more than 3 values is not yet supported");
-                    }
+                    int tmp_reg = tmp_regs[reg_index];
 
                     if (node->as.mult_assign.is_local) {
                         SymbolNode *sym = register_local(curr_tgt->as.id.name);
@@ -97,6 +115,12 @@ void node_multiple_assignment(ASTNode *node)
 
                 curr_tgt = curr_tgt->next;
                 reg_index++;
+            }
+
+            // Unlock any extracted values that had no matching target
+            // (more return values than targets on the LHS).
+            for (int i = reg_index; i < extract_count; i++) {
+                unlock_register(tmp_regs[i]);
             }
 
             // -----------------------------------------------------------------

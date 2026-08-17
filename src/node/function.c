@@ -345,18 +345,17 @@ void  node_function_call (ASTNode *node, int  dest_reg)
     // separately-compiled Lua function body free to clobber target_reg's
     // physical register number as its own internal scratch space.
     //
-    // Force the spill NOW (mirroring exactly how table_reg is already
-    // handled a few lines above) rather than leaving it to chance under
-    // register pressure. This uses the allocator's own tracked spill slot,
-    // not a raw stack PUSH/POP -- the existing ensure_in_register(target_reg)
-    // at STEP 4 already reloads it correctly from there; a hand-rolled
-    // PUSH/POP would operate on the same dynamic operand stack argument
-    // evaluation and nested calls also use, invisibly to the allocator,
-    // and risks corrupting unrelated spill/reload addressing for anything
-    // that happens in between.
+    // target_reg comes from allocate_pinned_register() (STEP 1), so it IS
+    // pinned -- plain spill_register() bails out immediately for pinned
+    // registers (that's the whole point of pinning) and would silently emit
+    // nothing here. force_spill_register() is the existing escape hatch for
+    // exactly this situation: it spills unconditionally without touching the
+    // pinned flag, and the pre-existing ensure_in_register(target_reg) at
+    // STEP 4 reloads it correctly afterward, the same as it already does for
+    // ordinary spills.
     // -------------------------------------------------------------------------
     if (!is_c_call) {
-        spill_register(target_reg);
+        force_spill_register(target_reg);
     }
 
     // -------------------------------------------------------------------------
