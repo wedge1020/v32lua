@@ -331,7 +331,7 @@ number_result17: 5.0000
 number_result18: 3.0000
 number_result19: 3.0000
 number_result20: 5.0000
-number_result21: 10.0000
+number_result21: 3.0000
 number_result22: 15.0000
 number_result23: 15.0000
 

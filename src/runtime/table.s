@@ -99,12 +99,12 @@ __builtin_table_get:
     JT   R4, __builtin_table_get_fallback ; Zero or negative keys go to fallback!
 
     ;; FAST-PATH CHECK 4: Is Key within LENGTH AND array allocated?
-    MOV  R5, [R1+1]          ; R5 = Array LENGTH (Word 1) — not capacity!
+    MOV  R5, [R1+1]          ; R5 = Array LENGTH (Word 1)
     MOV  R6, [R1+2]          ; R6 = Array Data Pointer
     IEQ  R6, 0
-    JT   R6, __builtin_table_get_fallback
+    JT   R6, __builtin_table_get_fallback_intkey   ; no array, but key is a known-valid positive int (R3)
     MOV  R4, R3
-    IGT  R4, R5              ; Is Key > Length?
+    IGT  R4, R5
     JT   R4, __builtin_table_get_fallback
 
     ;; --- FAST-PATH EXECUTION: O(1) Contiguous Array Read ---
@@ -113,6 +113,15 @@ __builtin_table_get:
     IADD R5, R3              ; Memory Address = ArrayPtr + (Key - 1)
     MOV  R0, [R5]            ; Read value directly from contiguous heap buffer!
     JMP  __builtin_table_get_done
+
+__builtin_table_get_fallback_intkey:
+    ;; Key is a valid positive integer beyond the table's logical length
+    ;; can't be present, even if a stale hash pair exists for it (removal
+    ;; doesn't scrub vacated slots) - short-circuit before scanning the hash.
+    MOV  R4, R3
+    IGT  R4, R5
+    JT   R4, __builtin_table_get_not_found
+    JMP  __builtin_table_get_fallback
 
 ;; --- FALLBACK EXECUTION: Association List Scan ---
 __builtin_table_get_fallback:
@@ -1078,18 +1087,6 @@ __table_remove_hash_shift_loop:
     JMP  __table_remove_hash_shift_loop
 
 __table_remove_hash_shift_done:
-    ;; clear the vacated tail slot: set(table, length, nil)
-    MOV  R6, R1
-    OR   R6, BOXED_TABLE
-    MOV  R0, R3
-    CIF  R0                    ; R0 = float(length)
-    PUSH R6
-    PUSH R0
-    MOV  R0, BOXED_NIL
-    PUSH R0
-    CALL __builtin_table_set
-    IADD SP, 3
-
     ISUB R3, 1
     MOV  [R1+1], R3
     MOV  R0, R7
