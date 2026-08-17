@@ -792,152 +792,158 @@ __ftoa_done:
 ;; ===========================================================================
 ;; Built-in: string.byte(s [, i [, j]])
 ;; Returns byte values from string as Lua numbers
-;; Incoming Stack: [BP+2] = string, [BP+3] = optional start index (1-based), [BP+4] = optional end index
-;; Returns: R0 = byte value (as boxed float), or multiple values on stack
+;;
+;; Incoming Stack: [BP+2] = string, [BP+3] = optional start index (1-based),
+;;                 [BP+4] = optional end index
+;; Returns: R0 = byte value (as boxed float), or BOXED_NIL on error
+;; Clobbers: R0-R4
 ;; ===========================================================================
 __builtin_string_byte:
-    PUSH BP
-    MOV  BP, SP
+    PUSH  BP
+    MOV   BP, SP
 
-    ;; Load and unbox string
-    MOV  R0, [BP+2]
-    CALL __unbox_string
-    MOV  R1, R0              ; R1 = unboxed string pointer
+    ;; --- Step 1: Load and unbox the string ---
+    MOV   R0, [BP+2]          ; Load string argument
+    CALL  __unbox_string      ; R0 = raw memory address (ROM or RAM)
+    MOV   R1, R0              ; R1 = unboxed string pointer (preserve)
 
-    ;; Default start index = 1 (Lua is 1-based)
-    MOV  R2, [BP+3]          ; Check if start index provided
-    IEQ  R2, BOXED_NIL
-    JT   R2, __string_byte_default_start
-    ;; Convert from Lua float to integer index
-    CFI  R2                 ; Convert Float to Integer
-    IADD R2, -1            ; Convert to 0-based
-    JMP  __string_byte_check_end
+    ;; --- Step 2: Handle optional start index (defaults to 1 = index 0) ---
+    MOV   R2, [BP+3]          ; Load start index argument
+    IEQ   R2, BOXED_NIL      ; Check if start index is NIL
+    JT    R2, __string_byte_default_start
+
+    ;; Start index provided - convert from Lua 1-based to 0-based
+    CFI   R2                 ; Convert float to integer
+    ISUB  R2, 1              ; Convert to 0-based index
+    JMP   __string_byte_check_end
 
 __string_byte_default_start:
-    MOV  R2, 0              ; Start at index 0 (first character)
+    MOV   R2, 0              ; Default: start at first character (0-based)
 
+    ;; --- Step 3: Handle optional end index (defaults to start index) ---
 __string_byte_check_end:
-    ;; Default end index = start index (single byte)
-    MOV  R3, [BP+4]          ; Check if end index provided
-    IEQ  R3, BOXED_NIL
-    JT   R3, __string_byte_default_end
-    CFI  R3
-    IADD R3, -1
-    JMP  __string_byte_validate
+    MOV   R3, [BP+4]          ; Load end index argument
+    IEQ   R3, BOXED_NIL
+    JT    R3, __string_byte_default_end
+
+    ;; End index provided - convert from Lua 1-based to 0-based
+    CFI   R3
+    ISUB  R3, 1
+    JMP   __string_byte_validate
 
 __string_byte_default_end:
-    MOV  R3, R2              ; Default: same as start
+    MOV   R3, R2              ; Default: end = start (single byte)
 
+    ;; --- Step 4: Validate indices are within string bounds ---
 __string_byte_validate:
-    ;; Validate indices are within bounds
-    ;; Get string length
-	PUSH  R1
-	CALL  __builtin_string_len
-	IADD  SP, 1
-	MOV   R4, R0
+    ;; Get string length - MUST push string pointer on stack first!
+    PUSH  R1                  ; ⚠️ FIX: Push string before calling length function
+    CALL  __builtin_string_len
+    IADD  SP, 1               ; Clean up the pushed argument
+    MOV   R4, R0              ; R4 = length as float
+    CFI   R4                  ; ⚠️ FIX: Convert float length to integer for comparisons
 
-    ;CIF  R0                 ; Already a float
-    ;MOV  R4, R0            ; R4 = length as float
-    ;CFI  R4                 ; Convert to integer
+    ;; Validate: start >= 0 AND start < length
+    ILT   R2, 0
+    JT    R2, __string_byte_error
+    IGE   R2, R4
+    JT    R2, __string_byte_error
 
-    ;; Check start >= 0 and start < length
-    ILT  R2, 0
-    JT   R2, __string_byte_error
-    IGE  R2, R4
-    JT   R2, __string_byte_error
+    ;; Validate: end >= start AND end < length
+    ILT   R3, R2
+    JT    R3, __string_byte_error
+    IGE   R3, R4
+    JT    R3, __string_byte_error
 
-    ;; Check end >= start and end < length
-    ILT  R3, R2
-    JT   R3, __string_byte_error
-    IGE  R3, R4
-    JT   R3, __string_byte_error
+    ;; --- Step 5: Return byte at validated position ---
+    IADD  R1, R2              ; R1 = string pointer + start offset
+    MOV   R0, [R1]            ; Load byte from string memory
+    CIF   R0                  ; Convert to Lua float
+    JMP   __string_byte_done
 
-    ;; Return byte at position R2
-    IADD R1, R2            ; Point to character
-    MOV  R0, [R1]          ; Load byte
-    CIF  R0               ; Convert to Lua number (float)
-
-    MOV  SP, BP
-    POP  BP
-    RET
-
+    ;; --- Error handling ---
 __string_byte_error:
-    MOV  R0, BOXED_NIL      ; Return nil on error
-    MOV  SP, BP
-    POP  BP
+    MOV   R0, BOXED_NIL      ; Return nil on any error
+
+__string_byte_done:
+    MOV   SP, BP
+    POP   BP
     RET
 
 ;; ===========================================================================
 ;; Built-in: string.char(b1, b2, ..., bn)
-;; Creates a string from byte values
-;; Incoming Stack: [BP+2] = first byte, [BP+3] = second byte, ... terminated by BOXED_NIL
+;; Creates a new string from byte values
+;;
+;; Incoming Stack: [BP+2] = first byte, [BP+3] = second byte, ...
+;;                 Arguments MUST be terminated by BOXED_NIL
 ;; Returns: R0 = new string (boxed as RAM string)
 ;; Clobbers: R0-R5
 ;; ===========================================================================
 __builtin_string_char:
-    PUSH BP
-    MOV  BP, SP
+    PUSH  BP
+    MOV   BP, SP
 
-    ;; --- STEP 1: Count arguments by scanning for BOXED_NIL terminator ---
-    MOV  R1, BP              ; R1 = base pointer to stack frame
-    IADD R1, 2              ; R1 = pointer to first argument ([BP+2])
-    MOV  R2, 0              ; R2 = argument counter
+    ;; --- Step 1: Count arguments by scanning for BOXED_NIL terminator ---
+    MOV   R1, BP               ; R1 = base pointer to stack frame
+    IADD  R1, 2               ; R1 = pointer to first argument ([BP+2])
+    MOV   R2, 0               ; R2 = argument counter
 
 __string_char_count_loop:
-    MOV  R3, [R1]           ; Load current argument
-    IEQ  R3, BOXED_NIL      ; Check for terminator
-    JT   R3, __string_char_count_done
-    IADD R2, 1              ; Increment counter
-    IADD R1, 1              ; Move to next argument
-    JMP  __string_char_count_loop
+    MOV   R3, [R1]            ; Load current argument from stack
+    IEQ   R3, BOXED_NIL       ; Check if this is the terminator
+    JT    R3, __string_char_count_done  ; ⚠️ FIX: JT (not TB) jumps if R3 != 0 (equal)
+    IADD  R2, 1               ; Increment argument counter
+    IADD  R1, 1               ; Move pointer to next stack word
+    JMP   __string_char_count_loop
 
 __string_char_count_done:
-    ;; R2 now contains the number of arguments
-    ;; Allocate memory: R2 bytes + 1 for null terminator
-    IADD R2, 1              ; +1 for null terminator
-    PUSH R2
-    CALL __malloc
-    IADD SP, 1
-    MOV  R4, R0            ; R4 = heap pointer (save in R4)
+    ;; --- Step 2: Allocate memory (R2 bytes + 1 for null terminator) ---
+    ;; Note: __malloc expects size in WORDS, but R2 is in bytes.
+    ;; For now we assume bytes == words (simplification for single-byte chars)
+    IADD  R2, 1               ; +1 for null terminator byte
+    PUSH  R2
+    CALL  __malloc
+    IADD  SP, 1
+    MOV   R4, R0              ; R4 = heap pointer (preserve for return)
 
-    ;; Check for OOM
-    IEQ  R4, 0
-    JT   R4, __string_char_oom
+    ;; Handle out-of-memory
+    IEQ   R4, 0
+    JT    R4, __string_char_oom
 
-    ;; --- STEP 2: Copy bytes from stack to heap ---
-    MOV  R1, BP              ; Reset R1 to base pointer
-    IADD R1, 2              ; R1 = pointer to first argument
-    MOV  R5, R4            ; R5 = current write position in heap
+    ;; --- Step 3: Copy byte values from stack to heap ---
+    MOV   R1, BP               ; Reset R1 to base pointer
+    IADD  R1, 2               ; R1 = pointer to first argument ([BP+2])
+    MOV   R5, R4              ; R5 = current write position in heap
 
 __string_char_copy_loop:
-    MOV  R3, [R1]           ; Load current argument
-    IEQ  R3, BOXED_NIL      ; Check for terminator
-    JT   R3, __string_char_copy_done
+    MOV   R3, [R1]            ; Load current argument
+    IEQ   R3, BOXED_NIL       ; Check for terminator
+    JT    R3, __string_char_copy_done  ; ⚠️ FIX: JT (not TB) jumps if equal
 
-    ;; Convert Lua number to integer byte
-    CFI  R3                 ; Convert Float to Integer
-    MOV  [R5], R3           ; Store byte at current position
-    IADD R5, 1              ; Advance write pointer
-    IADD R1, 1              ; Advance read pointer (to next stack arg)
-    JMP  __string_char_copy_loop
+    ;; Convert Lua float byte to integer and store
+    CFI   R3                  ; Convert float to integer (byte value)
+    MOV   [R5], R3            ; Store byte at current heap position
+    IADD  R5, 1               ; Advance write pointer (by 1 word)
+    IADD  R1, 1               ; Advance read pointer to next argument
+    JMP   __string_char_copy_loop
 
 __string_char_copy_done:
-    ;; Null-terminate the string
-    MOV  R3, 0
-    MOV  [R5], R3
+    ;; --- Step 4: Null-terminate the new string ---
+    MOV   R3, 0
+    MOV   [R5], R3            ; Write null terminator byte
 
-    ;; Box as RAM string and return
-    MOV  R0, R4
-    OR   R0, BOXED_RAMSTRING
+    ;; --- Step 5: Box as RAM string and return ---
+    MOV   R0, R4              ; Return heap pointer
+    OR    R0, BOXED_RAMSTRING ; Tag as RAM string
 
-    MOV  SP, BP
-    POP  BP
+    MOV   SP, BP
+    POP   BP
     RET
 
 __string_char_oom:
-    MOV  R0, BOXED_NIL      ; Return nil on OOM
-    MOV  SP, BP
-    POP  BP
+    MOV   R0, BOXED_NIL      ; Return nil on allocation failure
+    MOV   SP, BP
+    POP   BP
     RET
 
 ;; ===========================================================================
