@@ -541,6 +541,8 @@ void generate_program (ASTNode *head)
     char    *check               = NULL;
     int      final_line_offset   = 0; 
 
+	//analyze_closures (program_root);
+
     // =========================================================================
     // 1. CONDITIONAL ENTRY POINT CHECKS
     // =========================================================================

@@ -65,6 +65,13 @@ void  node_for_numeric (ASTNode *node)
     snprintf(step_var, sizeof(step_var), "__step_%d", label_id);
     strcpy(index_var, node->as.for_numeric.index_name);
 
+	/*
+	if (index_sym->is_boxed) {
+		emit_initialize_local(index_sym, value_reg_holding_current_index);
+	} else {
+		emit_store_variable(index_var, value_reg_holding_current_index);
+	}*/
+
     // Access strings for stack frame references
     char access_limit[128], access_step[128], access_index[128];
 
@@ -302,6 +309,13 @@ void node_for_generic(ASTNode *node)
     register_local(key_var);
 
     char access_iter[128], access_state[128], access_key[128];
+
+	/*
+	if (index_sym->is_boxed) {
+		emit_initialize_local(index_sym, value_reg_holding_current_index);
+	} else {
+		emit_store_variable(index_var, value_reg_holding_current_index);
+	}*/
     get_variable_access_string(iter_func_var, access_iter);
     get_variable_access_string(state_var, access_state);
     get_variable_access_string(key_var, access_key);

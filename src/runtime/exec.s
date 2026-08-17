@@ -16,16 +16,49 @@ __builtin_exec:
     JMP __runtime_error_not_callable
 
 __exec_valid:
-    ; 3. Unbox the address and restore the Vircon32 memory page bit
-    AND R0, BOXED_PAYLOAD          ; Strip NaN-box tag bits
-    OR  R0, V32_CART_PAGE          ; Restore Vircon32 code memory page bit
-    
-    ; 4. The Tail-Call Jump!
-    ; We do NOT use CALL R0 here. Because the original call site executed 
-    ; "CALL __builtin_exec", the return address to the script is already on the 
-    ; stack. By jumping directly to R0, the target function executes and its own 
-    ; "RET" instruction will cleanly return straight to the original caller!
+    MOV R2, R0
+    AND R2, BOXED_CLOSURE_FLAG
+    JT  R2, __exec_closure
+
+    ; --- plain function: unchanged fast path ---
+    AND R0, BOXED_PAYLOAD
+    OR  R0, V32_CART_PAGE
     JMP R0
+
+; ----------------------------------------------------------------------------
+; Closure case: R0's payload is a RAM address of a closure record:
+;   [0] code address (needs V32_CART_PAGE OR'd back in, same as plain funcs)
+;   [1] upvalue count
+;   [2..] boxed-upvalue pointers, in the order the callee expects them
+;
+; We push the upvalues onto the stack right here, in the caller's frame,
+; BEFORE the tail-jump -- so from the target function's own prologue
+; (PUSH BP; MOV BP,SP) they look exactly like ordinary trailing hidden
+; parameters, indistinguishable from what a direct call would have pushed.
+; ----------------------------------------------------------------------------
+__exec_closure:
+    MOV R1, R0
+    AND R1, CLOSURE_ADDR_MASK        ; R1 = closure record address
+
+    MOV R2, [R1+1]                   ; R2 = upvalue count
+    MOV R3, R1
+    IADD R3, 2                       ; R3 = base of upvalue pointer array
+    IADD R3, R2
+    ISUB R3, 1                       ; R3 = address of the LAST upvalue slot
+
+__exec_push_upvalue_loop:
+    IEQ  R2, 0
+    JT   R2, __exec_push_done
+    MOV  R4, [R3]
+    PUSH R4
+    ISUB R3, 1
+    ISUB R2, 1
+    JMP  __exec_push_upvalue_loop
+
+__exec_push_done:
+    MOV  R0, [R1]                    ; R0 = code address
+    OR   R0, V32_CART_PAGE
+    JMP  R0
 
 ; ==============================================================================
 ; Runtime Panic Handler

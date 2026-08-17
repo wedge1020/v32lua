@@ -65,7 +65,7 @@ void  node_function_def (ASTNode *node)
 
     // ✅ CRITICAL FIX: Initialize spill slots AFTER local variables
     //reset_spill_slots(-(num_locals + NUM_GPRS));  // ✅ Initialize spill slots AFTER locals
-    push_scope();
+    push_function_scope();
 
     // ============================================================
     // PARAMETER TRAVERSAL:
@@ -85,6 +85,15 @@ void  node_function_def (ASTNode *node)
             }
         }
         p = p->next;
+    }
+
+    // continue the same offset sequence for received upvalues, so
+    // they land contiguously right after the normal parameters on the
+    // stack -- exactly where emit_load_function_value()'s callers push them
+    // (see the closure-creation code above and __builtin_exec's push loop
+    // in runtime.s).
+    for (NameList *up = node->as.function_def.upvalues; up != NULL; up = up->next) {
+        register_upvalue(up->name, param_offset++);
     }
 
     // Mark function symbol as variadic
@@ -440,13 +449,11 @@ void  node_function_call (ASTNode *node, int  dest_reg)
     }
 }
 
-void node_function_pointer(ASTNode *node, int dest_reg) {
+void node_function_pointer (ASTNode *node, int dest_reg)
+{
     if (node->as.func_ptr.func_def) {
         generate_asm(node->as.func_ptr.func_def, 0);
     }
-    //emit_asm("MOV R%d, [func_%s]\n", dest_reg, node->as.func_ptr.mangled_name);
-    emit_asm ("    ;; Load and box address of the mangled function\n");
-    emit_asm ("MOV R%d, __function_%s\n", dest_reg, node -> as.func_ptr.mangled_name);
-    // AUDITED: Apply Function NaN tag (Bit 31=1, Bit 22=0)
-    emit_asm ("OR R%d, BOXED_FUNCTION ; Box as Function\n", dest_reg);
+    emit_load_function_value(node->as.func_ptr.func_def, node->as.func_ptr.mangled_name, dest_reg);
 }
+

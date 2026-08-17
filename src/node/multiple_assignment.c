@@ -7,25 +7,16 @@ void node_multiple_assignment(ASTNode *node)
     int      val_reg              = -1;
 
     // --- Intercept Bare Local Declarations ---
-    if (node->as.mult_assign.is_local && node->as.mult_assign.values_head == NULL) {
-        while (curr_tgt != NULL)
-        {
-            if (curr_tgt -> type == NODE_IDENTIFIER)
-            {
-                // Register local symbol and initialize to canonical Nil (BOXED_NIL)
-                SymbolNode *sym = register_local(curr_tgt -> as.id.name);
-                char access_str[128];
-                get_variable_access_string(sym->name, access_str);
-
-                emit_asm("    ;; Bare local '%s' initialized to nil", sym->name);
-
-                // FIX: Use register intermediary for MOV
+     if (node->as.mult_assign.is_local && node->as.mult_assign.values_head == NULL) {
+        while (curr_tgt != NULL) {
+            if (curr_tgt->type == NODE_IDENTIFIER) {
+                SymbolNode *sym = register_local(curr_tgt->as.id.name);
                 int temp_reg = allocate_pinned_register();
                 emit_asm("MOV R%d, BOXED_NIL", temp_reg);
-                emit_asm("MOV %s, R%d", access_str, temp_reg);
+                emit_initialize_local(sym, temp_reg);   // was: get_variable_access_string + MOV
                 unlock_pinned_register(temp_reg);
             }
-            curr_tgt = curr_tgt -> next;
+            curr_tgt = curr_tgt->next;
         }
         return;
     }

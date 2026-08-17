@@ -760,3 +760,148 @@ void emit_tic80_map_data(FILE *out) {
     }
     fprintf(out, "\n\n");
 }
+
+// ============================================================================
+// emit_load_variable: load the VALUE of a Lua variable into dest_reg.
+// Fast path (globals, uncaptured locals/params): identical to before, one
+// MOV. Slow path (a boxed local, or any upvalue -- upvalues are ALWAYS
+// boxed): the slot holds a pointer, so load the pointer then dereference it.
+// ============================================================================
+void emit_load_variable (const char *name, int dest_reg)
+{
+    SymbolNode *sym = resolve_symbol(name);
+    if (sym == NULL) sym = register_global(name);
+
+    char access_str[256];
+    get_variable_access_string(name, access_str);
+
+    if (!sym->is_boxed) {
+        emit_asm("MOV R%d, %s ; load '%s'", dest_reg, access_str, name);
+        return;
+    }
+
+    emit_asm("    ; --- '%s' is captured -- boxed access ---", name);
+    emit_asm("MOV R%d, %s ; load box pointer", dest_reg, access_str);
+    emit_asm("MOV R%d, [R%d] ; dereference box", dest_reg, dest_reg);
+}
+
+// ============================================================================
+// emit_store_variable: store src_reg's value into a Lua variable's slot.
+// Mirrors emit_load_variable()'s indirection on the write side.
+// ============================================================================
+void emit_store_variable (const char *name, int src_reg)
+{
+    SymbolNode *sym = resolve_symbol(name);
+    if (sym == NULL) sym = register_global(name);
+
+    char access_str[256];
+    get_variable_access_string(name, access_str);
+
+    if (!sym->is_boxed) {
+        emit_asm("MOV %s, R%d ; store '%s'", access_str, src_reg, name);
+        return;
+    }
+
+    int ptr_reg = allocate_pinned_register();
+    emit_asm("    ; --- '%s' is captured -- boxed access ---", name);
+    emit_asm("MOV R%d, %s ; load box pointer", ptr_reg, access_str);
+    emit_asm("MOV [R%d], R%d ; write through box", ptr_reg, src_reg);
+    unlock_pinned_register(ptr_reg);
+}
+
+// ============================================================================
+// emit_initialize_local: store a local's INITIAL value at its declaration
+// site. If the analysis pass marked it boxed, allocate the box first and
+// leave the pointer in the slot instead of the raw value.
+// ============================================================================
+void  emit_initialize_local (SymbolNode *sym, int  value_reg)
+{
+    char  access_str[256];
+    get_variable_access_string (sym -> name, access_str);
+
+    if (!sym -> is_boxed)
+    {
+        emit_asm ("MOV %s, R%d ; init local '%s'", access_str,
+                                                   value_reg,
+                                                   sym -> name);
+        return;
+    }
+
+    emit_asm ("    ; --- '%s' is captured by a nested closure: box it ---", sym -> name);
+
+    //////////////////////////////////////////////////////////////////////////
+    //
+    // __malloc clobbers registers internally -- spill/reload value_reg
+    // around the call rather than assuming it survives, matching how the
+    // rest of the compiler already treats calls as clobbering.
+    //
+    spill_register (value_reg);
+
+    emit_asm ("MOV R0, 1");
+    emit_asm ("PUSH R0 ; box size = 1 word");
+    emit_asm ("CALL __malloc");
+    emit_asm ("IADD SP, 1 ; clean up malloc argument");
+
+    ensure_in_register (value_reg);
+    emit_asm ("MOV [R0], R%d ; store initial value into the box", value_reg);
+    emit_asm ("MOV %s, R0 ; slot now holds the box pointer",      access_str);
+}
+
+// ============================================================================
+// emit_load_function_value: load a boxed function VALUE into dest_reg.
+//
+// No-upvalue case (the overwhelming majority of functions): identical to
+// before -- a bare boxed code address, no heap allocation.
+//
+// Closure case: allocate [code_addr, count, up_0, up_1, ...] on the heap and
+// box its address instead, with BOXED_CLOSURE_FLAG set so __builtin_exec
+// knows to route through it.
+// ============================================================================
+void emit_load_function_value (ASTNode *func_def_node, const char *mangled_name, int dest_reg)
+{
+    int upvalue_count = (func_def_node != NULL)
+        ? name_list_length(func_def_node->as.function_def.upvalues)
+        : 0;
+
+    if (upvalue_count == 0) {
+        emit_asm("    ;; Load and box address of the mangled function");
+        emit_asm("MOV R%d, __function_%s", dest_reg, mangled_name);
+        emit_asm("OR R%d, BOXED_FUNCTION ; Box as Function", dest_reg);
+        return;
+    }
+
+    emit_asm("    ;; Build closure record for '%s' (%d upvalue%s)",
+             mangled_name, upvalue_count, upvalue_count == 1 ? "" : "s");
+
+    emit_asm("MOV R0, %d", 2 + upvalue_count);
+    emit_asm("PUSH R0");
+    emit_asm("CALL __malloc");
+    emit_asm("IADD SP, 1 ; clean up malloc argument");
+
+    int rec_reg = allocate_pinned_register();
+    emit_asm("MOV R%d, R0 ; closure record base", rec_reg);
+
+    emit_asm("MOV R0, __function_%s", mangled_name);
+    emit_asm("MOV [R%d], R0 ; word 0: code address", rec_reg);
+    emit_asm("MOV R0, %d", upvalue_count);
+    emit_asm("MOV [R%d+1], R0 ; word 1: upvalue count", rec_reg);
+
+    // Copy each captured variable's CURRENT box pointer -- as visible from
+    // THIS (enclosing) function's own scope -- into the record, in the same
+    // order register_upvalue() will expect them on the callee side.
+    int index = 0;
+    for (NameList *up = func_def_node->as.function_def.upvalues; up != NULL; up = up->next) {
+        int tmp_reg = allocate_pinned_register();
+        char access_str[256];
+        get_variable_access_string(up->name, access_str);   // raw slot value = the box pointer
+        emit_asm("MOV R%d, %s ; box pointer for captured '%s'", tmp_reg, access_str, up->name);
+        emit_asm("MOV [R%d+%d], R%d", rec_reg, 2 + index, tmp_reg);
+        unlock_pinned_register(tmp_reg);
+        index++;
+    }
+
+    emit_asm("MOV R%d, R%d ; box the closure record", dest_reg, rec_reg);
+    emit_asm("OR R%d, BOXED_FUNCTION", dest_reg);
+    emit_asm("OR R%d, BOXED_CLOSURE_FLAG ; mark payload as a closure record, not raw code", dest_reg);
+    unlock_pinned_register(rec_reg);
+}
