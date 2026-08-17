@@ -46,7 +46,27 @@ void  node_function_def (ASTNode *node)
     // Arity is already safely stored on the symbol from Stage 4!
     // We only need to map parameters to stack offsets [BP + 2], etc.
     // ============================================================
-    int param_offset = 2;
+    int param_offset  = 2;
+    int upvalue_count = name_list_length(node->as.function_def.upvalues);
+
+    // Upvalues are registered FIRST, claiming the low offsets closest to
+    // the return address ([BP+2 .. BP+1+upvalue_count]). This isn't a
+    // style choice -- it's forced by how __builtin_exec's closure path
+    // actually places them at runtime (see runtime.s __exec_closure): it
+    // pops the return address, pushes the upvalues, then pushes the
+    // return address back on top, with NO knowledge of how many explicit
+    // arguments the original caller already pushed further down the
+    // stack. That means upvalues ALWAYS land immediately above the return
+    // address, and explicit arguments ALWAYS end up further out, no
+    // matter what order the compiler registers them in. Registering
+    // parameters first (the old order) assigned [BP+2] to the first
+    // parameter and pushed upvalues out to [BP+3.. ] -- exactly backwards
+    // from what the runtime produces, so a closure with both a captured
+    // variable AND a real parameter read the wrong slot for each.
+    for (NameList *up = node->as.function_def.upvalues; up != NULL; up = up->next) {
+        register_upvalue(up->name, param_offset++);
+    }
+
     int is_variadic = 0;
     ASTNode *p = node->as.function_def.params;
     while (p != NULL) {
@@ -77,26 +97,17 @@ void  node_function_def (ASTNode *node)
         p = p->next;
     }
 
-    // Real, user-visible arity -- snapshot it BEFORE the upvalue loop below
-    // advances param_offset further. Upvalues are invisible to Lua-level
-    // call sites (they're supplied by the closure record, not by the
-    // caller's explicit argument list), so they must never leak into arity.
-    int explicit_param_count = param_offset - 2;
-
-    // continue the same offset sequence for received upvalues, so
-    // they land contiguously right after the normal parameters on the
-    // stack -- exactly where emit_load_function_value()'s callers push them
-    // (see the closure-creation code above and __builtin_exec's push loop
-    // in runtime.s).
-    for (NameList *up = node->as.function_def.upvalues; up != NULL; up = up->next) {
-        register_upvalue(up->name, param_offset++);
-    }
+    // Real, user-visible arity -- upvalues were registered above but must
+    // never leak into arity: they're invisible to Lua-level call sites,
+    // supplied by the closure record rather than the caller's argument
+    // list.
+    int explicit_param_count = param_offset - 2 - upvalue_count;
 
     // Mark function symbol as variadic
     SymbolNode *sym = resolve_symbol(func_name);
     if (sym) {
         sym->is_variadic = is_variadic;
-        sym->arity = is_variadic ? -1 : explicit_param_count;   // was (param_offset - 2)
+        sym->arity = is_variadic ? -1 : explicit_param_count;
     }
 
     // For variadic functions: reserve space for argument count at [BP-2]

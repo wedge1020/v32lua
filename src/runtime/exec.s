@@ -58,8 +58,7 @@ __exec_closure:
     ISUB R3, 1                       ; R3 = address of the LAST upvalue slot
 
 __exec_push_upvalue_loop:
-    IEQ  R2, 0
-    JT   R2, __exec_push_done
+    JF   R2, __exec_push_done   ; Jump if R2 == 0 (exit when no more upvalues)
     MOV  R4, [R3]
     PUSH R4
     ISUB R3, 1
