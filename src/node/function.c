@@ -18,32 +18,6 @@ void  node_function_def (ASTNode *node)
         emit_asm("JMP __%s_skip\n", func_name);
     }
 
-    // ===== Register local function names =====
-    /*
-    bool is_local_func = false;
-    if (node->next != NULL && node->next->type == NODE_MULTIPLE_ASSIGNMENT) {
-        is_local_func = node->next->as.mult_assign.is_local;
-    }
-
-    if (is_local_func) {
-        SymbolNode *sym = register_local(func_name);
-        sym->is_function = 1;
-        int count = 0;
-        ASTNode *p = node->as.function_def.params;
-        while (p != NULL) {
-            count++;
-            p = p->next;
-        }
-        sym->arity = count;
-
-        // ===== INITIALIZE LOCAL FUNCTION VARIABLE =====
-        char access_str[128];
-        get_variable_access_string(func_name, access_str);
-        emit_asm("MOV R0, __function_%s\n", func_name);
-        emit_asm("OR R0, BOXED_FUNCTION\n");
-        emit_asm("MOV %s, R0\n", access_str);
-    }*/
-
     push_function_context (func_name, node);
 
     if (g_debug_mode) {
@@ -139,7 +113,29 @@ void  node_function_def (ASTNode *node)
     emit_asm ("__%s_return:\n", func_name);
     emit_asm ("MOV SP, BP\n");
     emit_asm ("POP BP\n");
-    emit_asm ("RET\n");
+
+    int closure_upvalue_count = name_list_length(node->as.function_def.upvalues);
+    if (closure_upvalue_count > 0) {
+        // __builtin_exec's closure path (see runtime.s __exec_closure)
+        // pushes closure_upvalue_count extra words ABOVE the return
+        // address before tail-jumping in here -- they occupy [BP+2] and
+        // up, exactly where this function's own upvalue parameters were
+        // registered via register_upvalue(). A bare RET only pops the ONE
+        // word at [BP+1] (the return address); nothing else is ever
+        // positioned to discard the upvalue words above it. So this
+        // function -- the one place that statically knows its own
+        // upvalue count -- has to do it: peek the return address without
+        // popping it, skip past the return-address slot AND the upvalue
+        // words in a single adjustment, then jump to the saved address
+        // manually instead of using RET.
+        emit_asm ("MOV R7, [SP] ; peek return address (don't consume it yet)\n");
+        emit_asm ("IADD SP, %d ; discard return address slot + %d upvalue word%s\n",
+                  1 + closure_upvalue_count, closure_upvalue_count,
+                  closure_upvalue_count == 1 ? "" : "s");
+        emit_asm ("JMP R7 ; manual return, stack now balanced\n");
+    } else {
+        emit_asm ("RET\n");
+    }
     emit_asm ("\n");
 
     pop_function_context();

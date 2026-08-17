@@ -20,18 +20,30 @@ void init_global_scope(void) {
 
 //////////////////////////////////////////////////////////////////////////////
 //
-// Like push_scope(), but for the OUTERMOST scope of a function body. Its
-// parent is the global scope only -- never the enclosing function's local
-// scope. Cross-function references must always go through the explicit
-// upvalue mechanism (SYM_UPVALUE symbols registered by register_upvalue),
-// never through a raw scope-chain walk into a frame that may not even be
-// on the stack anymore by the time this function runs.
+// Like push_scope(), but for the OUTERMOST scope of a function body.
+//
+// `parent` is set to whatever scope was actually active when this function
+// was reached -- NOT hardcoded to global_scope -- because pop_scope() relies
+// on `parent` to correctly restore current_scope when this scope is popped.
+// A nested function popping back into a hardcoded global_scope instead of
+// its real enclosing scope corrupts the caller's notion of "current scope"
+// for the rest of that caller's body, and eventually trips pop_scope()'s
+// underflow guard when the caller tries to pop a scope that's already been
+// silently replaced.
+//
+// Cross-function variable lookups are blocked a different way: this scope
+// is tagged is_function_boundary, and resolve_symbol() stops walking past
+// any scope with that flag set (falling back only to the real global scope,
+// never into an enclosing function's locals). That's what makes closures
+// safe -- not the parent pointer, which now just does its original job of
+// letting pop_scope() unwind correctly.
 //
 void  push_function_scope (void)
 {
     ScopeNode *new_scope               = (ScopeNode *) calloc (1, sizeof (ScopeNode));
-    new_scope -> parent                = global_scope;
+    new_scope -> parent                = current_scope;   // real caller scope, for pop_scope()
     new_scope -> local_offset_counter  = 1;
+    new_scope -> is_function_boundary  = true;
     current_scope                      = new_scope;
 }
 
@@ -69,23 +81,43 @@ void pop_scope(void) {
     free(old_scope);
 }
 
-// Lookup a variable starting from the innermost scope outward
+// Lookup a variable starting from the innermost scope outward.
+//
+// Ordinary block scopes (if/while/for, pushed via push_scope()) are walked
+// normally via `parent`, since they're still part of the SAME function's
+// frame. When the walk reaches a function-boundary scope (pushed via
+// push_function_scope()), that scope's own symbols -- the function's own
+// params/locals/upvalues -- are still checked normally, but the walk does
+// NOT continue into that scope's `parent` (which is just whatever caller
+// happened to invoke this function, an unrelated frame at runtime). Instead
+// it jumps straight to the real global scope, so plain global names are
+// still visible from any nesting depth, without ever exposing an enclosing
+// function's locals to a nested one.
 SymbolNode *resolve_symbol (const char *name)
 {
     ScopeNode *search_scope = current_scope;
-    
-    while (search_scope                    != NULL)
+
+    while (search_scope != NULL)
     {
-        SymbolNode *sym                     = search_scope->symbols;
-        while (sym                         != NULL)
+        SymbolNode *sym = search_scope->symbols;
+        while (sym != NULL)
         {
             if (strcmp (sym -> name, name) == 0)
             {
                 return (sym); // Found it!
             }
-            sym                             = sym -> next;
+            sym = sym -> next;
         }
-        search_scope                        = search_scope -> parent; // Move down the stack
+
+        if (search_scope->is_function_boundary && search_scope != global_scope)
+        {
+            // Don't walk into the caller's scope -- skip straight to
+            // globals, which remain visible from any depth.
+            search_scope = global_scope;
+            continue;
+        }
+
+        search_scope = search_scope -> parent;
     }
     return (NULL); // Not found anywhere
 }
@@ -420,21 +452,6 @@ void  register_all_globals_prepass (ASTNode *node)
                 register_all_globals_prepass (node->as.function_def.body);
                 break;
 
-            /* once we get local functions implemented...
-            case NODE_FUNCTION_DEF:
-                // Check if next node is a local multiple assignment
-                bool is_local = false;
-                if (node->next != NULL && node->next->type == NODE_MULTIPLE_ASSIGNMENT) {
-                    is_local = node->next->as.mult_assign.is_local;
-                }
-
-                if (!is_local) {
-                    mark_global_as_function (node);
-                }
-                register_all_globals_prepass(node->as.function_def.body);
-                break;
-                */
-
             case NODE_MULTIPLE_ASSIGNMENT:
                 if (!node->as.mult_assign.is_local) {
                     ASTNode *tgt = node->as.mult_assign.targets_head;
@@ -451,6 +468,10 @@ void  register_all_globals_prepass (ASTNode *node)
             case NODE_IF:
                 register_all_globals_prepass(node->as.if_stmt.if_body);
                 register_all_globals_prepass(node->as.if_stmt.else_body);
+                break;
+
+            case NODE_DO_BLOCK:
+                register_all_globals_prepass(node->as.do_block.body);
                 break;
 
             case NODE_WHILE:

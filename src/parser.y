@@ -236,6 +236,14 @@ statement:
         $$ -> as.if_stmt.if_body       = $4;
         $$ -> as.if_stmt.else_body     = $5;
     }
+    | TOKEN_DO statement_list TOKEN_END {
+        // Bare scoping block: no condition, no loop tracking -- just gives
+        // the enclosed statements their own lexical scope. Most useful for
+        // deliberately ending a 'local' declaration's shadow before the
+        // rest of the enclosing block, without needing an 'if true then'
+        // workaround.
+        $$ = make_node_do_block ($2);
+    }
     | TOKEN_LOCAL var_list {
         $$ = make_node(NODE_MULTIPLE_ASSIGNMENT);
         $$->as.mult_assign.is_local = 1;
@@ -587,13 +595,13 @@ function_call:
         node->as.call.args_head = $5;
         $$ = node;
     }
-	| prefix_expr '(' argument_list ')' {
-		ASTNode* node = make_node(NODE_FUNCTION_CALL);
-		node->as.call.target = $1;
-		node->as.call.is_method_call = 0;
-		node->as.call.args_head = $3;
-		$$ = node;
-	}
+    | prefix_expr '(' argument_list ')' {
+        ASTNode* node = make_node(NODE_FUNCTION_CALL);
+        node->as.call.target = $1;
+        node->as.call.is_method_call = 0;
+        node->as.call.args_head = $3;
+        $$ = node;
+    }
     ;
 
 field:

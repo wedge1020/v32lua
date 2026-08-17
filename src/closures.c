@@ -164,6 +164,13 @@ void analyze_block (ASTNode *node, FuncAnalysisFrame *frame)
                 break;
             }
 
+            case NODE_DO_BLOCK: {
+                NameList *saved = frame->bound;
+                analyze_block(node->as.do_block.body, frame);
+                frame->bound = saved;
+                break;
+            }
+
             case NODE_WHILE: {
                 analyze_expr(node->as.while_loop.condition, frame);
                 NameList *saved = frame->bound;

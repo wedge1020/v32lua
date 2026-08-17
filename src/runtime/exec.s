@@ -40,6 +40,17 @@ __exec_closure:
     MOV R1, R0
     AND R1, CLOSURE_ADDR_MASK        ; R1 = closure record address
 
+    ; "CALL __builtin_exec" already pushed a return address before we got
+    ; here. Pushing upvalues now would land them ON TOP of it instead of
+    ; below it -- the callee's prologue would then see the return address
+    ; at [BP+2] (where it expects its first upvalue) and the upvalue at
+    ; [BP+1] (where it expects the return address), and the callee's own
+    ; RET would pop a box pointer and jump to it as code. Pull the return
+    ; address off first, push the upvalues underneath where it was, then
+    ; push it back on top -- reproducing exactly the frame a direct call
+    ; with pre-pushed upvalue arguments would produce.
+    POP  R5                          ; R5 = return address
+
     MOV R2, [R1+1]                   ; R2 = upvalue count
     MOV R3, R1
     IADD R3, 2                       ; R3 = base of upvalue pointer array
@@ -56,6 +67,8 @@ __exec_push_upvalue_loop:
     JMP  __exec_push_upvalue_loop
 
 __exec_push_done:
+    PUSH R5                          ; return address back on top, above the upvalues
+
     MOV  R0, [R1]                    ; R0 = code address
     OR   R0, V32_CART_PAGE
     JMP  R0

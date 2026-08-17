@@ -243,23 +243,23 @@ number_result02: 5.0000
 number_result03: 27.0000
 number_result04: 18.0000
 number_result05: 3.0000
-number_result06: 5.0000 (last value of i)
-number_result07: -15.0000 (-5 + -4 + -3 + -2 + -1)
-number_result08: 5.0000 (breaks after 5 iterations)
-number_result09: 0.0000 (loop doesn't execute)
-number_result10: 22.5000 (1.5 + 2.5 + 3.5 + 4.5 + 5.5)
-number_result11: 18.0000 (3 + 4 + 5 + 6 + 7)
-number_result12: 22.0000 (1 + 4 + 7 + 10)
+number_result06: 5.0000
+number_result07: -15.0000
+number_result08: 5.0000
+number_result09: 0.0000
+number_result10: 22.5000
+number_result11: 18.0000
+number_result12: 22.0000
 number_result13: 5.0000
 number_result14: 1.0000
-number_result15: 30.0000 (3 * 10)
-number_result16: 13.0000 (i=1, j=3 -> 1*10+3)
-number_result17: 21.0000 (i=2, j=1 -> 2*100+1)
-number_result18: 19.0000 (10 + 7 + 4 + 1)
+number_result15: 30.0000
+number_result16: 13.0000
+number_result17: 21.0000
+number_result18: 19.0000
 number_result19: 10.0000
-number_result20: 24.0000 (0 + 3 + 6 + 9)
-number_result21: 7.5000 (0 + 0.5 + 1.0 + 1.5 + 2.0)
-number_result22: 25.0000 (1 + 4 + 7 + 10)
-number_result23: 15.0000 (1+2+3+4+5, modifying i doesn't affect loop)
+number_result20: 24.0000
+number_result21: 7.5000
+number_result22: 25.0000
+number_result23: 15.0000
 
 --]]

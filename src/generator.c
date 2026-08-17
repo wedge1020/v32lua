@@ -156,6 +156,10 @@ int  count_function_locals(ASTNode* node)
                 break;
             }
 
+            case NODE_DO_BLOCK:
+                count += count_function_locals(node->as.do_block.body);
+                break;
+
             case NODE_WHILE:
                 // Recurse into WHILE loop bodies
                 count += count_function_locals(node->as.while_loop.body);
@@ -243,6 +247,10 @@ int check_needs_stack (ASTNode *node)
             //fprintf (stderr, "[IF] stack check: doesn't need one\n");
             break;
 
+        case NODE_DO_BLOCK:
+            if (check_needs_stack(node->as.do_block.body)) return (1);
+            break;
+
         case NODE_MULTIPLE_ASSIGNMENT: {
             ASTNode* curr_tgt = node->as.mult_assign.targets_head;
             while (curr_tgt) { if (check_needs_stack(curr_tgt)) return (1); curr_tgt = curr_tgt->next; }
@@ -325,6 +333,10 @@ void  generate_asm (ASTNode *node, int  dest_reg)
 
             case NODE_IF:
                 node_if (node);
+                break;
+
+            case NODE_DO_BLOCK:
+                node_do_block (node);
                 break;
 
             case NODE_FUNCTION_DEF:

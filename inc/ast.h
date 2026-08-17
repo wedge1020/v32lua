@@ -50,6 +50,11 @@ typedef struct astnode {
             struct astnode *else_body; // Can be NULL
         } if_stmt;
 
+        struct
+        {
+            struct astnode *body;   // The statement list inside 'do ... end'
+        } do_block;
+
         struct {
             char            *name;
             struct astnode  *params;
@@ -167,6 +172,7 @@ extern int yylineno;
 // AST function prototypes
 //
 ASTNode *make_node                   (NodeType);
+ASTNode *make_node_do_block          (ASTNode *);
 ASTNode *make_node_ident             (const char *);
 ASTNode *make_node_string            (const char *);
 ASTNode *make_node_cart_hint         (const char *);

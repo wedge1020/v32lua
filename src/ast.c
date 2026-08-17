@@ -142,6 +142,13 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
     return node;
 }
 
+ASTNode *make_node_do_block (ASTNode *body)
+{
+    ASTNode *node = make_node (NODE_DO_BLOCK);
+    node -> as.do_block.body = body;
+    return node;
+}
+
 ASTNode *make_node_function_def (const char *name, ASTNode *params, ASTNode *body)
 {
     ASTNode *node = make_node(NODE_FUNCTION_DEF);

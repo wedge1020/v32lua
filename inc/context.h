@@ -48,6 +48,21 @@ typedef struct ScopeNode
     SymbolNode       *last;                 // last symbol in list
     int               local_offset_counter; // Tracks [BP - 1], [BP - 2]
     struct ScopeNode *parent;               // Pointer to the enclosing scope
+    bool              is_function_boundary; // NEW: true only for the scope a
+                                            // function's OWN body starts in
+                                            // (see push_function_scope()).
+                                            // resolve_symbol() checks this
+                                            // scope's own symbols, then
+                                            // refuses to keep walking into
+                                            // whatever scope happened to be
+                                            // active when this function was
+                                            // defined -- that's a different,
+                                            // possibly-long-gone frame at
+                                            // runtime. pop_scope() ignores
+                                            // this flag entirely; it always
+                                            // restores via `parent`, which
+                                            // still points to the REAL
+                                            // caller scope.
 } ScopeNode;
 
 // ============================================================================

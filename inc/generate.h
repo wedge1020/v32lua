@@ -35,6 +35,7 @@ void  node_comment_block       (ASTNode *);
 void  node_comment_line        (ASTNode *);
 void  node_concat              (ASTNode *, int);
 void  node_div                 (ASTNode *, int);
+void  node_do_block            (ASTNode *);
 void  node_floordiv            (ASTNode *, int);
 void  node_for_numeric         (ASTNode *);
 void  node_for_generic         (ASTNode *);
