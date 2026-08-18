@@ -256,20 +256,41 @@ void  node_for_numeric (ASTNode *node)
 }
 
 // ============================================================================
-// GENERIC FOR LOOP: for k, v in pairs(t) do ... end
+// GENERIC FOR: for var_list in iter_expr do ... end
 //
-// Strategy:
-//   1. Evaluate the iterator expression (e.g., pairs(t))
-//   2. This should return: iterator_func, state, initial_key
-//   3. Store these in local variables
-//   4. Generate while(true) loop that calls iterator_func(state, key)
-//   5. Check for nil to break
-//   6. Assign loop variables and execute body
+// Two calling conventions in play here, both mirroring conventions already
+// established elsewhere in this compiler rather than inventing new ones:
 //
-// FIX 2: When executing the loop body, temporarily unpin the loop control
-// registers (iter_reg, state_reg, key_reg) to allow the body code to reuse
-// them. This prevents register exhaustion when the loop body contains function
-// calls or complex expressions that need many registers.
+//   1. iter_expr evaluation: the grammar (for_start var_list TOKEN_IN
+//      expr_list ...) means iter_expr is always an expr_list -- either a
+//      single expression (typically pairs(t)/ipairs(t), or any call that
+//      itself returns 3 values), or an explicit list of up to 3
+//      expressions (`for i,v in f, s, var do`). The single-expression form
+//      returns all 3 values itself via R0/R2/R3 -- the same multi-return
+//      convention node_return()/node_multiple_assignment() use everywhere
+//      else. The explicit-list form evaluates each expression separately
+//      and places them into R0/R2/R3 by hand.
+//
+//   2. Per-iteration iterator calls: CALL iterator(state, key) returns its
+//      results the same way any 2-or-3-value function return does in this
+//      compiler -- R0 = new key (or nil/false when done), R2 = first
+//      value, R3 = second value (rarely used by iterators, kept for
+//      generality).
+//
+// Previously this function invented a third, incompatible convention
+// (reading return values off the hardware stack via [SP-0]/[SP-1]), which
+// matched neither the compiler's own multi-return convention nor the
+// actual behavior of the hand-written iterators in runtime.s. It also
+// checked the CURRENT key for nil BEFORE ever calling the iterator, which
+// is backwards for next()/pairs() -- whose documented calling convention
+// is to pass nil to mean "give me the first key." That meant every
+// pairs() loop saw pairs()'s own initial nil key at the very first check
+// and exited before the iterator was ever called. And it only ever
+// evaluated the first node of iter_expr, silently dropping the state/
+// control-variable expressions in the explicit-list form.
+//
+// FIX 2 (retained): loop control registers are unpinned around the call
+// and body so the body doesn't exhaust the register file.
 // ============================================================================
 void node_for_generic(ASTNode *node)
 {
@@ -287,9 +308,7 @@ void node_for_generic(ASTNode *node)
     push_loop(label_id, LOOP_TYPE_FOR_GENERIC);
 
     // ---------------------------------------------------------------------
-    // STEP 2: Evaluate iterator expression
-    // For: for k,v in pairs(t) do
-    // iter_expr = pairs(t) which should return: iter_func, state, first_key
+    // STEP 2: Evaluate iterator expression(s) into R0/R2/R3
     // ---------------------------------------------------------------------
     int iter_reg = allocate_pinned_register();
     int state_reg = allocate_pinned_register();
@@ -299,14 +318,44 @@ void node_for_generic(ASTNode *node)
     mark_register_live(state_reg, 10);
     mark_register_live(key_reg, 10);
 
-    // Evaluate the iterator expression - should return 3 values on stack
-    generate_asm(node->as.for_generic.iter_expr, 0);
+    ASTNode *iter_list_head = node->as.for_generic.iter_expr;
 
-    // The iterator function call (pairs/ipairs) should leave:
-    // R0 = iterator function
-    // [SP-1] = state (table)
-    // [SP-2] = initial key
-    // But we need to capture these into variables
+    if (iter_list_head != NULL && iter_list_head->next != NULL) {
+        // Explicit list form: f, s, var (var is optional -> defaults to nil)
+        ASTNode *f_node = iter_list_head;
+        ASTNode *s_node = f_node->next;
+        ASTNode *v_node = s_node->next;
+
+        // Compute all three into their own pinned registers FIRST, and
+        // only copy into R0/R2/R3 afterward -- same reasoning as
+        // node_multiple_assignment's two-pass extraction: if we copied
+        // into R0/R2/R3 as we went, a nested CALL inside a LATER
+        // expression's evaluation (e.g. the `#t16 + 1` control-variable
+        // expression in the reverse-iterator test) could clobber an
+        // already-copied earlier value.
+        generate_asm(f_node, iter_reg);
+        ensure_in_register(iter_reg);
+
+        generate_asm(s_node, state_reg);
+        ensure_in_register(state_reg);
+
+        if (v_node != NULL) {
+            generate_asm(v_node, key_reg);
+            ensure_in_register(key_reg);
+        }
+
+        emit_asm("MOV R0, R%d ; Iterator function (explicit list form)\n", iter_reg);
+        emit_asm("MOV R2, R%d ; State (explicit list form)\n", state_reg);
+        if (v_node != NULL) {
+            emit_asm("MOV R3, R%d ; Initial control variable (explicit list form)\n", key_reg);
+        } else {
+            emit_asm("MOV R3, BOXED_NIL ; Initial control variable omitted, defaults to nil\n");
+        }
+    } else {
+        // Single-expression form: pairs(t) / ipairs(t) / any call that
+        // itself returns 3 values via R0/R2/R3.
+        generate_asm(iter_list_head, 0);
+    }
 
     // ---------------------------------------------------------------------
     // STEP 2.5: Store iterator results in local variables
@@ -316,7 +365,6 @@ void node_for_generic(ASTNode *node)
     snprintf(state_var, sizeof(state_var), "__for_state_%d", label_id);
     snprintf(key_var, sizeof(key_var), "__for_key_%d", label_id);
 
-    // Register locals
     register_local(iter_func_var);
     register_local(state_var);
     register_local(key_var);
@@ -327,21 +375,12 @@ void node_for_generic(ASTNode *node)
     get_variable_access_string(state_var, access_state);
     get_variable_access_string(key_var, access_key);
 
-    // Store iterator function (R0)
     emit_asm("MOV %s, R0         ; Store iterator function\n", access_iter);
-
-    // Pop state from stack (should be at [SP-1] relative to current SP)
-    emit_asm("MOV R0, [SP-1]     ; Load state\n");
-    emit_asm("MOV %s, R0         ; Store state\n", access_state);
-
-    // Pop initial key from stack (should be at [SP-2])
-    emit_asm("MOV R0, [SP-2]     ; Load initial key\n");
-    emit_asm("MOV %s, R0         ; Store initial key\n", access_key);
-    emit_asm("IADD SP, 2         ; Clean up 2 stack values\n");
+    emit_asm("MOV %s, R2         ; Store state\n", access_state);
+    emit_asm("MOV %s, R3         ; Store initial key\n", access_key);
 
     // FIX 2: Now that we've stored the loop control values in stack locals,
-    // we can UNPIN the registers we used for setup. The values are safe in
-    // the stack variables, so we don't need to keep them in registers.
+    // we can UNPIN the registers we used for setup.
     unlock_pinned_register(iter_reg);
     unlock_pinned_register(state_reg);
     unlock_pinned_register(key_reg);
@@ -351,7 +390,7 @@ void node_for_generic(ASTNode *node)
     // ---------------------------------------------------------------------
     ASTNode *var = node->as.for_generic.var_list;
     char **var_names = NULL;
-    SymbolNode **var_syms = NULL;   // NEW: keep the symbols, not just names
+    SymbolNode **var_syms = NULL;
     int var_count = 0;
 
     ASTNode *curr = var;
@@ -361,11 +400,11 @@ void node_for_generic(ASTNode *node)
     }
 
     var_names = (char **)malloc(var_count * sizeof(char *));
-    var_syms  = (SymbolNode **)malloc(var_count * sizeof(SymbolNode *));   // NEW
+    var_syms  = (SymbolNode **)malloc(var_count * sizeof(SymbolNode *));
     curr = var;
     for (int i = 0; i < var_count && curr != NULL; i++) {
         var_names[i] = curr->as.id.name;
-        var_syms[i]  = register_local(var_names[i]);   // NEW: capture the symbol
+        var_syms[i]  = register_local(var_names[i]);
         curr = curr->next;
     }
 
@@ -375,31 +414,15 @@ void node_for_generic(ASTNode *node)
     emit_asm("%s:\n", start_label);
 
     // ---------------------------------------------------------------------
-    // STEP 5: Check if key is nil (end of iteration)
+    // STEP 5: Call iterator_func(state, current_key), THEN check the
+    //         RETURNED key for nil/false -- not the key about to be
+    //         passed in. See the function-level comment above for why
+    //         checking beforehand is wrong for next()/pairs().
     // ---------------------------------------------------------------------
-    // FIX 2: Use a temporary register for the check, don't pin it
-    int check_reg = allocate_register();
-    mark_register_live(check_reg, 5);
-
-    get_variable_access_string(key_var, access_key);
-    emit_asm("MOV R%d, %s        ; Load current key\n", check_reg, access_key);
-    emit_falsy_jump(check_reg, end_label);
-    unlock_register(check_reg);
-
-    // ---------------------------------------------------------------------
-    // STEP 6: Assign loop variables from iterator results
-    // Call: iterator_func(state, current_key)
-    // ---------------------------------------------------------------------
-    // FIX 2: Temporarily unpin any loop-related registers before evaluating body
-    // This allows the body to reuse registers without causing exhaustion
-    //
-    // Save current pinning state for loop control registers
     int saved_pinned[NUM_GPRS];
     for (int i = 0; i < NUM_GPRS; i++) {
         saved_pinned[i] = register_pinned[i];
     }
-
-    // Unpin all registers temporarily for body evaluation
     for (int i = 0; i < NUM_GPRS; i++) {
         register_pinned[i] = 0;
     }
@@ -424,54 +447,56 @@ void node_for_generic(ASTNode *node)
     emit_asm("CALL R0            ; Call iterator(state, key)\n");
     emit_asm("IADD SP, 2         ; Clean up 2 arguments\n");
 
-    // R0 now contains the new key (or nil if done)
-    // Results are on stack: [SP-0] = new_key, [SP-1] = value1, [SP-2] = value2, ...
+    // Iterator results come back via R0/R2/R3, the same convention
+    // node_return() uses for every other multi-value return:
+    //   R0 = new key (or BOXED_NIL/false when iteration is done)
+    //   R2 = first value (e.g. 'v' in "for k, v in ...")
+    //   R3 = third value (rarely used by iterators, kept for generality)
+
+    // Check the RETURNED key (R0), not the key we just passed in.
+    int check_reg = allocate_register();
+    mark_register_live(check_reg, 5);
+    emit_asm("MOV R%d, R0        ; Copy returned key for falsy check\n", check_reg);
+    emit_falsy_jump(check_reg, end_label);
+    unlock_register(check_reg);
 
     // Store new key for next iteration
     emit_asm("MOV %s, R0        ; Save new key for next iteration\n", access_key);
 
-    // Assign loop variables from stack
+    // Assign loop variables from R0/R2/R3
+    int raw_regs[3] = {0, 2, 3};
     for (int i = 0; i < var_count && i < 3; i++) {
         char var_access[128];
         get_variable_access_string(var_names[i], var_access);
-
-        // Pop value from stack (values are pushed in order: key, val1, val2...)
-        emit_asm("MOV R0, [SP-%d]     ; Load value %d from stack\n", i, i);
-        emit_asm("MOV %s, R0        ; Assign to loop variable '%s'\n",
-                 var_access, var_names[i]);
+        emit_asm("MOV %s, R%d        ; Assign to loop variable '%s'\n",
+                 var_access, raw_regs[i], var_names[i]);
     }
 
-    // Clean up iterator results from stack
-    emit_asm("IADD SP, %d       ; Clean up %d values from stack\n",
-             var_count > 0 ? var_count : 1, var_count > 0 ? var_count : 1);
-
     // ---------------------------------------------------------------------
-    // STEP 7: Execute Loop Body
+    // STEP 6: Execute Loop Body
     // ---------------------------------------------------------------------
-    // FIX 2: Body is evaluated with unpinned registers, allowing it to
-    // reuse registers that were previously pinned for loop control
     push_scope();
     generate_block(node->as.for_generic.body);
     pop_scope();
 
-    // Jump back to start
     emit_asm("JMP %s\n", start_label);
 
     // ---------------------------------------------------------------------
-    // STEP 8: Loop end label
+    // STEP 7: Loop end label
     // ---------------------------------------------------------------------
     emit_asm("%s:\n", end_label);
 
-    // Restore pinning state after loop body
     for (int i = 0; i < NUM_GPRS; i++) {
         register_pinned[i] = saved_pinned[i];
     }
 
-    // Clean up
     pop_loop();
     pop_scope();
 
     if (var_names != NULL) {
         free(var_names);
+    }
+    if (var_syms != NULL) {
+        free(var_syms);
     }
 }

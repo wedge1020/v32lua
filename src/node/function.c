@@ -291,7 +291,17 @@ void  node_function_call (ASTNode *node, int  dest_reg)
         emit_asm("    ; --- Method call: resolve target and cache 'self' ---\n");
 
         ASTNode *table_get_node = node->as.call.target;
-        table_reg = allocate_register();
+        // table_reg must survive the entire argument-evaluation window
+        // (STEP 2) so it can be pushed as 'self' at STEP 3 -- exactly the
+        // same requirement target_reg has for the function pointer itself.
+        // It's pinned + locked here for the same reason target_reg is:
+        // pinning is what actually stops allocate_register() from handing
+        // this same physical register number to an unrelated value (like
+        // an argument) while table_reg is spilled and waiting to be
+        // reloaded. A plain allocate_register() + spill_register() here
+        // previously let exactly that collision happen.
+        table_reg = allocate_pinned_register();
+        lock_register(table_reg);
         int key_reg = allocate_register();
 
         // Short-lived registers for lookup
@@ -324,10 +334,21 @@ void  node_function_call (ASTNode *node, int  dest_reg)
         // Clean up key register
         unlock_register(key_reg);
 
-        // Spill table_reg but NOT target_reg (target is still locked)
-        // Method lookup is done, but we still need the method pointer in target_reg
-        spill_register(table_reg);
-    } else {
+        // Spill table_reg but NOT target_reg (target is still locked).
+        // force_spill_register() is required here (not plain
+        // spill_register()) because table_reg is now pinned -- plain
+        // spill_register() bails out immediately for pinned registers and
+        // would silently emit nothing, leaving stale data in the spill
+        // slot. force_spill_register() spills unconditionally without
+        // touching the pinned flag, so table_reg's register number
+        // remains reserved (allocate_register() skips all pinned
+        // registers in every phase) for the whole argument-evaluation
+        // window, and the ensure_in_register(table_reg) at STEP 3 below
+        // reloads it correctly.
+        force_spill_register(table_reg);
+    }
+    else
+    {
         // Direct function call: foo() or module.func()
         if (!is_c_call) {
             // Standard Lua function - resolve target directly into locked register
@@ -447,7 +468,7 @@ void  node_function_call (ASTNode *node, int  dest_reg)
         ensure_in_register(table_reg);
 
         emit_asm("PUSH R%d ; Arg 1: self\n", table_reg);
-        unlock_register(table_reg); // No longer needed
+        unlock_pinned_register(table_reg); // No longer needed -- also clears the pin
         total_arg_count++;
     }
 

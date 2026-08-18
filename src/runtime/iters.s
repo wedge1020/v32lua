@@ -1,16 +1,34 @@
-;; ===========================================================================
-;; Built-in: next(t, [k]) - Table iterator for pairs()
+;; ---------------------------------------------------------------------------
+;; Built-in: next(t, key) - table iterator for pairs()
 ;;
-;; Incoming Stack: [BP+3] = Tagged Table Pointer, [BP+2] = Key (or NIL)
-;; Returns: R0 = next key (boxed), pushes next value on stack
-;;          If no more elements, returns BOXED_NIL
+;; Incoming Stack: [BP+3] = Tagged Table Pointer, [BP+2] = Current Key (or
+;;                 NIL to start from the beginning)
+;; Returns: R0 = next key (BOXED_NIL when iteration is done), R2 = value
+;;          at that key (2-value return via R0/R2, matching this
+;;          compiler's standard multi-return convention -- see
+;;          node_return() in v32lua.c)
 ;; Register Usage: R1-R8
-;; ===========================================================================
+;;
+;; IMPLEMENTATION NOTE: scans the hash association list only. There is no
+;; separate "array part" traversal, because there is no separate array
+;; part in this runtime -- __builtin_table_set stores every key (whether a
+;; small contiguous integer or anything else) through the same hash
+;; bucket-chain mechanism (see __builtin_table_set_hash_store; real array
+;; allocation is still a __builtin_table_set_reallocate TODO). A previous
+;; version of this function had a separate array-part fast path that read
+;; directly through the table's array-data-pointer header field -- always
+;; null -- and returned garbage for any table with a nonzero tracked
+;; length. Scanning the hash uniformly for every key type sidesteps that.
+;;
+;; Nil-valued entries (a key set to nil via t[k] = nil, which this runtime
+;; stores in place rather than physically removing) are treated as absent
+;; and silently skipped during the scan, matching real Lua's pairs()
+;; semantics of never yielding a deleted key.
+;; ---------------------------------------------------------------------------
 __builtin_next:
     PUSH BP
     MOV  BP, SP
 
-    ;; --- Callee-Save: Preserve 8 working registers ---
     PUSH R1
     PUSH R2
     PUSH R3
@@ -20,7 +38,6 @@ __builtin_next:
     PUSH R7
     PUSH R8
 
-    ;; --- Load arguments ---
     MOV  R1, [BP+3]          ; R1 = Tagged Table Pointer
     MOV  R2, [BP+2]          ; R2 = Current Key (or NIL for first call)
 
@@ -29,150 +46,74 @@ __builtin_next:
     AND  R3, BOXED_DATA
     IEQ  R3, BOXED_TABLE
     JF   R3, __next_error_not_table
+    AND  R1, BOXED_PAYLOAD   ; R1 = raw table header address (unboxed for good)
 
-    ;; --- Unbox table pointer ---
-    AND  R1, BOXED_PAYLOAD   ; R1 = raw table header address
-
-    ;; --- Check if key is NIL (first iteration) ---
-    MOV  R3, R2
-    IEQ  R3, BOXED_NIL
-    JT   R3, __next_first_key
-
-    ;; --- Key is not NIL: find NEXT key after R2 ---
-    ;; Use table_get to find the next key
-    ;; For now, we'll do a linear scan through all keys
-    MOV  R4, [R1+1]          ; R4 = array length
-    CFI  R4                 ; Convert to integer
-
-    ;; Check if we should start from array part
-    MOV  R5, R2
-    CFI  R5
-    ILT  R5, 1
-    JT   R5, __next_check_hash
-
-    ;; We're in numeric range - find next numeric key
-    IADD R5, 1               ; Next index
-    ILE  R5, R4
-    JT   R5, __next_array_found
-
-    ;; Fall through to hash check
-    JMP  __next_check_hash
-
-__next_first_key:
-    ;; First call: return first array element or first hash key
-    MOV  R4, [R1+1]          ; R4 = array length
-    CFI  R4
-    IGT  R4, 0
-    JT   R4, __next_array_first
-
-    ;; No array elements, check hash
-    JMP  __next_check_hash_first
-
-__next_array_first:
-    MOV  R5, 1               ; Start at index 1
-__next_array_found:
-    ;; Get value at index R5
-    MOV  R6, [R1+2]          ; R6 = Array Data Pointer
-    MOV  R7, R5
-    ISUB R7, 1               ; Convert to 0-based
-    IADD R6, R7
-    MOV  R0, [R6]            ; Value
-
-    ;; Push value on stack
-    PUSH R0
-
-    ;; Return key (R5) as boxed float
-    MOV  R0, R5
-    CIF  R0
-    JMP  __next_done
-
-__next_check_hash_first:
-    MOV  R5, 0               ; Signal first hash key
-    JMP  __next_scan_hash
-
-__next_check_hash:
-    ;; Find next key in hash table after R2
-    ;; This is a simplified implementation
     MOV  R6, [R1+3]          ; R6 = Base Hash Data Pointer
     IEQ  R6, 0
-    JT   R6, __next_done_nil  ; No hash table
+    JT   R6, __next_done_nil  ; No hash storage at all -> table is empty
 
-    MOV  R7, R6              ; R7 = running pointer
-    IADD R7, 2               ; Skip to first key
+    ;; --- R8 = "still searching for R2" flag ---
+    ;; If R2 is NIL, we want the very first live entry -- we're already
+    ;; "past" the search key. Otherwise we must scan until we see R2
+    ;; itself before considering anything a candidate.
+    MOV  R8, R2
+    IEQ  R8, BOXED_NIL
+    JT   R8, __next_seeking_done
+    MOV  R8, 1
+    JMP  __next_scan_bucket
+__next_seeking_done:
+    MOV  R8, 0
 
-    MOV  R8, 0               ; R8 = found flag
-__next_scan_hash:
-    MOV  R9, [R6]            ; R9 = PairCount
-    IEQ  R9, 0
-    JT   R9, __next_hash_done
+__next_scan_bucket:
+    MOV  R4, [R6]              ; R4 = PairCount in this bucket
+    MOV  R7, R6
+    IADD R7, 2                 ; R7 = running pointer to Key0
 
-    MOV  R4, 0               ; Counter
-__next_scan_loop:
-    MOV  R3, [R7]            ; R3 = current key
+__next_scan_pair:
+    MOV  R3, R4
     IEQ  R3, 0
-    JT   R3, __next_hash_done_inner
+    JT   R3, __next_next_bucket   ; No more pairs in this bucket
 
-    ;; Check if this is the key we're looking for (for non-first calls)
-    MOV  R5, R2
-    IEQ  R5, BOXED_NIL
-    JF   R5, __next_check_match
+    MOV  R5, [R7]               ; R5 = stored key at this slot
 
-    ;; First call: return first key
-    MOV  R8, 1               ; Found
-    JMP  __next_hash_found
+    MOV  R3, R8
+    IEQ  R3, 0
+    JT   R3, __next_have_target  ; not seeking anymore -> this slot is a candidate
 
-__next_check_match:
-    IEQ  R3, R5
-    JF   R3, __next_not_match
-    MOV  R8, 1               ; Found next key
-    JMP  __next_hash_found_next
-__next_not_match:
-    IADD R7, 2               ; Skip to next key
-    IADD R4, 1
-    JMP  __next_scan_loop
+    ;; Still seeking: is this slot the key we're looking for?
+    MOV  R3, R5
+    IEQ  R3, R2
+    JF   R3, __next_advance_pair
+    MOV  R8, 0                  ; Found it -- next live slot is our candidate
+    JMP  __next_advance_pair
 
-__next_hash_found_next:
-    IADD R7, 2               ; Skip to next key
-    IADD R4, 1
-    JMP  __next_scan_loop
+__next_have_target:
+    ;; This slot is a candidate. Skip it if its value is nil (deleted key).
+    MOV  R3, [R7+1]
+    IEQ  R3, BOXED_NIL
+    JT   R3, __next_advance_pair
 
-__next_hash_found:
-    ;; R3 = key, R7 points to key, next value is at R7+1
-    IADD R7, 1
-    MOV  R0, [R7]            ; Value
-    PUSH R0
-
-    MOV  R0, R3
-    CIF  R0
+    ;; Live entry -- this is the result.
+    MOV  R0, R5                 ; R0 = key
+    MOV  R2, [R7+1]             ; R2 = value
     JMP  __next_done
 
-__next_hash_done_inner:
-    IADD R6, 16              ; Move to next bucket (16 words = header + 7 pairs)
-    MOV  R7, R6
+__next_advance_pair:
     IADD R7, 2
-    JMP  __next_scan_hash
+    ISUB R4, 1
+    JMP  __next_scan_pair
 
-__next_hash_done:
-    ;; No more hash keys
-    ;; If we were looking for next after a key, check if we've checked all
-    MOV  R5, R2
-    IEQ  R5, BOXED_NIL
-    JT   R5, __next_done_nil
-
-    ;; We've exhausted hash, try array from start
-    MOV  R4, [R1+1]
-    CFI  R4
-    IGT  R4, 0
-    JF   R4, __next_done_nil
-
-    MOV  R5, 1
-    JMP  __next_array_found
+__next_next_bucket:
+    MOV  R3, [R6+1]              ; R3 = NextBucketPtr
+    IEQ  R3, 0
+    JT   R3, __next_done_nil     ; End of chain, nothing left
+    MOV  R6, R3
+    JMP  __next_scan_bucket
 
 __next_done_nil:
     MOV  R0, BOXED_NIL
 
 __next_done:
-    ;; --- Callee-Restore ---
     POP  R8
     POP  R7
     POP  R6
@@ -187,16 +128,25 @@ __next_done:
     RET
 
 __next_error_not_table:
-    JMP __next_error_not_table
     HLT
+    JMP __next_error_not_table
 
 ;; ===========================================================================
 ;; Built-in: ipairs_iter(t, index) - Numeric iterator for ipairs()
 ;;
 ;; Incoming Stack: [BP+3] = Tagged Table Pointer, [BP+2] = Current Index
-;; Returns: R0 = next index (boxed), pushes value on stack
-;;          Returns BOXED_NIL when index > array length
-;; Register Usage: R1-R5
+;; Returns: R0 = next index (boxed float, or BOXED_NIL when done),
+;;          R2 = value at that index (2-value return via R0/R2, matching
+;;          this compiler's standard multi-return convention -- see
+;;          node_return() in v32lua.c)
+;; Register Usage: R1-R7
+;;
+;; IMPLEMENTATION NOTE: fetches the value via __builtin_table_get rather
+;; than reading through the table's array-data-pointer header field
+;; directly. That field is always null in this runtime (real array
+;; allocation is still a __builtin_table_set_reallocate TODO), so the
+;; previous direct-array-read version returned garbage for every table
+;; with a nonzero tracked length.
 ;; ===========================================================================
 __builtin_ipairs_iter:
     PUSH BP
@@ -208,10 +158,12 @@ __builtin_ipairs_iter:
     PUSH R3
     PUSH R4
     PUSH R5
+    PUSH R6
+    PUSH R7
 
     ;; --- Load arguments ---
-    MOV  R1, [BP+3]          ; R1 = Tagged Table Pointer
-    MOV  R2, [BP+2]          ; R2 = Current Index
+    MOV  R1, [BP+3]          ; R1 = Tagged Table Pointer (kept BOXED for table_get)
+    MOV  R2, [BP+2]          ; R2 = Current Index (boxed float, or NIL for first call)
 
     ;; --- Validate table ---
     MOV  R3, R1
@@ -219,56 +171,42 @@ __builtin_ipairs_iter:
     IEQ  R3, BOXED_TABLE
     JF   R3, __ipairs_iter_error
 
-    ;; --- Unbox table pointer ---
-    AND  R1, BOXED_PAYLOAD   ; R1 = raw table header address
+    MOV  R4, R1
+    AND  R4, BOXED_PAYLOAD   ; R4 = raw table header address (R1 stays boxed)
 
-    ;; --- Get array length ---
-    MOV  R3, [R1+1]          ; R3 = array length (as float)
-    CIF  R3                 ; Ensure it's a float
-    CFI  R3                 ; Convert to integer
+    ;; --- Get tracked contiguous array length (Word 1) ---
+    MOV  R5, [R4+1]
 
-    ;; --- Check if current index is valid ---
-    MOV  R4, R2
-    CFI  R4                 ; Convert index to integer
+    ;; --- Compute next index into R6 ---
+    MOV  R6, R2
+    IEQ  R6, BOXED_NIL
+    JT   R6, __ipairs_iter_start
 
-    ;; If index is NIL (shouldn't happen for ipairs, but handle it)
-    MOV  R5, R2
-    IEQ  R5, BOXED_NIL
-    JT   R5, __ipairs_iter_start
+    MOV  R6, R2
+    CFI  R6
+    IADD R6, 1                ; Next index
 
-    ;; Normal case: increment index
-    IADD R4, 1               ; Next index
-
-    ;; Check if next index exceeds array length
-    IGT  R4, R3
-    JT   R4, __ipairs_iter_done_nil
-
-    JMP  __ipairs_iter_get_value
+    JMP  __ipairs_iter_check_bounds
 
 __ipairs_iter_start:
-    ;; First call: start at index 1
-    MOV  R4, 1
-    IGT  R4, R3
-    JT   R4, __ipairs_iter_done_nil
+    MOV  R6, 1                ; First call: start at index 1
 
-__ipairs_iter_get_value:
-    ;; Get value at index R4 from array
-    MOV  R5, [R1+2]          ; R5 = Array Data Pointer
-    IEQ  R5, 0
-    JT   R5, __ipairs_iter_done_nil  ; No array allocated
+__ipairs_iter_check_bounds:
+    MOV  R7, R6
+    IGT  R7, R5
+    JT   R7, __ipairs_iter_done_nil   ; Next index exceeds length -> done
 
-    ;; Calculate address: array_ptr + (index - 1)
-    MOV  R2, R4
-    ISUB R2, 1
-    IADD R5, R2
+    ;; --- Fetch value at index R6 via __builtin_table_get ---
+    MOV  R7, R6
+    CIF  R7                   ; R7 = boxed float key
+    PUSH R1                   ; Arg1: Table Pointer (boxed)
+    PUSH R7                   ; Arg2: Key
+    CALL __builtin_table_get
+    IADD SP, 2
 
-    ;; Load value
-    MOV  R0, [R5]
-    PUSH R0                  ; Push value on stack
-
-    ;; Return next index as boxed float
-    MOV  R0, R4
-    CIF  R0
+    MOV  R2, R0                ; R2 = fetched value (2nd return value)
+    MOV  R0, R6
+    CIF  R0                    ; R0 = next index as boxed float (1st return value)
     JMP  __ipairs_iter_done
 
 __ipairs_iter_done_nil:
@@ -276,6 +214,8 @@ __ipairs_iter_done_nil:
 
 __ipairs_iter_done:
     ;; --- Callee-Restore ---
+    POP  R7
+    POP  R6
     POP  R5
     POP  R4
     POP  R3
@@ -287,5 +227,6 @@ __ipairs_iter_done:
     RET
 
 __ipairs_iter_error:
-    JMP __ipairs_iter_error
     HLT
+    JMP __ipairs_iter_error
+
