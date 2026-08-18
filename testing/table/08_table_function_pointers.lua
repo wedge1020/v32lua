@@ -7,6 +7,12 @@ function add(a, b) return a + b end
 function multiply(a, b) return a * b end
 function greet(name) return "Hello, " .. name end
 
+-- Global table + colon-defined method, for Test 7 (colon call-site syntax)
+Counter = {count = 0}
+function Counter:increment(amount)
+    self.count = self.count + amount
+end
+
 function test_table_function_pointers()
     -- === Test 1: Storing function in table ===
     local t1 = {op = add}
@@ -43,6 +49,16 @@ function test_table_function_pointers()
     number_result6 = t6.math.add(7, 3)   -- Expected: 10
     number_result7 = t6.math.mul(7, 3)  -- Expected: 21
     __rawasm__("__debug6:")
+
+    -- === Test 7: Colon call-site syntax (obj:method(args)) ===
+    -- Counter:increment(5) must desugar to Counter.increment(Counter, 5),
+    -- with `self` bound automatically -- not just colon-style function
+    -- DEFINITION (already covered by Counter:increment above), but colon
+    -- CALL-SITE syntax actually being used.
+    Counter:increment(5)
+    Counter:increment(3)
+    number_result8 = Counter.count  -- Expected: 8
+    __rawasm__("__debug7:")
 end
 
 function main()
@@ -58,6 +74,7 @@ function main()
     print(100, 120, "Test 5 - swapped op: " .. number_result5)
     print(100, 140, "Test 6 - nested add: " .. number_result6)
     print(100, 160, "Test 6 - nested mul: " .. number_result7)
+    print(100, 180, "Test 7 - colon call count: " .. number_result8)
 end
 
 --[[
@@ -70,4 +87,5 @@ string_result1: "Hello, Vircon32"
 number_result5: 12.0000
 number_result6: 10.0000
 number_result7: 21.0000
+number_result8: 8.0000
 ]]

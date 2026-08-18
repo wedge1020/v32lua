@@ -30,6 +30,13 @@ function test_table_concat()
     -- === Test 7: Mixed types (numbers coerced to strings) ===
     local t7 = {"a", 1, "b", 2}
     string_result7 = table.concat(t7)  -- Expected: "a1b2"
+
+    -- === Test 8: Default range stops at the array-part boundary, not at a
+    --             hole further out (consistent with # and ipairs already
+    --             treating the first gap as the end of the array part) ===
+    local t8 = {"a", "b"}
+    t8[4] = "d"  -- gap at index 3, so #t8 == 2
+    string_result8 = table.concat(t8)  -- Expected: "ab" (stops before the gap)
 end
 
 function main()
@@ -44,6 +51,7 @@ function main()
     print(100, 100, "Test 5 - Empty: '" .. string_result5 .. "'")
     print(100, 120, "Test 6 - Single: " .. string_result6)
     print(100, 140, "Test 7 - Mixed: " .. string_result7)
+    print(100, 160, "Test 8 - Gap boundary: " .. string_result8)
 end
 
 --[[
@@ -55,4 +63,5 @@ string_result4: "ab"
 string_result5: ""
 string_result6: "only"
 string_result7: "a1b2"
+string_result8: "ab"
 ]]

@@ -46,6 +46,15 @@ function test_table_hash_operations()
     boolean_result1 = (t5.missing == nil)  -- Expected: true
     boolean_result2 = (t5.absent == nil)   -- Expected: true (absent key returns nil)
     __rawasm__("__debug5:")
+
+    -- === Test 6: A table used as a key in another table ===
+    local t6 = {}
+    local key_table = {}
+    t6[key_table] = "keyed_by_table"
+    string_result12 = t6[key_table]  -- Expected: "keyed_by_table"
+    local other_table = {}
+    string_result13 = t6[other_table] or "nil"  -- Expected: "nil" (different table, different key)
+    __rawasm__("__debug6:")
 end
 
 function main()
@@ -68,6 +77,8 @@ function main()
     print(100, 260, "Test 5 - exists: " .. string_result11)
     print(100, 280, "Test 5 - missing==nil: " .. tostring(boolean_result1))
     print(100, 300, "Test 5 - absent==nil: " .. tostring(boolean_result2))
+    print(100, 320, "Test 6 - keyed by table: " .. string_result12)
+    print(100, 340, "Test 6 - diff table key: " .. string_result13)
 end
 
 --[[
@@ -88,5 +99,7 @@ string_result10: "value"
 string_result11: "yes"
 boolean_result1: true
 boolean_result2: true
+string_result12: "keyed_by_table"
+string_result13: "nil"
 
 --]]

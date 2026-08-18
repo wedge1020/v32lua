@@ -38,6 +38,14 @@ function test_table_sort()
     table.sort(t6)
     number_result8 = t6[1]  -- Expected: 1
     number_result9 = t6[5]  -- Expected: 5
+
+    -- === Test 7: Custom comparator (descending order) ===
+    -- This exercises table.sort(t, comp) -- the documented but, until now,
+    -- entirely untested second form of the signature.
+    local t7 = {3, 1, 4, 1, 5}
+    table.sort(t7, function(a, b) return a > b end)
+    number_result10 = t7[1]  -- Expected: 5 (largest first)
+    number_result11 = t7[5]  -- Expected: 1 (smallest last)
 end
 
 function main()
@@ -57,6 +65,8 @@ function main()
     print(100, 200, "Test 5 - Sorted[4]: " .. number_result7)
     print(100, 220, "Test 6 - Rev[1]: " .. number_result8)
     print(100, 240, "Test 6 - Rev[5]: " .. number_result9)
+    print(100, 260, "Test 7 - Comparator[1]: " .. number_result10)
+    print(100, 280, "Test 7 - Comparator[5]: " .. number_result11)
 end
 
 --[[
@@ -73,4 +83,6 @@ number_result6: 1
 number_result7: 4
 number_result8: 1
 number_result9: 5
+number_result10: 5
+number_result11: 1
 ]]

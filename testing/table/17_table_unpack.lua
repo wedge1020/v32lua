@@ -2,6 +2,10 @@
 --@ Tests ONLY the table.unpack() library function.
 --@ Results stored in global variables for automated memory scraping.
 
+function sum_three(a, b, c)
+    return a + b + c
+end
+
 function test_table_unpack()
     -- === Test 1: Unpack full table ===
     local t1 = {"a", "b", "c"}
@@ -36,6 +40,11 @@ function test_table_unpack()
     local t6 = {"a", "b", "c"}
     local result = table.unpack(t6, 3, 1)
     boolean_result2 = (result == nil)  -- Expected: true
+
+    -- === Test 7: unpack() expanding directly into a function call's
+    --             argument list (not just a destructuring assignment) ===
+    local t7 = {10, 20, 30}
+    number_result1 = sum_three(table.unpack(t7))  -- Expected: 60
 end
 
 function main()
@@ -53,6 +62,7 @@ function main()
     print(100, 160, "Test 4 - Empty nil: " .. tostring(boolean_result1))
     print(100, 180, "Test 5 - Single: " .. string_result8)
     print(100, 200, "Test 6 - Invalid: " .. tostring(boolean_result2))
+    print(100, 220, "Test 7 - Call-arg expand: " .. number_result1)
 end
 
 --[[
@@ -67,4 +77,5 @@ string_result7: "c"
 boolean_result1: true
 string_result8: "only"
 boolean_result2: true
+number_result1: 60
 ]]
