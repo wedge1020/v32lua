@@ -1,6 +1,73 @@
 #include "v32lua.h"
 
 // ============================================================================
+// table.insert(t, [pos], value) - Inserts value at position (or appends)
+// Two call forms: table.insert(t, value) [2 args] or
+//                 table.insert(t, pos, value) [3 args]
+// ============================================================================
+int emit_table_insert_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+    if (!arg || !arg->next) {
+        compiler_error(ERR_SYNTAX, node->line_number,
+            "table.insert() expects at least two arguments");
+        return 0;
+    }
+    ASTNode *arg2 = arg->next;
+    ASTNode *arg3 = arg2->next;
+
+    ASTNode *pos_node = arg3 ? arg2 : NULL;
+    ASTNode *val_node = arg3 ? arg3 : arg2;
+
+    emit_asm("    ;; --- Intrinsic: table.insert(t, [pos], value) ---\n");
+
+    // --- Evaluate each argument, spilling it to the stack right away. ---
+    // Any of these sub-expressions could itself contain a nested CALL
+    // (e.g. `table.insert(t, #t, v)`), and several runtime helpers
+    // (__builtin_len et al.) clobber R0-R2 with no callee-save. Spilling
+    // each value to the hardware stack as soon as it's computed, then
+    // reloading everything right before the final CALL, makes this immune
+    // to whatever a later argument expression does internally -- same
+    // pattern used for node_table_set / node_table_constructor.
+    int t_reg = allocate_register();
+    generate_asm(arg, t_reg);
+    ensure_in_register(t_reg);
+    emit_asm("    PUSH R%d ; spill table pointer\n", t_reg);
+
+    int pos_reg = allocate_register();
+    if (pos_node != NULL) {
+        generate_asm(pos_node, pos_reg);
+        ensure_in_register(pos_reg);
+    } else {
+        emit_asm("    MOV R%d, BOXED_NIL\n", pos_reg);  // default: append
+    }
+    emit_asm("    PUSH R%d ; spill position\n", pos_reg);
+
+    int val_reg = allocate_register();
+    generate_asm(val_node, val_reg);
+    ensure_in_register(val_reg);
+
+    // Reload in reverse order (LIFO) now that all arguments are safely computed.
+    emit_asm("    POP  R%d ; reload position\n", pos_reg);
+    emit_asm("    POP  R%d ; reload table pointer\n", t_reg);
+
+    emit_asm("    PUSH R%d ; Table Pointer\n", t_reg);
+    emit_asm("    PUSH R%d ; Position\n", pos_reg);
+    emit_asm("    PUSH R%d ; Value\n", val_reg);
+    emit_asm("    CALL __builtin_table_insert\n");
+    emit_asm("    IADD SP, 3\n");
+
+    if (dest_reg != 0) {
+        emit_asm("    MOV R%d, R0\n", dest_reg);
+    }
+
+    unlock_register(t_reg);
+    unlock_register(pos_reg);
+    unlock_register(val_reg);
+    return 1;
+}
+
+// ============================================================================
 // table.remove(t, [pos]) - Removes and returns the element at position
 // ============================================================================
 int emit_table_remove_intrinsic(ASTNode *node, int dest_reg)
@@ -13,15 +80,29 @@ int emit_table_remove_intrinsic(ASTNode *node, int dest_reg)
     }
 
     emit_asm("    ;; --- Intrinsic: table.remove(t, [pos]) ---\n");
+
+    // --- Evaluate the table pointer, then immediately spill it to the
+    //     stack. ---
+    // The position expression (e.g. `table.remove(t, #t)`) could itself
+    // contain a nested CALL, and several runtime helpers (__builtin_len et
+    // al.) clobber R0-R2 with no callee-save. Spilling t_reg right away and
+    // reloading it right before the final CALL makes it immune to whatever
+    // the position expression does internally -- same pattern used for
+    // node_table_set / node_table_constructor / emit_table_insert_intrinsic.
     int t_reg = allocate_register();
     generate_asm(arg, t_reg);
+    ensure_in_register(t_reg);
+    emit_asm("    PUSH R%d ; spill table pointer\n", t_reg);
 
     int pos_reg = allocate_register();
     if (arg->next != NULL) {
         generate_asm(arg->next, pos_reg);
+        ensure_in_register(pos_reg);
     } else {
         emit_asm("    MOV R%d, BOXED_NIL\n", pos_reg);  // default: remove last element
     }
+
+    emit_asm("    POP  R%d ; reload table pointer\n", t_reg);
 
     emit_asm("    PUSH R%d ; Table Pointer\n", t_reg);
     emit_asm("    PUSH R%d ; Position\n", pos_reg);

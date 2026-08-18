@@ -133,6 +133,7 @@ bool  emit_ipairs_intrinsic     (ASTNode *);
 //
 // table library
 //
+int   emit_table_insert_intrinsic    (ASTNode *, int);
 int   emit_table_remove_intrinsic    (ASTNode *, int);
 
 #endif

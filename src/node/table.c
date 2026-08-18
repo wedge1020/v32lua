@@ -23,6 +23,16 @@ void  node_table_constructor (ASTNode *node, int dest_reg)
 
                 // Generate the value
                 generate_asm(field, val_reg);
+                ensure_in_register(val_reg);
+
+                // --- Spill value across key evaluation ---
+                // The array index here is always a compile-time literal
+                // (below), so this spill isn't strictly load-bearing today.
+                // It's here for consistency with the record-style branch
+                // and to stay safe if array-style keys ever stop being
+                // synthesized literals. See the record-style branch below
+                // for the actual bug this pattern fixes.
+                emit_asm("PUSH R%d ; spill value (protect across key evaluation)", val_reg);
 
                 // Create integer key node for array index
                 ASTNode *key_node = make_node(NODE_NUMBER);
@@ -30,8 +40,10 @@ void  node_table_constructor (ASTNode *node, int dest_reg)
                 generate_asm(key_node, key_reg);
                 free(key_node); // Clean up temporary node
 
-                ensure_in_register(val_reg);
                 ensure_in_register(key_reg);
+
+                // Reload the spilled value now that it's safe.
+                emit_asm("POP  R%d ; reload spilled value", val_reg);
 
                 // Call __builtin_table_set
                 emit_asm("PUSH R%d ; table pointer", dest_reg);
@@ -45,7 +57,7 @@ void  node_table_constructor (ASTNode *node, int dest_reg)
 
                 array_index++;
             }
-            // Handle record-style initializer (key = value)
+            // Handle record-style initializer (key = value, or [key] = value)
             else {
                 // field is already a NODE_TABLE_SET with key and value
                 // We need to set the table_expr to our new table
@@ -58,11 +70,26 @@ void  node_table_constructor (ASTNode *node, int dest_reg)
                 mark_register_live(val_reg, 2);
                 mark_register_live(key_reg, 2);
 
+                // --- Evaluate VALUE first, then immediately spill it. ---
+                // The parser allows `[expr] = value` record fields (see
+                // the `'[' expr ']' '=' expr` grammar rule), so
+                // field->as.table_set.key can be an arbitrary expression --
+                // e.g. `{[f()] = "z"}`. If that expression emits a CALL
+                // (like __builtin_len does for `#t`), it can silently
+                // clobber val_reg if val_reg lands in R0-R2, since several
+                // runtime helpers (__builtin_table_len, __builtin_string_len)
+                // use those as scratch with no callee-save. Spilling val_reg
+                // to the stack now and reloading it right before the call
+                // makes it immune to whatever the key expression does.
                 generate_asm(field->as.table_set.value, val_reg);
-                generate_asm(field->as.table_set.key, key_reg);
-
                 ensure_in_register(val_reg);
+                emit_asm("PUSH R%d ; spill value (protect across possible nested CALLs in key expr)", val_reg);
+
+                generate_asm(field->as.table_set.key, key_reg);
                 ensure_in_register(key_reg);
+
+                // Reload the spilled value now that it's safe.
+                emit_asm("POP  R%d ; reload spilled value", val_reg);
 
                 emit_asm("PUSH R%d ; table pointer", table_reg);
                 emit_asm("PUSH R%d ; key", key_reg);
@@ -95,18 +122,38 @@ void  node_table_set (ASTNode *node)
     int  table_reg  = allocate_pinned_register ();
     int  key_reg    = allocate_pinned_register ();
 
-    // ✅ All used immediately for table operation
+    // All used immediately for table operation
     mark_register_live (val_reg,   2);
     mark_register_live (table_reg, 2);
     mark_register_live (key_reg,   2);
 
-    generate_asm (node -> as.table_set.value,      val_reg);
+    // --- Evaluate VALUE first, then immediately spill it to the stack. ---
+    // Register pinning only stops the COMPILER's allocator from reusing
+    // val_reg's slot -- it does NOT protect the physical register from being
+    // clobbered by a runtime CALL emitted while generating the table/key
+    // sub-expressions. `t[#t + 1] = v` is exactly that case: the key
+    // expression (`#t + 1`) emits `CALL __builtin_len`, which internally
+    // calls `__builtin_table_len` / `__builtin_string_len` -- both of which
+    // use R0-R2 as scratch with NO callee-save. If val_reg lands in R0-R2
+    // (it does, typically R2), its value is silently destroyed before we
+    // ever get to push it as the argument to __builtin_table_set.
+    //
+    // Spilling it to the hardware stack right away, then reloading it
+    // immediately before the call, makes it immune to whatever the
+    // table/key expressions do internally, including nested CALLs.
+    generate_asm (node -> as.table_set.value, val_reg);
+    ensure_in_register (val_reg);
+    emit_asm ("PUSH R%d ; spill value (protect across possible nested CALLs in key/table exprs)", val_reg);
+
     generate_asm (node -> as.table_set.table_expr, table_reg);
     generate_asm (node -> as.table_set.key,        key_reg);
 
-    ensure_in_register (val_reg);
     ensure_in_register (table_reg);
     ensure_in_register (key_reg);
+
+    // Reload the spilled value now that it's safe -- immediately before
+    // building the __builtin_table_set argument frame.
+    emit_asm ("POP  R%d ; reload spilled value", val_reg);
 
     emit_asm ("PUSH R%d ; table pointer", table_reg);
     emit_asm ("PUSH R%d ; key",           key_reg);

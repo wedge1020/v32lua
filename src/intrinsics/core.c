@@ -615,6 +615,12 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         return emit_type_intrinsic(node, dest_reg);
     }
 
+    // tables
+
+    if (strcmp(func_name, "table.insert") == 0) {
+        return emit_table_insert_intrinsic(node, dest_reg);
+    }
+
     if (strcmp(func_name, "table.remove") == 0) {
         return emit_table_remove_intrinsic(node, dest_reg);
     }
