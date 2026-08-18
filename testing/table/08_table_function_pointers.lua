@@ -11,27 +11,30 @@ function test_table_function_pointers()
     -- === Test 1: Storing function in table ===
     local t1 = {op = add}
     number_result1 = t1.op(3, 5)  -- Expected: 8
+    __rawasm__("__debug1:")
 
     -- === Test 2: Multiple function pointers ===
     local t2 = {sum = add, product = multiply}
     number_result2 = t2.sum(4, 6)      -- Expected: 10
     number_result3 = t2.product(4, 6) -- Expected: 24
-
+    __rawasm__("__debug2:")
 
     -- === Test 3: Method-style calls ===
-	__rawasm__("__debug:")
     local t3 = {value = 10, double = function(self) return self.value * 2 end}
     number_result4 = t3.double(t3)  -- Expected: 20
+    __rawasm__("__debug3:")
 
     -- === Test 4: Dynamic function assignment ===
     local t4 = {}
     t4.func = greet
     string_result1 = t4.func("Vircon32")  -- Expected: "Hello, Vircon32"
+    __rawasm__("__debug4:")
 
     -- === Test 5: Overwriting function pointers ===
     local t5 = {op = add}
     t5.op = multiply
     number_result5 = t5.op(3, 4)  -- Expected: 12 (not 7)
+    __rawasm__("__debug5:")
 
     -- === Test 6: Nested function tables ===
     local t6 = {
@@ -39,6 +42,7 @@ function test_table_function_pointers()
     }
     number_result6 = t6.math.add(7, 3)   -- Expected: 10
     number_result7 = t6.math.mul(7, 3)  -- Expected: 21
+    __rawasm__("__debug6:")
 end
 
 function main()

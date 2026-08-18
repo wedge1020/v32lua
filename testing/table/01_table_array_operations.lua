@@ -13,6 +13,7 @@ function test_table_array_operations()
     number_result2 = t1[2]  -- Expected: 200
     number_result3 = t1[3]  -- Expected: 300
     number_result4 = #t1    -- Expected: 3
+    __rawasm__("__debug1:")
 
     -- === Test 2: Length operator with gaps ===
     local t2 = {}
@@ -20,23 +21,27 @@ function test_table_array_operations()
     t2[2] = "b"
     t2[4] = "d"  -- Gap at index 3
     number_result5 = #t2    -- Expected: 2 (stops at first nil)
+    __rawasm__("__debug2:")
 
     -- === Test 3: Appending via length+1 ===
     local t3 = {"x", "y"}
     t3[#t3 + 1] = "z"
     string_result1 = t3[3]  -- Expected: "z"
     number_result6 = #t3    -- Expected: 3
+    __rawasm__("__debug3:")
 
     -- === Test 4: Array bounds checking ===
     local t4 = {"only"}
     string_result2 = t4[1]  -- Expected: "only"
     string_result3 = t4[2] or "nil"  -- Expected: "nil"
+    __rawasm__("__debug4:")
 
     -- === Test 5: Large array ===
     local t5 = {}
     for i = 1, 10 do t5[i] = i * 10 end
     number_result7 = t5[5]  -- Expected: 50
     number_result8 = #t5    -- Expected: 10
+    __rawasm__("__debug5:")
 end
 
 function main()

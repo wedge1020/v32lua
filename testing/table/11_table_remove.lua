@@ -9,6 +9,7 @@ function test_table_remove()
     string_result1 = removed  -- Expected: "c"
     number_result1 = #t1     -- Expected: 2
     string_result2 = t1[2]   -- Expected: "b"
+    __rawasm__("__debug1:")
 
     -- === Test 2: Remove from position 1 ===
     local t2 = {"a", "b", "c"}
@@ -16,6 +17,7 @@ function test_table_remove()
     string_result3 = removed2  -- Expected: "a"
     string_result4 = t2[1]     -- Expected: "b" (shifted)
     number_result2 = #t2      -- Expected: 2
+    __rawasm__("__debug2:")
 
     -- === Test 3: Remove from middle ===
     local t3 = {"a", "b", "c"}
@@ -23,18 +25,21 @@ function test_table_remove()
     string_result5 = removed3  -- Expected: "b"
     string_result6 = t3[2]     -- Expected: "c" (shifted)
     number_result3 = #t3      -- Expected: 2
+    __rawasm__("__debug3:")
 
     -- === Test 4: Remove from single-element table ===
     local t4 = {"only"}
     local removed4 = table.remove(t4)
     string_result7 = removed4  -- Expected: "only"
     number_result4 = #t4      -- Expected: 0
+    __rawasm__("__debug4:")
 
     -- === Test 5: Remove with negative position ===
     local t5 = {"a", "b", "c"}
     local removed5 = table.remove(t5, -1)  -- Remove last
     string_result8 = removed5  -- Expected: "c"
     number_result5 = #t5      -- Expected: 2
+    __rawasm__("__debug5:")
 end
 
 function main()

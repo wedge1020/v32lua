@@ -9,32 +9,36 @@ function test_table_instantiation()
     t1[1] = "first"
     t1[2] = "second"
     number_result1 = #t1  -- Expected: 2 (array length)
-	__rawasm__("__debug:")
     string_result1 = t1[1]  -- Expected: "first"
     string_result2 = t1[2]  -- Expected: "second"
+    __rawasm__("__debug1:")
 
     -- === Test 2: Table with initial array values ===
     local t2 = {"alpha", "beta", "gamma"}
     number_result2 = #t2  -- Expected: 3
     string_result3 = t2[1]  -- Expected: "alpha"
     string_result4 = t2[3]  -- Expected: "gamma"
+    __rawasm__("__debug2:")
 
     -- === Test 3: Table with string keys (hash part) ===
     local t3 = {name = "test", value = 123}
     string_result5 = t3.name  -- Expected: "test"
     number_result3 = t3.value  -- Expected: 123
     boolean_result1 = (t3.name == "test")  -- Expected: true
+    __rawasm__("__debug3:")
 
     -- === Test 4: Mixed table (array + hash) ===
     local t4 = {"arr1", "arr2", key1 = "hash1"}
     number_result4 = #t4  -- Expected: 2 (array part only)
     string_result6 = t4[1]  -- Expected: "arr1"
     string_result7 = t4.key1  -- Expected: "hash1"
+    __rawasm__("__debug4:")
 
     -- === Test 5: Nested table access ===
     local t5 = {inner = {x = 10, y = 20}}
     number_result5 = t5.inner.x  -- Expected: 10
     number_result6 = t5.inner.y  -- Expected: 20
+    __rawasm__("__debug5:")
 
     -- === Test 6: Zero/negative indices (hash fallback) ===
     local t6 = {}
@@ -43,6 +47,7 @@ function test_table_instantiation()
     string_result8 = t6[0]  -- Expected: "zero"
     string_result9 = t6[-1]  -- Expected: "negative"
     number_result7 = #t6  -- Expected: 0 (no positive integer keys)
+    __rawasm__("__debug6:")
 end
 
 function main()

@@ -11,6 +11,7 @@ function test_table_mutation()
     string_result1 = t1[1]  -- Expected: "new1"
     string_result2 = t1[2]  -- Expected: "new2"
     string_result3 = t1[3]  -- Expected: "old3" (unchanged)
+    __rawasm__("__debug1:")
 
     -- === Test 2: Overwriting hash values ===
     local t2 = {name = "old_name", value = 0}
@@ -18,6 +19,7 @@ function test_table_mutation()
     t2.value = 42
     string_result4 = t2.name  -- Expected: "new_name"
     number_result1 = t2.value  -- Expected: 42
+    __rawasm__("__debug2:")
 
     -- === Test 3: Adding new keys ===
     local t3 = {a = 1}
@@ -26,6 +28,7 @@ function test_table_mutation()
     number_result2 = t3.a  -- Expected: 1
     number_result3 = t3.b  -- Expected: 2
     string_result5 = t3[1]  -- Expected: "array"
+    __rawasm__("__debug3:")
 
     -- === Test 4: Deleting keys (setting to nil) ===
     local t4 = {x = 10, y = 20, z = 30}
@@ -33,6 +36,7 @@ function test_table_mutation()
     number_result4 = t4.x  -- Expected: 10
     boolean_result1 = (t4.y == nil)  -- Expected: true
     number_result5 = t4.z  -- Expected: 30
+    __rawasm__("__debug4:")
 
     -- === Test 5: Clearing and reusing table ===
     local t5 = {1, 2, 3}
@@ -42,6 +46,7 @@ function test_table_mutation()
     t5.new = "fresh"
     string_result6 = t5.new  -- Expected: "fresh"
     number_result6 = #t5    -- Expected: 0
+    __rawasm__("__debug5:")
 end
 
 function main()

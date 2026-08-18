@@ -61,7 +61,6 @@ end
 
 --[[
 === EXPECTED OUTPUT ===
-Global Variables:
 number_result1: 1
 number_result2: 3
 number_result3: 5

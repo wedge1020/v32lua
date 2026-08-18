@@ -9,6 +9,7 @@ function test_table_hash_operations()
     string_result1 = t1.name   -- Expected: "hero"
     string_result2 = t1.class  -- Expected: "mage"
     number_result1 = t1.level  -- Expected: 99
+    __rawasm__("__debug1:")
 
     -- === Test 2: Zero and negative indices ===
     local t2 = {}
@@ -18,6 +19,7 @@ function test_table_hash_operations()
     string_result3 = t2[0]     -- Expected: "zero"
     string_result4 = t2[-1]    -- Expected: "minus_one"
     string_result5 = t2[-100]  -- Expected: "minus_hundred"
+    __rawasm__("__debug2:")
 
     -- === Test 3: Mixed key types ===
     local t3 = {}
@@ -28,6 +30,7 @@ function test_table_hash_operations()
     string_result7 = t3[0]        -- Expected: "zero_key"
     string_result8 = t3[1]        -- Expected: "array_start"
     number_result2 = #t3         -- Expected: 1 (only positive int keys count)
+    __rawasm__("__debug3:")
 
     -- === Test 4: Dynamic key access ===
     local t4 = {}
@@ -35,12 +38,14 @@ function test_table_hash_operations()
     t4[key] = "value"
     string_result9 = t4[key]     -- Expected: "value"
     string_result10 = t4["dynamic"]  -- Expected: "value"
+    __rawasm__("__debug4:")
 
     -- === Test 5: Nil value vs missing key ===
     local t5 = {exists = "yes", missing = nil}
     string_result11 = t5.exists  -- Expected: "yes"
     boolean_result1 = (t5.missing == nil)  -- Expected: true
     boolean_result2 = (t5.absent == nil)   -- Expected: true (absent key returns nil)
+    __rawasm__("__debug5:")
 end
 
 function main()

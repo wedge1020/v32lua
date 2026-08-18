@@ -8,6 +8,7 @@ function test_table_insert()
     table.insert(t1, "c")
     string_result1 = t1[3]  -- Expected: "c"
     number_result1 = #t1    -- Expected: 3
+    __rawasm__("__debug1:")
 
     -- === Test 2: Insert at position 1 ===
     local t2 = {"b", "c"}
@@ -15,18 +16,21 @@ function test_table_insert()
     string_result2 = t2[1]  -- Expected: "a"
     string_result3 = t2[3]  -- Expected: "c" (shifted)
     number_result2 = #t2    -- Expected: 3
+    __rawasm__("__debug2:")
 
     -- === Test 3: Insert in middle ===
     local t3 = {"a", "c"}
     table.insert(t3, 2, "b")
     string_result4 = t3[2]  -- Expected: "b"
     number_result3 = #t3    -- Expected: 3
+    __rawasm__("__debug3:")
 
     -- === Test 4: Insert into empty table ===
     local t4 = {}
     table.insert(t4, "only")
     string_result5 = t4[1]  -- Expected: "only"
     number_result4 = #t4    -- Expected: 1
+    __rawasm__("__debug4:")
 
     -- === Test 5: Insert with negative position (from end) ===
     local t5 = {"a", "b", "c"}
@@ -34,6 +38,7 @@ function test_table_insert()
     string_result6 = t5[3]  -- Expected: "x"
     string_result7 = t5[4]  -- Expected: "c"
     number_result5 = #t5    -- Expected: 4
+    __rawasm__("__debug5:")
 end
 
 function main()

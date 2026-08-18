@@ -48,7 +48,6 @@ end
 
 --[[
 === EXPECTED OUTPUT ===
-Global Variables:
 string_result1: "abc"
 string_result2: "a-b-c"
 string_result3: "bcd"
