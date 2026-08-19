@@ -447,11 +447,18 @@ void node_for_generic(ASTNode *node)
     emit_asm("CALL __builtin_exec ; Validate and execute iterator (unboxes tag, handles closures)\n");
     emit_asm("IADD SP, 2         ; Clean up 2 arguments\n");
 
-    // Iterator results come back via R0/R2/R3, the same convention
-    // node_return() uses for every other multi-value return:
-    //   R0 = new key (or BOXED_NIL/false when iteration is done)
-    //   R2 = first value (e.g. 'v' in "for k, v in ...")
-    //   R3 = third value (rarely used by iterators, kept for generality)
+    // Iterator results come back via R0/R2/R3. Lock R2/R3 BEFORE allocating
+    // any scratch register below -- otherwise allocate_register() can (and
+    // did) hand back R2 or R3 for the falsy-check scratch register, since a
+    // real hardware CALL doesn't touch this compiler's own register_inventory
+    // bookkeeping. The scratch register's own MOV then clobbers the very
+    // return value it's sitting on top of, before the loop-variable
+    // assignments below ever get to read it. R0 doesn't need locking here --
+    // allocate_register() never hands out R0 in the first place (its scan
+    // starts at index 1). Same hazard node_multiple_assignment's PASS1
+    // already guards against for this exact register set.
+    lock_register(2);
+    lock_register(3);
 
     // Check the RETURNED key (R0), not the key we just passed in.
     int check_reg = allocate_register();
@@ -471,6 +478,10 @@ void node_for_generic(ASTNode *node)
         emit_asm("MOV %s, R%d        ; Assign to loop variable '%s'\n",
                  var_access, raw_regs[i], var_names[i]);
     }
+
+    // R2/R3 have now been fully consumed (saved to memory) -- safe to release.
+    unlock_register(2);
+    unlock_register(3);
 
     // ---------------------------------------------------------------------
     // STEP 6: Execute Loop Body

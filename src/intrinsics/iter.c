@@ -33,10 +33,10 @@ bool emit_ipairs_intrinsic(ASTNode *node) {
     // Writing R0 first is always safe; copying table_reg into R2 BEFORE
     // touching R3 means that even if table_reg == R3, its value is
     // captured into R2 before R3 gets overwritten.
-    emit_asm("MOV R0, __builtin_ipairs_iter ; Iterator function\n");
-    emit_asm("OR R0, BOXED_FUNCTION  ; Box as function\n");
-    emit_asm("MOV R2, R%d            ; State = table\n", table_reg);
-    emit_asm("MOV R3, 1.000000       ; Starting index\n");
+	emit_asm("MOV R0, __builtin_ipairs_iter ; Iterator function\n");
+	emit_asm("OR R0, BOXED_FUNCTION  ; Box as function\n");
+	emit_asm("MOV R2, R%d            ; State = table\n", table_reg);
+	emit_asm("MOV R3, BOXED_NIL      ; Starting index (ipairs_iter treats nil as \"start at 1\")\n");
 
     unlock_pinned_register(table_reg);
     return true;

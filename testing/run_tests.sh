@@ -107,7 +107,16 @@ if [ -r "${UNIT}.lua" ]; then
         echo "---------------------------------------------------------------"
     fi
 
-    printf "evaluating: %30s (%2s/%2s)     ... %4s\n" "${UNIT}" "${passed}" "${total}" "${qual}"
+    if [ "${qual}" = "PASS" ]; then
+        printf "evaluating: %30s (%2s/%2s)     ... %4s\n" "${UNIT}" "${passed}" "${total}" "${qual}"
+    elif [ "${DEBUG}" = "false" ]; then
+        let missed=total-passed
+        printf "evaluating: %30s (%2s/%2s)     ... %-4s\n" "${UNIT}" "${passed}" "${total}" "hit"
+        printf "            %30s (%2s/%2s)     ... %4s\n" " " "${missed}" "${total}" "miss"
+        printf "            %28s               ... %4s\n" " " "${qual}"
+    else
+        printf "evaluating: %30s (%2s/%2s)     ... %4s\n" "${UNIT}" "${passed}" "${total}" "${qual}"
+    fi
 
     if [ "${qual}" = "FAIL" ] && [ "${DEBUG}" = "true" ]; then
         echo "---------------------------------------------------------------"

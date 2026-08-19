@@ -30,7 +30,6 @@ __builtin_next:
     MOV  BP, SP
 
     PUSH R1
-    PUSH R2
     PUSH R3
     PUSH R4
     PUSH R5
@@ -49,8 +48,18 @@ __builtin_next:
     AND  R1, BOXED_PAYLOAD   ; R1 = raw table header address (unboxed for good)
 
     MOV  R6, [R1+3]          ; R6 = Base Hash Data Pointer
-    IEQ  R6, 0
-    JT   R6, __next_done_nil  ; No hash storage at all -> table is empty
+    MOV  R3, R6               ; Test on scratch R3 to preserve R6 pointer
+                              ; (IEQ is destructive -- overwrites its first
+                              ; operand with the 0/1 result. The original
+                              ; code tested R6 directly here, which is
+                              ; exactly the class of bug __builtin_table_get
+                              ; and __builtin_table_set's equivalent checks
+                              ; already guard against with a scratch
+                              ; register -- this was the one spot in
+                              ; __builtin_next that didn't get the same
+                              ; treatment.)
+    IEQ  R3, 0
+    JT   R3, __next_done_nil  ; No hash storage at all -> table is empty
 
     ;; --- R8 = "still searching for R2" flag ---
     ;; If R2 is NIL, we want the very first live entry -- we're already
@@ -120,7 +129,6 @@ __next_done:
     POP  R5
     POP  R4
     POP  R3
-    POP  R2
     POP  R1
 
     MOV  SP, BP
@@ -154,7 +162,6 @@ __builtin_ipairs_iter:
 
     ;; --- Callee-Save ---
     PUSH R1
-    PUSH R2
     PUSH R3
     PUSH R4
     PUSH R5
@@ -219,7 +226,6 @@ __ipairs_iter_done:
     POP  R5
     POP  R4
     POP  R3
-    POP  R2
     POP  R1
 
     MOV  SP, BP
