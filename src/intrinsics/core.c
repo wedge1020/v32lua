@@ -394,6 +394,13 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         }
     }
 
+    // TIC-80 pmem()
+    if (strcmp(func_name, "pmem") == 0) {
+        if (runtime_req.needs_tic80 == true) {
+            return emit_tic80_pmem_intrinsic(node, dest_reg);
+        }
+    }
+
     //////////////////////////////////////////////////////////////////////////
     //
     // string library intrinsics

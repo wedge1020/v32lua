@@ -575,3 +575,63 @@ bool emit_tic80_music_intrinsic(ASTNode *node, int dest_reg) {
 
     return true;
 }
+
+/**
+ * Emits assembly for the pmem() intrinsic (TIC-80 compatibility).
+ *
+ * Syntax:
+ *   pmem(index)          -> returns byte value at index (read)
+ *   pmem(index, value)  -> writes byte value at index, returns value
+ */
+bool emit_tic80_pmem_intrinsic(ASTNode *node, int dest_reg) {
+    emit_asm("    ;; --- TIC-80 pmem() Intrinsic ---\n");
+
+    // Collect up to 2 arguments (index, value)
+    int arg_count = 0;
+    ASTNode *curr = node->as.call.args_head;
+    ASTNode *args[2] = { NULL, NULL };
+    while (curr != NULL && arg_count < 2) {
+        args[arg_count++] = curr;
+        curr = curr->next;
+    }
+
+    if (arg_count < 1) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+                      "TIC-80 pmem() requires at least 1 argument: pmem(index[, value])");
+        return false;
+    }
+
+    // Push arguments right-to-left: value (if present), index
+    if (arg_count >= 2) {
+        // Write operation: push value then index
+        int reg = allocate_register();
+        register_pinned[reg] = 1;
+        generate_asm(args[1], reg);  // value
+        emit_asm("PUSH R%d ; Arg 2: value\n", reg);
+        register_pinned[reg] = 0;
+        unlock_register(reg);
+    } else {
+        // Read operation: push nil as placeholder for value
+        emit_asm("MOV R0, BOXED_NIL\n");
+        emit_asm("PUSH R0 ; Arg 2: value (nil for read)\n");
+    }
+
+    // Push index (always required)
+    int reg = allocate_register();
+    register_pinned[reg] = 1;
+    generate_asm(args[0], reg);  // index
+    emit_asm("PUSH R%d ; Arg 1: index\n", reg);
+    register_pinned[reg] = 0;
+    unlock_register(reg);
+
+    // Call runtime subroutine
+    emit_asm("CALL __builtin_tic80_pmem\n");
+    emit_asm("IADD SP, 2 ; Clean up pmem() arguments\n");
+
+    // Transfer result to dest_reg if needed
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R0 ; Transfer return value\n", dest_reg);
+    }
+
+    return true;
+}

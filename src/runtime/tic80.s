@@ -1109,3 +1109,96 @@ _tic80_map_done:
     MOV   SP, BP
     POP   BP
     RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; __builtin_tic80_pmem: Access TIC-80 Persistent Memory (mapped to Vircon32 MEMCARD)
+;;
+;; TIC-80 pmem() signature:
+;;   pmem(index)          -> returns byte value at index (read)
+;;   pmem(index, value)  -> writes byte value at index (write)
+;;
+;; Stack layout:
+;;   [BP+2] = index (0-65535 for TIC-80's 64KB)
+;;   [BP+3] = value (optional, for write)
+;;
+;; Returns: R0 = byte value (for read), or the value written (for write)
+;;
+;; Maps TIC-80's 64KB persistent memory to first 64KB of Vircon32 MEMCARD
+;; MEMCARD base: 0x30000000, size: 1MB (0x100000 bytes)
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_pmem:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; Check if this is a write operation (2 arguments)
+    ;; Stack has: [BP+0]=return addr, [BP+1]=old BP, [BP+2]=index, [BP+3]=value
+    MOV   R1, [BP+3]        ; Load potential value argument
+    MOV   R2, BOXED_NIL
+    IEQ   R1, R2
+    JT    R1, _tic80_pmem_read
+
+    ;; === WRITE OPERATION ===
+    ;; Convert index to integer
+    MOV   R1, [BP+2]        ; index
+    CFI   R1                ; R1 = integer index
+
+    ;; Bounds check: 0 <= index < 65536 (TIC-80 pmem limit)
+	MOV   R2, R1
+    ILT   R2, 0
+    JT    R2, _tic80_pmem_invalid
+	MOV   R2, R1
+    IGE   R2, 65536
+    JT    R2, _tic80_pmem_invalid
+
+    ;; Convert value to integer (byte)
+    MOV   R2, [BP+3]        ; value
+    CFI   R2
+    AND   R2, 0xFF         ; Clamp to byte (0-255)
+
+    ;; Calculate MEMCARD address: 0x30000000 + index
+    MOV   R3, 0x30000000
+    IADD  R3, R1           ; R3 = MEMCARD address
+
+    ;; Write byte to MEMCARD
+    MOV   [R3], R2
+
+    ;; Return the value written (as boxed Lua number)
+    CIF   R2
+    MOV   R0, R2
+    JMP   _tic80_pmem_done
+
+_tic80_pmem_read:
+    ;; === READ OPERATION ===
+    MOV   R1, [BP+2]        ; index
+    CFI   R1                ; R1 = integer index
+
+    ;; Bounds check
+	MOV   R0, R1
+    ILT   R0, 0
+    JT    R0, _tic80_pmem_invalid
+	MOV   R0, R1
+    IGE   R0, 65536
+    JT    R0, _tic80_pmem_invalid
+
+    ;; Calculate MEMCARD address
+    MOV   R3, 0x30000000
+    IADD  R3, R1
+
+    ;; Read byte from MEMCARD
+    MOV   R0, [R3]
+    AND   R0, 0xFF         ; Ensure byte value
+
+    ;; Return as boxed Lua number
+    CIF   R0
+    JMP   _tic80_pmem_done
+
+_tic80_pmem_invalid:
+    MOV   R0, BOXED_NIL     ; Return nil for out-of-bounds
+
+_tic80_pmem_done:
+    MOV   SP, BP
+    POP   BP
+    RET
