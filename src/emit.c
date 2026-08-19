@@ -882,6 +882,36 @@ void emit_load_function_value (ASTNode *func_def_node, const char *mangled_name,
     emit_asm("    ;; Build closure record for '%s' (%d upvalue%s)",
              mangled_name, upvalue_count, upvalue_count == 1 ? "" : "s");
 
+    // -------------------------------------------------------------------
+    // FIX: this function ALWAYS uses raw R0 as scratch for the malloc
+    // size argument, malloc's own return value, and the code-address
+    // load below -- by hardcoded register number, not through the
+    // compiler's own register allocator. allocate_register() never
+    // hands out R0 (its scan starts at index 1), so dest_reg here is
+    // never literally R0 -- but that offers no protection when the
+    // CALLER already has something meaningful sitting in the PHYSICAL
+    // R0 register that this function doesn't own.
+    //
+    // node_return()'s multi-return protocol is exactly such a caller:
+    // for `return a, b` where both a and b are closures, the first
+    // return value is deliberately placed in R0 before the SECOND
+    // return expression is ever evaluated. Building the second
+    // closure's record here then unconditionally overwrote that R0
+    // with its own malloc scratch, destroying the first closure before
+    // the function ever returned -- e.g. `return increment, get` always
+    // clobbered `increment`'s already-built closure pointer while
+    // constructing `get`'s.
+    //
+    // Saving/restoring R0 around just the portion that actually uses it
+    // as scratch is universally safe regardless of caller context: if
+    // R0 didn't hold anything meaningful, this is a harmless no-op;
+    // if it did, the caller's value survives unchanged. Same
+    // save-across-an-internal-CALL idiom already used elsewhere in this
+    // runtime (see __builtin_table_new's callee-save comment for R1
+    // across its own internal CALL __malloc).
+    // -------------------------------------------------------------------
+    emit_asm("PUSH R0 ; preserve caller's R0 across this closure's own malloc scratch");
+
     emit_asm("MOV R0, %d", 2 + upvalue_count);
     emit_asm("PUSH R0");
     emit_asm("CALL __malloc");
@@ -895,14 +925,16 @@ void emit_load_function_value (ASTNode *func_def_node, const char *mangled_name,
     emit_asm("MOV R0, %d", upvalue_count);
     emit_asm("MOV [R%d+1], R0 ; word 1: upvalue count", rec_reg);
 
-    // Copy each captured variable's CURRENT box pointer -- as visible from
-    // THIS (enclosing) function's own scope -- into the record, in the same
-    // order register_upvalue() will expect them on the callee side.
+    // Done needing raw R0 as scratch -- restore the caller's value now,
+    // before anything else (the upvalue-copy loop below only ever uses
+    // allocate_pinned_register()-issued temporaries, never R0).
+    emit_asm("POP R0 ; restore caller's R0");
+
     int index = 0;
     for (NameList *up = func_def_node->as.function_def.upvalues; up != NULL; up = up->next) {
         int tmp_reg = allocate_pinned_register();
         char access_str[256];
-        get_variable_access_string(up->name, access_str);   // raw slot value = the box pointer
+        get_variable_access_string(up->name, access_str);
         emit_asm("MOV R%d, %s ; box pointer for captured '%s'", tmp_reg, access_str, up->name);
         emit_asm("MOV [R%d+%d], R%d", rec_reg, 2 + index, tmp_reg);
         unlock_pinned_register(tmp_reg);

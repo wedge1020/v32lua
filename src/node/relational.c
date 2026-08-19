@@ -3,11 +3,16 @@
 void  node_relational (ASTNode *node, int  dest_reg)
 {
     generate_asm (node -> as.binary.left, dest_reg);
+
+    // See node_add() for the full rationale -- e.g. `x > compute()`
+    // is just as vulnerable as arithmetic operators are.
+    emit_asm ("PUSH R%d ; spill left operand (protect across possible nested CALL in right operand)\n", dest_reg);
+
     int  right_reg  = allocate_register ();
     generate_asm (node -> as.binary.right, right_reg);
-
-    ensure_in_register (dest_reg);
     ensure_in_register (right_reg);
+
+    emit_asm ("POP R%d ; reload spilled left operand\n", dest_reg);
 
     if (node->as.binary.operator == OP_EQ || node->as.binary.operator == OP_NEQ) {
         emit_asm("PUSH R%d\n", dest_reg);
@@ -24,13 +29,6 @@ void  node_relational (ASTNode *node, int  dest_reg)
     }
     else
     {
-        // Ordering operators (<, <=, >, >=) have to work for BOTH numbers
-        // and strings. A raw FLT/FGT on the register only makes sense when
-        // it holds an actual float -- a boxed string holds a tagged
-        // *pointer*, so comparing it directly with FLT/FGT compares
-        // meaningless bit patterns instead of string contents. Route
-        // through the type-aware runtime comparator instead, then turn
-        // its signed result (-1 / 0 / 1) into a Lua boolean.
         emit_asm("PUSH R%d\n", dest_reg);
         emit_asm("PUSH R%d\n", right_reg);
         emit_asm("CALL __builtin_relcmp\n");
@@ -39,8 +37,6 @@ void  node_relational (ASTNode *node, int  dest_reg)
 		switch (node -> as.binary.operator)
 		{
 			case OP_LT:
-				// True only if relcmp's result is EXACTLY -1. A sentinel (2)
-				// never matches, so incomparable operands correctly read false.
 				emit_asm ("IEQ R0, -1 ; true only if Left < Right\n");
 				break;
 
@@ -49,10 +45,6 @@ void  node_relational (ASTNode *node, int  dest_reg)
 				break;
 
 			case OP_LE:
-				// LE = (result == -1) OR (result == 0). Computed with explicit
-				// exact matches rather than inverting GT -- inverting would make
-				// LE/GE come out true for an incomparable-operands sentinel,
-				// since a fixed sentinel is unavoidably either > 0 or < 0.
 				emit_asm ("MOV R%d, R0 ; save raw relcmp result\n", right_reg);
 				emit_asm ("IEQ R0, -1 ; is it Less?\n");
 				emit_asm ("MOV R%d, R%d ; recover raw result\n", dest_reg, right_reg);

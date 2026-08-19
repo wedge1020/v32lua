@@ -302,13 +302,16 @@ void  push_function_context (const char *name, ASTNode *def_node)
         compiler_error (ERR_INTERNAL, -1,
                         "Out of memory allocating function context for '%s'", name);
     }
-    
-    new_node -> name               = name; 
-    new_node -> label_counter      = 0; 
-    new_node -> def_node           = def_node;
-    
-    new_node -> next               = context_stack_head;
-    context_stack_head             = new_node;
+
+    new_node -> name                 = name;
+    new_node -> label_counter        = 0;
+    new_node -> def_node             = def_node;
+    new_node -> vararg_count_offset  = -1;
+    new_node -> vararg_first_offset  = -1;
+    new_node -> fixed_param_count    = 0;
+
+    new_node -> next                 = context_stack_head;
+    context_stack_head               = new_node;
 }
 
 void  pop_function_context (void)

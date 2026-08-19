@@ -35,30 +35,7 @@ void  node_function_def (ASTNode *node)
         emit_asm("ISUB SP, %d ; Reserve stack for locals + spills\n", total_stack);
     }
 
-    // -------------------------------------------------------------------
-    // FIX (implicit-fallthrough-return bug): any code path that reaches
-    // the end of this function's body WITHOUT executing an explicit
-    // 'return' statement -- whether the function has no return statement
-    // at all, or simply falls off the end of an 'if' whose other branch
-    // does return -- must implicitly return nil, per Lua semantics.
-    //
-    // R0 (and R2/R3, for functions statically known elsewhere in their
-    // own body to return more than one value) are ordinary
-    // general-purpose registers with no guaranteed reset between calls.
-    // Nothing else in this compiler initializes them before
-    // generate_block() runs below, so falling off the end previously left
-    // the caller reading back whatever stale value those physical
-    // registers happened to hold from unrelated earlier code, instead of
-    // nil -- e.g. a function with no return statement at all always
-    // returned garbage, never nil.
-    //
-    // Defaulting them to BOXED_NIL here, unconditionally, before the body
-    // executes, is safe regardless of whether an explicit return follows
-    // later: node_return() on any path that DOES execute simply
-    // overwrites these with the real values on its own way out; only a
-    // path that never reaches a return statement ever observes this
-    // default.
-    // -------------------------------------------------------------------
+    // --- Default implicit return value(s): nil until overwritten ---
     {
         SymbolNode *self_sym          = resolve_symbol(func_name);
         int         self_return_count = (self_sym != NULL) ? self_sym->return_count : 1;
@@ -80,13 +57,46 @@ void  node_function_def (ASTNode *node)
         register_upvalue(up->name, param_offset++);
     }
 
+    // -------------------------------------------------------------------
+    // FIX (variadic parameter offset bug): pre-scan for a trailing "..."
+    // marker BEFORE assigning any fixed-parameter offsets. node_function_
+    // call() always pushes the caller-supplied TOTAL argument count as
+    // the very last word before CALL for any variadic target (see its
+    // STEP 3.5) -- since PUSH decrements SP before storing, the LAST
+    // word pushed ends up at the LOWEST offset, i.e. exactly
+    // [BP + 2 + upvalue_count] -- the slot the old code assigned to the
+    // FIRST fixed parameter. Every fixed parameter was therefore read
+    // one slot too early in any variadic function -- e.g. reading the
+    // caller's pushed arg-count (a raw integer like 4) back as if it
+    // were the value of the first real parameter.
+    //
+    // Reserving this slot up front (without registering a symbol for it)
+    // shifts every real fixed parameter's offset out by exactly one,
+    // matching where node_function_call() actually put them.
+    // -------------------------------------------------------------------
+    bool has_dots_marker = false;
+    for (ASTNode *pp = node->as.function_def.params; pp != NULL; pp = pp->next) {
+        if (pp->type == NODE_IDENTIFIER && strcmp(pp->as.id.name, "...") == 0) {
+            has_dots_marker = true;
+            break;
+        }
+    }
+
+    int vararg_count_offset = -1;
+    if (has_dots_marker) {
+        vararg_count_offset = param_offset; // this slot will hold the runtime arg count
+        param_offset++;
+    }
+
     int is_variadic = 0;
+    int fixed_param_count = 0;
     ASTNode *p = node->as.function_def.params;
     while (p != NULL) {
         if (p->type == NODE_IDENTIFIER) {
             if (strcmp(p->as.id.name, "...") == 0) {
                 is_variadic = 1;
             } else {
+                fixed_param_count++;
                 SymbolNode *param_sym = register_parameter(p->as.id.name, param_offset++);
 
                 if (param_sym->is_boxed) {
@@ -103,7 +113,16 @@ void  node_function_def (ASTNode *node)
         p = p->next;
     }
 
-    int explicit_param_count = param_offset - 2 - upvalue_count;
+    // Record variadic-access info for this function so a nested `{...}`
+    // table constructor (see node_table_constructor()) can find the
+    // runtime arg count and the first actual vararg value on the stack.
+    if (context_stack_head != NULL) {
+        context_stack_head->vararg_count_offset = vararg_count_offset;
+        context_stack_head->vararg_first_offset = param_offset; // right after the last fixed param
+        context_stack_head->fixed_param_count   = fixed_param_count;
+    }
+
+    int explicit_param_count = fixed_param_count;
 
     SymbolNode *sym = resolve_symbol(func_name);
     if (sym) {
@@ -111,10 +130,13 @@ void  node_function_def (ASTNode *node)
         sym->arity = is_variadic ? -1 : explicit_param_count;
     }
 
-    if (is_variadic) {
-        emit_asm ("    ; --- Variadic function: reserve space for arg count ---\n");
-        emit_asm ("ISUB SP, 1 ; Space for argument count at [BP-2]\n");
-    }
+    // NOTE: the old unconditional "ISUB SP, 1 ; Space for argument count
+    // at [BP-2]" local-slot reservation has been removed. The runtime
+    // arg count already lives on the stack at [BP + vararg_count_offset]
+    // -- a slot the CALLER pushed, not something this function needs to
+    // allocate or copy into a local of its own. That old slot was never
+    // actually populated with the count in the first place; it was dead,
+    // uninitialized stack space.
 
     generate_block(node->as.function_def.body);
     pop_scope();

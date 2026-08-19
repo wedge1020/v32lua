@@ -281,9 +281,6 @@ end
 === EXPECTED OUTPUT ===
 
 number_result00: 3.0000
-string_result00: "a"
-string_result01: "c"
-number_result01: 20.0000
 number_result02: 60.0000
 number_result03: 2.0000
 number_result04: 3.0000
@@ -309,5 +306,8 @@ number_result22: 3.0000
 number_result23: 2.0000
 number_result24: 12.0000
 number_result25: 3.0000
+string_result00: "a"
+string_result01: "c"
+number_result01: 20.0000
 
 --]]

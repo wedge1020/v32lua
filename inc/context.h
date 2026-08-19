@@ -39,7 +39,15 @@ typedef struct FunctionContextNode
 {
     const char                 *name;
     int                         label_counter;
-    ASTNode                    *def_node;      // function_def this context belongs
+    ASTNode                    *def_node;
+    int                         vararg_count_offset; // [BP+N] where the caller-supplied
+                                                       // total runtime arg count lives, or
+                                                       // -1 if this function isn't variadic
+    int                         vararg_first_offset;  // [BP+N] of the FIRST actual vararg
+                                                       // value (meaningful only when
+                                                       // vararg_count_offset != -1)
+    int                         fixed_param_count;     // this function's own declared,
+                                                       // non-"..." parameter count
     struct FunctionContextNode *next;
 } FunctionContextNode;
 

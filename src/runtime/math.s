@@ -916,15 +916,21 @@ __frexp_apply_sign:
     XOR   R0, 0x80000000         ; flip mantissa's sign bit back to negative
 
 __frexp_done:
-    MOV   R1, R3
-    CIF   R1                    ; R1 = exponent as Lua float
+    ;; --- Return: R0 = mantissa, R2 = exponent ---
+    ;; FIX: this project's established multi-return convention is
+    ;; R0/R2/R3, not R0/R1. R2's earlier role here (sign-preserving copy
+    ;; of the original x) is fully consumed by this point -- its last
+    ;; read was the sign check immediately above -- so it's safe to
+    ;; overwrite with the real second return value now.
+    MOV   R2, R3
+    CIF   R2                    ; R2 = exponent as Lua float
     MOV   SP, BP
     POP   BP
     RET
 
 __frexp_zero:
     MOV   R0, 0.0
-    MOV   R1, 0.0
+    MOV   R2, 0.0                ; second return value (exponent) = 0
     MOV   SP, BP
     POP   BP
     RET
@@ -980,17 +986,28 @@ __builtin_modf:
     MOV   R0, [BP+2]           ; R0 = x
 
     ;; --- Integer part (truncates toward zero) ---
-    MOV   R2, R0
-    CFI   R2                   ; R2 = integer part (as integer)
-    CIF   R2                   ; R2 = integer part (as float)
+    MOV   R1, R0
+    CFI   R1                   ; R1 = integer part (as integer)
+    CIF   R1                   ; R1 = integer part (as float)
 
     ;; --- Fractional part = x - integer_part ---
-    MOV   R1, R0
-    FSUB  R1, R2                ; R1 = fractional part -- explicitly returned now,
-                                 ; not left as an incidental leftover register value
+    MOV   R2, R0
+    FSUB  R2, R1                ; R2 = fractional part
+                                 ;
+                                 ; FIX: this project's established
+                                 ; multi-return convention is R0/R2/R3
+                                 ; (see node_return()/pairs()/ipairs()
+                                 ; elsewhere in this runtime), not R0/R1.
+                                 ; The caller's generic extraction logic
+                                 ; always reads the SECOND return value
+                                 ; from R2. Computing the fractional
+                                 ; part directly into R2 (using R1 as
+                                 ; scratch for the integer part instead)
+                                 ; fixes this at the source, rather than
+                                 ; needing an extra move at the end.
 
-    ;; --- Return: R0 = integer part, R1 = fractional part ---
-    MOV   R0, R2
+    ;; --- Return: R0 = integer part, R2 = fractional part ---
+    MOV   R0, R1
 
     MOV   SP, BP
     POP   BP

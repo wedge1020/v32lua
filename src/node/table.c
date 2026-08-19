@@ -12,40 +12,120 @@ void  node_table_constructor (ASTNode *node, int dest_reg)
         int array_index = 1; // Lua arrays are 1-indexed
 
         while (field != NULL) {
+            // -----------------------------------------------------------
+            // FIX: '...' inside a table constructor (`{...}` or
+            // `{fixed, ...}`) previously fell into the generic
+            // array-style branch below, calling generate_asm() directly
+            // on this field -- but NODE_VARIADIC_EXPR's case in
+            // generate_asm() is an unimplemented stub (emits only a
+            // comment), leaving the "value" register holding whatever
+            // garbage was already sitting in it. The table ended up with
+            // exactly one bogus element regardless of how many actual
+            // vararg values the caller passed -- including zero.
+            //
+            // Real Lua only expands '...' to ALL of its values when it
+            // is the LAST field in the constructor; this grammar only
+            // ever produces a single, standalone NODE_VARIADIC_EXPR
+            // field, so field->next is expected to be NULL here for any
+            // construct reachable from valid source.
+            //
+            // Requires the ENCLOSING function to actually be variadic;
+            // node_function_def() stashes the two stack offsets needed
+            // for this on context_stack_head specifically for this use.
+            // A non-variadic context (vararg_count_offset == -1) safely
+            // contributes zero elements instead of emitting bad code.
+            // -----------------------------------------------------------
+            if (field->type == NODE_VARIADIC_EXPR) {
+                if (context_stack_head != NULL && context_stack_head->vararg_count_offset != -1) {
+                    int count_reg = allocate_register();
+                    int idx_reg   = allocate_register();
+                    int addr_reg  = allocate_register();
+                    int val_reg   = allocate_register();
+                    int key_reg   = allocate_register();
+
+                    mark_register_live(count_reg, 30);
+                    mark_register_live(idx_reg,   30);
+
+                    int vco = context_stack_head->vararg_count_offset;
+                    int vfo = context_stack_head->vararg_first_offset;
+                    int fpc = context_stack_head->fixed_param_count;
+
+                    // vararg_count = (runtime total arg count) - (this
+                    // function's own fixed/named parameter count)
+                    emit_asm("MOV R%d, BP", addr_reg);
+                    emit_asm("IADD R%d, %d ; BP offset of runtime arg count", addr_reg, vco);
+                    emit_asm("MOV R%d, [R%d] ; runtime total argument count", count_reg, addr_reg);
+                    emit_asm("ISUB R%d, %d ; subtract fixed param count -> vararg count", count_reg, fpc);
+
+                    emit_asm("MOV R%d, 0 ; vararg loop index", idx_reg);
+
+                    int loop_id = get_next_label();
+                    const char *ctx = get_current_function_name();
+                    char loop_label[128], end_label[128];
+                    snprintf(loop_label, sizeof(loop_label), "__%s_vararg_expand_%d", ctx, loop_id);
+                    snprintf(end_label,   sizeof(end_label),   "__%s_vararg_expand_end_%d", ctx, loop_id);
+
+                    emit_asm("%s:", loop_label);
+
+                    // Destructive comparison -- test a scratch copy, never idx_reg itself.
+                    emit_asm("MOV R%d, R%d ; scratch copy (ILT is destructive)", val_reg, idx_reg);
+                    emit_asm("ILT R%d, R%d ; index < vararg count?", val_reg, count_reg);
+                    emit_asm("JF R%d, %s", val_reg, end_label);
+
+                    // Load the actual vararg value from [BP + vfo + idx].
+                    emit_asm("MOV R%d, BP", addr_reg);
+                    emit_asm("IADD R%d, %d ; base offset of the first vararg value", addr_reg, vfo);
+                    emit_asm("IADD R%d, R%d ; + loop index", addr_reg, idx_reg);
+                    emit_asm("MOV R%d, [R%d] ; the vararg value itself (already a boxed Lua value)", val_reg, addr_reg);
+
+                    // Key = array_index + idx, as a boxed Lua float.
+                    emit_asm("MOV R%d, R%d", key_reg, idx_reg);
+                    emit_asm("IADD R%d, %d ; base array index for this batch", key_reg, array_index);
+                    emit_asm("CIF R%d ; key as Lua float", key_reg);
+
+                    emit_asm("PUSH R%d ; table pointer", dest_reg);
+                    emit_asm("PUSH R%d ; key", key_reg);
+                    emit_asm("PUSH R%d ; value", val_reg);
+                    emit_asm("CALL __builtin_table_set");
+                    emit_asm("IADD SP, 3");
+
+                    emit_asm("IADD R%d, 1", idx_reg);
+                    emit_asm("JMP %s", loop_label);
+                    emit_asm("%s:", end_label);
+
+                    unlock_register(count_reg);
+                    unlock_register(idx_reg);
+                    unlock_register(addr_reg);
+                    unlock_register(val_reg);
+                    unlock_register(key_reg);
+                }
+
+                field = field->next;
+                continue;
+            }
+
             // Handle array-style initializer (just a value expression)
             if (field->type != NODE_TABLE_SET) {
-                // Generate: table[array_index] = value
                 int val_reg = allocate_pinned_register();
                 int key_reg = allocate_pinned_register();
 
                 mark_register_live(val_reg, 2);
                 mark_register_live(key_reg, 2);
 
-                // Generate the value
                 generate_asm(field, val_reg);
                 ensure_in_register(val_reg);
 
-                // --- Spill value across key evaluation ---
-                // The array index here is always a compile-time literal
-                // (below), so this spill isn't strictly load-bearing today.
-                // It's here for consistency with the record-style branch
-                // and to stay safe if array-style keys ever stop being
-                // synthesized literals. See the record-style branch below
-                // for the actual bug this pattern fixes.
                 emit_asm("PUSH R%d ; spill value (protect across key evaluation)", val_reg);
 
-                // Create integer key node for array index
                 ASTNode *key_node = make_node(NODE_NUMBER);
                 key_node->as.number.val = array_index;
                 generate_asm(key_node, key_reg);
-                free(key_node); // Clean up temporary node
+                free(key_node);
 
                 ensure_in_register(key_reg);
 
-                // Reload the spilled value now that it's safe.
                 emit_asm("POP  R%d ; reload spilled value", val_reg);
 
-                // Call __builtin_table_set
                 emit_asm("PUSH R%d ; table pointer", dest_reg);
                 emit_asm("PUSH R%d ; key", key_reg);
                 emit_asm("PUSH R%d ; value", val_reg);
@@ -59,28 +139,13 @@ void  node_table_constructor (ASTNode *node, int dest_reg)
             }
             // Handle record-style initializer (key = value, or [key] = value)
             else {
-                // field is already a NODE_TABLE_SET with key and value
-                // We need to set the table_expr to our new table
-                //field->as.table_set.table_expr = make_node_ident("__temp_table");
-
-                int table_reg = dest_reg; // Already has the table
+                int table_reg = dest_reg;
                 int val_reg = allocate_pinned_register();
                 int key_reg = allocate_pinned_register();
 
                 mark_register_live(val_reg, 2);
                 mark_register_live(key_reg, 2);
 
-                // --- Evaluate VALUE first, then immediately spill it. ---
-                // The parser allows `[expr] = value` record fields (see
-                // the `'[' expr ']' '=' expr` grammar rule), so
-                // field->as.table_set.key can be an arbitrary expression --
-                // e.g. `{[f()] = "z"}`. If that expression emits a CALL
-                // (like __builtin_len does for `#t`), it can silently
-                // clobber val_reg if val_reg lands in R0-R2, since several
-                // runtime helpers (__builtin_table_len, __builtin_string_len)
-                // use those as scratch with no callee-save. Spilling val_reg
-                // to the stack now and reloading it right before the call
-                // makes it immune to whatever the key expression does.
                 generate_asm(field->as.table_set.value, val_reg);
                 ensure_in_register(val_reg);
                 emit_asm("PUSH R%d ; spill value (protect across possible nested CALLs in key expr)", val_reg);
@@ -88,7 +153,6 @@ void  node_table_constructor (ASTNode *node, int dest_reg)
                 generate_asm(field->as.table_set.key, key_reg);
                 ensure_in_register(key_reg);
 
-                // Reload the spilled value now that it's safe.
                 emit_asm("POP  R%d ; reload spilled value", val_reg);
 
                 emit_asm("PUSH R%d ; table pointer", table_reg);
