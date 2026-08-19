@@ -574,6 +574,55 @@ int count_max_return_values (ASTNode *node)
                 for (ASTNode *e = node->as.return_stmt.expressions_head; e != NULL; e = e->next) {
                     count++;
                 }
+
+                // -----------------------------------------------------
+                // FIX (passthrough undercount): a return statement with
+                // exactly ONE expression, where that expression is
+                // itself a call to a function already known to return
+                // more than one value, actually contributes THAT many
+                // values to this function's own max return count -- not
+                // just "1" for being a single comma-separated expression.
+                // Without this, a passthrough function like
+                //   function passthrough() return inner_pair() end
+                // gets statically registered as return_count=1, so ITS
+                // OWN callers (via node_multiple_assignment()) never
+                // extract past R0 even after node_return() itself is
+                // fixed to correctly forward R0/R2/R3.
+                //
+                // ORDER LIMITATION: this only works if the callee's own
+                // return_count has already been computed by the time
+                // THIS function is processed by the register_all_
+                // globals_prepass() walk -- i.e. the callee must be
+                // defined/registered earlier. A forward reference to a
+                // not-yet-processed multi-return callee will still
+                // undercount here.
+                // -----------------------------------------------------
+                if (count == 1 &&
+                    node->as.return_stmt.expressions_head->type == NODE_FUNCTION_CALL) {
+                    ASTNode    *call_target = node->as.return_stmt.expressions_head->as.call.target;
+                    SymbolNode *callee_sym  = NULL;
+
+                    if (call_target->type == NODE_IDENTIFIER) {
+                        callee_sym = resolve_symbol(call_target->as.id.name);
+                    } else {
+                        char path_buf[256] = {0};
+                        if (resolve_static_path(call_target, path_buf)) {
+                            callee_sym = resolve_symbol(path_buf);
+                            if (callee_sym == NULL) {
+                                for (int i = 0; path_buf[i] != '\0'; i++) {
+                                    if (path_buf[i] == '.' || path_buf[i] == ':') path_buf[i] = '_';
+                                }
+                                callee_sym = resolve_symbol(path_buf);
+                            }
+                        }
+                    }
+
+                    if (callee_sym != NULL && callee_sym->is_function &&
+                        callee_sym->return_count > count) {
+                        count = callee_sym->return_count;
+                    }
+                }
+
                 if (count > max_count) max_count = count;
                 break;
             }

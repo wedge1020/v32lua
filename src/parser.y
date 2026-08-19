@@ -313,6 +313,80 @@ statement:
         func_def->next = assign;
         $$ = func_def;*/
     }
+    | TOKEN_LOCAL func_start TOKEN_IDENTIFIER ':' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END
+    {
+        // local function obj:method(...) ... end
+        //
+        // Not standard Lua (real Lua's "local function" only accepts a
+        // plain Name), but supported here as a project extension so the
+        // colon-method sugar works under 'local' too. Semantically this
+        // is identical to "function obj:method(...) ... end" -- the
+        // 'local' keyword is silently ignored, exactly like the existing
+        // "local function NAME(...)" rule above does.
+
+        // 1. Mangle "obj" + "add_multiple" -> "obj_add_multiple"
+        char* mangled_name = mangle_method_name($3, $5);
+
+        // 2. Inject "self" as the first parameter (colon-call convention)
+        ASTNode* self_param = make_node_ident("self");
+        self_param->next = $7; // link to the rest of the declared parameters
+
+        // 3. Build the function definition using the pre-allocated node
+        ASTNode* func_def = $2;
+        func_def->as.function_def.name = mangled_name;
+        func_def->as.function_def.params = self_param;
+        func_def->as.function_def.body = $9;
+        func_def->as.function_def.is_variadic = 0;
+
+        // 4. Build a function-pointer node targeting the mangled label
+        ASTNode* func_ptr = make_node(NODE_FUNCTION_POINTER);
+        func_ptr->as.func_ptr.mangled_name = strdup(mangled_name);
+
+        // 5. Tie it into a table assignment: obj["add_multiple"] = func_ptr
+        ASTNode* key_node   = make_node_string($5);
+        ASTNode* table_node = make_node_ident($3);
+
+        ASTNode* table_set = make_node(NODE_TABLE_SET);
+        table_set->as.table_set.table_expr = table_node;
+        table_set->as.table_set.key        = key_node;
+        table_set->as.table_set.value      = func_ptr;
+
+        // 6. Chain: func_def -> table_set, same pattern as every other
+        // method-desugaring rule in this grammar
+        func_def->next = table_set;
+        $$ = func_def;
+    }
+    | TOKEN_LOCAL func_start TOKEN_IDENTIFIER '.' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END
+    {
+        // local function obj.method(...) ... end
+        //
+        // Dot form: unlike the colon form above, NO implicit 'self' is
+        // injected here -- this mirrors the existing non-local dot-rule
+        // in function_def: below. If the body needs self, the author
+        // writes it as an explicit first parameter, same as real Lua.
+
+        char* mangled_name = mangle_method_name($3, $5);
+
+        ASTNode* func_def = $2;
+        func_def->as.function_def.name = mangled_name;
+        func_def->as.function_def.params = $7;
+        func_def->as.function_def.body = $9;
+        func_def->as.function_def.is_variadic = 0;
+
+        ASTNode* func_ptr = make_node(NODE_FUNCTION_POINTER);
+        func_ptr->as.func_ptr.mangled_name = strdup(mangled_name);
+
+        ASTNode* key_node   = make_node_string($5);
+        ASTNode* table_node = make_node_ident($3);
+
+        ASTNode* table_set = make_node(NODE_TABLE_SET);
+        table_set->as.table_set.table_expr = table_node;
+        table_set->as.table_set.key        = key_node;
+        table_set->as.table_set.value      = func_ptr;
+
+        func_def->next = table_set;
+        $$ = func_def;
+    }
     | TOKEN_RAWASM '(' TOKEN_STRING ')' { 
         $$ = make_node(NODE_RAWASM);
         $$->as.inline_asm.code = $3;
@@ -474,6 +548,20 @@ return_stmt:
     TOKEN_RETURN expr_list {
         $$ = make_node(NODE_RETURN);
         $$->as.return_stmt.expressions_head = $2;
+        $$->as.return_stmt.parent_func_arg_count = 0;
+    }
+    | TOKEN_RETURN {
+        // Bare 'return' with no expression -- equivalent to returning
+        // no values at all. node_return() already handles a NULL
+        // expressions_head correctly: its per-expression loop simply
+        // doesn't execute (ret_idx stays 0), and the existing
+        // stale-register nil-padding logic (see the earlier fix) fills
+        // in BOXED_NIL for however many return slots this function's
+        // OTHER branches statically require -- exactly the same as an
+        // early-exit branch that returns fewer values than a sibling
+        // branch elsewhere in the same function.
+        $$ = make_node(NODE_RETURN);
+        $$->as.return_stmt.expressions_head = NULL;
         $$->as.return_stmt.parent_func_arg_count = 0;
     }
     ;

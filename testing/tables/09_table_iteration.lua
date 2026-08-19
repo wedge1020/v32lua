@@ -6,7 +6,6 @@ function test_table_iteration()
     -- === Test 1: ipairs over a pure array table (order is guaranteed) ===
     local t1 = {"a", "b", "c"}
     local concat1 = ""
-    __rawasm__("__debug0:")
     for i, v in ipairs(t1) do
         concat1 = concat1 .. v
     end

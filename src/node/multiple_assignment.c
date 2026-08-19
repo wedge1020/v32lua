@@ -27,12 +27,9 @@ void node_multiple_assignment(ASTNode *node)
     if (curr_val != NULL && curr_val->next == NULL && curr_val->type == NODE_FUNCTION_CALL) {
         // Determine the return count STATICALLY. First check the builtin
         // table (math.modf/frexp/etc.), then -- if that comes back as the
-        // default of 1 -- check whether it's a plain call to a
-        // user-defined function we've already tracked a real return_count
-        // for (see count_max_return_values() / mark_global_as_function()).
-        // Only ONE of these should ever win; do not repeat the builtin
-        // lookup after the user-defined check, or it silently overwrites
-        // whatever the user-defined check found.
+        // default of 1 -- check whether it's a call to a user-defined
+        // function we've already tracked a real return_count for (see
+        // count_max_return_values() / mark_global_as_function()).
         char callee_path[256] = {0};
         int  return_count     = 1;
 
@@ -40,8 +37,53 @@ void node_multiple_assignment(ASTNode *node)
             return_count = get_builtin_return_count(callee_path);
         }
 
-        if (return_count == 1 && curr_val->as.call.target->type == NODE_IDENTIFIER) {
-            SymbolNode *callee_sym = resolve_symbol(curr_val->as.call.target->as.id.name);
+        // -----------------------------------------------------------------
+        // FIX: resolve the callee symbol for BOTH plain identifier calls
+        // (foo()) AND method/dotted calls (obj:foo() / obj.foo()).
+        //
+        // Method and dotted calls always desugar their call target into a
+        // NODE_TABLE_GET (table_expr + string key) -- never a bare
+        // NODE_IDENTIFIER -- regardless of whether the source used '.' or
+        // ':'. The old check here only looked up the callee's symbol when
+        // curr_val->as.call.target->type == NODE_IDENTIFIER, which is
+        // NEVER true for a method call. That meant return_count silently
+        // stayed at its default of 1 for every method/dotted call, so the
+        // Pass-1/Pass-2 multi-value extraction below never ran: only R0
+        // (the first return value) was ever captured, and every additional
+        // assignment target got nil-padded instead of reading R2/R3 --
+        // e.g. `local min, max = obj:min_max(5)` always left `max` as nil.
+        //
+        // resolve_static_path() already flattened the call target into a
+        // dotted path (e.g. "obj.min_max") above. Try that directly first
+        // (covers plain identifiers too, and any oddball global registered
+        // with a literal dot in its name), then fall back to the mangled
+        // underscore form that mangle_method_name() / the colon-method
+        // parser rules actually register table:method()/table.method()
+        // definitions under (e.g. "obj_min_max").
+        // -----------------------------------------------------------------
+        if (return_count == 1) {
+            SymbolNode *callee_sym = NULL;
+
+            if (curr_val->as.call.target->type == NODE_IDENTIFIER) {
+                callee_sym = resolve_symbol(curr_val->as.call.target->as.id.name);
+            } else if (callee_path[0] != '\0') {
+                callee_sym = resolve_symbol(callee_path);
+
+                if (callee_sym == NULL) {
+                    char mangled_buf[256];
+                    strncpy(mangled_buf, callee_path, sizeof(mangled_buf) - 1);
+                    mangled_buf[sizeof(mangled_buf) - 1] = '\0';
+
+                    for (int i = 0; mangled_buf[i] != '\0'; i++) {
+                        if (mangled_buf[i] == '.' || mangled_buf[i] == ':') {
+                            mangled_buf[i] = '_';
+                        }
+                    }
+
+                    callee_sym = resolve_symbol(mangled_buf);
+                }
+            }
+
             if (callee_sym != NULL && callee_sym->is_function && callee_sym->return_count > 1) {
                 return_count = callee_sym->return_count;
             }
@@ -49,7 +91,8 @@ void node_multiple_assignment(ASTNode *node)
 
         if (return_count > 1) {
             // This is a multi-return function call (e.g., math.modf, math.frexp,
-            // or a user-defined function with more than one 'return' expression)
+            // or a user-defined function -- including a method -- with more
+            // than one 'return' expression)
             generate_asm(curr_val, 0);  // dest_reg=0 means don't store to single reg
 
             // -----------------------------------------------------------------

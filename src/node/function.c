@@ -6,17 +6,16 @@ void  node_function_def (ASTNode *node)
 
     mark_global_as_function (node);
 
-    // Nested/local functions are compiled inline, in the middle of the
-    // enclosing function's code. Unlike top-level functions (only ever
-    // reached via CALL), straight-line execution would otherwise fall
-    // directly into the body and hit its RET without ever having been
-    // CALLed, popping garbage off the stack as a "return address."
-    // Guard it with a jump around the whole definition. Top-level scope
-    // has an empty context stack, so this only fires for nested defs.
     bool is_nested_def = (context_stack_head != NULL);
     if (is_nested_def) {
         emit_asm("JMP __%s_skip\n", func_name);
     }
+
+    int saved_base_spill_frame_offset = base_spill_frame_offset;
+    int saved_spill_slot_for_reg[NUM_GPRS];
+    int saved_register_use_distance[NUM_GPRS];
+    memcpy(saved_spill_slot_for_reg, spill_slot_for_reg, sizeof(saved_spill_slot_for_reg));
+    memcpy(saved_register_use_distance, register_use_distance, sizeof(saved_register_use_distance));
 
     push_function_context (func_name, node);
 
@@ -26,7 +25,6 @@ void  node_function_def (ASTNode *node)
 
     emit_asm("__function_%s:\n", func_name);
 
-    // --- OPTIMIZATION: Check eligibility for Frame Pointer Omission ---
     int num_locals = count_function_locals(node->as.function_def.body);
     emit_asm("PUSH BP\n");
     emit_asm("MOV BP, SP\n");
@@ -37,32 +35,47 @@ void  node_function_def (ASTNode *node)
         emit_asm("ISUB SP, %d ; Reserve stack for locals + spills\n", total_stack);
     }
 
-    // ✅ CRITICAL FIX: Initialize spill slots AFTER local variables
-    //reset_spill_slots(-(num_locals + NUM_GPRS));  // ✅ Initialize spill slots AFTER locals
+    // -------------------------------------------------------------------
+    // FIX (implicit-fallthrough-return bug): any code path that reaches
+    // the end of this function's body WITHOUT executing an explicit
+    // 'return' statement -- whether the function has no return statement
+    // at all, or simply falls off the end of an 'if' whose other branch
+    // does return -- must implicitly return nil, per Lua semantics.
+    //
+    // R0 (and R2/R3, for functions statically known elsewhere in their
+    // own body to return more than one value) are ordinary
+    // general-purpose registers with no guaranteed reset between calls.
+    // Nothing else in this compiler initializes them before
+    // generate_block() runs below, so falling off the end previously left
+    // the caller reading back whatever stale value those physical
+    // registers happened to hold from unrelated earlier code, instead of
+    // nil -- e.g. a function with no return statement at all always
+    // returned garbage, never nil.
+    //
+    // Defaulting them to BOXED_NIL here, unconditionally, before the body
+    // executes, is safe regardless of whether an explicit return follows
+    // later: node_return() on any path that DOES execute simply
+    // overwrites these with the real values on its own way out; only a
+    // path that never reaches a return statement ever observes this
+    // default.
+    // -------------------------------------------------------------------
+    {
+        SymbolNode *self_sym          = resolve_symbol(func_name);
+        int         self_return_count = (self_sym != NULL) ? self_sym->return_count : 1;
+        if (self_return_count > 3) self_return_count = 3;
+        if (self_return_count < 1) self_return_count = 1;
+
+        emit_asm("    ; --- Default implicit return value(s): nil until overwritten ---\n");
+        if (self_return_count >= 1) emit_asm("MOV R0, BOXED_NIL\n");
+        if (self_return_count >= 2) emit_asm("MOV R2, BOXED_NIL\n");
+        if (self_return_count >= 3) emit_asm("MOV R3, BOXED_NIL\n");
+    }
+
     push_function_scope();
 
-    // ============================================================
-    // PARAMETER TRAVERSAL:
-    // Arity is already safely stored on the symbol from Stage 4!
-    // We only need to map parameters to stack offsets [BP + 2], etc.
-    // ============================================================
     int param_offset  = 2;
     int upvalue_count = name_list_length(node->as.function_def.upvalues);
 
-    // Upvalues are registered FIRST, claiming the low offsets closest to
-    // the return address ([BP+2 .. BP+1+upvalue_count]). This isn't a
-    // style choice -- it's forced by how __builtin_exec's closure path
-    // actually places them at runtime (see runtime.s __exec_closure): it
-    // pops the return address, pushes the upvalues, then pushes the
-    // return address back on top, with NO knowledge of how many explicit
-    // arguments the original caller already pushed further down the
-    // stack. That means upvalues ALWAYS land immediately above the return
-    // address, and explicit arguments ALWAYS end up further out, no
-    // matter what order the compiler registers them in. Registering
-    // parameters first (the old order) assigned [BP+2] to the first
-    // parameter and pushed upvalues out to [BP+3.. ] -- exactly backwards
-    // from what the runtime produces, so a closure with both a captured
-    // variable AND a real parameter read the wrong slot for each.
     for (NameList *up = node->as.function_def.upvalues; up != NULL; up = up->next) {
         register_upvalue(up->name, param_offset++);
     }
@@ -71,18 +84,11 @@ void  node_function_def (ASTNode *node)
     ASTNode *p = node->as.function_def.params;
     while (p != NULL) {
         if (p->type == NODE_IDENTIFIER) {
-            // Skip "..." - it's a variadic marker, not a real parameter
             if (strcmp(p->as.id.name, "...") == 0) {
                 is_variadic = 1;
             } else {
                 SymbolNode *param_sym = register_parameter(p->as.id.name, param_offset++);
 
-                // A captured parameter arrives as a raw value -- the caller
-                // pushed it as an ordinary argument, unboxed. Box it here,
-                // once, at entry, exactly like a captured local gets boxed
-                // at its declaration -- so any closure defined later in this
-                // body captures a heap cell that outlives this frame instead
-                // of a stack slot that doesn't.
                 if (param_sym->is_boxed) {
                     int tmp_reg = allocate_register();
                     char raw_access[256];
@@ -97,48 +103,28 @@ void  node_function_def (ASTNode *node)
         p = p->next;
     }
 
-    // Real, user-visible arity -- upvalues were registered above but must
-    // never leak into arity: they're invisible to Lua-level call sites,
-    // supplied by the closure record rather than the caller's argument
-    // list.
     int explicit_param_count = param_offset - 2 - upvalue_count;
 
-    // Mark function symbol as variadic
     SymbolNode *sym = resolve_symbol(func_name);
     if (sym) {
         sym->is_variadic = is_variadic;
         sym->arity = is_variadic ? -1 : explicit_param_count;
     }
 
-    // For variadic functions: reserve space for argument count at [BP-2]
     if (is_variadic) {
         emit_asm ("    ; --- Variadic function: reserve space for arg count ---\n");
         emit_asm ("ISUB SP, 1 ; Space for argument count at [BP-2]\n");
     }
-    // =============================================================
 
     generate_block(node->as.function_def.body);
     pop_scope();
 
-    // --- Function Epilogue ---
     emit_asm ("__%s_return:\n", func_name);
     emit_asm ("MOV SP, BP\n");
     emit_asm ("POP BP\n");
 
     int closure_upvalue_count = name_list_length(node->as.function_def.upvalues);
     if (closure_upvalue_count > 0) {
-        // __builtin_exec's closure path (see runtime.s __exec_closure)
-        // pushes closure_upvalue_count extra words ABOVE the return
-        // address before tail-jumping in here -- they occupy [BP+2] and
-        // up, exactly where this function's own upvalue parameters were
-        // registered via register_upvalue(). A bare RET only pops the ONE
-        // word at [BP+1] (the return address); nothing else is ever
-        // positioned to discard the upvalue words above it. So this
-        // function -- the one place that statically knows its own
-        // upvalue count -- has to do it: peek the return address without
-        // popping it, skip past the return-address slot AND the upvalue
-        // words in a single adjustment, then jump to the saved address
-        // manually instead of using RET.
         emit_asm ("MOV R7, [SP] ; peek return address (don't consume it yet)\n");
         emit_asm ("IADD SP, %d ; discard return address slot + %d upvalue word%s\n",
                   1 + closure_upvalue_count, closure_upvalue_count,
@@ -150,6 +136,10 @@ void  node_function_def (ASTNode *node)
     emit_asm ("\n");
 
     pop_function_context();
+
+    base_spill_frame_offset = saved_base_spill_frame_offset;
+    memcpy(spill_slot_for_reg, saved_spill_slot_for_reg, sizeof(spill_slot_for_reg));
+    memcpy(register_use_distance, saved_register_use_distance, sizeof(register_use_distance));
 
     if (is_nested_def) {
         emit_asm("__%s_skip:\n", func_name);

@@ -10,7 +10,7 @@ end
 function test_functions_basic()
     -- === Test 00: Global function, no params, side-effect only ===
     function set_flag()
-        flag_result00 = 1
+        number_result00 = 1
     end
     set_flag()
     __rawasm__("__debug0:")
@@ -73,7 +73,7 @@ function main()
     test_functions_basic()
 
     print(000, 00,  "--- Functions Basic Test ---")
-    print(000, 020, "Test 00 - Global fn flag: " ..   flag_result00)
+    print(000, 020, "Test 00 - Global fn flag: " ..   number_result00)
     print(000, 040, "Test 01 - Local w/ret: " ..      number_result01)
     print(000, 060, "Test 02 - Single param: " ..     number_result02)
     print(000, 080, "Test 03 - Multi param: " ..      number_result03)
@@ -86,7 +86,7 @@ end
 
 --[[
 === EXPECTED OUTPUT ===
-flag_result00: 1.0000
+number_result00: 1.0000
 number_result01: 100.0000
 number_result02: 50.0000
 number_result03: 6.0000

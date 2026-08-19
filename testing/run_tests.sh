@@ -88,6 +88,11 @@ if [ -r "${UNIT}.lua" ]; then
     tail -${upos} ${UNIT}.lua | grep ':' > ${UNIT}.want
     total=$(cat ${UNIT}.want | wc -l | tr -d ' ')
 
+    if [ "${DEBUG}" = "true" ]; then
+        echo "---------------------------------------------------------------"
+    fi
+    printf "evaluating: %30s " "${UNIT}"
+
     ${RUNEVAL} ${RFLAGS} ${UNIT}.v32    >  ${UNIT}.out
     cat ${UNIT}.out | grep ':.*:' | cut -d':' -f2,3 | sed 's/^\([^:]*\):\([^:]*\)$/\2: \1/g' > ${UNIT}.have
     
@@ -103,19 +108,15 @@ if [ -r "${UNIT}.lua" ]; then
         qual="FAIL"
     fi
 
-    if [ "${DEBUG}" = "true" ]; then
-        echo "---------------------------------------------------------------"
-    fi
-
     if [ "${qual}" = "PASS" ]; then
-        printf "evaluating: %30s (%2s/%2s)     ... %4s\n" "${UNIT}" "${passed}" "${total}" "${qual}"
-    elif [ "${DEBUG}" = "false" ]; then
+        printf "(%2s/%2s)     ... %4s\n" "${passed}" "${total}" "${qual}"
+    elif [ "${DEBUG}" = "true" ]; then
         let missed=total-passed
-        printf "evaluating: %30s (%2s/%2s)     ... %-4s\n" "${UNIT}" "${passed}" "${total}" "hit"
-        printf "            %30s (%2s/%2s)     ... %4s\n" " " "${missed}" "${total}" "miss"
-        printf "            %28s               ... %4s\n" " " "${qual}"
+        printf "(%2s/%2s)     ... %-4s\n" "${passed}" "${total}" "hit"
+        printf "%42s (%2s/%2s)     ... %4s\n" " " "${missed}" "${total}" "miss"
+        printf "%40s               ... %4s\n" " " "${qual}"
     else
-        printf "evaluating: %30s (%2s/%2s)     ... %4s\n" "${UNIT}" "${passed}" "${total}" "${qual}"
+        printf "(%2s/%2s)     ... %4s\n" "${passed}" "${total}" "${qual}"
     fi
 
     if [ "${qual}" = "FAIL" ] && [ "${DEBUG}" = "true" ]; then
