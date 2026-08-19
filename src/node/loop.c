@@ -444,7 +444,7 @@ void node_for_generic(ASTNode *node)
     // Call iterator function
     get_variable_access_string(iter_func_var, access_iter);
     emit_asm("MOV R0, %s        ; Load iterator function\n", access_iter);
-    emit_asm("CALL R0            ; Call iterator(state, key)\n");
+    emit_asm("CALL __builtin_exec ; Validate and execute iterator (unboxes tag, handles closures)\n");
     emit_asm("IADD SP, 2         ; Clean up 2 arguments\n");
 
     // Iterator results come back via R0/R2/R3, the same convention
