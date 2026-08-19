@@ -1230,8 +1230,41 @@ __table_remove_hash_shift_loop:
     JMP  __table_remove_hash_shift_loop
 
 __table_remove_hash_shift_done:
-    ISUB R3, 1
-    MOV  [R1+1], R3
+    ;; --- FIX: clear the now-vacated slot ---
+    ;; The shift loop above only ever OVERWRITES each slot with the NEXT
+    ;; slot's value -- it never actually deletes anything -- so the very
+    ;; last slot (at the OLD length's key, still held in R3 here) keeps a
+    ;; live, non-nil duplicate forever. Any subsequent `t[k]` read past
+    ;; the new (shrunk) length incorrectly still finds that duplicate
+    ;; instead of nil, since the hash-fallback read path scans for the
+    ;; key directly and never consults the tracked length at all. This is
+    ;; exactly what makes the extremely common
+    ;; `while t[1] ~= nil do table.remove(t, 1) end` idiom loop forever --
+    ;; index 1 never actually becomes nil no matter how many elements are
+    ;; removed.
+    ;;
+    ;; Storing BOXED_NIL at the vacated key matches this runtime's
+    ;; established "nil-valued hash entry == absent" convention (see
+    ;; __builtin_next's own doc comment). This single table_set call also
+    ;; replaces the old manual "ISUB R3,1; MOV [R1+1],R3" entirely:
+    ;; __builtin_table_set's own nil-handling logic
+    ;; (__builtin_table_set_hash_maybe_shrink) already clamps the tracked
+    ;; length down to (key - 1) whenever a nil is stored at a key within
+    ;; the current length -- which the key we're storing here (the OLD
+    ;; length, unchanged since before this loop) always is. Letting it
+    ;; do that bookkeeping itself avoids two separate, easy-to-desync
+    ;; length writes.
+    MOV  R5, R3
+    CIF  R5                    ; R5 = float(old length) -- the vacated key
+    MOV  R6, R1
+    OR   R6, BOXED_TABLE
+    MOV  R0, BOXED_NIL
+    PUSH R6
+    PUSH R5
+    PUSH R0
+    CALL __builtin_table_set   ; also shrinks tracked length to (old_length - 1)
+    IADD SP, 3
+
     MOV  R0, R7
     JMP  __table_remove_done
 
