@@ -26,7 +26,7 @@ asm:
 
 tests:
 	@echo "==============================================================="
-	@echo "v32lua non-iterating conditionals (if statements)"
+	@echo "v32lua non-iterating conditionals (selection)"
 	@echo "==============================================================="
 	@for f in $(LUA_SRCS); do \
 		../run_tests.sh $$f; \
@@ -37,7 +37,7 @@ tests:
 # Run with VERBOSE=true for each file
 report:
 	@echo "==============================================================="
-	@echo "v32lua non-iterating conditionals (if statements)"
+	@echo "v32lua non-iterating conditionals (selection)"
 	@echo "==============================================================="
 	@for f in $(LUA_SRCS); do \
 		VERBOSE="true" ../run_tests.sh $$f; \
@@ -48,7 +48,7 @@ report:
 # Run with DEBUG=true for each file
 debug:
 	@echo "==============================================================="
-	@echo "v32lua non-iterating conditionals (if statements)"
+	@echo "v32lua non-iterating conditionals (selection)"
 	@echo "==============================================================="
 	@for f in $(LUA_SRCS); do \
 		DEBUG="true" ../run_tests.sh $$f; \

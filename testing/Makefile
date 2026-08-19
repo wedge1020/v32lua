@@ -85,7 +85,7 @@ monofiles:
 
 tests:
 	@$(MAKE) -C basics tests
-	@$(MAKE) -C if_statements tests
+	@$(MAKE) -C selection tests
 	@$(MAKE) -C loops tests
 	@$(MAKE) -C functions tests
 	@$(MAKE) -C math tests

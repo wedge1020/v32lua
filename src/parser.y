@@ -732,6 +732,15 @@ table_constructor:
     | '{' field_list '}' {
         $$ = make_node_table_constructor($2);
     }
+    | '{' field_list ',' '}' {
+        // Trailing comma before the closing brace -- e.g.
+        //   { [1] = a, [2] = b, }
+        // Standard, idiomatic Lua; the parser previously had no
+        // production for a comma immediately followed by '}', since
+        // field_list only ever grows via 'field_list , field' and a
+        // field must start with an expression token, which '}' is not.
+        $$ = make_node_table_constructor($2);
+    }
     ;
 
 tic80_section:
