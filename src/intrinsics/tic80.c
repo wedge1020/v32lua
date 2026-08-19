@@ -635,3 +635,100 @@ bool emit_tic80_pmem_intrinsic(ASTNode *node, int dest_reg) {
 
     return true;
 }
+
+/**
+ * Emits assembly for the fget() intrinsic (TIC-80 sprite flags).
+ *
+ * Syntax: fget(sprite_id, flag_bit) -> returns 0 or 1
+ */
+bool emit_tic80_fget_intrinsic(ASTNode *node, int dest_reg) {
+    emit_asm("    ;; --- TIC-80 fget() Intrinsic (Sprite Flags) ---\n");
+
+    // Collect exactly 2 arguments: sprite_id, flag_bit
+    int arg_count = 0;
+    ASTNode *curr = node->as.call.args_head;
+    ASTNode *args[2] = { NULL, NULL };
+    while (curr != NULL && arg_count < 2) {
+        args[arg_count++] = curr;
+        curr = curr->next;
+    }
+
+    if (arg_count < 2) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+                      "TIC-80 fget() requires 2 arguments: fget(sprite_id, flag_bit)");
+        return false;
+    }
+
+    // Push arguments right-to-left: flag_bit, sprite_id
+    int reg = allocate_register();
+    generate_asm(args[1], reg);  // flag_bit
+    emit_asm("PUSH R%d ; Arg 2: flag_bit\n", reg);
+    unlock_register(reg);
+
+    reg = allocate_register();
+    generate_asm(args[0], reg);  // sprite_id
+    emit_asm("PUSH R%d ; Arg 1: sprite_id\n", reg);
+    unlock_register(reg);
+
+    // Call runtime subroutine
+    emit_asm("CALL __builtin_tic80_fget\n");
+    emit_asm("IADD SP, 2 ; Clean up fget() arguments\n");
+
+    // Transfer result to dest_reg if needed
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R0 ; Transfer return value\n", dest_reg);
+    }
+
+    return true;
+}
+
+/**
+ * Emits assembly for the fset() intrinsic (TIC-80 sprite flags).
+ *
+ * Syntax: fset(sprite_id, flag_bit, value) -> returns value
+ */
+bool emit_tic80_fset_intrinsic(ASTNode *node, int dest_reg) {
+    emit_asm("    ;; --- TIC-80 fset() Intrinsic (Sprite Flags) ---\n");
+
+    // Collect exactly 3 arguments: sprite_id, flag_bit, value
+    int arg_count = 0;
+    ASTNode *curr = node->as.call.args_head;
+    ASTNode *args[3] = { NULL, NULL, NULL };
+    while (curr != NULL && arg_count < 3) {
+        args[arg_count++] = curr;
+        curr = curr->next;
+    }
+
+    if (arg_count < 3) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+                      "TIC-80 fset() requires 3 arguments: fset(sprite_id, flag_bit, value)");
+        return false;
+    }
+
+    // Push arguments right-to-left: value, flag_bit, sprite_id
+    int reg = allocate_register();
+    generate_asm(args[2], reg);  // value
+    emit_asm("PUSH R%d ; Arg 3: value\n", reg);
+    unlock_register(reg);
+
+    reg = allocate_register();
+    generate_asm(args[1], reg);  // flag_bit
+    emit_asm("PUSH R%d ; Arg 2: flag_bit\n", reg);
+    unlock_register(reg);
+
+    reg = allocate_register();
+    generate_asm(args[0], reg);  // sprite_id
+    emit_asm("PUSH R%d ; Arg 1: sprite_id\n", reg);
+    unlock_register(reg);
+
+    // Call runtime subroutine
+    emit_asm("CALL __builtin_tic80_fset\n");
+    emit_asm("IADD SP, 3 ; Clean up fset() arguments\n");
+
+    // Transfer result to dest_reg if needed
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R0 ; Transfer return value\n", dest_reg);
+    }
+
+    return true;
+}

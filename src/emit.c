@@ -539,6 +539,13 @@ int   emit_variable_map (void)
     fprintf (out(), "%%define  CLOSURE_ADDR_MASK        0x001FFFFF\n");
     fprintf (out(), "%%define  HEAP_POINTER             0x00000000\n");
 
+    if (runtime_req.needs_tic80)
+    {
+        fprintf (out(), "%%define  TIC80_SPRITE_COUNT       0x00000200\n");
+        fprintf (out(), "%%define  TIC80_FLAGS_PER_SPRITE   0x00000008\n");
+        fprintf (out(), "%%define  TIC80_FLAG_BUFFER_WORDS  0x00000080\n");
+    }
+
     SymbolNode *curr = global_scope ? global_scope->symbols : NULL;
     while (curr != NULL) {
         if (curr->is_function) {

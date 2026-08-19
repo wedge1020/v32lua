@@ -90,9 +90,57 @@ _tic80_init_textures_done:
     ;; Initialize map buffer after textures
     CALL  __builtin_tic80_init_map
 
+    ;; Initialize sprite flags buffer
+    CALL  __builtin_tic80_init_flags
+
     ;; Restore callee-saved register
     POP   R13
 
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; __builtin_tic80_init_flags: Initialize Sprite Flag Buffer
+;;
+;; Allocates and zero-initializes 512 bytes (128 words) for sprite flags
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_init_flags:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; Allocate flag buffer (128 words = 512 bytes)
+    MOV   R0, TIC80_FLAG_BUFFER_WORDS
+    PUSH  R0
+    CALL  __malloc
+    IADD  SP, 1
+
+    ;; Store pointer globally
+    MOV   R1, var_TIC80_SPRITE_FLAGS_PTR
+    MOV   [R1], R0
+    MOV   R12, R0            ; R12 = flag buffer pointer
+
+    ;; Zero-initialize the flag buffer (128 words)
+    MOV   R2, 0             ; word index
+
+_tic80_init_flags_zero_loop:
+    MOV   R8, R2
+    ILT   R8, TIC80_FLAG_BUFFER_WORDS
+    JF    R8, _tic80_init_flags_done
+    MOV   R8, R2
+
+    MOV   R1, R12
+    IADD  R1, R2
+    MOV   R8, 0
+    MOV   [R1], R8
+
+    IADD  R2, 1
+    JMP   _tic80_init_flags_zero_loop
+
+_tic80_init_flags_done:
     MOV   SP, BP
     POP   BP
     RET
@@ -1146,10 +1194,10 @@ __builtin_tic80_pmem:
     CFI   R1                ; R1 = integer index
 
     ;; Bounds check: 0 <= index < 65536 (TIC-80 pmem limit)
-	MOV   R2, R1
+    MOV   R2, R1
     ILT   R2, 0
     JT    R2, _tic80_pmem_invalid
-	MOV   R2, R1
+    MOV   R2, R1
     IGE   R2, 65536
     JT    R2, _tic80_pmem_invalid
 
@@ -1176,10 +1224,10 @@ _tic80_pmem_read:
     CFI   R1                ; R1 = integer index
 
     ;; Bounds check
-	MOV   R0, R1
+    MOV   R0, R1
     ILT   R0, 0
     JT    R0, _tic80_pmem_invalid
-	MOV   R0, R1
+    MOV   R0, R1
     IGE   R0, 65536
     JT    R0, _tic80_pmem_invalid
 
@@ -1199,6 +1247,183 @@ _tic80_pmem_invalid:
     MOV   R0, BOXED_NIL     ; Return nil for out-of-bounds
 
 _tic80_pmem_done:
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; __builtin_tic80_fget: Get Flag Bit for a TIC-80 Sprite
+;;
+;; Stack: [BP+2] = sprite_id (0-511)
+;;        [BP+3] = flag_bit (0-7)
+;; Returns: R0 = 0 or 1 (as boxed Lua number), or BOXED_NIL if invalid
+;;
+;; Each sprite has 8 flag bits stored in a single byte.
+;; Buffer index = sprite_id (each sprite gets 1 byte)
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_fget:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; Load buffer pointer
+    MOV   R1, var_TIC80_SPRITE_FLAGS_PTR
+    MOV   R12, [R1]
+    IEQ   R12, 0
+    JT    R12, _tic80_fget_invalid
+
+    ;; Load arguments
+    MOV   R1, [BP+2]        ; sprite_id
+    MOV   R2, [BP+3]        ; flag_bit (0-7)
+
+    ;; Convert to integers
+    CFI   R1
+    CFI   R2
+
+    ;; Validate sprite_id: 0 <= id < 512
+    MOV   R3, R1
+    ILT   R3, 0
+    JT    R3, _tic80_fget_invalid
+    MOV   R3, R1
+    IGE   R3, 512
+    JT    R3, _tic80_fget_invalid
+
+    ;; Validate flag_bit: 0 <= bit < 8
+    MOV   R3, R2
+    ILT   R3, 0
+    JT    R3, _tic80_fget_invalid
+    MOV   R3, R2
+    IGE   R3, 8
+    JT    R3, _tic80_fget_invalid
+
+    ;; Load the byte containing flags for this sprite
+    MOV   R3, var_TIC80_SPRITE_FLAGS_PTR
+    MOV   R12, [R3]        ; restore R12
+    MOV   R3, R12
+    IADD  R3, R1           ; R3 = address of sprite's flag byte
+    MOV   R3, [R3]         ; R3 = flag byte (32-bit word, but we only use low 8 bits)
+
+    ;; Create bitmask: 1 << flag_bit
+    MOV   R4, 1
+    SHL   R4, R2           ; R4 = 1 << flag_bit
+
+    ;; Extract the flag bit
+    AND   R3, R4           ; R3 = byte & mask
+    IEQ   R3, 0
+    JT    R3, _tic80_fget_false
+
+    ;; Flag is set (1)
+    MOV   R0, 1
+    CIF   R0
+    JMP   _tic80_fget_done
+
+_tic80_fget_false:
+    ;; Flag is clear (0)
+    MOV   R0, 0
+    CIF   R0
+
+_tic80_fget_done:
+    JMP   _tic80_fget_end
+
+_tic80_fget_invalid:
+    MOV   R0, BOXED_NIL
+
+_tic80_fget_end:
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; __builtin_tic80_fset: Set Flag Bit for a TIC-80 Sprite
+;;
+;; Stack: [BP+2] = sprite_id (0-511)
+;;        [BP+3] = flag_bit (0-7)
+;;        [BP+4] = value (0 or 1, as Lua number)
+;; Returns: R0 = the value that was set (as boxed Lua number)
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_fset:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; Load buffer pointer
+    MOV   R1, var_TIC80_SPRITE_FLAGS_PTR
+    MOV   R12, [R1]
+    IEQ   R12, 0
+    JT    R12, _tic80_fset_done_nil
+
+    ;; Load arguments
+    MOV   R1, [BP+2]        ; sprite_id
+    MOV   R2, [BP+3]        ; flag_bit
+    MOV   R3, [BP+4]        ; value
+
+    ;; Convert to integers
+    CFI   R1
+    CFI   R2
+    CFI   R3
+    AND   R3, 1            ; Clamp value to 0 or 1
+
+    ;; Validate sprite_id: 0 <= id < 512
+    MOV   R4, R1
+    ILT   R4, 0
+    JT    R4, _tic80_fset_done_nil
+    MOV   R4, R1
+    IGE   R4, 512
+    JT    R4, _tic80_fset_done_nil
+
+    ;; Validate flag_bit: 0 <= bit < 8
+    MOV   R4, R2
+    ILT   R4, 0
+    JT    R4, _tic80_fset_done_nil
+    MOV   R4, R2
+    IGE   R4, 8
+    JT    R4, _tic80_fset_done_nil
+
+    ;; Load the byte containing flags for this sprite
+    MOV   R4, var_TIC80_SPRITE_FLAGS_PTR
+    MOV   R4, [R4]
+    IADD  R4, R1           ; R4 = address of sprite's flag byte
+    MOV   R4, [R4]         ; R4 = current flag byte
+
+    ;; Create bitmask: 1 << flag_bit
+    MOV   R5, 1
+    SHL   R5, R2           ; R5 = bitmask
+
+    ;; Set or clear the bit based on value
+    MOV   R6, R3           ; R6 = value (0 or 1)
+    IEQ   R6, 0
+    JT    R6, _tic80_fset_clear
+
+_tic80_fset_set:
+    ;; Set bit: byte = byte | mask
+    OR    R4, R5
+    JMP   _tic80_fset_store
+
+_tic80_fset_clear:
+    ;; Clear bit: byte = byte & ~mask
+    NOT   R5           ; R5 = ~mask
+    AND   R4, R5
+
+_tic80_fset_store:
+    ;; Store the modified byte back
+    MOV   R5, var_TIC80_SPRITE_FLAGS_PTR
+    MOV   R5, [R5]
+    IADD  R5, R1
+    MOV   [R5], R4
+
+    ;; Return the value that was set (as boxed Lua number)
+    CIF   R3
+    MOV   R0, R3
+    JMP   _tic80_fset_done
+
+_tic80_fset_done_nil:
+    MOV   R0, BOXED_NIL
+
+_tic80_fset_done:
     MOV   SP, BP
     POP   BP
     RET
