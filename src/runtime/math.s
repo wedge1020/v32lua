@@ -365,6 +365,7 @@ __builtin_acos:
 ;;
 ;; Clobbers: R0-R2
 ;; ===========================================================================
+
 __builtin_atan:
     PUSH BP
     MOV  BP, SP
@@ -402,27 +403,54 @@ __builtin_atan:
 ;; Returns:
 ;;   R0 = atan2(y, x) in radians as Lua float
 ;;
-;; Clobbers: R0-R2
+;; Clobbers: R0-R4
 ;; ===========================================================================
 __builtin_atan2:
-    PUSH BP
-    MOV  BP, SP
+    PUSH  BP
+    MOV   BP, SP
+    MOV   R1, [BP+2]           ; R1 = y
+    MOV   R2, [BP+3]           ; R2 = x
 
-    ;; --- Load y and x from stack ---
-    MOV  R1, [BP+2]           ; R1 = y
-    MOV  R2, [BP+3]           ; R2 = x
+    ;; Check if both y and x are 0.0
+    MOV   R3, R1
+    FEQ   R3, 0.0             ; R3 = 1 if y == 0.0, else 0
+    MOV   R4, R2
+    FEQ   R4, 0.0             ; R4 = 1 if x == 0.0, else 0
+    AND   R3, R4              ; R3 = 1 if both are 0, else 0
+    IEQ   R3, 1
+    JT    R3, __atan2_zero_zero
 
-    ;; --- Compute atan2(y, x) using native instruction ---
-    ;; ATAN2: DSTREG = atan2(DSTREG, SRCREG)
-    ;; So we need: ATAN2 R1, R2 where R1=y, R2=x
-    ATAN2 R1, R2             ; R1 = atan2(y, x)
-
-    MOV  R0, R1              ; Return result in R0
-
-    ;; --- Return result ---
-    MOV  SP, BP
-    POP  BP
+    ATAN2 R1, R2
+    MOV   R0, R1
+    MOV   SP, BP
+    POP   BP
     RET
+
+__atan2_zero_zero:
+    MOV   R0, 0.0             ; Return 0 for atan2(0, 0)
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;__builtin_atan2:
+;    PUSH BP
+;    MOV  BP, SP
+;
+;    ;; --- Load y and x from stack ---
+;    MOV  R1, [BP+2]           ; R1 = y
+;    MOV  R2, [BP+3]           ; R2 = x
+;
+;    ;; --- Compute atan2(y, x) using native instruction ---
+;    ;; ATAN2: DSTREG = atan2(DSTREG, SRCREG)
+;    ;; So we need: ATAN2 R1, R2 where R1=y, R2=x
+;    ATAN2 R1, R2             ; R1 = atan2(y, x)
+;
+;    MOV  R0, R1              ; Return result in R0
+;
+;    ;; --- Return result ---
+;    MOV  SP, BP
+;    POP  BP
+;    RET
 
 ;; ===========================================================================
 ;; Built-in: math.deg(x)
@@ -531,16 +559,48 @@ __builtin_log:
     PUSH BP
     MOV  BP, SP
 
-    ;; --- Load x from stack ---
-    MOV  R0, [BP+2]           ; R0 = x
+    MOV  R0, [BP+2]       ; R0 = x
 
-    ;; --- Compute natural log ---
-    LOG  R0                  ; R0 = ln(x)
+    ; Check if x <= 0.0
+    MOV  R1, R0          ; R1 = x
+    FLE  R1, 0.0        ; R1 = (x <= 0.0) ? 1 : 0
+    JF   R1, _builtin_log_positive
 
-    ;; --- Return result ---
+    ; x <= 0: check if x == 0.0
+    MOV  R1, R0          ; R1 = x
+    FEQ  R1, 0.0        ; R1 = (x == 0.0) ? 1 : 0
+    JT   R1, _builtin_log_zero
+
+    ; x < 0: return NaN
+    MOV  R0, 0x7FC00000
+    JMP  _builtin_log_done
+
+_builtin_log_zero:
+    MOV  R0, 0xFF800000
+    JMP  _builtin_log_done
+
+_builtin_log_positive:
+    LOG  R0
+
+_builtin_log_done:
     MOV  SP, BP
     POP  BP
     RET
+
+;__builtin_log:
+;    PUSH BP
+;    MOV  BP, SP
+;
+;    ;; --- Load x from stack ---
+;    MOV  R0, [BP+2]           ; R0 = x
+;
+;    ;; --- Compute natural log ---
+;    LOG  R0                  ; R0 = ln(x)
+;
+;    ;; --- Return result ---
+;    MOV  SP, BP
+;    POP  BP
+;    RET
 
 ;; ===========================================================================
 ;; Built-in: math.log10(x)
@@ -1032,19 +1092,78 @@ __mathfn_sin:
 __mathfn_log:
     PUSH  BP
     MOV   BP, SP
-    MOV   R0, [BP+2]
-    LOG   R0
+    MOV   R0, [BP+2]   ; x
+
+    ; Check if x <= 0.0
+    MOV  R1, R0          ; R1 = x
+    FLE  R1, 0.0        ; R1 = (x <= 0.0) ? 1 : 0
+    JF   R1, _log_positive
+
+    ; x <= 0: check if x == 0.0
+    MOV  R1, R0          ; R1 = x
+    FEQ  R1, 0.0        ; R1 = (x == 0.0) ? 1 : 0
+    JT   R1, _log_zero
+
+    ; x < 0: return NaN
+    MOV  R0, 0x7FC00000
+    JMP  _log_done
+
+_log_zero:
+    ; x == 0: return -inf
+    MOV  R0, 0xFF800000
+    JMP  _log_done
+
+_log_positive:
+    LOG  R0
+
+_log_done:
     MOV   SP, BP
     POP   BP
     RET
 
+;__mathfn_log:
+;    PUSH  BP
+;    MOV   BP, SP
+;    MOV   R0, [BP+2]
+;    LOG   R0
+;    MOV   SP, BP
+;    POP   BP
+;    RET
+
+;__mathfn_atan2:
+;    PUSH  BP
+;    MOV   BP, SP
+;    MOV   R0, [BP+2]   ; y
+;    MOV   R1, [BP+3]   ; x
+;    ATAN2 R0, R1
+;    MOV   SP, BP
+;    POP   BP
+;    RET
+
 __mathfn_atan2:
     PUSH  BP
     MOV   BP, SP
-    MOV   R0, [BP+2]   ; y
-    MOV   R1, [BP+3]   ; x
-    ATAN2 R0, R1
+    MOV   R1, [BP+2]           ; R1 = y
+    MOV   R2, [BP+3]           ; R2 = x
+
+    ;; Check if both y and x are 0.0
+    MOV   R3, R1
+    FEQ   R3, 0.0             ; R3 = 1 if y == 0.0, else 0
+    MOV   R4, R2
+    FEQ   R4, 0.0             ; R4 = 1 if x == 0.0, else 0
+    AND   R3, R4              ; R3 = 1 if both are 0, else 0
+    IEQ   R3, 1
+    JT    R3, __atan2_zero_zero
+
+    ATAN2 R1, R2
+    MOV   R0, R1
     MOV   SP, BP
     POP   BP
     RET
+
+;__atan2_zero_zero:
+;    MOV   R0, 0.0             ; Return 0 for atan2(0, 0)
+;    MOV   SP, BP
+;    POP   BP
+;    RET
 
