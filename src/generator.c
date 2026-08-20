@@ -283,18 +283,62 @@ int check_needs_stack (ASTNode *node)
 void generate_block(ASTNode *head) {
     ASTNode *current = head;
     while (current != NULL) {
-        // Only allocate if the statement needs a result register
-        if (current->type != NODE_BREAK && current->type != NODE_RETURN) {
+        // -------------------------------------------------------------
+        // FIX: previously this allocated a temp_reg for every statement
+        // except NODE_BREAK/NODE_RETURN, on the assumption every
+        // statement needs somewhere to put a result. But node_if(),
+        // node_while(), node_for_numeric(), node_for_generic(), and
+        // node_do_block() all take ONLY an ASTNode* -- no dest_reg
+        // parameter -- and never write to one. Handing them a temp_reg
+        // anyway just leaves it locked, uselessly, for as long as that
+        // statement takes to fully generate -- which for a NODE_IF
+        // nested inside an elseif chain (your grammar desugars elseif
+        // into a NODE_IF sitting alone in the previous branch's
+        // else_body) means the WHOLE REST OF THE CHAIN, since
+        // generate_block(else_body) allocates one more temp_reg per
+        // nesting level and doesn't release it until everything below
+        // that level has finished generating. Each elseif branch
+        // permanently stacked one more locked-but-useless register on
+        // top of the last, which is why register numbers climbed
+        // higher (R6, R7, R8, R9...) the deeper into the chain you
+        // went, and why corruption only appeared several branches in --
+        // eventually there weren't enough real registers left for what
+        // each branch's own condition check and function call actually
+        // needed.
+        //
+        // These node types are statement-only control structures: they
+        // never produce a value a caller could consume, so there's
+        // nothing to protect a register FOR in the first place. Route
+        // them through the same 0-dest_reg path as break/return.
+        // -------------------------------------------------------------
+        bool produces_no_value =
+            (current->type == NODE_BREAK)          ||
+            (current->type == NODE_RETURN)         ||
+            (current->type == NODE_IF)             ||
+            (current->type == NODE_WHILE)          ||
+            (current->type == NODE_FOR_NUMERIC)     ||
+            (current->type == NODE_FOR_GENERIC)     ||
+            (current->type == NODE_DO_BLOCK)        ||
+            (current->type == NODE_FUNCTION_DEF)    ||
+            (current->type == NODE_MULTIPLE_ASSIGNMENT);
+
+        if (!produces_no_value) {
+            // Only actual value-producing expression-statements (bare
+            // function calls used as statements, etc.) still get a
+            // temp_reg -- and even for those, this register is released
+            // immediately after that ONE statement's own codegen
+            // returns, not held across any further nested block.
             int temp_reg = allocate_register();
 
-            // ✅ Mark as live for this statement
+            // Mark as live for this statement
             mark_register_live (temp_reg, 1);
 
             generate_asm(current, temp_reg);
             unlock_register(temp_reg);
         } else {
-            // Statements that don't produce values
-            generate_asm(current, 0);  // Pass 0 to indicate no dest_reg needed
+            // Statements that don't produce values, or whose handler
+            // takes no dest_reg parameter at all: no register needed.
+            generate_asm(current, 0);
         }
         current = current->next;
     }

@@ -55,7 +55,7 @@ monofiles:
 	scripts/monolithic_code.sh
 	@cp src/lexer.l put/lexer.l.txt
 	@cp src/parser.y put/parser.y.txt
-	$(MAKE) -C testing monofiles
+	#$(MAKE) -C testing monofiles
 
 context:
 	$(MAKE) -C src context

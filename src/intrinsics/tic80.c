@@ -303,7 +303,6 @@ bool emit_tic80_cls_intrinsic(ASTNode *node) {
     return true;
 }
 
-// Add to tic80.c
 bool emit_tic80_print_intrinsic(ASTNode *node) {
     emit_asm("    ;; --- TIC-80 print(value, x, y) Intrinsic ---\n");
 
@@ -337,9 +336,23 @@ bool emit_tic80_print_intrinsic(ASTNode *node) {
     emit_asm("CALL __builtin_print\n");
     emit_asm("IADD SP, 3 ; Clean up arguments\n");
 
-    unlock_register(reg_val);
-    unlock_register(reg_x);
-    unlock_register(reg_y);
+    // FIX: these registers were allocated with allocate_pinned_register(),
+    // which sets register_pinned[reg] = 1. Releasing them with plain
+    // unlock_register() clears the inventory slot but leaves the pinned
+    // flag set forever -- every phase of allocate_register() except the
+    // emergency pinned-register-stealing phase refuses to hand out a
+    // pinned register, so each print() call was permanently retiring 3
+    // registers from circulation for the rest of compilation. Programs
+    // with enough print() calls (or enough of anything else register-
+    // hungry downstream) would eventually exhaust the free pool and fall
+    // into the emergency path, which silently force-spills a register
+    // some OTHER, unrelated piece of code still believes is safely
+    // pinned -- corrupting whatever value that code expected to still be
+    // there. unlock_pinned_register() clears BOTH the pin and the
+    // inventory slot, which is what these registers actually need.
+    unlock_pinned_register(reg_val);
+    unlock_pinned_register(reg_x);
+    unlock_pinned_register(reg_y);
 
     return true;
 }

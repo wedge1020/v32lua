@@ -157,17 +157,27 @@ void update_register_live(int reg)
     }
 }
 
-// ============================================================================
-// Intelligent Allocation with Liveness and Emergency Spill
-// ============================================================================
-
 // Allocates a register using a 4-phase strategy:
 // 1. Free register (not allocated, not pinned)
 // 2. Dead register (allocated but use_distance == 0)
 // 3. Spill farthest-future-use register (allocated, not pinned)
 // 4. Fallback to highest-numbered register (allocated, not pinned)
 //
-// FIX 3: Added Phase 5 - Emergency spill of pinned registers when all else fails
+// Phase 5 (pinned-register emergency spill) has been REMOVED. It used to
+// force-spill a still-pinned register out from under whoever pinned it,
+// with no way to notify that code its register had been silently
+// evicted -- the very next read of that register would get garbage
+// instead of the value the caller believed was still safely resident.
+// That's exactly what caused the intermittent, hard-to-trace runtime
+// corruption behind a real bug (a pin/unlock mismatch in
+// emit_tic80_print_intrinsic() that leaked 3 pinned registers per call).
+//
+// If normal allocation genuinely can't find a register now, that means
+// too many registers are pinned simultaneously somewhere in the call
+// stack of codegen functions currently executing -- which is a real bug
+// in the compiler, not something safe to paper over at runtime. Failing
+// loudly here, at the exact point of exhaustion, is far more debuggable
+// than letting a corrupted ROM run and blue-screen minutes later.
 int allocate_register(void)
 {
     // Phase 1: Free register
@@ -210,32 +220,28 @@ int allocate_register(void)
         }
     }
 
-    // FIX 3: Phase 5 - Emergency spill of pinned registers
-    // If we still haven't found a candidate, force-spill a pinned register
+    // No unpinned register available anywhere -- this means something
+    // upstream pinned registers and never released them (a pin/unlock
+    // mismatch), or a genuinely pathological amount of simultaneous
+    // pinning. Either way, report it as a compiler bug instead of
+    // silently stealing a pinned register out from under its owner.
     if (best_candidate == -1) {
-        // Try to find a pinned register that can be spilled
-        for (int i = NUM_GPRS - 1; i >= 1; i--) {
-            if (register_inventory[i] && register_pinned[i]) {
-                // Found a pinned register - force spill it
-                force_spill_register(i);
-                best_candidate = i;
-                break;
+        if (g_verbose_debug) {
+            fprintf(stderr, "[debug] allocate_register() CRITICAL: All registers pinned and allocated!\n");
+            fprintf(stderr, "[debug] allocate_register() Register Inventory: ");
+            for (int i = 0; i < NUM_GPRS; i++) {
+                fprintf(stderr, "R%d=%d(p=%d) ", i, register_inventory[i], register_pinned[i]);
             }
+            fprintf(stderr, "\n");
         }
-
-        // If we STILL can't find a register, it's a true emergency
-        if (best_candidate == -1) {
-            if (g_verbose_debug) {
-                fprintf(stderr, "[debug] allocate_register() CRITICAL: All registers pinned and allocated!\n");
-                fprintf(stderr, "[debug] allocate_register() Register Inventory: ");
-                for (int i = 0; i < NUM_GPRS; i++) {
-                    fprintf(stderr, "R%d=%d(p=%d) ", i, register_inventory[i], register_pinned[i]);
-                }
-                fprintf(stderr, "\n");
-            }
-            compiler_error(ERR_INTERNAL, -1, "Register inventory exhausted!");
-            return -1;
-        }
+        compiler_error(ERR_INTERNAL, -1,
+            "Register inventory exhausted: every register is pinned. "
+            "This means some codegen function pinned a register via "
+            "allocate_pinned_register() and released it with plain "
+            "unlock_register() instead of unlock_pinned_register() -- "
+            "check for that mismatch, or an unlock_pinned_register() "
+            "call missing on an error/early-return path.");
+        return -1;
     }
 
     // Spill the selected candidate if it was allocated

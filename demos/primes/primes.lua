@@ -329,7 +329,7 @@ function main()
                 x               = x + 100
                 print(x, y, time[alg])
 
-                if time[alg]   >  6.0 then
+                if time[alg]   >  2.0 then
                     flag[alg]   = false
                 end
             end
