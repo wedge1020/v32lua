@@ -67,24 +67,24 @@ _random_0args:
 
 ;; --- Case 1: math.random(n) -> integer in [1, n] ---
 _random_1arg:
-    ;; Ensure n is an integer
     CFI   R4                  ; Convert n to integer
 
-    ;; Check if n <= 0 to avoid division by zero
-    ILT   R4, 1               ; Check if n < 1
-    JF    R4, _random_valid_n ; If n >= 1, continue normally
-    MOV   R0, 0               ; For n <= 0, return 0 (or handle error)
+    ;; Triple-redundant safety checks
+    IEQ   R4, 0
+    JT    R4, _random_bad
+    ILT   R4, 1
+    JT    R4, _random_bad
+    IGT   R4, 0
+    JF    R4, _random_bad
+
+    ;; Now we are 100% certain R4 > 0
+    IMOD  R0, R4              ; R0 = random % n
+    IADD  R0, 1               ; R0 = random % n + 1
     CIF   R0
     JMP   _random_done
 
-_random_valid_n:
-    ;; Compute random % n
-    IMOD  R0, R4              ; R0 = random % n
-
-    ;; Add 1 to get range [1, n]
-    IADD  R0, 1
-
-    ;; Convert back to float
+_random_bad:
+    MOV   R0, 0               ; Return 0 for any invalid input
     CIF   R0
     JMP   _random_done
 
