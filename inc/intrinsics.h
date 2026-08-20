@@ -87,6 +87,7 @@ bool  emit_tic80_rectb_intrinsic (ASTNode *, int);
 bool  emit_tic80_circ_intrinsic  (ASTNode *, int);
 bool  emit_tic80_circb_intrinsic (ASTNode *, int);
 
+bool  emit_tic80_time_intrinsic  (ASTNode *, int);
 bool  emit_tic80_exit_intrinsic  (ASTNode *, int);
 
 void  emit_print_intrinsic (ASTNode *node);

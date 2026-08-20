@@ -1045,6 +1045,42 @@ bool emit_tic80_circb_intrinsic(ASTNode *node, int dest_reg) {
 }
 
 /**
+ * Emits assembly for the time() intrinsic (TIC-80 compatibility).
+ *
+ * Syntax: time() -> returns milliseconds since cartridge began execution
+ *
+ * TIC-80 time() returns milliseconds, but Vircon32's TIM_CurrentTime returns
+ * seconds since system start. We multiply by 1000 to convert to milliseconds.
+ */
+bool emit_tic80_time_intrinsic(ASTNode *node, int dest_reg) {
+    emit_asm("    ;; --- TIC-80 time() Intrinsic ---\n");
+
+    // time() takes no arguments, but we still need to handle the call
+    // Check for any arguments and evaluate them for side effects (Lua semantics)
+    ASTNode *curr = node->as.call.args_head;
+    while (curr != NULL) {
+        int reg = allocate_register();
+        generate_asm(curr, reg);
+        unlock_register(reg);
+        curr = curr->next;
+    }
+
+    // Get current time in seconds from hardware
+    if (dest_reg != 0) {
+        emit_asm("    IN R%d, TIM_CurrentTime ; Get seconds since system start\n", dest_reg);
+        emit_asm("    CIF R%d ; Convert hardware integer to Lua float\n", dest_reg);
+        emit_asm("    FMUL R%d, 1000.0 ; Convert seconds to milliseconds\n", dest_reg);
+    } else {
+        // If no destination register, still need to compute but discard result
+        emit_asm("    IN R0, TIM_CurrentTime ; Get seconds since system start\n");
+        emit_asm("    CIF R0 ; Convert hardware integer to Lua float\n");
+        emit_asm("    FMUL R0, 1000.0 ; Convert seconds to milliseconds\n");
+    }
+
+    return true;
+}
+
+/**
  * Emits assembly for the exit() intrinsic (TIC-80 compatibility).
  * Syntax: exit() or exit(anything) -- real TIC-80 exit() takes no
  * parameters and only *requests* termination: it doesn't stop execution
