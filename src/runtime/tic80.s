@@ -1463,28 +1463,31 @@ _tic80_fset_done:
 ;; Destroys R1-R4. Draws on whatever texture is currently selected.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __tic80_draw_swatch (internal helper -- not Lua-callable)
+;; In: R1=x R2=y R3=w R4=h (already valid Lua floats, TIC-80 pixels,
+;;     top-left, w/h >= 1), R5=color (0-15)
+;; Destroys R1-R4. Draws on whatever texture is currently selected.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 __tic80_draw_swatch:
     MOV   R8, R5
     IADD  R8, 512
     OUT   GPU_SelectedRegion, R8
 
-    CIF   R3
     FMUL  R3, 2.625
     FMUL  R3, 0.333333333       ; scale = (size * 2.625) / 3
     OUT   GPU_DrawingScaleX, R3
 
-    CIF   R4
     FMUL  R4, 2.625
     FMUL  R4, 0.333333333
     OUT   GPU_DrawingScaleY, R4
 
-    CIF   R1
     FMUL  R1, 2.625
     FADD  R1, 0.5
     CFI   R1
     OUT   GPU_DrawingPointX, R1
 
-    CIF   R2
     FMUL  R2, 2.625
     FADD  R2, 0.5
     CFI   R2
@@ -1515,9 +1518,9 @@ __builtin_tic80_pix:
     CFI   R5
     AND   R5, 15              ; clamp to valid swatch 0-15
 
-    MOV   R6, R5              ; stash boxed-return value before CALL clobbers R5
-    MOV   R3, 1
-    MOV   R4, 1
+    MOV   R6, R5
+    MOV   R3, 1.0        ; was: MOV R3, 1
+    MOV   R4, 1.0        ; was: MOV R4, 1
     CALL  __tic80_draw_swatch
 
     MOV   R0, R6
@@ -1651,10 +1654,10 @@ __builtin_tic80_rectb:
     PUSH  R12
     PUSH  R13
 
-    MOV   R10, [BP+2]        ; x
-    MOV   R11, [BP+3]        ; y
-    MOV   R12, [BP+4]        ; w
-    MOV   R13, [BP+5]        ; h
+    MOV   R10, [BP+2]        ; x  (float)
+    MOV   R11, [BP+3]        ; y  (float)
+    MOV   R12, [BP+4]        ; w  (float)
+    MOV   R13, [BP+5]        ; h  (float)
     MOV   R5,  [BP+6]        ; color
     CFI   R5
     AND   R5, 15
@@ -1663,31 +1666,31 @@ __builtin_tic80_rectb:
     MOV   R1, R10
     MOV   R2, R11
     MOV   R3, R12
-    MOV   R4, 1
+    MOV   R4, 1.0
     CALL  __tic80_draw_swatch
 
     ;; bottom strip: (x, y+h-1, w, 1)
     MOV   R1, R10
     MOV   R2, R11
-    IADD  R2, R13
-    ISUB  R2, 1
+    FADD  R2, R13
+    FSUB  R2, 1.0
     MOV   R3, R12
-    MOV   R4, 1
+    MOV   R4, 1.0
     CALL  __tic80_draw_swatch
 
     ;; left strip: (x, y, 1, h)
     MOV   R1, R10
     MOV   R2, R11
-    MOV   R3, 1
+    MOV   R3, 1.0
     MOV   R4, R13
     CALL  __tic80_draw_swatch
 
     ;; right strip: (x+w-1, y, 1, h)
     MOV   R1, R10
-    IADD  R1, R12
-    ISUB  R1, 1
+    FADD  R1, R12
+    FSUB  R1, 1.0
     MOV   R2, R11
-    MOV   R3, 1
+    MOV   R3, 1.0
     MOV   R4, R13
     CALL  __tic80_draw_swatch
 
@@ -1701,3 +1704,4 @@ __builtin_tic80_rectb:
     MOV   SP, BP
     POP   BP
     RET
+

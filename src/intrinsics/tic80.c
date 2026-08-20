@@ -763,3 +763,166 @@ bool emit_tic80_sync_intrinsic(ASTNode *node, int dest_reg) {
 
     return true;
 }
+
+/**
+ * Emits assembly for the pix() intrinsic (TIC-80 compatibility).
+ * Syntax: pix(x, y, color) -- draws a single pixel. Write-only; see
+ * __builtin_tic80_pix's header comment for why the read form isn't
+ * supported on this GPU.
+ */
+bool emit_tic80_pix_intrinsic(ASTNode *node, int dest_reg) {
+    emit_asm("    ;; --- TIC-80 pix() Intrinsic ---\n");
+
+    ASTNode *args[3] = { NULL, NULL, NULL };
+    int arg_count = 0;
+    ASTNode *curr = node->as.call.args_head;
+    while (curr != NULL && arg_count < 3) {
+        args[arg_count++] = curr;
+        curr = curr->next;
+    }
+
+    if (arg_count != 3) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+                      "TIC-80 pix() requires 3 arguments: pix(x, y, color)");
+        return false;
+    }
+
+    // Push right-to-left: color, y, x
+    for (int i = 2; i >= 0; i--) {
+        int reg = allocate_register();
+        register_pinned[reg] = 1;
+        generate_asm(args[i], reg);
+        emit_asm("PUSH R%d ; pix() arg %d\n", reg, i);
+        register_pinned[reg] = 0;
+        unlock_register(reg);
+    }
+
+    emit_asm("CALL __builtin_tic80_pix\n");
+    emit_asm("IADD SP, 3 ; Clean up pix() arguments\n");
+
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R0 ; Transfer result to dest_reg\n", dest_reg);
+    }
+
+    return true;
+}
+
+/**
+ * Emits assembly for the line() intrinsic (TIC-80 compatibility).
+ * Syntax: line(x0, y0, x1, y1, color)
+ */
+bool emit_tic80_line_intrinsic(ASTNode *node, int dest_reg) {
+    emit_asm("    ;; --- TIC-80 line() Intrinsic ---\n");
+
+    ASTNode *args[5] = { NULL, NULL, NULL, NULL, NULL };
+    int arg_count = 0;
+    ASTNode *curr = node->as.call.args_head;
+    while (curr != NULL && arg_count < 5) {
+        args[arg_count++] = curr;
+        curr = curr->next;
+    }
+
+    if (arg_count != 5) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+                      "TIC-80 line() requires 5 arguments: line(x0, y0, x1, y1, color)");
+        return false;
+    }
+
+    for (int i = 4; i >= 0; i--) {
+        int reg = allocate_register();
+        register_pinned[reg] = 1;
+        generate_asm(args[i], reg);
+        emit_asm("PUSH R%d ; line() arg %d\n", reg, i);
+        register_pinned[reg] = 0;
+        unlock_register(reg);
+    }
+
+    emit_asm("CALL __builtin_tic80_line\n");
+    emit_asm("IADD SP, 5 ; Clean up line() arguments\n");
+
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R0 ; Transfer result to dest_reg\n", dest_reg);
+    }
+
+    return true;
+}
+
+/**
+ * Emits assembly for the rect() intrinsic (TIC-80 compatibility).
+ * Syntax: rect(x, y, w, h, color) -- filled rectangle
+ */
+bool emit_tic80_rect_intrinsic(ASTNode *node, int dest_reg) {
+    emit_asm("    ;; --- TIC-80 rect() Intrinsic ---\n");
+
+    ASTNode *args[5] = { NULL, NULL, NULL, NULL, NULL };
+    int arg_count = 0;
+    ASTNode *curr = node->as.call.args_head;
+    while (curr != NULL && arg_count < 5) {
+        args[arg_count++] = curr;
+        curr = curr->next;
+    }
+
+    if (arg_count != 5) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+                      "TIC-80 rect() requires 5 arguments: rect(x, y, w, h, color)");
+        return false;
+    }
+
+    for (int i = 4; i >= 0; i--) {
+        int reg = allocate_register();
+        register_pinned[reg] = 1;
+        generate_asm(args[i], reg);
+        emit_asm("PUSH R%d ; rect() arg %d\n", reg, i);
+        register_pinned[reg] = 0;
+        unlock_register(reg);
+    }
+
+    emit_asm("CALL __builtin_tic80_rect\n");
+    emit_asm("IADD SP, 5 ; Clean up rect() arguments\n");
+
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R0 ; Transfer result to dest_reg\n", dest_reg);
+    }
+
+    return true;
+}
+
+/**
+ * Emits assembly for the rectb() intrinsic (TIC-80 compatibility).
+ * Syntax: rectb(x, y, w, h, color) -- rectangle border only
+ */
+bool emit_tic80_rectb_intrinsic(ASTNode *node, int dest_reg) {
+    emit_asm("    ;; --- TIC-80 rectb() Intrinsic ---\n");
+
+    ASTNode *args[5] = { NULL, NULL, NULL, NULL, NULL };
+    int arg_count = 0;
+    ASTNode *curr = node->as.call.args_head;
+    while (curr != NULL && arg_count < 5) {
+        args[arg_count++] = curr;
+        curr = curr->next;
+    }
+
+    if (arg_count != 5) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+                      "TIC-80 rectb() requires 5 arguments: rectb(x, y, w, h, color)");
+        return false;
+    }
+
+    for (int i = 4; i >= 0; i--) {
+        int reg = allocate_register();
+        register_pinned[reg] = 1;
+        generate_asm(args[i], reg);
+        emit_asm("PUSH R%d ; rectb() arg %d\n", reg, i);
+        register_pinned[reg] = 0;
+        unlock_register(reg);
+    }
+
+    emit_asm("CALL __builtin_tic80_rectb\n");
+    emit_asm("IADD SP, 5 ; Clean up rectb() arguments\n");
+
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R0 ; Transfer result to dest_reg\n", dest_reg);
+    }
+
+    return true;
+}

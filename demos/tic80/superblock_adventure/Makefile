@@ -1,6 +1,6 @@
 # --- Configuration ---
 DEMO          = superblock_adventure
-LUA_COMPILER  = ../../bin/v32lua
+LUA_COMPILER  = ../../../bin/v32lua
 ASSEMBLER     = assemble
 TEXTURE_TOOL  = png2vircon
 PACKER        = packrom

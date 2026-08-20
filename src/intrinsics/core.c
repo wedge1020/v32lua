@@ -424,6 +424,34 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         }
     }
 
+    // TIC-80 pix() -- set/read a single pixel
+    if (strcmp(func_name, "pix") == 0) {
+        if (runtime_req.needs_tic80 == true) {
+            return emit_tic80_pix_intrinsic(node, dest_reg);
+        }
+    }
+
+    // TIC-80 line()
+    if (strcmp(func_name, "line") == 0) {
+        if (runtime_req.needs_tic80 == true) {
+            return emit_tic80_line_intrinsic(node, dest_reg);
+        }
+    }
+
+    // TIC-80 rect() -- filled rectangle
+    if (strcmp(func_name, "rect") == 0) {
+        if (runtime_req.needs_tic80 == true) {
+            return emit_tic80_rect_intrinsic(node, dest_reg);
+        }
+    }
+
+    // TIC-80 rectb() -- rectangle border
+    if (strcmp(func_name, "rectb") == 0) {
+        if (runtime_req.needs_tic80 == true) {
+            return emit_tic80_rectb_intrinsic(node, dest_reg);
+        }
+    }
+
     //////////////////////////////////////////////////////////////////////////
     //
     // string library intrinsics
@@ -762,16 +790,34 @@ int try_emit_table_get_intrinsic(ASTNode *table_expr, ASTNode *key_expr, int des
         const char *key = key_expr->as.string_val.value;
 
         if (strcmp (key, "pi") == 0 || strcmp (key, "e") == 0 || strcmp (key, "huge") == 0) {
-            runtime_req.needs_math = true; // ensure __const_math_* labels get embedded
+            runtime_req.needs_math = true;
 
             if (dest_reg != 0) {
                 emit_asm ("    ;; --- Intrinsic: math.%s (constant) ---\n", key);
-                // NOTE the brackets: __const_math_pi etc. are ROM data
-                // labels, so this must DEREFERENCE them to get the
-                // actual float value, not just load the label's address
-                // (see the companion fix for __builtin_cos/tan/deg/rad,
-                // which had the exact same missing-bracket bug).
                 emit_asm ("    MOV R%d, [__const_math_%s]\n", dest_reg, key);
+            }
+            return 1;
+        }
+
+        // --- Bare reference to a math function (not a call): box a real
+        // callable label instead of falling through to a table lookup
+        // against a "math" table that doesn't actually exist at runtime.
+        // See __mathfn_sin / __mathfn_log / __mathfn_atan2 in runtime_s.txt.
+        // math.cos reuses __builtin_cos directly -- same calling
+        // convention already, no wrapper needed.
+        const char *label = NULL;
+        if      (strcmp (key, "sin")    == 0) label = "__mathfn_sin";
+        else if (strcmp (key, "log")    == 0) label = "__mathfn_log";
+        else if (strcmp (key, "atan2")  == 0) label = "__mathfn_atan2";
+        else if (strcmp (key, "cos")    == 0) label = "__builtin_cos";
+
+        if (label != NULL) {
+            runtime_req.needs_math = true;
+
+            if (dest_reg != 0) {
+                emit_asm ("    ;; --- math.%s (function value, not called) ---\n", key);
+                emit_asm ("    MOV R%d, %s\n", dest_reg, label);
+                emit_asm ("    OR  R%d, BOXED_FUNCTION ; Box as Function\n", dest_reg);
             }
             return 1;
         }

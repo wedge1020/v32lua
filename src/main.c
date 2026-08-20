@@ -147,39 +147,45 @@ int  main (int  argc, char** argv)
     }
     fclose(yyin);
 
-    // After parsing, before semantic analysis
-    if (runtime_req.needs_tic80) {
+    if (runtime_req.needs_tic80)
+    {
         process_all_tic80_sections();
 
-        if (tic80_has_assets()) {
-            log_stage(3, "tic80 assets parsing", verbose);
+        // Always generate + register the texture atlas when TIC-80 support is
+        // needed, regardless of whether the source declared any TILES/SPRITES/
+        // MAP sections. Even a program with zero custom art still needs
+        // texture 0 to exist -- that's where the palette swatch bank
+        // (regions 512-527) lives, and pix()/rect()/rectb()/line() all
+        // depend on it being present in the cart. tic80_has_assets() answers
+        // a narrower question (did the user declare real tile/sprite art)
+        // that no longer determines whether textures need to exist at all.
+        log_stage(3, "tic80 assets parsing", verbose);
 
-            char base_path[256];
-            strncpy(base_path, output_filename, sizeof(base_path));
-            char *last_dot = strrchr(base_path, '.');
-            if (last_dot) *last_dot = '\0';
+        char base_path[256];
+        strncpy(base_path, output_filename, sizeof(base_path));
+        char *last_dot = strrchr(base_path, '.');
+        if (last_dot) *last_dot = '\0';
 
-            generate_all_tic80_colorkey_textures(base_path);
+        generate_all_tic80_colorkey_textures(base_path);
 
-            // Register all 17 textures in CORRECT order (0-16)
-            CARTresource *prev = NULL;
-            for (int tex_idx = 0; tex_idx < 17; tex_idx++) {
-                CARTresource *res = malloc(sizeof(CARTresource));
-                res->id = next_texture_id++;
-                res->var_name = malloc(32);
-                snprintf(res->var_name, 32, "tic80_spritesheet_%d", tex_idx);
-                res->filename = malloc(strlen(base_path) + 32);
-                snprintf(res->filename, strlen(base_path) + 32,
-                         "%s_colorkey_%d", base_path, tex_idx);
-                res->next = NULL;  // Append, don't prepend
+        // Register all 17 textures in CORRECT order (0-16)
+        CARTresource *prev = NULL;
+        for (int tex_idx = 0; tex_idx < 17; tex_idx++) {
+            CARTresource *res = malloc(sizeof(CARTresource));
+            res->id = next_texture_id++;
+            res->var_name = malloc(32);
+            snprintf(res->var_name, 32, "tic80_spritesheet_%d", tex_idx);
+            res->filename = malloc(strlen(base_path) + 32);
+            snprintf(res->filename, strlen(base_path) + 32,
+                     "%s_colorkey_%d", base_path, tex_idx);
+            res->next = NULL;  // Append, don't prepend
 
-                if (prev) {
-                    prev->next = res;
-                } else {
-                    textures_head = res;
-                }
-                prev = res;
+            if (prev) {
+                prev->next = res;
+            } else {
+                textures_head = res;
             }
+            prev = res;
         }
     }
 
@@ -249,38 +255,3 @@ int  main (int  argc, char** argv)
 
     return (0);
 }
-
-/*
-int main (int  argc, char** argv)
-{
-    const char *input_filename = argv[1];
-
-    if (argc < 2)
-    {
-        fprintf(stderr, "Usage: %s <input_file.lua>\n", argv[0]);
-        exit (1);
-    }
-
-    FILE* file = fopen(argv[1], "r");
-    if (!file) {
-        perror("Error opening source file");
-        return 1;
-    }
-    yyin = file;
-
-    #if YYDEBUG
-    yydebug = 0;
-    #endif
-
-    // Run the Parser (which loops calls to the Code Generator automatically)
-    if (yyparse() != 0) {
-        fprintf(stderr, "Compiler Aborted: Parsing error encountered.\n");
-        return 1;
-    }
-
-    // 4. Output the Vircon32 cartridge XML file
-    emit_cart_xml (input_filename);
-
-    return (0);
-}
-*/

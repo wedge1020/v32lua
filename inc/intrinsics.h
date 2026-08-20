@@ -79,6 +79,11 @@ bool  emit_tic80_pmem_intrinsic  (ASTNode *, int);
 // TIC-80 Sprite Flag Functions
 bool  emit_tic80_fget_intrinsic  (ASTNode *, int);
 bool  emit_tic80_fset_intrinsic  (ASTNode *, int);
+// TIC-80 drawing functions
+bool  emit_tic80_pix_intrinsic   (ASTNode *, int);
+bool  emit_tic80_line_intrinsic  (ASTNode *, int);
+bool  emit_tic80_rect_intrinsic  (ASTNode *, int);
+bool  emit_tic80_rectb_intrinsic (ASTNode *, int);
 
 void  emit_print_intrinsic (ASTNode *node);
 bool  emit_printf_intrinsic(ASTNode *node, int dest_reg);

@@ -1013,3 +1013,38 @@ __builtin_modf:
     POP   BP
     RET
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __mathfn_sin / __mathfn_log / __mathfn_atan2
+;; Standalone callable wrappers so math.sin/math.log/math.atan2 can be
+;; boxed as first-class function values (e.g. `local s = math.sin`),
+;; not just used as direct call-site intrinsics.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__mathfn_sin:
+    PUSH  BP
+    MOV   BP, SP
+    MOV   R0, [BP+2]
+    SIN   R0
+    MOV   SP, BP
+    POP   BP
+    RET
+
+__mathfn_log:
+    PUSH  BP
+    MOV   BP, SP
+    MOV   R0, [BP+2]
+    LOG   R0
+    MOV   SP, BP
+    POP   BP
+    RET
+
+__mathfn_atan2:
+    PUSH  BP
+    MOV   BP, SP
+    MOV   R0, [BP+2]   ; y
+    MOV   R1, [BP+3]   ; x
+    ATAN2 R0, R1
+    MOV   SP, BP
+    POP   BP
+    RET
+

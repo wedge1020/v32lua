@@ -656,6 +656,13 @@ void generate_program (ASTNode *head)
     }
     else if (has_update)
     {
+        if (runtime_req.needs_tic80)
+        {
+            emit_asm ("MOV R0, var_TIC80_PAUSE_FLAG\n");
+            emit_asm ("MOV R1, 0\n");
+            emit_asm ("MOV [R0], R1 ; initialize pause flag to 0\n");
+        }
+
         emit_asm ("__start:\n");
         if (runtime_req.needs_pico8)
         {
@@ -667,11 +674,6 @@ void generate_program (ASTNode *head)
         }
         else if (runtime_req.needs_tic80)
         {
-            emit_asm ("MOV R0, var_TIC80_PAUSE_FLAG\n");
-            emit_asm ("MOV R1, 0\n");
-            emit_asm ("MOV [R0], R1 ; initialize pause flag to 0\n");
-            emit_asm ("__start:\n");
-
             // Check START button rising edge
             emit_asm ("IN R0, INP_GamepadButtonStart\n");
             emit_asm ("IEQ R0, 1\n");
