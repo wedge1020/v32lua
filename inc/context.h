@@ -136,6 +136,7 @@ void        mark_global_as_function      (ASTNode    *);
 void        mark_global_as_c_function    (const char *, int);
 const char *get_current_function_name    (void);
 void        get_variable_access_string   (const char *, char       *);
+void        get_extra_return_slot_access (int,          char *);
 void        push_function_context        (const char *, ASTNode    *);
 void        pop_function_context         (void);
 void        pop_scope                    (void);

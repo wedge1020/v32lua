@@ -202,6 +202,7 @@ int  main (int  argc, char** argv)
         register_global ("TIC80_PAUSE_FLAG");
         register_global ("TIC80_COLOR_MULTIPLY");
         register_global ("TIC80_SPRITE_FLAGS_PTR");
+        register_global ("TIC80_EXIT_FLAG");
     }
 
     if (runtime_req.needs_pico8)

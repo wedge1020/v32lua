@@ -12,6 +12,14 @@
 #define NUM_GPRS 14
 #define MAX_SPILL_SLOTS 64  // Arbitrary limit for spilled values
 
+// Maximum number of "extra" (beyond the 3 register-passed) return values
+// supported by the multi-return calling convention. Values 1-3 of any
+// multi-return function/call travel in R0/R2/R3 as before; values 4 and
+// up travel through a small bank of dedicated global words instead (see
+// get_extra_return_slot_access() in v32lua.c). Total max return values
+// per function is therefore 3 + MAX_EXTRA_RETURN_SLOTS.
+#define MAX_EXTRA_RETURN_SLOTS 16
+
 // Track which registers should NOT be spilled
 extern int  register_pinned[NUM_GPRS];
 

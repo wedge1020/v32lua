@@ -39,13 +39,29 @@ void  node_function_def (ASTNode *node)
     {
         SymbolNode *self_sym          = resolve_symbol(func_name);
         int         self_return_count = (self_sym != NULL) ? self_sym->return_count : 1;
-        if (self_return_count > 3) self_return_count = 3;
         if (self_return_count < 1) self_return_count = 1;
+        // (No 3-cap here anymore -- self_return_count can legitimately be
+        // > 3 now; the R0/R2/R3 defaults below are unchanged, and values
+        // 4+ get their own nil default via the shared extra-return-slot
+        // globals right after.)
 
         emit_asm("    ; --- Default implicit return value(s): nil until overwritten ---\n");
         if (self_return_count >= 1) emit_asm("MOV R0, BOXED_NIL\n");
         if (self_return_count >= 2) emit_asm("MOV R2, BOXED_NIL\n");
         if (self_return_count >= 3) emit_asm("MOV R3, BOXED_NIL\n");
+
+        if (self_return_count > 3) {
+            int pad_reg = allocate_register();
+            emit_asm("MOV R%d, BOXED_NIL ; default value for extra return slots\n", pad_reg);
+
+            for (int idx = 3; idx < self_return_count; idx++) {
+                char slot_access[128];
+                get_extra_return_slot_access(idx - 3, slot_access);
+                emit_asm("MOV %s, R%d\n", slot_access, pad_reg);
+            }
+
+            unlock_register(pad_reg);
+        }
     }
 
     push_function_scope();

@@ -283,6 +283,52 @@ void get_variable_access_string(const char *name, char *output_buffer) {
 }
 
 // ============================================================================
+// get_extra_return_slot_access(): Compute the assembly access string for the
+// Nth "extra" return-value slot (N = 0 for the 4th return value overall,
+// N = 1 for the 5th, etc). Values 1-3 of any multi-return function travel
+// in the fixed hardware registers R0/R2/R3, exactly as before. Everything
+// from the 4th value onward travels through a small bank of dedicated
+// global words instead -- one per slot, auto-registered via the SAME
+// global-variable machinery Lua globals already use (register_global() /
+// get_variable_access_string()), so no changes to the assembler or output
+// format are required.
+//
+// Why plain globals instead of stack slots: the call site would otherwise
+// need to know, for every single call, how many argument words the callee
+// itself will read (self + fixed params + vararg marker) so it could push
+// the extra-return placeholders at the exact matching stack offset --
+// fragile, and impossible for calls made through a function VALUE
+// (obj.cb(), a table of callbacks, etc.) where the target isn't known
+// until runtime. A small fixed bank of globals sidesteps all of that: the
+// callee writes directly into slot (return_index - 3), the caller reads
+// the same slot right back out, and -- because both sides always read/
+// write these slots as the very next thing after the CALL instruction,
+// before any other Lua call can run -- there's no window for another call
+// to clobber them in between. This even makes `return f()` tail-forwarding
+// of a >3-value call work for free: the inner call's node_return() already
+// left the right values sitting in these slots, and the outer function
+// just leaves them untouched.
+//
+// Naming: slots are auto-registered as globals named "__extra_ret_N". The
+// leading double underscore follows the same reserved-name convention
+// already used for other compiler-internal state (e.g. "__for_iter_%d").
+// ============================================================================
+void get_extra_return_slot_access(int extra_index, char *output_buffer)
+{
+    if (extra_index < 0 || extra_index >= MAX_EXTRA_RETURN_SLOTS) {
+        compiler_error(ERR_INTERNAL, -1,
+            "Multi-return value index %d exceeds the maximum of %d extra "
+            "return slots (%d total return values supported)",
+            extra_index, MAX_EXTRA_RETURN_SLOTS, 3 + MAX_EXTRA_RETURN_SLOTS);
+        return;
+    }
+
+    char slot_name[32];
+    snprintf(slot_name, sizeof(slot_name), "__extra_ret_%d", extra_index);
+    get_variable_access_string(slot_name, output_buffer);
+}
+
+// ============================================================================
 // --- Label Generator
 // ============================================================================
 int get_next_label (void)

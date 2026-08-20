@@ -939,3 +939,122 @@ bool emit_tic80_rectb_intrinsic(ASTNode *node, int dest_reg) {
 
     return true;
 }
+
+/**
+ * Emits assembly for the circ() intrinsic (TIC-80 compatibility).
+ * Syntax: circ(x, y, radius, color) -- filled circle
+ */
+bool emit_tic80_circ_intrinsic(ASTNode *node, int dest_reg) {
+    emit_asm("    ;; --- TIC-80 circ() Intrinsic ---\n");
+
+    ASTNode *args[4] = { NULL, NULL, NULL, NULL };
+    int arg_count = 0;
+    ASTNode *curr = node->as.call.args_head;
+    while (curr != NULL && arg_count < 4) {
+        args[arg_count++] = curr;
+        curr = curr->next;
+    }
+
+    if (arg_count != 4) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+                      "TIC-80 circ() requires 4 arguments: circ(x, y, radius, color)");
+        return false;
+    }
+
+    // Push right-to-left: color, radius, y, x
+    for (int i = 3; i >= 0; i--) {
+        int reg = allocate_register();
+        register_pinned[reg] = 1;
+        generate_asm(args[i], reg);
+        emit_asm("PUSH R%d ; circ() arg %d\n", reg, i);
+        register_pinned[reg] = 0;
+        unlock_register(reg);
+    }
+
+    emit_asm("CALL __builtin_tic80_circ\n");
+    emit_asm("IADD SP, 4 ; Clean up circ() arguments\n");
+
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R0 ; Transfer result to dest_reg\n", dest_reg);
+    }
+
+    return true;
+}
+
+/**
+ * Emits assembly for the circb() intrinsic (TIC-80 compatibility).
+ * Syntax: circb(x, y, radius, color) -- circle outline (1px border)
+ */
+bool emit_tic80_circb_intrinsic(ASTNode *node, int dest_reg) {
+    emit_asm("    ;; --- TIC-80 circb() Intrinsic ---\n");
+
+    ASTNode *args[4] = { NULL, NULL, NULL, NULL };
+    int arg_count = 0;
+    ASTNode *curr = node->as.call.args_head;
+    while (curr != NULL && arg_count < 4) {
+        args[arg_count++] = curr;
+        curr = curr->next;
+    }
+
+    if (arg_count != 4) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+                      "TIC-80 circb() requires 4 arguments: circb(x, y, radius, color)");
+        return false;
+    }
+
+    for (int i = 3; i >= 0; i--) {
+        int reg = allocate_register();
+        register_pinned[reg] = 1;
+        generate_asm(args[i], reg);
+        emit_asm("PUSH R%d ; circb() arg %d\n", reg, i);
+        register_pinned[reg] = 0;
+        unlock_register(reg);
+    }
+
+    emit_asm("CALL __builtin_tic80_circb\n");
+    emit_asm("IADD SP, 4 ; Clean up circb() arguments\n");
+
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R0 ; Transfer result to dest_reg\n", dest_reg);
+    }
+
+    return true;
+}
+
+/**
+ * Emits assembly for the exit() intrinsic (TIC-80 compatibility).
+ * Syntax: exit() or exit(anything) -- real TIC-80 exit() takes no
+ * parameters and only *requests* termination: it doesn't stop execution
+ * immediately, the current TIC() call keeps running to completion, and
+ * TIC-80 stops calling TIC() again after this frame. tomb_of_the_tic.lua
+ * calls it as exit(selectedLevel) with no guard afterward, which only
+ * makes sense under that deferred semantics -- so any argument passed is
+ * accepted (evaluated for Lua side effects, matching sync()'s precedent)
+ * and then discarded; only the deferred-stop behavior is real.
+ */
+bool emit_tic80_exit_intrinsic(ASTNode *node, int dest_reg) {
+    emit_asm("    ;; --- TIC-80 exit() Intrinsic ---\n");
+
+    // Evaluate and discard any arguments, purely for side effects.
+    ASTNode *curr = node->as.call.args_head;
+    while (curr != NULL) {
+        int reg = allocate_register();
+        generate_asm(curr, reg);
+        unlock_register(reg);
+        curr = curr->next;
+    }
+
+    char flag_access[128];
+    get_variable_access_string("TIC80_EXIT_FLAG", flag_access);
+
+    int flag_reg = allocate_register();
+    emit_asm("MOV R%d, 1\n", flag_reg);
+    emit_asm("MOV %s, R%d ; request exit after this frame finishes\n", flag_access, flag_reg);
+    unlock_register(flag_reg);
+
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, BOXED_NIL ; exit() has no meaningful return value\n", dest_reg);
+    }
+
+    return true;
+}

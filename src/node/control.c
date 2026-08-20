@@ -31,7 +31,6 @@ void  node_return (ASTNode *node)
 {
     ASTNode *expr = node -> as.return_stmt.expressions_head;
     int ret_idx = 0;
-    int arg_count = node -> as.return_stmt.parent_func_arg_count;
 
     int raw_reg_used[3] = {0, 0, 0}; // index 0->R0, 1->R2, 2->R3
 
@@ -56,8 +55,15 @@ void  node_return (ASTNode *node)
 
         if (callee_sym != NULL && callee_sym->is_function && callee_sym->return_count > 1) {
             generate_asm(expr, 0);
+
+            // Tail-forward ALL of the callee's return values, not just the
+            // first 3 (previously clamped here with "if (ret_idx > 3)
+            // ret_idx = 3"). The callee's own node_return() already left
+            // values 4+ sitting in the shared __extra_ret_N global slots --
+            // since nothing runs between that CALL and this function's own
+            // immediate return, those slots are still exactly as the
+            // callee left them, so there's nothing further to copy.
             ret_idx = callee_sym->return_count;
-            if (ret_idx > 3) ret_idx = 3;
             expr = NULL;
         }
     }
@@ -77,40 +83,25 @@ void  node_return (ASTNode *node)
         else if (ret_idx == 1) { emit_asm ("MOV R2, R%d\n", val_reg); target_raw_reg = 2; raw_reg_used[1] = 1; }
         else if (ret_idx == 2) { emit_asm ("MOV R3, R%d\n", val_reg); target_raw_reg = 3; raw_reg_used[2] = 1; }
         else {
-            int offset = 2 + arg_count + (ret_idx - 3);
-            emit_asm ("MOV [BP + %d], R%d\n", offset, val_reg);
+            // 4th and later return values: write into the shared "extra
+            // return slot" globals instead of a fixed register -- see
+            // get_extra_return_slot_access() for the full rationale.
+            char slot_access[128];
+            get_extra_return_slot_access(ret_idx - 3, slot_access);
+            emit_asm ("MOV %s, R%d ; extra return value %d\n", slot_access, val_reg, ret_idx);
         }
 
         if (target_raw_reg != -1) {
             // Lock the raw register so a LATER return expression in this
-            // same statement can't get it handed back out as scratch
-            // (the original clobbered-register bug this whole block
-            // exists to prevent).
+            // same statement can't get it handed back out as scratch.
             lock_register(target_raw_reg);
         }
 
-        // -------------------------------------------------------------
-        // FIX: only unlock val_reg here if it is NOT the very raw
-        // register we just locked above. allocate_register() is free to
-        // hand back R0/R2/R3 as val_reg for any expression -- nothing
-        // pins them away from it -- so val_reg == target_raw_reg is a
-        // normal, expected outcome (visible directly in the generated
-        // asm as a redundant "MOV R2, R2"). lock_register() and
-        // unlock_register() both operate on the SAME per-register-number
-        // state; unconditionally unlocking val_reg here immediately
-        // cancelled the lock_register() call above whenever they
-        // coincided, leaving R0/R2/R3 unprotected again one statement
-        // early. The very next return-expression's allocate_register()
-        // call would then happily hand that "free" register straight
-        // back out as ITS OWN scratch space, overwriting the value that
-        // was supposed to be safely parked there for the return -- e.g.
-        // `return lo, hi, a + b + c` computing `a + b + c` directly on
-        // top of the register still holding `hi`.
-        //
-        // When they DO coincide, the post-loop unlock block below (which
-        // runs once every expression in this return statement has been
-        // evaluated) is what correctly releases it instead.
-        // -------------------------------------------------------------
+        // Only unlock val_reg here if it is NOT the very raw register we
+        // just locked above -- see the original comment block this
+        // preserves: val_reg == target_raw_reg is a normal, expected
+        // outcome, and unconditionally unlocking here would cancel the
+        // lock_register() call one statement early.
         if (val_reg != target_raw_reg) {
             unlock_register(val_reg);
         }
@@ -125,12 +116,33 @@ void  node_return (ASTNode *node)
 
     SymbolNode *fn_sym      = resolve_symbol (get_current_function_name ());
     int         max_returns = (fn_sym != NULL) ? fn_sym -> return_count : ret_idx;
-    if (max_returns > 3) max_returns = 3;
+    // (No 3-cap here anymore -- max_returns can legitimately be > 3 now.)
 
+    // -----------------------------------------------------------------
+    // Pad any return slot THIS return statement didn't populate, because
+    // a DIFFERENT 'return' elsewhere in the same function returns more
+    // values (see count_max_return_values()). R0/R2/R3 padding is
+    // unchanged; slots 4+ are padded through the same shared globals
+    // used above.
+    // -----------------------------------------------------------------
     if (ret_idx < max_returns) {
         if (ret_idx <= 0 && max_returns >= 1) emit_asm ("MOV R0, BOXED_NIL ; pad unused return slot\n");
         if (ret_idx <= 1 && max_returns >= 2) emit_asm ("MOV R2, BOXED_NIL ; pad unused return slot\n");
         if (ret_idx <= 2 && max_returns >= 3) emit_asm ("MOV R3, BOXED_NIL ; pad unused return slot\n");
+
+        if (max_returns > 3) {
+            int pad_reg = allocate_register();
+            emit_asm ("MOV R%d, BOXED_NIL ; nil value for padding extra return slots\n", pad_reg);
+
+            int start = (ret_idx > 3) ? ret_idx : 3;
+            for (int idx = start; idx < max_returns; idx++) {
+                char slot_access[128];
+                get_extra_return_slot_access(idx - 3, slot_access);
+                emit_asm ("MOV %s, R%d ; pad unused return slot %d\n", slot_access, pad_reg, idx);
+            }
+
+            unlock_register(pad_reg);
+        }
     }
 
     emit_asm ("JMP __%s_return\n", get_current_function_name ());

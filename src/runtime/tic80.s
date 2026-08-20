@@ -1705,3 +1705,295 @@ __builtin_tic80_rectb:
     POP   BP
     RET
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __tic80_circ_plot_point (internal helper -- not Lua-callable)
+;; In: R1=x (int), R2=y (int), R5=color (int 0-15). Destroys R1-R4, R8.
+;; Stamps a single 1x1 swatch -- the same primitive pix() uses for one point.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__tic80_circ_plot_point:
+    CIF   R1
+    CIF   R2
+    MOV   R3, 1.0
+    MOV   R4, 1.0
+    CALL  __tic80_draw_swatch
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __tic80_circ_draw_hspan (internal helper -- not Lua-callable)
+;; In: R1=x_left (int), R2=y (int), R3=width in TIC-80 pixels (int, >=1),
+;;     R5=color (int 0-15). Destroys R1-R4, R8.
+;; A 1-pixel-tall horizontal strip -- how circ() fills each scanline.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__tic80_circ_draw_hspan:
+    CIF   R1
+    CIF   R2
+    CIF   R3
+    MOV   R4, 1.0
+    CALL  __tic80_draw_swatch
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_tic80_circ -- circ(x, y, radius, color)  [filled]
+;; Standard integer midpoint (Bresenham) circle algorithm. Instead of
+;; plotting 8 individual points per step (which would leave gaps once
+;; filled), each step draws 4 horizontal spans connecting the symmetric
+;; x-extents for its two rows -- the usual "filled circle via spans"
+;; decomposition of the same algorithm circb() uses for the outline.
+;; The span at py==0 and the span at px==py get drawn twice (once from
+;; each pair) -- harmless: same color, same pixels, just a couple of
+;; redundant swatch stamps at the poles/diagonal.
+;; Stack: [BP+2]=x [BP+3]=y [BP+4]=radius [BP+5]=color
+;; Returns: R0 = color (boxed) that was drawn.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_circ:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R6                 ; err (midpoint decision variable)
+    PUSH  R7                 ; py  (algorithm y, starts at 0)
+    PUSH  R10                ; cx  (int)
+    PUSH  R11                ; cy  (int)
+    PUSH  R12                ; color (int, clamped 0-15)
+    PUSH  R13                ; px  (algorithm x, starts at radius)
+
+    MOV   R10, [BP+2]        ; x (float)
+    CFI   R10                ; cx (int)
+    MOV   R11, [BP+3]        ; y (float)
+    CFI   R11                ; cy (int)
+    MOV   R13, [BP+4]        ; radius (float)
+    CFI   R13                ; px = radius (int)
+    MOV   R12, [BP+5]        ; color (float)
+    CFI   R12
+    AND   R12, 15            ; clamp to valid swatch 0-15
+
+    MOV   R7, 0               ; py = 0
+    MOV   R6, 0               ; err = 0
+
+__circ_loop:
+    MOV   R1, R13
+    IGE   R1, R7              ; px >= py ? (destructive -- R13 read via copy)
+    JF    R1, __circ_done
+
+    ;; --- Span A: row cy+py, from cx-px to cx+px  (width = 2*px+1) ---
+    MOV   R1, R10
+    ISUB  R1, R13
+    MOV   R2, R11
+    IADD  R2, R7
+    MOV   R3, R13
+    IMUL  R3, 2
+    IADD  R3, 1
+    MOV   R5, R12
+    CALL  __tic80_circ_draw_hspan
+
+    ;; --- Span B: row cy-py, from cx-px to cx+px  (width = 2*px+1) ---
+    MOV   R1, R10
+    ISUB  R1, R13
+    MOV   R2, R11
+    ISUB  R2, R7
+    MOV   R3, R13
+    IMUL  R3, 2
+    IADD  R3, 1
+    MOV   R5, R12
+    CALL  __tic80_circ_draw_hspan
+
+    ;; --- Span C: row cy+px, from cx-py to cx+py  (width = 2*py+1) ---
+    MOV   R1, R10
+    ISUB  R1, R7
+    MOV   R2, R11
+    IADD  R2, R13
+    MOV   R3, R7
+    IMUL  R3, 2
+    IADD  R3, 1
+    MOV   R5, R12
+    CALL  __tic80_circ_draw_hspan
+
+    ;; --- Span D: row cy-px, from cx-py to cx+py  (width = 2*py+1) ---
+    MOV   R1, R10
+    ISUB  R1, R7
+    MOV   R2, R11
+    ISUB  R2, R13
+    MOV   R3, R7
+    IMUL  R3, 2
+    IADD  R3, 1
+    MOV   R5, R12
+    CALL  __tic80_circ_draw_hspan
+
+    ;; --- Advance the midpoint decision variable ---
+    IADD  R7, 1                ; py += 1
+    MOV   R1, R7
+    IMUL  R1, 2
+    IADD  R1, 1
+    IADD  R6, R1               ; err += 1 + 2*py
+
+    MOV   R2, R6
+    ISUB  R2, R13               ; err - px
+    IMUL  R2, 2
+    IADD  R2, 1                 ; 2*(err-px) + 1
+    MOV   R3, R2
+    IGT   R3, 0                 ; > 0 ?
+    JF    R3, __circ_loop
+
+    ISUB  R13, 1                ; px -= 1
+    MOV   R1, R13
+    IMUL  R1, 2
+    MOV   R2, 1
+    ISUB  R2, R1
+    IADD  R6, R2                ; err += 1 - 2*px
+
+    JMP   __circ_loop
+
+__circ_done:
+    MOV   R0, R12
+    CIF   R0
+
+    POP   R13
+    POP   R12
+    POP   R11
+    POP   R10
+    POP   R7
+    POP   R6
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_tic80_circb -- circb(x, y, radius, color)  [1px outline only]
+;; Same midpoint algorithm as circ(), but plots the 8 symmetric points per
+;; step directly as single 1x1 stamps instead of connecting them into spans
+;; -- an unfilled outline rather than a solid disc.
+;; Stack: [BP+2]=x [BP+3]=y [BP+4]=radius [BP+5]=color
+;; Returns: R0 = color (boxed) that was drawn.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_circb:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R6                 ; err
+    PUSH  R7                 ; py
+    PUSH  R10                ; cx (int)
+    PUSH  R11                ; cy (int)
+    PUSH  R12                ; color (int, clamped)
+    PUSH  R13                ; px (starts at radius)
+
+    MOV   R10, [BP+2]
+    CFI   R10
+    MOV   R11, [BP+3]
+    CFI   R11
+    MOV   R13, [BP+4]
+    CFI   R13
+    MOV   R12, [BP+5]
+    CFI   R12
+    AND   R12, 15
+
+    MOV   R7, 0
+    MOV   R6, 0
+
+__circb_loop:
+    MOV   R1, R13
+    IGE   R1, R7
+    JF    R1, __circb_done
+
+    ;; --- Point 1: (cx+px, cy+py) ---
+    MOV   R1, R10
+    IADD  R1, R13
+    MOV   R2, R11
+    IADD  R2, R7
+    MOV   R5, R12
+    CALL  __tic80_circ_plot_point
+
+    ;; --- Point 2: (cx+py, cy+px) ---
+    MOV   R1, R10
+    IADD  R1, R7
+    MOV   R2, R11
+    IADD  R2, R13
+    MOV   R5, R12
+    CALL  __tic80_circ_plot_point
+
+    ;; --- Point 3: (cx-py, cy+px) ---
+    MOV   R1, R10
+    ISUB  R1, R7
+    MOV   R2, R11
+    IADD  R2, R13
+    MOV   R5, R12
+    CALL  __tic80_circ_plot_point
+
+    ;; --- Point 4: (cx-px, cy+py) ---
+    MOV   R1, R10
+    ISUB  R1, R13
+    MOV   R2, R11
+    IADD  R2, R7
+    MOV   R5, R12
+    CALL  __tic80_circ_plot_point
+
+    ;; --- Point 5: (cx-px, cy-py) ---
+    MOV   R1, R10
+    ISUB  R1, R13
+    MOV   R2, R11
+    ISUB  R2, R7
+    MOV   R5, R12
+    CALL  __tic80_circ_plot_point
+
+    ;; --- Point 6: (cx-py, cy-px) ---
+    MOV   R1, R10
+    ISUB  R1, R7
+    MOV   R2, R11
+    ISUB  R2, R13
+    MOV   R5, R12
+    CALL  __tic80_circ_plot_point
+
+    ;; --- Point 7: (cx+py, cy-px) ---
+    MOV   R1, R10
+    IADD  R1, R7
+    MOV   R2, R11
+    ISUB  R2, R13
+    MOV   R5, R12
+    CALL  __tic80_circ_plot_point
+
+    ;; --- Point 8: (cx+px, cy-py) ---
+    MOV   R1, R10
+    IADD  R1, R13
+    MOV   R2, R11
+    ISUB  R2, R7
+    MOV   R5, R12
+    CALL  __tic80_circ_plot_point
+
+    ;; --- Advance the midpoint decision variable ---
+    IADD  R7, 1
+    MOV   R1, R7
+    IMUL  R1, 2
+    IADD  R1, 1
+    IADD  R6, R1
+
+    MOV   R2, R6
+    ISUB  R2, R13
+    IMUL  R2, 2
+    IADD  R2, 1
+    MOV   R3, R2
+    IGT   R3, 0
+    JF    R3, __circb_loop
+
+    ISUB  R13, 1
+    MOV   R1, R13
+    IMUL  R1, 2
+    MOV   R2, 1
+    ISUB  R2, R1
+    IADD  R6, R2
+
+    JMP   __circb_loop
+
+__circb_done:
+    MOV   R0, R12
+    CIF   R0
+
+    POP   R13
+    POP   R12
+    POP   R11
+    POP   R10
+    POP   R7
+    POP   R6
+    MOV   SP, BP
+    POP   BP
+    RET
+

@@ -705,6 +705,8 @@ void generate_program (ASTNode *head)
             emit_asm ("MOV R0, var_TIC80_PAUSE_FLAG\n");
             emit_asm ("MOV R1, 0\n");
             emit_asm ("MOV [R0], R1 ; initialize pause flag to 0\n");
+            emit_asm ("MOV R0, var_TIC80_EXIT_FLAG\n");
+            emit_asm ("MOV [R0], R1 ; initialize exit flag to 0 (R1 already 0)\n");
         }
 
         emit_asm ("__start:\n");
@@ -739,7 +741,19 @@ void generate_program (ASTNode *head)
             emit_asm ("CALL __function_TIC\n");
             emit_asm ("__just_wait:");
             emit_asm ("WAIT\n");
+
+            // exit() defers termination to the end of the current frame --
+            // TIC() has already run and WAIT has already presented whatever
+            // it drew, so it's safe to stop here instead of looping back
+            // into another frame.
+            emit_asm ("MOV R1, var_TIC80_EXIT_FLAG\n");
+            emit_asm ("MOV R1, [R1]\n");
+            emit_asm ("IEQ R1, 0\n");
+            emit_asm ("JF R1, __exit_requested ; exit() was called this frame\n");
             emit_asm ("JMP __start\n");
+            emit_asm ("__exit_requested:\n");
+            emit_asm ("HLT ; exit() requested -- Vircon32 has no console to return to, so halt cleanly\n");
+            emit_asm ("JMP __exit_requested\n");
 
             // PAUSE: dim, render one frame, print, set flag
             emit_asm ("__do_pause:\n");

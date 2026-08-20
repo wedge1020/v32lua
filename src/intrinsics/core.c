@@ -452,6 +452,27 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         }
     }
 
+    // TIC-80 circ() -- filled circle
+    if (strcmp(func_name, "circ") == 0) {
+        if (runtime_req.needs_tic80 == true) {
+            return emit_tic80_circ_intrinsic(node, dest_reg);
+        }
+    }
+
+    // TIC-80 circb() -- circle border only
+    if (strcmp(func_name, "circb") == 0) {
+        if (runtime_req.needs_tic80 == true) {
+            return emit_tic80_circb_intrinsic(node, dest_reg);
+        }
+    }
+
+    // TIC-80 exit() -- request the cart stop after the current frame
+    if (strcmp(func_name, "exit") == 0) {
+        if (runtime_req.needs_tic80 == true) {
+            return emit_tic80_exit_intrinsic(node, dest_reg);
+        }
+    }
+
     //////////////////////////////////////////////////////////////////////////
     //
     // string library intrinsics

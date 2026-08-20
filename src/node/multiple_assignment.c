@@ -96,43 +96,61 @@ void node_multiple_assignment(ASTNode *node)
             generate_asm(curr_val, 0);  // dest_reg=0 means don't store to single reg
 
             // -----------------------------------------------------------------
-            // PASS 1: Copy ALL raw return values (R0, R2, R3) out of their
-            // fixed registers into freshly allocated, protected temp
-            // registers FIRST, as one uninterrupted block, before touching
-            // any target's storage.
+            // PASS 1: Copy ALL raw return values out of their source location
+            // (fixed registers R0/R2/R3 for values 1-3, the shared
+            // __extra_ret_N globals for value 4 onward -- see
+            // get_extra_return_slot_access()) into freshly allocated,
+            // protected temp registers FIRST, as one uninterrupted block,
+            // before touching any target's storage.
             //
-            // Lock the raw return-value registers themselves BEFORE
-            // allocating any tmp_reg. Without this, allocate_register()
-            // could hand back R2 (or R3) as the tmp_reg for return value 0,
-            // clobbering it before return value 1 is ever read out of it --
-            // the same hazard as before, just one level further in. Locking
-            // R0/R2/R3 up front makes them ineligible for that allocation
-            // entirely, so every tmp_reg is guaranteed to land somewhere
-            // else until all raw values are safely copied out.
+            // Lock the raw return-value REGISTERS themselves (R0/R2/R3, up
+            // to 3 of them) BEFORE allocating any tmp_reg. Without this,
+            // allocate_register() could hand back R2 (or R3) as the
+            // tmp_reg for return value 0, clobbering it before return
+            // value 1 is ever read out of it. Locking R0/R2/R3 up front
+            // makes them ineligible for that allocation entirely, so every
+            // tmp_reg is guaranteed to land somewhere else until all
+            // register-sourced raw values are safely copied out. Values
+            // from the extra-return globals don't need this protection --
+            // they live in memory, not in the register file, so they can't
+            // be clobbered by allocate_register() picking a temp register.
+            //
+            // extract_count is no longer clamped/rejected at 3 -- values
+            // beyond the 3rd just come from a different source. If
+            // extract_count somehow exceeds the compiler's supported
+            // maximum (3 + MAX_EXTRA_RETURN_SLOTS), get_extra_return_slot_
+            // access() below raises a clear compiler_error at the exact
+            // offending slot rather than silently truncating results.
             // -----------------------------------------------------------------
             int extract_count = return_count;
-            if (extract_count > 3) {
-                compiler_error(ERR_INTERNAL, -1,
-                    "Multi-return assignment with more than 3 values is not yet supported");
-                extract_count = 3; // keep going defensively after reporting
-            }
 
-            int raw_regs[3] = {0, 2, 3}; // physical registers node_return() places values in
+            int raw_regs[3] = {0, 2, 3}; // physical registers node_return() places values 1-3 in
+            int reg_source_count = (extract_count < 3) ? extract_count : 3;
 
-            for (int i = 0; i < extract_count; i++) {
+            for (int i = 0; i < reg_source_count; i++) {
                 lock_register(raw_regs[i]);
             }
 
-            int tmp_regs[3];
+            int *tmp_regs = (int *) malloc(sizeof(int) * extract_count);
+            if (tmp_regs == NULL) {
+                compiler_error(ERR_INTERNAL, -1, "Out of memory extracting multi-return values");
+            }
+
             for (int i = 0; i < extract_count; i++) {
                 tmp_regs[i] = allocate_register();
                 mark_register_live(tmp_regs[i], extract_count + 2); // survive the whole copy+store pass
 
-                emit_asm("MOV R%d, R%d ; Read return value %d", tmp_regs[i], raw_regs[i], i);
+                if (i < 3) {
+                    emit_asm("MOV R%d, R%d ; Read return value %d", tmp_regs[i], raw_regs[i], i);
+                } else {
+                    char slot_access[128];
+                    get_extra_return_slot_access(i - 3, slot_access);
+                    emit_asm("MOV R%d, %s ; Read return value %d", tmp_regs[i], slot_access, i);
+                }
             }
 
             // Raw registers are now fully copied out -- safe to release.
-            for (int i = 0; i < extract_count; i++) {
+            for (int i = 0; i < reg_source_count; i++) {
                 unlock_register(raw_regs[i]);
             }
 
@@ -165,6 +183,8 @@ void node_multiple_assignment(ASTNode *node)
             for (int i = reg_index; i < extract_count; i++) {
                 unlock_register(tmp_regs[i]);
             }
+
+            free(tmp_regs);
 
             // -----------------------------------------------------------------
             // Pad remaining targets with NIL.
