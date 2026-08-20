@@ -1,5 +1,5 @@
 # --- Configuration ---
-DEMO          = tic80hello
+DEMO          = hello
 LUA_COMPILER  = ../../bin/v32lua
 ASSEMBLER     = assemble
 TEXTURE_TOOL  = png2vircon

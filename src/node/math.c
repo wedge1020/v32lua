@@ -146,3 +146,21 @@ void node_floordiv (ASTNode *node, int  dest_reg)
 
     unlock_register (right_reg);
 }
+
+void node_pow (ASTNode *node, int dest_reg)
+{
+    generate_asm (node -> as.binary.left, dest_reg);
+
+    // See node_add() for the full rationale.
+    emit_asm ("PUSH R%d ; spill left operand (protect across possible nested CALL in right operand)\n", dest_reg);
+
+    int right_reg = allocate_register ();
+    mark_register_live (right_reg, 1);
+    generate_asm (node -> as.binary.right, right_reg);
+    ensure_in_register (right_reg);
+
+    emit_asm ("POP R%d ; reload spilled left operand\n", dest_reg);
+
+    emit_asm ("POW R%d, R%d\n", dest_reg, right_reg);
+    unlock_register (right_reg);
+}

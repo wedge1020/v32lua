@@ -732,3 +732,34 @@ bool emit_tic80_fset_intrinsic(ASTNode *node, int dest_reg) {
 
     return true;
 }
+
+/**
+ * Emits assembly for the sync() intrinsic (TIC-80 compatibility).
+ *
+ * Syntax: sync([mask [, bank [, tocart]]])
+ *
+ * Real TIC-80 sync() copies data between VRAM and one of several cart
+ * memory banks. Vircon32 has no equivalent bank-switching mechanism --
+ * its map/texture/palette data is already directly addressable -- so
+ * there's nothing to synchronize. This is intentionally a no-op: it
+ * exists purely so debug-only calls to sync() don't fail to compile.
+ * Arguments are still evaluated (and discarded) to preserve Lua's
+ * argument-evaluation-has-side-effects semantics.
+ */
+bool emit_tic80_sync_intrinsic(ASTNode *node, int dest_reg) {
+    emit_asm("    ;; --- TIC-80 sync() Intrinsic (no-op: no cart banks on Vircon32) ---\n");
+
+    ASTNode *curr = node->as.call.args_head;
+    while (curr != NULL) {
+        int reg = allocate_register();
+        generate_asm(curr, reg);   // evaluate for side effects only
+        unlock_register(reg);
+        curr = curr->next;
+    }
+
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, BOXED_NIL\n", dest_reg);
+    }
+
+    return true;
+}

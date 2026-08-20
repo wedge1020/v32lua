@@ -58,6 +58,7 @@ char *mangle_method_name (const char *table_name, const char *method_name);
 %left '+' '-'
 %left '*' '/' '%' TOKEN_FLOORDIV
 %right TOKEN_NOT TOKEN_LEN UNARY_MINUS
+%right '^'
 %left '['
 %left '.'
 %left ':'
@@ -406,8 +407,10 @@ statement:
     ;
 
 last_statement:
-      return_stmt { $$ = $1; }
-    | TOKEN_BREAK { $$ = make_node(NODE_BREAK); }
+      return_stmt        { $$ = $1; }
+    | return_stmt ';'    { $$ = $1; }
+    | TOKEN_BREAK         { $$ = make_node(NODE_BREAK); }
+    | TOKEN_BREAK ';'     { $$ = make_node(NODE_BREAK); }
     ;
 
 else_branch:
@@ -425,15 +428,37 @@ else_branch:
 
 /* --- LIST RULES FOR MULTIPLE ASSIGNMENT --- */
 var_list:
-    TOKEN_IDENTIFIER { 
-        $$ = make_node_ident($1); 
+    TOKEN_IDENTIFIER {
+        $$ = make_node_ident($1);
     }
-    | var_list ',' TOKEN_IDENTIFIER { 
+    | prefix_expr '.' TOKEN_IDENTIFIER {
+        ASTNode *string_key = make_node_string ($3);
+        $$ = make_node_table_get ($1, string_key);
+    }
+    | prefix_expr '[' expr ']' {
+        $$ = make_node_table_get ($1, $3);
+    }
+    | var_list ',' TOKEN_IDENTIFIER {
         ASTNode* new_ident = make_node_ident($3);
         ASTNode* curr = $1;
         while(curr->next) curr = curr->next;
         curr->next = new_ident;
-        $$ = $1; 
+        $$ = $1;
+    }
+    | var_list ',' prefix_expr '.' TOKEN_IDENTIFIER {
+        ASTNode *string_key = make_node_string ($5);
+        ASTNode *new_target = make_node_table_get ($3, string_key);
+        ASTNode* curr = $1;
+        while(curr->next) curr = curr->next;
+        curr->next = new_target;
+        $$ = $1;
+    }
+    | var_list ',' prefix_expr '[' expr ']' {
+        ASTNode *new_target = make_node_table_get ($3, $5);
+        ASTNode* curr = $1;
+        while(curr->next) curr = curr->next;
+        curr->next = new_target;
+        $$ = $1;
     }
     ;
 
@@ -606,6 +631,7 @@ expr:
     | expr TOKEN_FLOORDIV expr { $$ = make_node_binary (NODE_FLOORDIV, $1, $3); }
     | expr '/' expr     { $$ = make_node_binary (NODE_DIV, $1, $3); }
     | expr '%' expr     { $$ = make_node_binary (NODE_MOD, $1, $3); }
+    | expr '^' expr     { $$ = make_node_binary (NODE_POW, $1, $3); }
     | TOKEN_TRUE  { $$ = make_node_boolean (true);  }
     | TOKEN_FALSE { $$ = make_node_boolean (false); }
     | TOKEN_NIL   { $$ = make_node_nil ();          }

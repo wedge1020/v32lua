@@ -24,6 +24,7 @@ typedef enum
     NODE_DIV,
     NODE_FLOORDIV,
     NODE_MOD,
+    NODE_POW,
     NODE_AND,
     NODE_OR,
     NODE_RELATIONAL,

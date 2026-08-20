@@ -26,20 +26,43 @@ void generate_vtex_from_tic80_with_colorkey(const char *output_path, int texture
 
     for (int y = 0; y < TEX_HEIGHT; y++) {
         for (int x = 0; x < TEX_WIDTH; x++) {
-            uint8_t color_idx = get_tic80_tile_pixel(x, y);
-            uint32_t color = palette[color_idx % 16];
+            uint8_t red, green, blue, alpha;
 
-            // Palette is AABBGGRR: extract components
-            uint8_t alpha = (color >> 24) & 0xFF;    // AA
-            uint8_t blue  = (color >> 16) & 0xFF;    // BB
-            uint8_t green = (color >> 8)  & 0xFF;    // GG
-            uint8_t red   = color & 0xFF;          // RR
+            if (y >= 256) {
+                // --- Palette swatch row: 16 solid 3x3 blocks, regions 512-527 ---
+                // swatch c occupies x in [c*4, c*4+2]; x%4==3 is a 1px gap.
+                int col   = x / 4;
+                int col_x = x % 4;
 
-            // Apply color keying
-            if (texture_idx < 16 && color_idx == texture_idx) {
-                alpha = 0x00;  // Transparent
+                if (col >= 16 || col_x == 3) {
+                    red = green = blue = alpha = 0x00;   // gap / unused pixel
+                } else {
+                    uint32_t color = palette[col];
+                    blue  = (color >> 16) & 0xFF;
+                    green = (color >> 8)  & 0xFF;
+                    red   =  color        & 0xFF;
+                    // Always opaque -- NOT subject to this texture's colorkey.
+                    // pix()/rect()/rectb()/line() must draw reliably regardless
+                    // of which sprite-colorkey texture happens to be selected.
+                    alpha = 0xFF;
+                }
             } else {
-                alpha = 0xFF;  // Opaque
+                // --- Existing sprite/tile atlas logic, unchanged ---
+                uint8_t color_idx = get_tic80_tile_pixel(x, y);
+                uint32_t color = palette[color_idx % 16];
+
+                // Palette is AABBGGRR: extract components
+                alpha = (color >> 24) & 0xFF;    // AA
+                blue  = (color >> 16) & 0xFF;    // BB
+                green = (color >> 8)  & 0xFF;    // GG
+                red   =  color        & 0xFF;    // RR
+
+                // Apply color keying
+                if (texture_idx < 16 && color_idx == texture_idx) {
+                    alpha = 0x00;  // Transparent
+                } else {
+                    alpha = 0xFF;  // Opaque
+                }
             }
 
             // Write RGBA bytes in correct order (R, G, B, A)

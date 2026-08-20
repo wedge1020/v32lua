@@ -264,6 +264,8 @@ int check_needs_stack (ASTNode *node)
         case NODE_MUL:
         case NODE_DIV:
         case NODE_MOD:
+        case NODE_FLOORDIV:
+        case NODE_POW:
         case NODE_AND:
         case NODE_OR:
         case NODE_RELATIONAL:
@@ -386,6 +388,10 @@ void  generate_asm (ASTNode *node, int  dest_reg)
 
             case NODE_MOD:
                 node_mod (node, dest_reg);
+                break;
+
+            case NODE_POW:
+                node_pow (node, dest_reg);
                 break;
 
             case NODE_FLOORDIV:
@@ -561,31 +567,47 @@ void generate_program (ASTNode *head)
     // =========================================================================
     // 1. CONDITIONAL ENTRY POINT CHECKS
     // =========================================================================
-    SymbolNode *init_sym                 = resolve_symbol ("init");
-    SymbolNode *main_sym                 = resolve_symbol ("main");
-    SymbolNode *game_loop_sym            = resolve_symbol ("game_loop");
-    SymbolNode *tic80_sym                = NULL;
+    SymbolNode *init_sym     = NULL;
+    SymbolNode *main_sym     = NULL;
+    SymbolNode *update_sym   = NULL;
 
     if (runtime_req.needs_tic80)
     {
-        tic80_sym                = resolve_symbol ("TIC");
+        init_sym             = resolve_symbol ("BOOT");
+        update_sym           = resolve_symbol ("TIC");
+    }
+    else if (runtime_req.needs_pico8)
+    {
+        init_sym             = resolve_symbol ("_init");
+        main_sym             = resolve_symbol ("_draw");
+        update_sym           = resolve_symbol ("_update");
+    }
+    else
+    {
+        init_sym             = resolve_symbol ("init");
+        main_sym             = resolve_symbol ("main");
+        update_sym           = resolve_symbol ("game_loop");
     }
 
-    bool has_init            = (init_sym != NULL && init_sym->is_function == 1);
-    bool has_main            = (main_sym != NULL && main_sym->is_function == 1);
-    bool has_game_loop       = (game_loop_sym != NULL && game_loop_sym->is_function == 1);
-    bool has_tic             = (tic80_sym != NULL && tic80_sym->is_function == 1);
+    bool  has_init           = (init_sym   != NULL && init_sym -> is_function   == 1);
+    bool  has_main           = (main_sym   != NULL && main_sym -> is_function   == 1);
+    bool  has_update         = (update_sym != NULL && update_sym -> is_function == 1);
 
     // If neither main() nor game_loop() exists, halt compilation immediately
-    if (!has_main && !has_game_loop && (!has_tic && !runtime_req.needs_tic80))
-    {
-        compiler_error(ERR_SEMANTIC, -1, 
-            "Compilation failed: Your program must declare either a 'main()' or a 'game_loop()' function.");
-    }
-    else if (runtime_req.needs_tic80 && !has_tic)
+    if (runtime_req.needs_tic80 && !has_update)
     {
         compiler_error(ERR_SEMANTIC, -1, 
             "Compilation failed: Your program must declare a 'TIC()' function.");
+    }
+    else if (runtime_req.needs_pico8 && !has_update)
+    {
+        compiler_error(ERR_SEMANTIC, -1, 
+            "Compilation failed: Your program must declare a '_update()' function.");
+    }
+    else if (!has_update && !has_main)
+    {
+        compiler_error(ERR_SEMANTIC, -1, 
+            "Compilation failed: Your program must declare either a 'main()' or a 'game_loop()' function.");
     }
 
     // =========================================================================
@@ -610,96 +632,107 @@ void generate_program (ASTNode *head)
     // --- API Initialization: Call the appropriate region setup routine ---
     // Only call one based on which API is enabled (mutually exclusive)
     if (runtime_req.needs_pico8) {
-        emit_asm ("CALL __builtin_pico8_init  ; Initialize PICO-8 regions\n");
+        emit_asm ("CALL __builtin_pico8_init  ; Initialize PICO-8 assets\n");
     } else if (runtime_req.needs_tic80) {
-        emit_asm ("CALL __builtin_tic80_init  ; Initialize TIC-80 regions\n");
+        emit_asm ("CALL __builtin_tic80_init  ; Initialize TIC-80 assets\n");
     }
 
     // If init() exists, execute it immediately after global variable setup
     if (has_init)
     {
         if (runtime_req.needs_pico8)
-            emit_asm ("CALL __function__init  ; Run user-defined init function\n");
+            emit_asm ("CALL __function__init  ; Run user-defined _init function\n");
+        else if (runtime_req.needs_tic80)
+            emit_asm ("CALL __function_BOOT   ; Run user-defined BOOT function\n");
         else
             emit_asm ("CALL __function_init   ; Run user-defined init function\n");
     }
 
     // Route to main() if available; fall back to game_loop() otherwise
-    if (has_main)
+    if (has_main && !runtime_req.needs_pico8)
     {
         w_mainwait  = 1; // look for WAIT, issue warning if not found
         emit_asm ("CALL __function_main ; Execute main execution cycle\n");
     }
-    else if (has_game_loop)
+    else if (has_update)
     {
         emit_asm ("__start:\n");
-        emit_asm ("CALL __function_game_loop ; Execute game loop tick\n");
-        emit_asm ("WAIT\n");
-        emit_asm ("JMP __start\n");
-    }
-    else if ((runtime_req.needs_tic80) && (has_tic))
-    {
-        emit_asm ("MOV R0, var_TIC80_PAUSE_FLAG\n");
-        emit_asm ("MOV R1, 0\n");
-        emit_asm ("MOV [R0], R1 ; initialize pause flag to 0\n");
-        emit_asm ("__start:\n");
+        if (runtime_req.needs_pico8)
+        {
+            if (has_main)
+            {
+                emit_asm ("CALL __function__draw   ; Execute _draw()\n");
+            }
+            emit_asm ("CALL __function__update ; Execute _update()\n");
+        }
+        else if (runtime_req.needs_tic80)
+        {
+            emit_asm ("MOV R0, var_TIC80_PAUSE_FLAG\n");
+            emit_asm ("MOV R1, 0\n");
+            emit_asm ("MOV [R0], R1 ; initialize pause flag to 0\n");
+            emit_asm ("__start:\n");
 
-        // Check START button rising edge
-        emit_asm ("IN R0, INP_GamepadButtonStart\n");
-        emit_asm ("IEQ R0, 1\n");
-        emit_asm ("JF R0, __check_flag ; No edge: check if we need TIC\n");
+            // Check START button rising edge
+            emit_asm ("IN R0, INP_GamepadButtonStart\n");
+            emit_asm ("IEQ R0, 1\n");
+            emit_asm ("JF R0, __check_flag ; No edge: check if we need TIC\n");
 
-        // Rising edge detected: toggle pause
-        emit_asm ("MOV R1, var_TIC80_PAUSE_FLAG\n");
-        emit_asm ("MOV R1, [R1]\n");
-        emit_asm ("IEQ R1, 0\n");
-        emit_asm ("JT R1, __do_pause\n");
-        emit_asm ("JMP __do_unpause\n");
+            // Rising edge detected: toggle pause
+            emit_asm ("MOV R1, var_TIC80_PAUSE_FLAG\n");
+            emit_asm ("MOV R1, [R1]\n");
+            emit_asm ("IEQ R1, 0\n");
+            emit_asm ("JT R1, __do_pause\n");
+            emit_asm ("JMP __do_unpause\n");
 
-        // Normal frame: call TIC if not paused
-        emit_asm ("__check_flag:\n");
-        emit_asm ("MOV R1, var_TIC80_PAUSE_FLAG\n");
-        emit_asm ("MOV R1, [R1]\n");
-        emit_asm ("IEQ R1, 0\n");
-        emit_asm ("JF R1, __just_wait ; If paused, skip TIC\n");
-        emit_asm ("CALL __function_TIC\n");
-        emit_asm ("__just_wait:");
-        emit_asm ("WAIT\n");
-        emit_asm ("JMP __start\n");
+            // Normal frame: call TIC if not paused
+            emit_asm ("__check_flag:\n");
+            emit_asm ("MOV R1, var_TIC80_PAUSE_FLAG\n");
+            emit_asm ("MOV R1, [R1]\n");
+            emit_asm ("IEQ R1, 0\n");
+            emit_asm ("JF R1, __just_wait ; If paused, skip TIC\n");
+            emit_asm ("CALL __function_TIC\n");
+            emit_asm ("__just_wait:");
+            emit_asm ("WAIT\n");
+            emit_asm ("JMP __start\n");
 
-        // PAUSE: dim, render one frame, print, set flag
-        emit_asm ("__do_pause:\n");
-        emit_asm ("MOV R1, var_TIC80_COLOR_MULTIPLY\n");
-        emit_asm ("IN R2, GPU_MultiplyColor\n");
-        emit_asm ("MOV [R1], R2 ; Save current multiply\n");
-        emit_asm ("MOV R2, 0xFF404040 ; 50% gray\n");
-        emit_asm ("OUT GPU_MultiplyColor, R2\n");
-        emit_asm ("CALL __function_TIC ; Render ONE dimmed frame\n");
-        emit_asm ("MOV R1, 0xFFFFFFFF ; Restore for text\n");
-        emit_asm ("OUT GPU_MultiplyColor, R1\n");
-        emit_asm ("MOV R1, 275\n");
-        emit_asm ("PUSH R1\n");
-        emit_asm ("MOV R1, 170\n");
-        emit_asm ("PUSH R1\n");
-        emit_asm ("MOV R1, __const_str_pause\n");
-        emit_asm ("OR R1, BOXED_ROMSTRING\n");
-        emit_asm ("PUSH R1\n");
-        emit_asm ("CALL __builtin_print\n");
-        emit_asm ("IADD SP, 3\n");
-        emit_asm ("MOV R1, var_TIC80_PAUSE_FLAG\n");
-        emit_asm ("MOV R2, 1\n");
-        emit_asm ("MOV [R1], R2 ; Set flag = 1\n");
-        emit_asm ("WAIT\n");
-        emit_asm ("JMP __start\n");
+            // PAUSE: dim, render one frame, print, set flag
+            emit_asm ("__do_pause:\n");
+            emit_asm ("MOV R1, var_TIC80_COLOR_MULTIPLY\n");
+            emit_asm ("IN R2, GPU_MultiplyColor\n");
+            emit_asm ("MOV [R1], R2 ; Save current multiply\n");
+            emit_asm ("MOV R2, 0xFF404040 ; 50% gray\n");
+            emit_asm ("OUT GPU_MultiplyColor, R2\n");
+            emit_asm ("CALL __function_TIC ; Render ONE dimmed frame\n");
+            emit_asm ("MOV R1, 0xFFFFFFFF ; Restore for text\n");
+            emit_asm ("OUT GPU_MultiplyColor, R1\n");
+            emit_asm ("MOV R1, 275\n");
+            emit_asm ("PUSH R1\n");
+            emit_asm ("MOV R1, 170\n");
+            emit_asm ("PUSH R1\n");
+            emit_asm ("MOV R1, __const_str_pause\n");
+            emit_asm ("OR R1, BOXED_ROMSTRING\n");
+            emit_asm ("PUSH R1\n");
+            emit_asm ("CALL __builtin_print\n");
+            emit_asm ("IADD SP, 3\n");
+            emit_asm ("MOV R1, var_TIC80_PAUSE_FLAG\n");
+            emit_asm ("MOV R2, 1\n");
+            emit_asm ("MOV [R1], R2 ; Set flag = 1\n");
+            emit_asm ("WAIT\n");
+            emit_asm ("JMP __start\n");
 
-        // UNPAUSE: restore color, clear flag
-        emit_asm ("__do_unpause:\n");
-        emit_asm ("MOV R1, var_TIC80_COLOR_MULTIPLY\n");
-        emit_asm ("MOV R2, [R1]\n");
-        emit_asm ("OUT GPU_MultiplyColor, R2 ; Restore\n");
-        emit_asm ("MOV R1, var_TIC80_PAUSE_FLAG\n");
-        emit_asm ("MOV R2, 0\n");
-        emit_asm ("MOV [R1], R2 ; Clear flag = 0\n");
+            // UNPAUSE: restore color, clear flag
+            emit_asm ("__do_unpause:\n");
+            emit_asm ("MOV R1, var_TIC80_COLOR_MULTIPLY\n");
+            emit_asm ("MOV R2, [R1]\n");
+            emit_asm ("OUT GPU_MultiplyColor, R2 ; Restore\n");
+            emit_asm ("MOV R1, var_TIC80_PAUSE_FLAG\n");
+            emit_asm ("MOV R2, 0\n");
+            emit_asm ("MOV [R1], R2 ; Clear flag = 0\n");
+        }
+        else
+        {
+            emit_asm ("CALL __function_game_loop ; Execute game loop tick\n");
+        }
         emit_asm ("WAIT\n");
         emit_asm ("JMP __start\n");
     }

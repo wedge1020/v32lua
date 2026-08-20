@@ -81,6 +81,39 @@ _tic80_init_loop:
     JMP   _tic80_init_loop
 
 _tic80_init_next_texture:
+    ;; Register the 16 solid-color palette swatches (regions 512-527) for
+    ;; THIS texture too. Every colorkey variant (0-16) carries the same
+    ;; swatch bank at the same region IDs, so pix()/rect()/rectb()/line()
+    ;; never need to touch GPU_SelectedTexture -- they draw on whatever
+    ;; texture the caller currently has selected.
+    MOV   R1, 512              ; region id
+    MOV   R2, 0                 ; color index / column counter
+
+_tic80_init_swatch_loop:
+    MOV   R0, R2
+    IEQ   R0, 16
+    JT    R0, _tic80_init_swatch_done
+
+    OUT   GPU_SelectedRegion, R1
+
+    MOV   R3, R2
+    IMUL  R3, 4                ; x = color * 4  (3px swatch + 1px gap)
+    OUT   GPU_RegionMinX, R3
+    OUT   GPU_RegionMinY, 256
+
+    OUT   GPU_RegionHotspotX, R3
+    OUT   GPU_RegionHotspotY, 256          ; top-left; line() overrides Y per-draw
+
+    MOV   R4, R3
+    IADD  R4, 2                 ; MaxX = MinX + 2 (3px wide)
+    OUT   GPU_RegionMaxX, R4
+    OUT   GPU_RegionMaxY, 258   ; MinY + 2 (3px tall)
+
+    IADD  R1, 1
+    IADD  R2, 1
+    JMP   _tic80_init_swatch_loop
+
+_tic80_init_swatch_done:
     ;; Move to next texture
     IADD  R13, 1
     JMP   _tic80_init_texture_loop
@@ -1252,33 +1285,22 @@ _tic80_pmem_done:
     RET
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
-;; __builtin_tic80_fget: Get Flag Bit for a TIC-80 Sprite
-;;
-;; Stack: [BP+2] = sprite_id (0-511)
-;;        [BP+3] = flag_bit (0-7)
-;; Returns: R0 = 0 or 1 (as boxed Lua number), or BOXED_NIL if invalid
-;;
-;; Each sprite has 8 flag bits stored in a single byte.
-;; Buffer index = sprite_id (each sprite gets 1 byte)
-;;
+;; __builtin_tic80_fget: Get Flag Bit for a TIC-80 Sprite (bit-packed, 4/word)
+;; Stack: [BP+2] = sprite_id (0-511), [BP+3] = flag_bit (0-7)
+;; Returns: R0 = 0 or 1 (boxed), or BOXED_NIL if invalid
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 __builtin_tic80_fget:
     PUSH  BP
     MOV   BP, SP
 
-    ;; Load buffer pointer
     MOV   R1, var_TIC80_SPRITE_FLAGS_PTR
     MOV   R12, [R1]
-    IEQ   R12, 0
+    IEQ   R12, 0              ; destructive -- R12 is now junk (0/1)
     JT    R12, _tic80_fget_invalid
 
-    ;; Load arguments
-    MOV   R1, [BP+2]        ; sprite_id
-    MOV   R2, [BP+3]        ; flag_bit (0-7)
-
-    ;; Convert to integers
+    MOV   R1, [BP+2]          ; sprite_id
+    MOV   R2, [BP+3]          ; flag_bit
     CFI   R1
     CFI   R2
 
@@ -1298,29 +1320,39 @@ __builtin_tic80_fget:
     IGE   R3, 8
     JT    R3, _tic80_fget_invalid
 
-    ;; Load the byte containing flags for this sprite
-    MOV   R3, var_TIC80_SPRITE_FLAGS_PTR
-    MOV   R12, [R3]        ; restore R12
-    MOV   R3, R12
-    IADD  R3, R1           ; R3 = address of sprite's flag byte
-    MOV   R3, [R3]         ; R3 = flag byte (32-bit word, but we only use low 8 bits)
+    ;; word_index = sprite_id >> 2 ; byte_offset = sprite_id & 3 (which of
+    ;; the 4 packed sprites in that word)
+    MOV   R3, R1
+    SHL   R3, -2               ; R3 = word index
+    MOV   R4, R1
+    AND   R4, 3                ; R4 = byte offset within word (0-3)
 
-    ;; Create bitmask: 1 << flag_bit
-    MOV   R4, 1
-    SHL   R4, R2           ; R4 = 1 << flag_bit
+    ;; Reload the buffer pointer fresh (R12 was clobbered by IEQ above)
+    MOV   R5, var_TIC80_SPRITE_FLAGS_PTR
+    MOV   R5, [R5]
+    IADD  R5, R3
+    MOV   R5, [R5]              ; R5 = word containing this sprite's flag byte
 
-    ;; Extract the flag bit
-    AND   R3, R4           ; R3 = byte & mask
-    IEQ   R3, 0
-    JT    R3, _tic80_fget_false
+    ;; Extract the byte at byte_offset
+    SHL   R4, 3                 ; R4 = bit-shift amount (0, 8, 16, 24)
+    MOV   R6, 0xFF
+    SHL   R6, R4
+    AND   R5, R6                 ; isolate the byte (still shifted up in place)
+    ISGN  R4
+    SHL   R5, R4                 ; shift back down -> R5 = this sprite's flag byte
 
-    ;; Flag is set (1)
+    ;; Extract the specific flag bit
+    MOV   R7, 1
+    SHL   R7, R2                 ; R7 = 1 << flag_bit
+    AND   R5, R7
+    IEQ   R5, 0
+    JT    R5, _tic80_fget_false
+
     MOV   R0, 1
     CIF   R0
     JMP   _tic80_fget_done
 
 _tic80_fget_false:
-    ;; Flag is clear (0)
     MOV   R0, 0
     CIF   R0
 
@@ -1336,38 +1368,29 @@ _tic80_fget_end:
     RET
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
-;; __builtin_tic80_fset: Set Flag Bit for a TIC-80 Sprite
-;;
-;; Stack: [BP+2] = sprite_id (0-511)
-;;        [BP+3] = flag_bit (0-7)
-;;        [BP+4] = value (0 or 1, as Lua number)
-;; Returns: R0 = the value that was set (as boxed Lua number)
-;;
+;; __builtin_tic80_fset: Set Flag Bit for a TIC-80 Sprite (bit-packed, 4/word)
+;; Stack: [BP+2]=sprite_id [BP+3]=flag_bit [BP+4]=value (0/1)
+;; Returns: R0 = the value that was set (boxed), or BOXED_NIL if invalid
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 __builtin_tic80_fset:
     PUSH  BP
     MOV   BP, SP
 
-    ;; Load buffer pointer
     MOV   R1, var_TIC80_SPRITE_FLAGS_PTR
     MOV   R12, [R1]
     IEQ   R12, 0
     JT    R12, _tic80_fset_done_nil
 
-    ;; Load arguments
-    MOV   R1, [BP+2]        ; sprite_id
-    MOV   R2, [BP+3]        ; flag_bit
-    MOV   R3, [BP+4]        ; value
-
-    ;; Convert to integers
+    MOV   R1, [BP+2]           ; sprite_id
+    MOV   R2, [BP+3]           ; flag_bit
+    MOV   R3, [BP+4]           ; value
     CFI   R1
     CFI   R2
     CFI   R3
-    AND   R3, 1            ; Clamp value to 0 or 1
+    AND   R3, 1                 ; clamp value to 0/1
 
-    ;; Validate sprite_id: 0 <= id < 512
+    ;; Validate sprite_id
     MOV   R4, R1
     ILT   R4, 0
     JT    R4, _tic80_fset_done_nil
@@ -1375,7 +1398,7 @@ __builtin_tic80_fset:
     IGE   R4, 512
     JT    R4, _tic80_fset_done_nil
 
-    ;; Validate flag_bit: 0 <= bit < 8
+    ;; Validate flag_bit
     MOV   R4, R2
     ILT   R4, 0
     JT    R4, _tic80_fset_done_nil
@@ -1383,47 +1406,298 @@ __builtin_tic80_fset:
     IGE   R4, 8
     JT    R4, _tic80_fset_done_nil
 
-    ;; Load the byte containing flags for this sprite
-    MOV   R4, var_TIC80_SPRITE_FLAGS_PTR
-    MOV   R4, [R4]
-    IADD  R4, R1           ; R4 = address of sprite's flag byte
-    MOV   R4, [R4]         ; R4 = current flag byte
+    ;; word_index = sprite_id >> 2 ; byte_offset = sprite_id & 3
+    MOV   R4, R1
+    SHL   R4, -2                ; R4 = word index (kept alive to the store)
+    MOV   R8, R1
+    AND   R8, 3                  ; R8 = byte offset within word (0-3)
 
-    ;; Create bitmask: 1 << flag_bit
-    MOV   R5, 1
-    SHL   R5, R2           ; R5 = bitmask
+    MOV   R5, var_TIC80_SPRITE_FLAGS_PTR
+    MOV   R5, [R5]
+    IADD  R5, R4                  ; R5 = address of the packed word
+    MOV   R6, [R5]                ; R6 = current packed word
 
-    ;; Set or clear the bit based on value
-    MOV   R6, R3           ; R6 = value (0 or 1)
-    IEQ   R6, 0
-    JT    R6, _tic80_fset_clear
+    ;; Build a mask for this sprite's bit, positioned within the word:
+    ;; (1 << flag_bit) << (byte_offset * 8)
+    MOV   R7, R8
+    SHL   R7, 3                   ; R7 = byte-position shift (0,8,16,24)
+    MOV   R9, 1
+    SHL   R9, R2                   ; R9 = 1 << flag_bit
+    SHL   R9, R7                   ; R9 = mask positioned in the packed word
+
+    MOV   R10, R3                  ; copy value so R3 survives for the return
+    IEQ   R10, 0
+    JT    R10, _tic80_fset_clear
 
 _tic80_fset_set:
-    ;; Set bit: byte = byte | mask
-    OR    R4, R5
+    OR    R6, R9
     JMP   _tic80_fset_store
 
 _tic80_fset_clear:
-    ;; Clear bit: byte = byte & ~mask
-    NOT   R5           ; R5 = ~mask
-    AND   R4, R5
+    NOT   R9
+    AND   R6, R9
 
 _tic80_fset_store:
-    ;; Store the modified byte back
+    ;; R5 still points at the packed word (untouched since the load above);
+    ;; reloaded defensively anyway to match the rest of this file's style.
     MOV   R5, var_TIC80_SPRITE_FLAGS_PTR
     MOV   R5, [R5]
-    IADD  R5, R1
-    MOV   [R5], R4
+    IADD  R5, R4
+    MOV   [R5], R6
 
-    ;; Return the value that was set (as boxed Lua number)
-    CIF   R3
     MOV   R0, R3
+    CIF   R0
     JMP   _tic80_fset_done
 
 _tic80_fset_done_nil:
     MOV   R0, BOXED_NIL
 
 _tic80_fset_done:
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __tic80_draw_swatch (internal helper -- not Lua-callable)
+;; In: R1=x R2=y R3=w R4=h (TIC-80 pixels, top-left, w/h >= 1), R5=color (0-15)
+;; Destroys R1-R4. Draws on whatever texture is currently selected.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__tic80_draw_swatch:
+    MOV   R8, R5
+    IADD  R8, 512
+    OUT   GPU_SelectedRegion, R8
+
+    CIF   R3
+    FMUL  R3, 2.625
+    FMUL  R3, 0.333333333       ; scale = (size * 2.625) / 3
+    OUT   GPU_DrawingScaleX, R3
+
+    CIF   R4
+    FMUL  R4, 2.625
+    FMUL  R4, 0.333333333
+    OUT   GPU_DrawingScaleY, R4
+
+    CIF   R1
+    FMUL  R1, 2.625
+    FADD  R1, 0.5
+    CFI   R1
+    OUT   GPU_DrawingPointX, R1
+
+    CIF   R2
+    FMUL  R2, 2.625
+    FADD  R2, 0.5
+    CFI   R2
+    OUT   GPU_DrawingPointY, R2
+
+    OUT   GPU_Command, GPUCommand_DrawRegionZoomed
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_tic80_pix -- pix(x, y, color)
+;; Stack: [BP+2]=x [BP+3]=y [BP+4]=color
+;; Returns: R0 = color (boxed) that was drawn.
+;; NOTE: write-only. TIC-80's pix(x,y) read form (no color arg) can't be
+;; supported -- there is no GPU pixel-readback port on this console. If you
+;; need reads, you'd need a parallel CPU-side shadow buffer updated on every
+;; pix/line/rect/rectb/spr call, which is a real perf/complexity tradeoff --
+;; happy to design that separately if you actually need it (e.g. collision).
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_pix:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R6                 ; callee-saved, we use it as scratch below
+
+    MOV   R1, [BP+2]
+    MOV   R2, [BP+3]
+    MOV   R5, [BP+4]
+    CFI   R5
+    AND   R5, 15              ; clamp to valid swatch 0-15
+
+    MOV   R6, R5              ; stash boxed-return value before CALL clobbers R5
+    MOV   R3, 1
+    MOV   R4, 1
+    CALL  __tic80_draw_swatch
+
+    MOV   R0, R6
+    CIF   R0
+
+    POP   R6
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_tic80_line -- line(x0, y0, x1, y1, color)
+;; Drawn as one rotozoomed stretch of the swatch: length = |P1-P0|,
+;; angle = atan2(dy,dx), hotspot at swatch's left-center (0,1) so it
+;; pivots/extends from (x0,y0) toward (x1,y1). Thickness = 1 TIC-80 px.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_line:
+    PUSH  BP
+    MOV   BP, SP
+
+    IN    R6, GPU_SelectedTexture
+    IN    R7, GPU_SelectedRegion
+
+    MOV   R1, [BP+2]         ; x0
+    MOV   R2, [BP+3]         ; y0
+    MOV   R3, [BP+4]         ; x1
+    MOV   R4, [BP+5]         ; y1
+    MOV   R5, [BP+6]         ; color
+    CFI   R5
+    AND   R5, 15
+
+    ;; dx, dy (float, TIC-80 pixel units)
+    MOV   R8, R3
+    FSUB  R8, R1              ; R8 = dx
+    MOV   R9, R4
+    FSUB  R9, R2              ; R9 = dy
+
+    ;; length = sqrt(dx*dx + dy*dy)
+    MOV   R10, R8
+    FMUL  R10, R8
+    MOV   R11, R9
+    FMUL  R11, R9
+    FADD  R10, R11
+    MOV   R11, 0.5
+    POW   R10, R11            ; R10 = length in TIC-80 pixels
+
+    ;; angle = atan2(dy, dx)   -- destructive: R9 = atan2(R9, R8)
+    ATAN2 R9, R8               ; R9 = angle (radians)
+
+    ;; select swatch region for this color, set hotspot-left mode via
+    ;; scale/position, then rotate+stretch
+    OUT   GPU_SelectedTexture, 0
+    MOV   R1, R5
+    IADD  R1, 512
+    OUT   GPU_SelectedRegion, R1
+
+    ;; scale X stretches the swatch along its own local axis to `length`;
+    ;; scale Y stays at 1 TIC-80 pixel thick.
+    MOV   R1, R10
+    FMUL  R1, 2.625
+    FMUL  R1, 0.333333333
+    OUT   GPU_DrawingScaleX, R1
+
+    MOV   R1, 2.625
+    FMUL  R1, 0.333333333
+    OUT   GPU_DrawingScaleY, R1
+
+    OUT   GPU_DrawingAngle, R9
+
+    ;; position at (x0, y0), converted to Vircon32 pixels
+    MOV   R1, [BP+2]
+    FMUL  R1, 2.625
+    FADD  R1, 0.5
+    CFI   R1
+    OUT   GPU_DrawingPointX, R1
+
+    MOV   R1, [BP+3]
+    FMUL  R1, 2.625
+    FADD  R1, 0.5
+    CFI   R1
+    OUT   GPU_DrawingPointY, R1
+
+    OUT   GPU_Command, GPUCommand_DrawRegionRotozoomed
+
+    OUT   GPU_SelectedTexture, R6
+    OUT   GPU_SelectedRegion,  R7
+
+    MOV   R0, R5
+    CIF   R0
+
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_tic80_rect -- rect(x, y, w, h, color)  [filled]
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_rect:
+    PUSH  BP
+    MOV   BP, SP
+
+    MOV   R1, [BP+2]         ; x
+    MOV   R2, [BP+3]         ; y
+    MOV   R3, [BP+4]         ; w
+    MOV   R4, [BP+5]         ; h
+    MOV   R5, [BP+6]         ; color
+    CFI   R5
+    AND   R5, 15
+
+    CALL  __tic80_draw_swatch
+
+    MOV   R0, R5
+    CIF   R0
+
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_tic80_rectb -- rectb(x, y, w, h, color)  [1px border only]
+;; Drawn as 4 filled strips via __tic80_draw_swatch: top, bottom, left, right.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_rectb:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R10                ; callee-saved scratch for x,y,w,h,color
+    PUSH  R11
+    PUSH  R12
+    PUSH  R13
+
+    MOV   R10, [BP+2]        ; x
+    MOV   R11, [BP+3]        ; y
+    MOV   R12, [BP+4]        ; w
+    MOV   R13, [BP+5]        ; h
+    MOV   R5,  [BP+6]        ; color
+    CFI   R5
+    AND   R5, 15
+
+    ;; top strip: (x, y, w, 1)
+    MOV   R1, R10
+    MOV   R2, R11
+    MOV   R3, R12
+    MOV   R4, 1
+    CALL  __tic80_draw_swatch
+
+    ;; bottom strip: (x, y+h-1, w, 1)
+    MOV   R1, R10
+    MOV   R2, R11
+    IADD  R2, R13
+    ISUB  R2, 1
+    MOV   R3, R12
+    MOV   R4, 1
+    CALL  __tic80_draw_swatch
+
+    ;; left strip: (x, y, 1, h)
+    MOV   R1, R10
+    MOV   R2, R11
+    MOV   R3, 1
+    MOV   R4, R13
+    CALL  __tic80_draw_swatch
+
+    ;; right strip: (x+w-1, y, 1, h)
+    MOV   R1, R10
+    IADD  R1, R12
+    ISUB  R1, 1
+    MOV   R2, R11
+    MOV   R3, 1
+    MOV   R4, R13
+    CALL  __tic80_draw_swatch
+
+    MOV   R0, R5
+    CIF   R0
+
+    POP   R13
+    POP   R12
+    POP   R11
+    POP   R10
     MOV   SP, BP
     POP   BP
     RET

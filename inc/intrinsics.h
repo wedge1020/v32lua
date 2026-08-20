@@ -69,6 +69,7 @@ bool  emit_tic80_print_intrinsic (ASTNode *);
 bool  emit_tic80_mget_intrinsic  (ASTNode *, int);
 bool  emit_tic80_mset_intrinsic  (ASTNode *, int);
 bool  emit_tic80_map_intrinsic   (ASTNode *);
+bool  emit_tic80_sync_intrinsic  (ASTNode *, int);
 // TIC-80 Sound API
 bool  emit_tic80_play_intrinsic  (ASTNode *, int);
 bool  emit_tic80_sfx_intrinsic   (ASTNode *, int);
@@ -85,7 +86,7 @@ void  emit_get_gamepad_inputs_intrinsic(int dest_reg);
 void  emit_system_wait_intrinsic ();
 void  emit_system_halt_intrinsic ();
 
-//////////////////////////////////////////////////////////////////////////////	
+//////////////////////////////////////////////////////////////////////////////    
 //
 // string intrinsics
 //
@@ -94,7 +95,7 @@ bool  emit_string_char_intrinsic   (ASTNode *, int);
 bool  emit_tostring_intrinsic      (ASTNode *, int);
 bool  emit_string_format_intrinsic (ASTNode *, int);
 
-//////////////////////////////////////////////////////////////////////////////	
+//////////////////////////////////////////////////////////////////////////////    
 //
 // math intrinsics
 //
@@ -127,14 +128,14 @@ int   emit_math_modf_intrinsic       (ASTNode *, int);
 int   emit_math_frexp_intrinsic      (ASTNode *, int);
 int   emit_math_ldexp_intrinsic      (ASTNode *, int);
 
-//////////////////////////////////////////////////////////////////////////////	
+//////////////////////////////////////////////////////////////////////////////    
 //
 // iter intrinsics (for generic for loops)
 //
 bool  emit_pairs_intrinsic      (ASTNode *);
 bool  emit_ipairs_intrinsic     (ASTNode *);
 
-//////////////////////////////////////////////////////////////////////////////	
+//////////////////////////////////////////////////////////////////////////////    
 //
 // table library
 //

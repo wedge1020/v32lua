@@ -61,29 +61,29 @@ char *process_string_literal (const char *text, int  len)
     /* 2. Standard Multiline Comment: --[[ ... ]] (Silently Skipped) */
 "--[["([^\]]|\][^\]])*"]]" { /* Skip standard multiline comments safely */ }
 
-	/* 3. Transposed Single-Line Comment: --@ ... */
+    /* 3. Transposed Single-Line Comment: --@ ... */
 "--@".* {
     // Allocate space and replace "--@" with ";  " to preserve length and add assembly prefix
     char *comment = strdup(yytext);
-	int   index   = 0;
+    int   index   = 0;
 
-	while (comment[index] != '\0')
-	{
-		if (comment[index] == '-')
-		{
-			comment[index]  = ';';
-		}
-		else if (comment[index] == '@')
-		{
-			break;
-		}
-		index               = index + 1;
-	}
+    while (comment[index] != '\0')
+    {
+        if (comment[index] == '-')
+        {
+            comment[index]  = ';';
+        }
+        else if (comment[index] == '@')
+        {
+            break;
+        }
+        index               = index + 1;
+    }
     yylval.string_val = comment;
     return TOKEN_COMMENT_LINE;
 }
 
-	/* Extract section name between < and > */
+    /* Extract section name between < and > */
 "-- <"[A-Z]+">\n" {
     char *start = strchr(yytext, '<') + 1;
     char *end = strchr(yytext, '>');
@@ -150,6 +150,7 @@ char *process_string_literal (const char *text, int  len)
 ".."                    { return TOKEN_CONCAT;   }
 "__asm__"               { return TOKEN_ASM;      }
 "__rawasm__"            { return TOKEN_RAWASM;   }
+"^"                     { return '^'; }
 "+"                     { return '+'; }
 "-"                     { return '-'; }
 "*"                     { return '*'; }
@@ -184,6 +185,11 @@ char *process_string_literal (const char *text, int  len)
 [0-9]+(\.[0-9]+)?       { 
                             yylval.number_val  = atof (yytext); 
                             return (TOKEN_NUMBER); 
+                        }
+
+\.[0-9]+                {
+                            yylval.number_val  = atof (yytext);
+                            return (TOKEN_NUMBER);
                         }
 
 \"(\\.|[^"\\])*\"       { 

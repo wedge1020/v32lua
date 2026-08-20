@@ -6,12 +6,12 @@
 // =============================================================================
 
 #define TEX_WIDTH  128
-#define TEX_HEIGHT 256
+#define TEX_HEIGHT 264
 
 typedef struct {
     char magic[8];    // "V32-VTEX" - NO version, NO texture_count
     uint32_t width;   // 128
-    uint32_t height;  // 256
+    uint32_t height;  // 264
 } VTEXHeader;
 
 void  generate_vtex_from_tic80_with_colorkey (const char *, int);
