@@ -57,5 +57,5 @@ function TIC()
     circb(x, y, 4, 4 + i);
   end
 
-  print(60, 4, "circ() / circb() demo");
+  print("circ() / circb() demo", 60, 4);
 end

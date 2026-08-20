@@ -324,6 +324,29 @@ bool emit_tic80_print_intrinsic(ASTNode *node) {
     generate_asm(arg_x, reg_x);
     generate_asm(arg_y, reg_y);
 
+    // -----------------------------------------------------------------
+    // Scale TIC-80 logical pixel coordinates (a 240x136 "virtual" screen)
+    // into real Vircon32 screen pixels -- the same 2.625 factor every
+    // other TIC-80 drawing primitive applies (see __tic80_draw_swatch in
+    // the runtime, used by pix/line/rect/rectb/circ/circb). Without this,
+    // print() was the only TIC-80 drawing call plotting raw 0-240/0-136
+    // values directly onto the actual (larger) Vircon32 screen, which is
+    // why everything clustered up near the top-left instead of being
+    // proportionally positioned.
+    //
+    // This scaling can't live inside __builtin_print/__bios_print_text
+    // themselves -- those are shared with the non-TIC-80 print() path and
+    // with the pause-overlay text (which pushes raw Vircon32 pixel
+    // coordinates like 275, 170 directly, unscaled, and would break if
+    // the shared routine started scaling everything). It has to happen
+    // here, at the TIC-80-specific call site, exactly where every other
+    // TIC-80 intrinsic does its own scaling before handing off.
+    // -----------------------------------------------------------------
+    emit_asm("FMUL R%d, 2.625 ; Scale TIC-80 X to Vircon32 pixels\n", reg_x);
+    emit_asm("FADD R%d, 0.5 ; Round to nearest pixel\n", reg_x);
+    emit_asm("FMUL R%d, 2.625 ; Scale TIC-80 Y to Vircon32 pixels\n", reg_y);
+    emit_asm("FADD R%d, 0.5 ; Round to nearest pixel\n", reg_y);
+
     // Convert coordinates to hardware integers
     emit_asm("CFI R%d ; Convert X to hardware integer\n", reg_x);
     emit_asm("CFI R%d ; Convert Y to hardware integer\n", reg_y);

@@ -1,4 +1,4 @@
---#title  "[TIC80 API] pong (circ/rect flash demo)"
+--#title  "pong (circ/rect flash demo)"
 --#api tic80
 
 -- Quick and dirty single-player Pong: you control the left paddle, the
@@ -15,7 +15,7 @@ BALL_R_MAX  = 7; -- radius when the ball is right over the net (screen center)
 PADDLE_W    = 4;
 PADDLE_H    = 24;
 PADDLE_SPD  = 2;
-AI_SPD      = 1.6;
+AI_SPD      = 0.8;
 FLASH_TIME  = 6; -- frames a shape stays border-only after a hit
 
 bx = 0; by = 0; bdx = 0; bdy = 0;
@@ -145,6 +145,10 @@ function TIC()
     circ(bx, by, ball_vis_r, 15);
   end
 
-  print(SCREEN_W / 2 - 20, 4, score1);
-  print(SCREEN_W / 2 + 16, 4, score2);
+  -- small solid backdrops behind each score, so a stray pixel from the
+  -- font atlas never reads as "overlapping" anything behind it
+  rect(SCREEN_W / 2 - 24, 2, 20, 8, 0);
+  rect(SCREEN_W / 2 + 12, 2, 20, 8, 0);
+  print(score1, SCREEN_W / 2 - 20, 4);
+  print(score2, SCREEN_W / 2 + 16, 4);
 end
