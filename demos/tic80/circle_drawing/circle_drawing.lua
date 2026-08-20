@@ -1,4 +1,4 @@
---#title  "circ() / circb() demo"
+--#title  "[TIC80 API] circ() / circb() demo"
 --#api tic80
 
 -- Quick showcase of circ() (filled) and circb() (outline), animated with

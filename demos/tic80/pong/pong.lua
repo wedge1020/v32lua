@@ -1,4 +1,4 @@
---#title  "pong (circ/rect flash demo)"
+--#title  "[TIC80 API] pong (circ/rect flash demo)"
 --#api tic80
 
 -- Quick and dirty single-player Pong: you control the left paddle, the

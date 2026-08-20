@@ -1,4 +1,4 @@
---#title "TIC80 demo basic drawing routines"
+--#title "[TIC80 API] basic drawing routines demo"
 --#api tic80
 -- test_draw.lua
 -- Minimal exercise of pix(), rect(), rectb(), and line()
