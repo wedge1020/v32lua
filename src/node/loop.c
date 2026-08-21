@@ -350,23 +350,44 @@ void node_for_generic(ASTNode *node)
         ASTNode *s_node = f_node->next;
         ASTNode *v_node = s_node->next;
 
-        // Compute all three into their own pinned registers FIRST, and
-        // only copy into R0/R2/R3 afterward -- same reasoning as
-        // node_multiple_assignment's two-pass extraction: if we copied
-        // into R0/R2/R3 as we went, a nested CALL inside a LATER
-        // expression's evaluation (e.g. the `#t16 + 1` control-variable
-        // expression in the reverse-iterator test) could clobber an
-        // already-copied earlier value.
+        // -------------------------------------------------------------
+        // FIX: Compute f/s/v into pinned registers AND explicitly spill
+        // each one to the hardware stack immediately after computing it
+        // -- BEFORE generating the next expression in the list. Pinning
+        // alone (the previous approach) does NOT survive a nested CALL:
+        // it only stops the COMPILER's allocator from reassigning that
+        // register number, it does not stop a raw hardware CALL to a
+        // no-callee-save runtime routine from clobbering the register's
+        // actual contents. `for i,v in reverse_iter, t16, #t16 + 1 do`
+        // is exactly this case -- the control-variable expression
+        // (`#t16 + 1`) emits `CALL __builtin_len`, which internally
+        // calls `__builtin_table_len`, which uses R2 as scratch with no
+        // save/restore. If state_reg (holding t16) happens to land on
+        // R2 -- it does -- its value is silently destroyed before it's
+        // ever copied into the iterator-state slot, corrupting every
+        // subsequent call to the custom iterator for the rest of the
+        // loop with garbage instead of the real table.
+        //
+        // Same fix shape as node_table_set(): spill right after
+        // computing, reload in reverse (LIFO) order right before use.
+        // -------------------------------------------------------------
         generate_asm(f_node, iter_reg);
         ensure_in_register(iter_reg);
+        emit_asm("PUSH R%d ; spill iterator function (protect across possible nested CALLs in state/control exprs)\n", iter_reg);
 
         generate_asm(s_node, state_reg);
         ensure_in_register(state_reg);
+        emit_asm("PUSH R%d ; spill state (protect across possible nested CALLs in control-var expr)\n", state_reg);
 
         if (v_node != NULL) {
             generate_asm(v_node, key_reg);
             ensure_in_register(key_reg);
         }
+
+        // Reload in reverse (LIFO) order: state_reg was pushed LAST, so
+        // it must be popped FIRST.
+        emit_asm("POP R%d ; reload spilled state\n", state_reg);
+        emit_asm("POP R%d ; reload spilled iterator function\n", iter_reg);
 
         emit_asm("MOV R0, R%d ; Iterator function (explicit list form)\n", iter_reg);
         emit_asm("MOV R2, R%d ; State (explicit list form)\n", state_reg);
@@ -545,4 +566,65 @@ void node_for_generic(ASTNode *node)
 
     pop_loop();
     pop_scope();
+}
+
+// ===========================================================================
+// REPEAT/UNTIL LOOP: repeat ... until condition
+//
+// The two things that make this genuinely different from `while`, not just
+// a cosmetic reordering:
+//
+//   1. The body always executes at least once -- the condition is checked
+//      AFTER the body runs, not before. So there's no falsy-check-then-skip
+//      at the top the way node_while() has; instead we run the body
+//      unconditionally, then check whether to loop again.
+//
+//   2. The until-condition is evaluated INSIDE THE BODY'S OWN SCOPE. A local
+//      declared partway through the body (`local done = ...`) must still be
+//      visible when the until-expression is generated. This is why
+//      push_scope()/pop_scope() here wrap BOTH generate_block(body) AND
+//      generate_asm(condition) -- pop_scope() is deliberately deferred
+//      until after the condition has been fully generated, unlike every
+//      other loop type in this compiler, where the condition (if any) is
+//      evaluated in the OUTER scope, before the loop's own scope is pushed.
+//
+// break support works identically to every other loop type: push_loop()
+// before the body, and node_break() looks up LOOP_TYPE_REPEAT to build the
+// matching "__<func>_repeat_end_<id>" label (see node_break()'s tag switch).
+// ===========================================================================
+void  node_repeat (ASTNode *node)
+{
+    int  label_id   = get_next_label ();
+    const char *ctx  = get_current_function_name ();
+    char start_label[128], end_label[128];
+    snprintf(start_label, sizeof(start_label), "__%s_repeat_start_%d", ctx, label_id);
+    snprintf(end_label,   sizeof(end_label),   "__%s_repeat_end_%d",   ctx, label_id);
+
+    push_loop(label_id, LOOP_TYPE_REPEAT);
+
+    emit_asm ("%s:\n", start_label);
+
+    // -----------------------------------------------------------------
+    // Body and condition share ONE scope -- see the function-level
+    // comment above for why pop_scope() is deferred past the condition.
+    // -----------------------------------------------------------------
+    push_scope ();
+    generate_block (node -> as.repeat_loop.body);
+
+    int  cond_reg = allocate_register ();
+    mark_register_live (cond_reg, 2);
+    generate_asm (node -> as.repeat_loop.condition, cond_reg);
+
+    pop_scope ();
+
+    // Loop again if the condition is falsy; stop (fall through to
+    // end_label) if it's truthy -- the inverse of while's falsy-jump,
+    // matching repeat/until's inverted "stop when true" semantics.
+    emit_truthy_jump (cond_reg, end_label);
+    unlock_register (cond_reg);
+
+    emit_asm ("JMP %s\n", start_label);
+    emit_asm ("%s:\n", end_label);
+
+    pop_loop ();
 }

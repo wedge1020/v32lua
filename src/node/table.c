@@ -207,16 +207,41 @@ void  node_table_set (ASTNode *node)
     // table/key expressions do internally, including nested CALLs.
     generate_asm (node -> as.table_set.value, val_reg);
     ensure_in_register (val_reg);
-    emit_asm ("PUSH R%d ; spill value (protect across possible nested CALLs in key/table exprs)", val_reg);
+    emit_asm ("PUSH R%d ; spill value (protect across possible nested CALLs in table/key exprs)", val_reg);
 
+    // -----------------------------------------------------------------
+    // FIX: the TABLE POINTER needs exactly the same protection as the
+    // value above, and previously had none. `t[key_expr] = v` where
+    // key_expr contains its own nested CALL -- e.g. `pending[k .. "_mod"]
+    // = v * 10` (string concat -> CALL __builtin_strcat), or `t[f()] = v`,
+    // or `t[#x] = v` -- evaluates table_expr into table_reg FIRST, then
+    // generates the key expression SECOND. If that key expression emits
+    // any CALL to a runtime routine that doesn't save/restore registers
+    // (most of them don't -- e.g. __builtin_strcat freely clobbers
+    // R1-R8, and reliably leaves R3 = 0 on every exit path), and
+    // table_reg happens to land on one of those clobbered registers,
+    // the table pointer is silently replaced with garbage (observed:
+    // exactly 0, a non-table bit pattern) before __builtin_table_set
+    // ever runs. allocate_pinned_register() does NOT protect against
+    // this -- pinning only stops the COMPILER's allocator from handing
+    // that register number to something else; it has no effect on a raw
+    // hardware CALL clobbering the register's actual contents.
+    //
+    // Spilling table_reg to the hardware stack immediately after it's
+    // computed -- before the key expression (which may contain nested
+    // CALLs) is generated at all -- makes it immune, the same way the
+    // value already is above.
+    // -----------------------------------------------------------------
     generate_asm (node -> as.table_set.table_expr, table_reg);
-    generate_asm (node -> as.table_set.key,        key_reg);
-
     ensure_in_register (table_reg);
+    emit_asm ("PUSH R%d ; spill table pointer (protect across possible nested CALLs in key expr)", table_reg);
+
+    generate_asm (node -> as.table_set.key, key_reg);
     ensure_in_register (key_reg);
 
-    // Reload the spilled value now that it's safe -- immediately before
-    // building the __builtin_table_set argument frame.
+    // Reload in reverse (LIFO) order: table_reg was pushed LAST (after
+    // val_reg), so it must be popped FIRST.
+    emit_asm ("POP  R%d ; reload spilled table pointer", table_reg);
     emit_asm ("POP  R%d ; reload spilled value", val_reg);
 
     emit_asm ("PUSH R%d ; table pointer", table_reg);

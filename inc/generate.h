@@ -49,6 +49,7 @@ void  node_number              (ASTNode *, int);
 void  node_or                  (ASTNode *, int);
 void  node_pow                 (ASTNode *, int);
 void  node_relational          (ASTNode *, int);
+void  node_repeat              (ASTNode *);
 void  node_return              (ASTNode *);
 void  node_string              (ASTNode *, int);
 void  node_sub                 (ASTNode *, int);

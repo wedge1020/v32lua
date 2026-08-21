@@ -165,6 +165,12 @@ int  count_function_locals(ASTNode* node)
                 count += count_function_locals(node->as.while_loop.body);
                 break;
 
+            case NODE_REPEAT:
+                // Recurse into REPEAT loop bodies -- no hidden control
+                // variables to account for here, unlike numeric-for's +3.
+                count += count_function_locals(node->as.repeat_loop.body);
+                break;
+
             case NODE_FOR_NUMERIC:
                 // Adds 3 to the stack requirement frame frame (+1 index, +1 limit, +1 step)
                 count += 3 + count_function_locals(node->as.for_numeric.body);
@@ -240,6 +246,11 @@ int check_needs_stack (ASTNode *node)
             if (check_needs_stack(node->as.while_loop.body)) return (1);
             break;
 
+        case NODE_REPEAT:
+            if (check_needs_stack(node->as.repeat_loop.body)) return (1);
+            if (check_needs_stack(node->as.repeat_loop.condition)) return (1);
+            break;
+
         case NODE_IF:
             if (check_needs_stack (node -> as.if_stmt.condition)) return (1);
             if (check_needs_stack (node -> as.if_stmt.if_body))   return (1);
@@ -312,10 +323,11 @@ void generate_block(ASTNode *head) {
         // them through the same 0-dest_reg path as break/return.
         // -------------------------------------------------------------
         bool produces_no_value =
-            (current->type == NODE_BREAK)          ||
-            (current->type == NODE_RETURN)         ||
-            (current->type == NODE_IF)             ||
-            (current->type == NODE_WHILE)          ||
+            (current->type == NODE_BREAK)           ||
+            (current->type == NODE_RETURN)          ||
+            (current->type == NODE_IF)              ||
+            (current->type == NODE_WHILE)           ||
+            (current->type == NODE_REPEAT)          ||
             (current->type == NODE_FOR_NUMERIC)     ||
             (current->type == NODE_FOR_GENERIC)     ||
             (current->type == NODE_DO_BLOCK)        ||
@@ -362,6 +374,10 @@ void  generate_asm (ASTNode *node, int  dest_reg)
         {
             case NODE_WHILE:
                 node_while (node);
+                break;
+
+            case NODE_REPEAT:
+                node_repeat (node);
                 break;
 
             case NODE_FOR_NUMERIC:

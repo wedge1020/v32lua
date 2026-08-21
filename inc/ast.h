@@ -30,6 +30,11 @@ typedef struct astnode {
         } while_loop;
 
         struct {
+            struct astnode* body;      // Body is generated FIRST...
+            struct astnode* condition; // ...condition sees the body's own scope
+        } repeat_loop;
+
+        struct {
             char* index_name;          // The loop variable name (e.g., "i")
             struct astnode* start_expr;
             struct astnode* stop_expr;

@@ -209,6 +209,7 @@ function test_generic_for_loops()
         mod_pairs_count = mod_pairs_count + 1
         pending[k .. "_mod"] = v * 10
     end
+	__rawasm__("__debug17a:")
     for k, v in pairs(pending) do
         t18[k] = v
     end

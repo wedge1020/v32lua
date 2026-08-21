@@ -120,6 +120,8 @@ char *process_string_literal (const char *text, int  len)
 "--".* { /* Skip standard single-line comments safely */ }
 
 "while"                 { return TOKEN_WHILE;    }
+"repeat"                { return TOKEN_REPEAT;   }
+"until"                 { return TOKEN_UNTIL;    }
 "for"                   { return TOKEN_FOR;      }
 "in"                    { return TOKEN_IN;       }
 "break"                 { return TOKEN_BREAK;    }

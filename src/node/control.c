@@ -10,17 +10,20 @@ void  node_break (void)
     }
 
     // Each loop type builds its own exit label with a different tag (see
-    // node_while/node_for_numeric/node_for_generic) -- 'while' and 'for'
-    // are NOT interchangeable prefixes, and for_gen has a THIRD tag of its
-    // own. A two-way ternary here silently mapped LOOP_TYPE_FOR_GENERIC
-    // onto the 'while' label, which node_for_generic never actually
-    // defines -- 'break' inside a generic for loop jumped to a label that
-    // didn't exist: an unresolved-label error at assembly time.
+    // node_while/node_repeat/node_for_numeric/node_for_generic) -- these
+    // tags are NOT interchangeable prefixes. A missing case here silently
+    // falls through to the default and jumps to a label that loop type
+    // never actually defines -- an unresolved-label error at assembly
+    // time (this already happened once for LOOP_TYPE_FOR_GENERIC before
+    // it got its own explicit case; LOOP_TYPE_REPEAT gets the same
+    // explicit treatment here rather than risking silently falling into
+    // the "while" default).
     LoopType    type = current_loop_type ();
     const char *tag;
     switch (type) {
         case LOOP_TYPE_FOR_NUMERIC: tag = "for";     break;
         case LOOP_TYPE_FOR_GENERIC: tag = "for_gen"; break;
+        case LOOP_TYPE_REPEAT:      tag = "repeat";  break;
         case LOOP_TYPE_WHILE:
         default:                    tag = "while";   break;
     }

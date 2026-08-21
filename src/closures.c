@@ -179,6 +179,21 @@ void analyze_block (ASTNode *node, FuncAnalysisFrame *frame)
                 break;
             }
 
+            case NODE_REPEAT: {
+                // Order matters: analyze the BODY first (binding its
+                // locals into frame->bound), THEN analyze the
+                // until-condition -- while frame->bound still includes
+                // those body locals -- and only restore afterward. This
+                // mirrors node_repeat()'s codegen scoping and ensures a
+                // closure inside the until-condition correctly captures
+                // a body-local as an upvalue instead of missing it.
+                NameList *saved = frame->bound;
+                analyze_block(node->as.repeat_loop.body, frame);
+                analyze_expr(node->as.repeat_loop.condition, frame);
+                frame->bound = saved;
+                break;
+            }
+
             case NODE_FOR_NUMERIC: {
                 analyze_expr(node->as.for_numeric.start_expr, frame);
                 analyze_expr(node->as.for_numeric.stop_expr, frame);

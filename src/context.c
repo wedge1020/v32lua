@@ -528,6 +528,10 @@ void  register_all_globals_prepass (ASTNode *node)
                 register_all_globals_prepass(node->as.while_loop.body);
                 break;
 
+            case NODE_REPEAT:
+                register_all_globals_prepass(node->as.repeat_loop.body);
+                break;
+
             case NODE_FOR_NUMERIC:
             case NODE_FOR_GENERIC:
                 register_all_globals_prepass(node->as.for_numeric.body);
@@ -684,6 +688,11 @@ int count_max_return_values (ASTNode *node)
             }
             case NODE_WHILE: {
                 int c = count_max_return_values(node->as.while_loop.body);
+                if (c > max_count) max_count = c;
+                break;
+            }
+            case NODE_REPEAT: {
+                int c = count_max_return_values(node->as.repeat_loop.body);
                 if (c > max_count) max_count = c;
                 break;
             }

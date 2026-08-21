@@ -43,10 +43,11 @@ char *mangle_method_name (const char *table_name, const char *method_name);
 %token TOKEN_LOCAL TOKEN_IN TOKEN_DO TOKEN_NOT TOKEN_LEN UNARY_MINUS
 %token TOKEN_TRUE TOKEN_FALSE TOKEN_NIL TOKEN_FLOORDIV
 %token TOKEN_DOTS
+%token TOKEN_REPEAT TOKEN_UNTIL
 
 %type <ast_node> statement statement_list stat_list expr function_def return_stmt
 %type <ast_node> table_constructor function_call else_branch prefix_expr
-%type <ast_node> last_statement func_start while_start for_start if_start
+%type <ast_node> last_statement func_start while_start repeat_start for_start if_start
 %type <ast_node> field
 %type <ast_node> field_list
 
@@ -173,6 +174,11 @@ func_start:
 while_start:
     TOKEN_WHILE    { $$ = make_node(NODE_WHILE); }
     ;
+
+repeat_start:
+    TOKEN_REPEAT   { $$ = make_node(NODE_REPEAT); }
+    ;
+
 for_start:
     TOKEN_FOR      { $$ = make_node(NODE_FOR_NUMERIC); }
 
@@ -208,6 +214,17 @@ statement:
         $$ = $1;
         $$->as.while_loop.condition = $2;
         $$->as.while_loop.body = $4;
+    }
+    | repeat_start statement_list TOKEN_UNTIL expr {
+        // Note the order: body ($2) is parsed BEFORE the until-condition
+        // ($4) -- this matters for scoping. Lua's grammar for repeat/until
+        // deliberately puts the condition after the body's closing so
+        // that locals declared in the body are still in scope for it.
+        // node_repeat() in the compiler mirrors this by NOT popping the
+        // body's scope until after the condition has been generated.
+        $$ = $1;
+        $$->as.repeat_loop.body      = $2;
+        $$->as.repeat_loop.condition = $4;
     }
     | for_start TOKEN_IDENTIFIER '=' expr ',' expr TOKEN_DO statement_list TOKEN_END {
         $$ = make_node(NODE_FOR_NUMERIC);

@@ -8,6 +8,7 @@
 typedef enum
 {
     NODE_WHILE,
+    NODE_REPEAT,
     NODE_FOR_NUMERIC,
     NODE_FOR_GENERIC,
     NODE_BREAK,
@@ -72,6 +73,7 @@ typedef enum
 
 typedef enum {
     LOOP_TYPE_WHILE,
+    LOOP_TYPE_REPEAT,
     LOOP_TYPE_FOR_NUMERIC,
     LOOP_TYPE_FOR_GENERIC
 } LoopType;
