@@ -277,6 +277,30 @@ void  node_for_numeric (ASTNode *node)
 //      value, R3 = second value (rarely used by iterators, kept for
 //      generality).
 //
+// FIX 3 (this pass): the per-iteration call to the iterator function
+// previously pushed STATE then KEY, which (because the last value pushed
+// always lands at [BP+2], closest to the return address) put the KEY at
+// [BP+2] and the STATE at [BP+3]. That happened to match the two
+// hand-written runtime iterators (__builtin_next, __builtin_ipairs_iter),
+// which were hand-tuned to read that exact layout -- but it is BACKWARDS
+// relative to how this compiler assigns parameter offsets to an ordinary
+// Lua function. register_parameter() assigns ascending offsets starting
+// at [BP+2] in declaration order, so for `function simple_iter(t, i)`,
+// `t` (first declared) is [BP+2] and `i` (second declared) is [BP+3].
+// A custom iterator written in Lua (`for i,v in simple_iter, t15, 0 do`)
+// was therefore getting KEY bound to its `t` parameter and STATE (a
+// table) bound to its `i` parameter -- on the first call this passes a
+// non-table into `t[i]`, which trips __runtime_error_not_table and HLTs
+// the CPU.
+//
+// The push order below is now STATE pushed last (-> [BP+2], matching a
+// normal iterator function's first parameter) and KEY pushed first (->
+// [BP+3], matching its second parameter). __builtin_next and
+// __builtin_ipairs_iter in runtime.s have been updated to read the new
+// (now-correct, and now-consistent-with-everything-else) offsets to
+// match. This is a breaking change to those two routines' internal
+// offsets -- they must be updated together with this function.
+//
 // Previously this function invented a third, incompatible convention
 // (reading return values off the hardware stack via [SP-0]/[SP-1]), which
 // matched neither the compiler's own multi-return convention nor the
@@ -427,17 +451,32 @@ void node_for_generic(ASTNode *node)
         register_pinned[i] = 0;
     }
 
-    // Push arguments for iterator call: state, current_key
+    // -----------------------------------------------------------------
+    // Push arguments for iterator call: iterator(state, current_key).
+    //
+    // FIX 3: KEY is pushed FIRST (-> lands at [BP+3]) and STATE is
+    // pushed LAST (-> lands at [BP+2], since the last value pushed
+    // always ends up closest to the return address). This makes STATE
+    // the callee's first formal parameter and KEY its second formal
+    // parameter -- matching how register_parameter() assigns offsets to
+    // an ordinary Lua function's own declared parameters (ascending from
+    // [BP+2] in declaration order). This is what makes a user-written
+    // iterator like `function simple_iter(t, i)` receive the table in
+    // `t` and the running index in `i`, instead of the reverse.
+    //
+    // __builtin_next and __builtin_ipairs_iter have been updated to read
+    // [BP+2]=state/table, [BP+3]=key/index to match this new order.
+    // -----------------------------------------------------------------
     int arg_reg = allocate_register();
     mark_register_live(arg_reg, 2);
 
-    get_variable_access_string(state_var, access_state);
-    emit_asm("MOV R%d, %s           ; Load state into register\n", arg_reg, access_state);
-    emit_asm("PUSH R%d               ; Arg 2: state\n", arg_reg);
-
     get_variable_access_string(key_var, access_key);
     emit_asm("MOV R%d, %s           ; Load current key into register\n", arg_reg, access_key);
-    emit_asm("PUSH R%d               ; Arg 1: current key\n", arg_reg);
+    emit_asm("PUSH R%d               ; Arg 2: current key (pushed first -> [BP+3])\n", arg_reg);
+
+    get_variable_access_string(state_var, access_state);
+    emit_asm("MOV R%d, %s           ; Load state into register\n", arg_reg, access_state);
+    emit_asm("PUSH R%d               ; Arg 1: state (pushed last -> [BP+2])\n", arg_reg);
 
     unlock_register(arg_reg);
 
@@ -501,13 +540,9 @@ void node_for_generic(ASTNode *node)
         register_pinned[i] = saved_pinned[i];
     }
 
+    free(var_names);
+    free(var_syms);
+
     pop_loop();
     pop_scope();
-
-    if (var_names != NULL) {
-        free(var_names);
-    }
-    if (var_syms != NULL) {
-        free(var_syms);
-    }
 }

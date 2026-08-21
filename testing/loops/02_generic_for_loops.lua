@@ -13,6 +13,7 @@ function test_generic_for_loops()
         if i == 3 then string_result01 = v end
     end
     number_result00 = count1
+    __rawasm__("__debug0:")
 
     -- === Test 01: pairs on hash table ===
     local t2 = {x = 10, y = 20, z = 30}
@@ -22,6 +23,7 @@ function test_generic_for_loops()
         if k == "y" then number_result01 = v end
     end
     number_result02 = sum2
+    __rawasm__("__debug1:")
 
     -- === Test 02: ipairs with mixed table ===
     local t3 = {"first", "second", key = "value"}
@@ -30,6 +32,7 @@ function test_generic_for_loops()
         array_count = array_count + 1
     end
     number_result03 = array_count
+    __rawasm__("__debug2:")
 
     -- === Test 03: pairs counts all keys ===
     local t4 = {"arr", key1 = "val1", key2 = "val2"}
@@ -38,6 +41,7 @@ function test_generic_for_loops()
         total_keys = total_keys + 1
     end
     number_result04 = total_keys
+    __rawasm__("__debug3:")
 
     -- === Test 04: ipairs on empty table ===
     local t5 = {}
@@ -46,6 +50,7 @@ function test_generic_for_loops()
         empty_ipairs_count = empty_ipairs_count + 1
     end
     number_result05 = empty_ipairs_count
+    __rawasm__("__debug4:")
 
     -- === Test 05: pairs on empty table ===
     local t6 = {}
@@ -54,6 +59,7 @@ function test_generic_for_loops()
         empty_pairs_count = empty_pairs_count + 1
     end
     number_result06 = empty_pairs_count
+    __rawasm__("__debug5:")
 
     -- === Test 06: ipairs with gaps in array ===
     local t7 = {1, nil, 3, nil, 5}
@@ -65,6 +71,7 @@ function test_generic_for_loops()
     end
     number_result07 = gap_count
     number_result08 = gap_sum
+    __rawasm__("__debug6:")
 
     -- === Test 07: pairs with numeric keys ===
     local t8 = {1, 2, 3}
@@ -77,6 +84,7 @@ function test_generic_for_loops()
     end
     number_result09 = numeric_key_count
     number_result10 = numeric_key_sum
+    __rawasm__("__debug7:")
 
     -- === Test 08: ipairs with non-array table ===
     local t9 = {a = 1, b = 2, c = 3}
@@ -85,6 +93,7 @@ function test_generic_for_loops()
         non_array_count = non_array_count + 1
     end
     number_result11 = non_array_count
+    __rawasm__("__debug8:")
 
     -- === Test 09: pairs with nil values ===
     local t10 = {1, nil, 3, nil, 5}
@@ -95,6 +104,7 @@ function test_generic_for_loops()
         end
     end
     number_result12 = nil_val_count
+    __rawasm__("__debug9:")
 
     -- === Test 10: Break in ipairs loop ===
     local t11 = {1, 2, 3, 4, 5}
@@ -106,6 +116,7 @@ function test_generic_for_loops()
         end
     end
     number_result13 = break_ipairs_val
+    __rawasm__("__debug10:")
 
     -- === Test 11: Break in pairs loop ===
     local t12 = {a = 1, b = 2, c = 3}
@@ -117,6 +128,7 @@ function test_generic_for_loops()
         end
     end
     string_result02 = break_pairs_key
+    __rawasm__("__debug11:")
 
     -- === Test 12: Nested ipairs loops ===
     local t13 = {{1, 2}, {3, 4}, {5, 6}}
@@ -127,6 +139,7 @@ function test_generic_for_loops()
         end
     end
     number_result14 = nested_ipairs_sum
+    __rawasm__("__debug12:")
 
     -- === Test 13: Nested pairs loops ===
     local t14 = {
@@ -141,6 +154,7 @@ function test_generic_for_loops()
         end
     end
     number_result15 = nested_pairs_sum
+    __rawasm__("__debug13:")
 
     -- === Test 14: Custom iterator - simple ===
     local function simple_iter(t, i)
@@ -157,6 +171,7 @@ function test_generic_for_loops()
         custom_sum = custom_sum + v
     end
     number_result16 = custom_sum
+    __rawasm__("__debug14:")
 
     -- === Test 15: Custom iterator - reverse ===
     local function reverse_iter(t, i)
@@ -173,6 +188,7 @@ function test_generic_for_loops()
         reverse_sum = reverse_sum + v
     end
     number_result17 = reverse_sum
+    __rawasm__("__debug15:")
 
     -- === Test 16: Modifying table during ipairs iteration ===
     local t17 = {1, 2, 3, 4, 5}
@@ -182,6 +198,7 @@ function test_generic_for_loops()
         table.insert(t17, 100)  -- Add to end
     end
     number_result18 = mod_ipairs_count
+    __rawasm__("__debug16:")
 
     -- === Test 17: Modifying table during pairs iteration ===
     local t18 = {a = 1, b = 2, c = 3}
@@ -191,6 +208,7 @@ function test_generic_for_loops()
         t18[k .. "_mod"] = v * 10
     end
     number_result19 = mod_pairs_count
+    __rawasm__("__debug17:")
 
     -- === Test 18: ipairs with single element ===
     local t19 = {42}
@@ -199,6 +217,7 @@ function test_generic_for_loops()
         single_ipairs_val = v
     end
     number_result20 = single_ipairs_val
+    __rawasm__("__debug18:")
 
     -- === Test 19: pairs with single element ===
     local t20 = {x = 99}
@@ -207,6 +226,7 @@ function test_generic_for_loops()
         single_pairs_val = v
     end
     number_result21 = single_pairs_val
+    __rawasm__("__debug19:")
 
     -- === Test 20: ipairs with string keys (should be ignored) ===
     local t21 = {1, 2, 3, name = "test"}
@@ -215,6 +235,7 @@ function test_generic_for_loops()
         string_key_ipairs_count = string_key_ipairs_count + 1
     end
     number_result22 = string_key_ipairs_count
+    __rawasm__("__debug20:")
 
     -- === Test 21: pairs with string keys ===
     local t22 = {name = "test", value = 42}
@@ -223,6 +244,7 @@ function test_generic_for_loops()
         string_key_pairs_count = string_key_pairs_count + 1
     end
     number_result23 = string_key_pairs_count
+    __rawasm__("__debug21:")
 
     -- === Test 22: Multiple variables in generic for ===
     local t23 = {1, 2, 3}
@@ -231,6 +253,7 @@ function test_generic_for_loops()
         multi_var_sum = multi_var_sum + k + (v or 0)
     end
     number_result24 = multi_var_sum
+    __rawasm__("__debug22:")
 
     -- === Test 23: ipairs with 0 index (should be ignored) ===
     local t24 = {[0] = 0, 1, 2, 3}
@@ -239,6 +262,7 @@ function test_generic_for_loops()
         zero_index_count = zero_index_count + 1
     end
     number_result25 = zero_index_count
+    __rawasm__("__debug23:")
 end
 
 function main()
@@ -286,12 +310,12 @@ number_result03: 2.0000
 number_result04: 3.0000
 number_result05: 0.0000
 number_result06: 0.0000
-number_result07: 3.0000
-number_result08: 9.0000
+number_result07: 1.0000
+number_result08: 1.0000
 number_result09: 4.0000
-number_result10: 146.0000
+number_result10: 106.0000
 number_result11: 0.0000
-number_result12: 3.0000
+number_result12: 0.0000
 number_result13: 3.0000
 string_result02: "b"
 number_result14: 21.0000

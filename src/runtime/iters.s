@@ -1,30 +1,12 @@
-;; ---------------------------------------------------------------------------
-;; Built-in: next(t, key) - table iterator for pairs()
+;; ===========================================================================
+;; Built-in: next(table, key) - Stateless iterator used by pairs()
 ;;
-;; Incoming Stack: [BP+3] = Tagged Table Pointer, [BP+2] = Current Key (or
-;;                 NIL to start from the beginning)
-;; Returns: R0 = next key (BOXED_NIL when iteration is done), R2 = value
-;;          at that key (2-value return via R0/R2, matching this
-;;          compiler's standard multi-return convention -- see
-;;          node_return() in v32lua.c)
-;; Register Usage: R1-R8
-;;
-;; IMPLEMENTATION NOTE: scans the hash association list only. There is no
-;; separate "array part" traversal, because there is no separate array
-;; part in this runtime -- __builtin_table_set stores every key (whether a
-;; small contiguous integer or anything else) through the same hash
-;; bucket-chain mechanism (see __builtin_table_set_hash_store; real array
-;; allocation is still a __builtin_table_set_reallocate TODO). A previous
-;; version of this function had a separate array-part fast path that read
-;; directly through the table's array-data-pointer header field -- always
-;; null -- and returned garbage for any table with a nonzero tracked
-;; length. Scanning the hash uniformly for every key type sidesteps that.
-;;
-;; Nil-valued entries (a key set to nil via t[k] = nil, which this runtime
-;; stores in place rather than physically removing) are treated as absent
-;; and silently skipped during the scan, matching real Lua's pairs()
-;; semantics of never yielding a deleted key.
-;; ---------------------------------------------------------------------------
+;; Incoming Stack (post-FIX-3): [BP+2] = Tagged Table Pointer (state, now
+;; the first formal parameter to match how ordinary Lua functions receive
+;; their parameters -- see node_for_generic()'s FIX 3 comment in v32lua.c),
+;; [BP+3] = Current Key (or NIL for first call).
+;; Returns: R0 = key, R2 = value (or R0 = NIL when exhausted)
+;; ===========================================================================
 __builtin_next:
     PUSH BP
     MOV  BP, SP
@@ -37,8 +19,8 @@ __builtin_next:
     PUSH R7
     PUSH R8
 
-    MOV  R1, [BP+3]          ; R1 = Tagged Table Pointer
-    MOV  R2, [BP+2]          ; R2 = Current Key (or NIL for first call)
+    MOV  R1, [BP+2]          ; R1 = Tagged Table Pointer (state)
+    MOV  R2, [BP+3]          ; R2 = Current Key (or NIL for first call)
 
     ;; --- Validate table ---
     MOV  R3, R1
@@ -142,7 +124,9 @@ __next_error_not_table:
 ;; ===========================================================================
 ;; Built-in: ipairs_iter(t, index) - Numeric iterator for ipairs()
 ;;
-;; Incoming Stack: [BP+3] = Tagged Table Pointer, [BP+2] = Current Index
+;; Incoming Stack (post-FIX-3): [BP+2] = Tagged Table Pointer (state, now
+;; the first formal parameter, matching node_for_generic()'s FIX 3),
+;; [BP+3] = Current Index.
 ;; Returns: R0 = next index (boxed float, or BOXED_NIL when done),
 ;;          R2 = value at that index (2-value return via R0/R2, matching
 ;;          this compiler's standard multi-return convention -- see
@@ -169,8 +153,8 @@ __builtin_ipairs_iter:
     PUSH R7
 
     ;; --- Load arguments ---
-    MOV  R1, [BP+3]          ; R1 = Tagged Table Pointer (kept BOXED for table_get)
-    MOV  R2, [BP+2]          ; R2 = Current Index (boxed float, or NIL for first call)
+    MOV  R1, [BP+2]          ; R1 = Tagged Table Pointer (kept BOXED for table_get)
+    MOV  R2, [BP+3]          ; R2 = Current Index (boxed float, or NIL for first call)
 
     ;; --- Validate table ---
     MOV  R3, R1
