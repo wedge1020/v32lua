@@ -35,8 +35,6 @@ void  node_return (ASTNode *node)
     ASTNode *expr = node -> as.return_stmt.expressions_head;
     int ret_idx = 0;
 
-    int raw_reg_used[3] = {0, 0, 0}; // index 0->R0, 1->R2, 2->R3
-
     if (expr != NULL && expr->next == NULL && expr->type == NODE_FUNCTION_CALL) {
         ASTNode    *call_target = expr->as.call.target;
         SymbolNode *callee_sym  = NULL;
@@ -59,74 +57,93 @@ void  node_return (ASTNode *node)
         if (callee_sym != NULL && callee_sym->is_function && callee_sym->return_count > 1) {
             generate_asm(expr, 0);
 
-            // Tail-forward ALL of the callee's return values, not just the
-            // first 3 (previously clamped here with "if (ret_idx > 3)
-            // ret_idx = 3"). The callee's own node_return() already left
-            // values 4+ sitting in the shared __extra_ret_N global slots --
-            // since nothing runs between that CALL and this function's own
-            // immediate return, those slots are still exactly as the
-            // callee left them, so there's nothing further to copy.
+            // Tail-forward ALL of the callee's return values -- see the
+            // long-standing comment this preserves: the callee's own
+            // node_return() already left values 4+ in the shared
+            // __extra_ret_N globals, and nothing runs between that CALL
+            // and this function's own immediate return, so there's
+            // nothing further to copy. This path never touches
+            // R0/R2/R3 itself, so it isn't subject to the hazard fixed
+            // below -- the callee's own return already established them
+            // correctly and this function just passes them through.
             ret_idx = callee_sym->return_count;
             expr = NULL;
         }
     }
 
+    // -----------------------------------------------------------------
+    // FIX: return values destined for R0/R2/R3 (ret_idx 0/1/2) are
+    // computed and IMMEDIATELY SPILLED to the hardware stack -- NOT
+    // moved into R0/R2/R3 right away. They're only popped into their
+    // real destination register in one final pass, after every return
+    // expression has been fully evaluated.
+    //
+    // Why: `return i, t[i], t[i] * 2` computes three expressions, and
+    // the 2nd and 3rd both contain their own nested CALL (a table
+    // lookup). Runtime routines like __builtin_table_get return their
+    // result in R0 and use R0-R8 freely as scratch -- they have no
+    // concept of the compiler considering R0 "already holding this
+    // statement's first return value." The previous approach --
+    // lock_register(target_raw_reg) right after moving a value into
+    // R0/R2/R3 -- only stops the COMPILER's own allocator from handing
+    // that register out again; it does nothing to stop a raw hardware
+    // CALL from clobbering it. The 2nd return value's table lookup
+    // silently destroyed the 1st return value already sitting in R0,
+    // and nothing ever re-established it before the final RET -- so a
+    // 3-value return where later values contain nested calls handed
+    // back a corrupted FIRST value while the later ones stayed correct.
+    //
+    // Values beyond the 3rd don't need this treatment: they're written
+    // straight to their dedicated __extra_ret_N global, which is
+    // memory, not a shared scratch register, and so isn't at risk from
+    // a later expression's CALL the same way.
+    // -----------------------------------------------------------------
+    int push_order[3];   // which raw slot (0->R0, 1->R2, 2->R3), in push order
+    int push_count = 0;
+
     while (expr != NULL) {
         int val_reg = allocate_register();
         generate_asm (expr, val_reg);
+        ensure_in_register (val_reg);
 
-        // -------------------------------------------------------------
-        // Which fixed raw register (if any) does THIS return value land
-        // in? Tracked explicitly so we can correctly decide below whether
-        // it's safe to unlock val_reg.
-        // -------------------------------------------------------------
-        int target_raw_reg = -1;
-
-        if (ret_idx == 0)      { emit_asm ("MOV R0, R%d\n", val_reg); target_raw_reg = 0; raw_reg_used[0] = 1; }
-        else if (ret_idx == 1) { emit_asm ("MOV R2, R%d\n", val_reg); target_raw_reg = 2; raw_reg_used[1] = 1; }
-        else if (ret_idx == 2) { emit_asm ("MOV R3, R%d\n", val_reg); target_raw_reg = 3; raw_reg_used[2] = 1; }
-        else {
-            // 4th and later return values: write into the shared "extra
-            // return slot" globals instead of a fixed register -- see
-            // get_extra_return_slot_access() for the full rationale.
+        if (ret_idx < 3) {
+            emit_asm ("PUSH R%d ; spill return value %d (protect across later nested CALLs)\n", val_reg, ret_idx);
+            push_order[push_count++] = ret_idx;
+        } else {
+            // 4th and later return values: write straight into the
+            // shared "extra return slot" global -- memory, not a
+            // register, so no spill/reload protection needed here.
             char slot_access[128];
             get_extra_return_slot_access(ret_idx - 3, slot_access);
             emit_asm ("MOV %s, R%d ; extra return value %d\n", slot_access, val_reg, ret_idx);
         }
 
-        if (target_raw_reg != -1) {
-            // Lock the raw register so a LATER return expression in this
-            // same statement can't get it handed back out as scratch.
-            lock_register(target_raw_reg);
-        }
-
-        // Only unlock val_reg here if it is NOT the very raw register we
-        // just locked above -- see the original comment block this
-        // preserves: val_reg == target_raw_reg is a normal, expected
-        // outcome, and unconditionally unlocking here would cancel the
-        // lock_register() call one statement early.
-        if (val_reg != target_raw_reg) {
-            unlock_register(val_reg);
-        }
+        unlock_register(val_reg);
 
         ret_idx++;
         expr = expr -> next;
     }
 
-    if (raw_reg_used[0]) unlock_register(0);
-    if (raw_reg_used[1]) unlock_register(2);
-    if (raw_reg_used[2]) unlock_register(3);
+    // Pop in REVERSE (LIFO) order, straight into each value's real
+    // destination register -- the register name IS the destination,
+    // no intermediate MOV needed.
+    for (int k = push_count - 1; k >= 0; k--) {
+        int slot = push_order[k];
+        const char *raw_reg = (slot == 0) ? "R0" : (slot == 1) ? "R2" : "R3";
+        emit_asm ("POP %s ; restore return value %d\n", raw_reg, slot);
+    }
 
     SymbolNode *fn_sym      = resolve_symbol (get_current_function_name ());
     int         max_returns = (fn_sym != NULL) ? fn_sym -> return_count : ret_idx;
-    // (No 3-cap here anymore -- max_returns can legitimately be > 3 now.)
+    // (No 3-cap here anymore -- max_returns can legitimately be > 3.)
 
     // -----------------------------------------------------------------
     // Pad any return slot THIS return statement didn't populate, because
     // a DIFFERENT 'return' elsewhere in the same function returns more
-    // values (see count_max_return_values()). R0/R2/R3 padding is
-    // unchanged; slots 4+ are padded through the same shared globals
-    // used above.
+    // values (see count_max_return_values()). Unchanged from before --
+    // this only ever touches slots >= ret_idx, which by definition
+    // weren't part of the pop sequence above, so there's no ordering
+    // conflict with it.
     // -----------------------------------------------------------------
     if (ret_idx < max_returns) {
         if (ret_idx <= 0 && max_returns >= 1) emit_asm ("MOV R0, BOXED_NIL ; pad unused return slot\n");

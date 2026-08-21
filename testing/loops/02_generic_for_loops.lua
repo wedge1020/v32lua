@@ -209,7 +209,6 @@ function test_generic_for_loops()
         mod_pairs_count = mod_pairs_count + 1
         pending[k .. "_mod"] = v * 10
     end
-	__rawasm__("__debug17a:")
     for k, v in pairs(pending) do
         t18[k] = v
     end
@@ -269,42 +268,97 @@ function test_generic_for_loops()
     end
     number_result25 = zero_index_count
     __rawasm__("__debug23:")
+
+    -- === Test 24: Generic for with THREE loop variables (custom ===
+    -- === iterator that returns 3 values per step) ===
+    local function triple_iter(t, i)
+        i = i + 1
+        if t[i] ~= nil then
+            return i, t[i], t[i] * 2
+        end
+    end
+    local t25 = {5, 10, 15}
+    local triple_sum = 0
+    for idx, val, doubled in triple_iter, t25, 0 do
+        triple_sum = triple_sum + idx + val + doubled
+    end
+    number_result26 = triple_sum   -- (1+5+10)+(2+10+20)+(3+15+30) = 96
+    __rawasm__("__debug24:")
+
+    -- === Test 25: Generic for with FEWER loop variables than the ===
+    -- === iterator provides -- extra return values are simply discarded ===
+    local t26 = {a = 1, b = 2, c = 3}
+    local key_only_count = 0
+    for k in pairs(t26) do
+        key_only_count = key_only_count + 1
+    end
+    number_result27 = key_only_count   -- 3
+    __rawasm__("__debug25:")
+
+    -- === Test 26: break as the VERY FIRST statement in the loop body ===
+    local t27 = {1, 2, 3}
+    local immediate_break_iters2 = 0
+    for i, v in ipairs(t27) do
+		break
+    end
+    number_result28 = immediate_break_iters2   -- 0
+    __rawasm__("__debug26:")
+
+    -- === Test 27: Three-level-deep nested generic for loops ===
+    local grid3 = {
+        { {1, 2}, {3, 4} },
+        { {5, 6}, {7, 8} }
+    }
+    local triple_ipairs_count = 0
+    for _, plane in ipairs(grid3) do
+        for _, row in ipairs(plane) do
+            for _, cell in ipairs(row) do
+                triple_ipairs_count = triple_ipairs_count + 1
+            end
+        end
+    end
+    number_result29 = triple_ipairs_count   -- 2 planes * 2 rows * 2 cells = 8
+    __rawasm__("__debug27:")
 end
 
 function main()
     ioports.gpu.clear("black")
     test_generic_for_loops()
 
-    print(000, 00,  "--- Generic For Loops Expanded Test ---")
-    print(000, 020, "Test 00 - ipairs count: " ..     number_result00)
-    print(000, 040, "Test 00 - ipairs[1]: " ..       string_result00)
-    print(000, 060, "Test 00 - ipairs[3]: " ..       string_result01)
-    print(000, 080, "Test 01 - pairs sum: " ..       number_result02)
-    print(000, 100, "Test 01 - pairs y: " ..         number_result01)
-    print(000, 120, "Test 02 - ipairs mixed: " ..    number_result03)
-    print(000, 140, "Test 03 - pairs all: " ..       number_result04)
-    print(000, 160, "Test 04 - ipairs empty: " ..    number_result05)
-    print(000, 180, "Test 05 - pairs empty: " ..     number_result06)
-    print(000, 200, "Test 06 - ipairs gaps c: " ..  number_result07)
-    print(000, 220, "Test 06 - ipairs gaps s: " ..  number_result08)
-    print(000, 240, "Test 07 - pairs num k c: " ..  number_result09)
-    print(000, 260, "Test 07 - pairs num k s: " ..  number_result10)
-    print(200, 020, "Test 08 - ipairs non-arr: " ..  number_result11)
-    print(200, 040, "Test 09 - pairs nil: " ..      number_result12)
-    print(200, 060, "Test 10 - ipairs break: " ..   number_result13)
-    print(200, 080, "Test 11 - pairs break: " ..    string_result02)
-    print(200, 100, "Test 12 - nested ipairs: " ..   number_result14)
-    print(200, 120, "Test 13 - nested pairs: " ..   number_result15)
-    print(200, 140, "Test 14 - custom iter: " ..    number_result16)
-    print(200, 160, "Test 15 - reverse iter: " ..   number_result17)
-    print(200, 180, "Test 16 - mod ipairs: " ..    number_result18)
-    print(200, 200, "Test 17 - mod pairs: " ..     number_result19)
-    print(200, 220, "Test 18 - single ipairs: " ..  number_result20)
-    print(200, 240, "Test 19 - single pairs: " ..  number_result21)
-    print(200, 260, "Test 20 - str key ipairs: " .. number_result22)
-    print(200, 280, "Test 21 - str key pairs: " .. number_result23)
-    print(200, 300, "Test 22 - multi var: " ..     number_result24)
-    print(200, 320, "Test 23 - zero index: " ..    number_result25)
+    print(  0,   0,  "--- Generic For Loops Expanded Test ---")
+    print(  0,  20, "Test 00 - ipairs count: " ..    number_result00)
+    print(  0,  40, "Test 00 - ipairs[1]: " ..       string_result00)
+    print(  0,  60, "Test 00 - ipairs[3]: " ..       string_result01)
+    print(  0,  80, "Test 01 - pairs sum: " ..       number_result02)
+    print(  0, 100, "Test 01 - pairs y: " ..         number_result01)
+    print(  0, 120, "Test 02 - ipairs mixed: " ..    number_result03)
+    print(  0, 140, "Test 03 - pairs all: " ..       number_result04)
+    print(  0, 160, "Test 04 - ipairs empty: " ..    number_result05)
+    print(  0, 180, "Test 05 - pairs empty: " ..     number_result06)
+    print(  0, 200, "Test 06 - ipairs gaps c: " ..   number_result07)
+    print(  0, 220, "Test 06 - ipairs gaps s: " ..   number_result08)
+    print(  0, 240, "Test 07 - pairs num k c: " ..   number_result09)
+    print(  0, 260, "Test 07 - pairs num k s: " ..   number_result10)
+    print(  0, 280, "Test 08 - ipairs non-arr: " ..  number_result11)
+    print(  0, 300, "Test 09 - pairs nil: " ..       number_result12)
+    print(  0, 320, "Test 10 - ipairs break: " ..    number_result13)
+    print(320,  20, "Test 11 - pairs break: " ..     string_result02)
+    print(320,  40, "Test 12 - nested ipairs: " ..   number_result14)
+    print(320,  60, "Test 13 - nested pairs: " ..    number_result15)
+    print(320,  80, "Test 14 - custom iter: " ..     number_result16)
+    print(320, 100, "Test 15 - reverse iter: " ..    number_result17)
+    print(320, 120, "Test 16 - mod ipairs: " ..      number_result18)
+    print(320, 140, "Test 17 - mod pairs: " ..       number_result19)
+    print(320, 160, "Test 18 - single ipairs: " ..   number_result20)
+    print(320, 180, "Test 19 - single pairs: " ..    number_result21)
+    print(320, 200, "Test 20 - str key ipairs: " ..  number_result22)
+    print(320, 220, "Test 21 - str key pairs: " ..   number_result23)
+    print(320, 240, "Test 22 - multi var: " ..       number_result24)
+    print(320, 260, "Test 23 - zero index: " ..      number_result25)
+    print(320, 280, "Test 24 - triple var iter: " .. number_result26)
+    print(320, 300, "Test 25 - fewer vars: " ..      number_result27)
+    print(320, 320, "Test 26 - immediate break: " .. number_result28)
+    print(220, 080, "Test 27 - triple nested: " ..   number_result29)
 end
 
 --[[
@@ -336,6 +390,10 @@ number_result22: 3.0000
 number_result23: 2.0000
 number_result24: 12.0000
 number_result25: 3.0000
+number_result26: 96.0000
+number_result27: 3.0000
+number_result28: 0.0000
+number_result29: 8.0000
 string_result00: "a"
 string_result01: "c"
 number_result01: 20.0000

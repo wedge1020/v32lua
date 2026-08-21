@@ -79,15 +79,27 @@ __print_coerce:
     PUSH  R2                  ; Preserve Y coordinate
     PUSH  R1                  ; Preserve X coordinate
     PUSH  R3                  ; Push non-string value as argument
-    CALL  __builtin_tostring  ; R0 = Tagged String result
+    CALL  __builtin_tostring_scratch_a  ; R0 = Tagged String result.
+                                          ; Was __builtin_tostring: the
+                                          ; coerced string is drawn to the
+                                          ; GPU by __bios_print_text right
+                                          ; below and never referenced
+                                          ; again, so it never needs its
+                                          ; own permanent allocation. Only
+                                          ; ONE buffer is ever needed here
+                                          ; -- print() coerces and draws
+                                          ; one value at a time -- so "A"
+                                          ; alone (shared with
+                                          ; string.format()'s numeric
+                                          ; specifiers) is safe.
 
-    POP  R3                  ; Discard the argument (was pushed before CALL)
-    POP  R1                  ; Restore X
-    POP  R2                  ; Restore Y
-    POP  R5                  ; Restore GPU_SelectedTexture
-    POP  R6                  ; Restore GPU_SelectedRegion
-    MOV  R3, R0              ; Move result to R3
-    JMP  __print_check_tag
+    POP   R3                  ; Discard the argument (was pushed before CALL)
+    POP   R1                  ; Restore X
+    POP   R2                  ; Restore Y
+    POP   R5                  ; Restore GPU_SelectedTexture
+    POP   R6                  ; Restore GPU_SelectedRegion
+    MOV   R3, R0              ; Move result to R3
+    JMP   __print_check_tag
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;

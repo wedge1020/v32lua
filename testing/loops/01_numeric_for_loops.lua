@@ -201,6 +201,31 @@ function test_numeric_for_loops()
         i = 100  -- This should not affect the loop
     end
     number_result23 = mod_loop_val
+
+    -- === Test 24: start == limit executes exactly once ===
+    local single_iter_count = 0
+    for i = 5, 5 do
+        single_iter_count = single_iter_count + 1
+    end
+    number_result24 = single_iter_count   -- 1
+
+    -- === Test 25: break as the VERY FIRST statement in the loop body ===
+    local immediate_break_iters = 0
+    for i = 1, 10 do
+		break
+    end
+    number_result25 = immediate_break_iters   -- 0
+
+    -- === Test 26: Three-level-deep nested numeric for loops ===
+    local triple_for_count = 0
+    for x = 1, 2 do
+        for y = 1, 2 do
+            for z = 1, 2 do
+                triple_for_count = triple_for_count + 1
+            end
+        end
+    end
+    number_result26 = triple_for_count   -- 2*2*2 = 8
 end
 
 function main()
@@ -221,17 +246,20 @@ function main()
     print(000, 220, "Test 10 - Float bounds: " ..    number_result10)
     print(000, 240, "Test 11 - Expr bounds: " ..     number_result11)
     print(000, 260, "Test 12 - Var step: " ..        number_result12)
-    print(200, 020, "Test 13 - Break: " ..           number_result13)
-    print(200, 040, "Test 14 - Early break: " ..     number_result14)
-    print(200, 060, "Test 15 - Return: " ..          number_result15)
-    print(200, 080, "Test 16 - Nested break: " ..   number_result16)
-    print(200, 100, "Test 17 - Outer break: " ..    number_result17)
-    print(200, 120, "Test 18 - Neg step: " ..       number_result18)
-    print(200, 140, "Test 19 - Large range: " ..     number_result19)
-    print(200, 160, "Test 20 - Step 3: " ..         number_result20)
-    print(200, 180, "Test 21 - Frac step: " ..      number_result21)
-    print(200, 200, "Test 22 - Expr step: " ..      number_result22)
-    print(200, 220, "Test 23 - Mod loop var: " ..   number_result23)
+    print(320, 020, "Test 13 - Break: " ..           number_result13)
+    print(320, 040, "Test 14 - Early break: " ..     number_result14)
+    print(320, 060, "Test 15 - Return: " ..          number_result15)
+    print(320, 080, "Test 16 - Nested break: " ..   number_result16)
+    print(320, 100, "Test 17 - Outer break: " ..    number_result17)
+    print(320, 120, "Test 18 - Neg step: " ..       number_result18)
+    print(320, 140, "Test 19 - Large range: " ..     number_result19)
+    print(320, 160, "Test 20 - Step 3: " ..         number_result20)
+    print(320, 180, "Test 21 - Frac step: " ..      number_result21)
+    print(320, 200, "Test 22 - Expr step: " ..      number_result22)
+    print(320, 220, "Test 23 - Mod loop var: " ..   number_result23)
+    print(320, 240, "Test 24 - Single iter: " ..    number_result24)
+    print(320, 260, "Test 25 - Immediate break: " .. number_result25)
+    print(320, 280, "Test 26 - Triple nested: " ..  number_result26)
 end
 
 --[[
@@ -261,5 +289,8 @@ number_result20: 18.0000
 number_result21: 5.0000
 number_result22: 22.0000
 number_result23: 15.0000
+number_result24: 1.0000
+number_result25: 0.0000
+number_result26: 8.0000
 
 --]]

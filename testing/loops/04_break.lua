@@ -1,9 +1,9 @@
 --#title "v32lua break statement unit test"
 --@ Vircon32 Lua Break Statement Unit Test
---@ Tests 'break' inside while loops, numeric for loops, and generic for
---@ loops, including conditional breaks and nested-loop scoping (break
---@ only exits its own innermost loop). Results are stored in global
---@ variables for automated memory scraping.
+--@ Tests 'break' inside while loops, numeric for loops, generic for
+--@ loops, and repeat/until loops, including conditional breaks and
+--@ nested-loop scoping (break only exits its own innermost loop).
+--@ Results are stored in global variables for automated memory scraping.
 
 function test_break()
     -- === Test 00: break in a while loop, unconditional after a count ===
@@ -97,23 +97,80 @@ function test_break()
         end
     end
     number_result09 = while_passes   -- 2 -- outer while completed both passes
+
+    -- === Test 07: break as the VERY FIRST statement in a loop body -- ===
+    -- === across every loop type -- confirms zero prior work happens ===
+    local while_immediate = 0
+    while true do
+        break
+    end
+    number_result10 = while_immediate   -- 0
+
+    local for_immediate = 0
+    for i = 1, 10 do
+        break
+    end
+    number_result11 = for_immediate   -- 0
+
+    local genfor_immediate = 0
+    for _, v in ipairs({1, 2, 3}) do
+        break
+    end
+    number_result12 = genfor_immediate   -- 0
+
+    local repeat_immediate = 0
+    repeat
+        break
+    until true
+    number_result13 = repeat_immediate   -- 0
+
+    -- === Test 08: break in a THREE-LEVEL-DEEP MIXED-type nesting -- ===
+    -- === must only exit its own innermost loop, no matter what type ===
+    -- === each level is (numeric-for > while > generic-for here) ===
+    local level1_passes = 0
+    local level2_passes = 0
+    local level3_breaks = 0
+    for lvl1 = 1, 2 do                        -- numeric for (outermost)
+        level1_passes = level1_passes + 1
+        local wcount = 0
+        while wcount < 2 do                   -- while (middle)
+            wcount = wcount + 1
+            level2_passes = level2_passes + 1
+            for _, v in ipairs({1, 2, 3}) do   -- generic for (innermost)
+                if v == 2 then
+                    level3_breaks = level3_breaks + 1
+                    break
+                end
+            end
+        end
+    end
+    number_result14 = level1_passes   -- 2 -- outer for ran to completion
+    number_result15 = level2_passes   -- 4 -- 2 outer * 2 middle passes
+    number_result16 = level3_breaks   -- 4 -- innermost broke every single pass
 end
 
 function main()
     ioports.gpu.clear("black")
     test_break()
 
-    print(000, 00,  "--- Break Statement Test ---")
-    print(000, 020, "Test 00 - While count: " ..       number_result00)
-    print(000, 040, "Test 01 - While sum: " ..         number_result01)
-    print(000, 060, "Test 01 - While break val: " ..   number_result02)
-    print(000, 080, "Test 02 - Numeric for sum: " ..   number_result03)
-    print(000, 100, "Test 03 - Stepped for last: " ..  number_result04)
-    print(000, 120, "Test 04 - Generic for count: " .. number_result05)
-    print(000, 140, "Test 04 - Generic for total: " .. number_result06)
-    print(000, 160, "Test 05 - Outer iterations: " ..  number_result07)
-    print(000, 180, "Test 05 - Inner breaks: " ..      number_result08)
-    print(000, 200, "Test 06 - Mixed nesting: " ..     number_result09)
+    print(  0,   0, "--- Break Statement Test ---")
+    print(  0,  20, "Test 00 - While count: " ..        number_result00)
+    print(  0,  40, "Test 01 - While sum: " ..          number_result01)
+    print(  0,  60, "Test 01 - While break val: " ..    number_result02)
+    print(  0,  80, "Test 02 - Numeric for sum: " ..    number_result03)
+    print(  0, 100, "Test 03 - Stepped for last: " ..   number_result04)
+    print(  0, 120, "Test 04 - Generic for count: " ..  number_result05)
+    print(  0, 140, "Test 04 - Generic for total: " ..  number_result06)
+    print(  0, 160, "Test 05 - Outer iterations: " ..   number_result07)
+    print(  0, 180, "Test 05 - Inner breaks: " ..       number_result08)
+    print(  0, 200, "Test 06 - Mixed nesting: " ..      number_result09)
+    print(  0, 220, "Test 07 - Immediate (while): " ..  number_result10)
+    print(  0, 240, "Test 07 - Immediate (for): " ..    number_result11)
+    print(  0, 260, "Test 07 - Immediate (genfor): " .. number_result12)
+    print(320,  20, "Test 07 - Immediate (repeat): " .. number_result13)
+    print(320,  40, "Test 08 - Level1 passes: " ..      number_result14)
+    print(320,  60, "Test 08 - Level2 passes: " ..      number_result15)
+    print(320,  80, "Test 08 - Level3 breaks: " ..      number_result16)
 end
 
 --[[
@@ -129,5 +186,12 @@ number_result06: 60.0000
 number_result07: 3.0000
 number_result08: 3.0000
 number_result09: 2.0000
+number_result10: 0.0000
+number_result11: 0.0000
+number_result12: 0.0000
+number_result13: 0.0000
+number_result14: 2.0000
+number_result15: 4.0000
+number_result16: 4.0000
 
 --]]

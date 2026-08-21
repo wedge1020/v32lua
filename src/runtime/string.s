@@ -41,9 +41,18 @@ __builtin_strcat:
     IEQ  R3, BOXED_RAMSTRING
     JT   R3, __strcat_left_is_string
 
-    ;; Not a string - coerce it via __builtin_tostring
+    ;; Not a string - coerce it via the "A" scratch-buffer tostring
+    ;; variant (was __builtin_tostring). The result only needs to
+    ;; survive long enough for the length-measure + copy phases below
+    ;; -- it never becomes an independent Lua value -- so it doesn't
+    ;; need a fresh permanent allocation. See __builtin_ftoa_scratch_a
+    ;; and __builtin_ftoa_scratch_b's header comments for why LEFT
+    ;; specifically uses "A" and RIGHT (below) uses "B": both coerced
+    ;; operands must remain valid simultaneously here, since this
+    ;; routine measures both lengths before it ever allocates its own
+    ;; final buffer.
     PUSH R1
-    CALL __builtin_tostring  ; Returns string in R0
+    CALL __builtin_tostring_scratch_a  ; Returns string in R0
     IADD SP, 1
     MOV  R1, R0              ; R1 = string version
     MOV  [BP+3], R1          ; Replace left operand on stack
@@ -59,16 +68,21 @@ __strcat_left_is_string:
     IEQ  R3, BOXED_RAMSTRING
     JT   R3, __strcat_right_is_string
 
-    ;; Not a string - coerce it via __builtin_tostring
+    ;; Not a string - coerce it via the "B" scratch-buffer tostring
+    ;; variant (was __builtin_tostring). Must be the INDEPENDENT "B"
+    ;; buffer, not "A" -- if LEFT was also just coerced above, its
+    ;; result is still sitting in scratch buffer "A" and hasn't been
+    ;; copied into strcat's own final buffer yet (that happens further
+    ;; below); reusing "A" here would silently overwrite it.
     PUSH R1
-    CALL __builtin_tostring  ; Returns string in R0
+    CALL __builtin_tostring_scratch_b  ; Returns string in R0
     IADD SP, 1
     MOV  R1, R0              ; R1 = string version
     MOV  [BP+2], R1          ; Replace right operand on stack
 
 __strcat_right_is_string:
 
-    ;; === Original string concatenation logic continues ===
+    ;; === Original string concatenation logic continues, unchanged ===
     MOV  R0, [BP+3]          ; Load Left tagged pointer
     CALL __unbox_string      ; R0 = raw hardware address (ROM or RAM)
     MOV  R7, R0              ; Cache unboxed Left pointer in R7
@@ -433,13 +447,64 @@ __string_len_done:
     RET
 
 ;; ---------------------------------------------------------------------------
-;; Universal Type Serializer: Converts any tagged value to a String pointer 
-;; Incoming Stack: [BP+2] = Target Value 
+;; Built-in: tostring() -- converts any Lua value to a string.
+;;
+;; This is the normal, persistent variant: a float argument gets a FRESH,
+;; permanent heap allocation via __builtin_ftoa -- correct and necessary
+;; here, since tostring()'s return value genuinely becomes a Lua string
+;; the program may keep, store, or pass around indefinitely.
+;;
+;; Where the resulting string is instead immediately consumed (copied
+;; elsewhere, or displayed) and never needed again, use
+;; __builtin_tostring_scratch_a or _scratch_b below instead.
+;;
+;; Incoming Stack: [BP+2] = value to convert
+;; Returns: R0 = Tagged (boxed) string
 ;; ---------------------------------------------------------------------------
 __builtin_tostring:
     PUSH  BP
     MOV   BP, SP
+    MOV   R5, 0                ; mode 0: normal malloc'd, persistent buffer
+    JMP   __tostring_shared_body
 
+;; ---------------------------------------------------------------------------
+;; Built-in: tostring(), SHARED SCRATCH variant "A".
+;;
+;; Use instead of __builtin_tostring wherever the resulting string is
+;; immediately consumed and never needs to survive as an independent Lua
+;; value. Non-float results (nil, true/false, pass-through strings,
+;; table/function name constants) are already ROM constants or
+;; pass-throughs with no allocation at all, so this only actually changes
+;; behavior for the float case -- see __builtin_ftoa_scratch_a for the
+;; full rationale. Used by print()'s implicit coercion and
+;; __builtin_strcat's LEFT-operand coercion.
+;; ---------------------------------------------------------------------------
+__builtin_tostring_scratch_a:
+    PUSH  BP
+    MOV   BP, SP
+    MOV   R5, 1                ; mode 1: shared scratch buffer A
+    JMP   __tostring_shared_body
+
+;; ---------------------------------------------------------------------------
+;; Built-in: tostring(), SHARED SCRATCH variant "B" -- second independent
+;; buffer, used only by __builtin_strcat's RIGHT-operand coercion. See
+;; __builtin_ftoa_scratch_b for why a second buffer is needed.
+;; ---------------------------------------------------------------------------
+__builtin_tostring_scratch_b:
+    PUSH  BP
+    MOV   BP, SP
+    MOV   R5, 2                ; mode 2: shared scratch buffer B
+    ;; falls straight through into the shared body below
+
+;; ===========================================================================
+;; Shared dispatch body -- reached from all three entry points above.
+;; R5 holds the mode (0/1/2) selected by whichever entry point was called.
+;; None of the primitive/string/table/function checks below touch R1, R3,
+;; R4, or R6 in a way that matters across this call, and NONE of them
+;; touch R5 at all, so the mode flag survives intact all the way down to
+;; the float branch at the bottom, where it's finally read.
+;; ===========================================================================
+__tostring_shared_body:
     MOV   R1, [BP+2]          ; Load argument
 
     ;; === PRIMITIVE CHECKS FIRST (exact value matches) ===
@@ -485,12 +550,40 @@ __tostring_check_other:
     IEQ   R3, BOXED_FUNCTION
     JT    R3, __tostring_function
 
-    ;; Fall through: It's a float
+    ;; --- Fall through: it's a float. Dispatch to the correct ftoa ---
+    ;; --- variant based on the mode this entry point selected.     ---
+    MOV   R6, R5
+    IEQ   R6, 1
+    JT    R6, __tostring_use_scratch_a
+    MOV   R6, R5
+    IEQ   R6, 2
+    JT    R6, __tostring_use_scratch_b
+
+    ;; mode 0: normal malloc'd, persistent buffer
     PUSH  R1
     MOV   R0, -1
     PUSH  R0             ; default precision (6 digits, or omitted if whole)
     CALL  __builtin_ftoa
     IADD  SP, 2
+    JMP   __tostring_float_done
+
+__tostring_use_scratch_a:
+    PUSH  R1
+    MOV   R0, -1
+    PUSH  R0
+    CALL  __builtin_ftoa_scratch_a
+    IADD  SP, 2
+    JMP   __tostring_float_done
+
+__tostring_use_scratch_b:
+    PUSH  R1
+    MOV   R0, -1
+    PUSH  R0
+    CALL  __builtin_ftoa_scratch_b
+    IADD  SP, 2
+    ;; falls straight through
+
+__tostring_float_done:
     OR    R0, BOXED_RAMSTRING
     JMP   __tostring_done
 
@@ -534,17 +627,6 @@ __tostring_done:
     POP   BP
     RET
 
-__string_format_table_address:
-    PUSH BP
-    MOV  BP, SP
-
-    MOV  R0, __const_str_table
-    OR   R0, BOXED_ROMSTRING      ; Box raw pointer as a valid Lua String
-
-    MOV  SP, BP
-    POP  BP
-    RET
-
 ;; ---------------------------------------------------------------------------
 ;; Built-in: Float to ASCII (Full Floating Point Support)
 ;; Incoming Stack: [BP+3] = Raw IEEE754 Float (value to convert)
@@ -561,6 +643,13 @@ __string_format_table_address:
 ;;                          Precision is clamped to a max of 17.
 ;; Returns: R0 = Raw Heap Pointer to null-terminated ASCII string
 ;; Registers: R0-R13 (R14/BP and R15/SP preserved)
+;;
+;; This allocates a FRESH, permanent 48-word heap block on every call --
+;; correct and necessary when the resulting string genuinely becomes a
+;; Lua value the program may keep (e.g. tostring()'s return value). Where
+;; the result is instead immediately copied elsewhere or displayed and
+;; never needed again, use __builtin_ftoa_scratch_a or _scratch_b below
+;; instead -- see their own header comments for the rationale.
 ;; ---------------------------------------------------------------------------
 __builtin_ftoa:
     PUSH BP
@@ -579,6 +668,105 @@ __builtin_ftoa:
     JT   R4, __oom_handler
 
     MOV  R2, R0                 ; R2 = locked-in base pointer
+    JMP  __ftoa_shared_body
+
+;; ---------------------------------------------------------------------------
+;; Built-in: Float to ASCII, SHARED SCRATCH variant "A".
+;;
+;; Use instead of __builtin_ftoa wherever the resulting string is
+;; immediately consumed (copied elsewhere, or displayed) and never needs
+;; to survive as an independent, addressable Lua value in its own right.
+;; Currently used by: string.format()'s numeric specifiers, print()'s
+;; implicit number-to-string coercion, and __builtin_strcat's LEFT-operand
+;; coercion. Each of these only ever needs ONE buffer alive at a time --
+;; every result is fully copied out or displayed before the next coercion
+;; can happen -- so sharing this one buffer across all three is safe.
+;;
+;; Costs exactly one 48-word allocation for the ENTIRE run of the cart --
+;; made once, on the first call, and reused forever after -- instead of a
+;; fresh 48-word block that becomes permanently unreachable garbage on
+;; every single call. This runtime has no garbage collector, so that
+;; memory could never be reclaimed any other way: a HUD that calls
+;; string.format() or print() with a number once per frame (completely
+;; ordinary for a TIC-80 cart) would otherwise exhaust available RAM
+;; within minutes of continuous play.
+;;
+;; Incoming Stack / Returns / Registers: identical to __builtin_ftoa,
+;; EXCEPT the returned pointer is the SAME shared buffer every time -- the
+;; caller must finish using it (copy it out, or display it) before this
+;; routine (or its indirect callers, e.g. __builtin_tostring_scratch_a) is
+;; called again.
+;; ---------------------------------------------------------------------------
+__builtin_ftoa_scratch_a:
+    PUSH BP
+    MOV  BP, SP
+
+    MOV  R0, [FTOA_SCRATCH_PTR_A]
+    IEQ  R0, 0
+    JF   R0, __ftoa_scratch_a_have_buffer
+
+    ;; First call ever: allocate the shared buffer once, exactly as
+    ;; __builtin_ftoa does, and cache its address for every future call.
+    MOV  R0, 48
+    PUSH R0
+    CALL __malloc
+    IADD SP, 1
+
+    MOV  R4, R0
+    IEQ  R4, 0
+    JT   R4, __oom_handler
+
+    MOV  [FTOA_SCRATCH_PTR_A], R0
+
+__ftoa_scratch_a_have_buffer:
+    MOV  R2, [FTOA_SCRATCH_PTR_A]
+    JMP  __ftoa_shared_body
+
+;; ---------------------------------------------------------------------------
+;; Built-in: Float to ASCII, SHARED SCRATCH variant "B" -- a SECOND,
+;; independent scratch buffer.
+;;
+;; Exists only because __builtin_strcat needs two coerced operands to
+;; remain valid simultaneously: strcat measures BOTH operand lengths
+;; before allocating its own final buffer, so if both sides need
+;; coercing, the left-coerced string (built via scratch buffer "A") must
+;; remain valid while the right side is being coerced too -- reusing
+;; buffer "A" for the right side as well would silently overwrite the
+;; left operand's still-needed content. Used ONLY by __builtin_strcat's
+;; RIGHT-operand coercion.
+;;
+;; Otherwise identical in every respect to __builtin_ftoa_scratch_a.
+;; ---------------------------------------------------------------------------
+__builtin_ftoa_scratch_b:
+    PUSH BP
+    MOV  BP, SP
+
+    MOV  R0, [FTOA_SCRATCH_PTR_B]
+    IEQ  R0, 0
+    JF   R0, __ftoa_scratch_b_have_buffer
+
+    MOV  R0, 48
+    PUSH R0
+    CALL __malloc
+    IADD SP, 1
+
+    MOV  R4, R0
+    IEQ  R4, 0
+    JT   R4, __oom_handler
+
+    MOV  [FTOA_SCRATCH_PTR_B], R0
+
+__ftoa_scratch_b_have_buffer:
+    MOV  R2, [FTOA_SCRATCH_PTR_B]
+    ;; falls straight through into the shared body below
+
+;; ===========================================================================
+;; Shared conversion body -- reached from all three entry points above via
+;; JMP/fallthrough, each having set R2 to that variant's buffer base
+;; pointer first. Everything from here down is UNCHANGED from the
+;; original __builtin_ftoa's own conversion algorithm.
+;; ===========================================================================
+__ftoa_shared_body:
     MOV  R9, R2                 ; R9 = write head
 
     MOV  R3, [BP+3]             ; R3 = value
@@ -1124,7 +1312,10 @@ __string_format_handle_di:
                                   ; feeds raw integer bits into ftoa's float ops)
     MOV  R2, 0
     PUSH R2                     ; force precision 0: round to integer, no '.'
-    CALL __builtin_ftoa
+    CALL __builtin_ftoa_scratch_a  ; was __builtin_ftoa -- result is fully
+                                     ; copied out by __string_format_copy_string
+                                     ; below and never touched again, so it
+                                     ; never needs its own permanent allocation
     IADD SP, 2
     POP  R6
     POP  R5
@@ -1144,7 +1335,7 @@ __string_format_handle_u:
     PUSH R0
     MOV  R2, 0
     PUSH R2
-    CALL __builtin_ftoa
+    CALL __builtin_ftoa_scratch_a  ; was __builtin_ftoa
     IADD SP, 2
     POP  R6
     POP  R5
@@ -1163,7 +1354,7 @@ __string_format_handle_f:
     PUSH R6
     PUSH R0                     ; value
     PUSH R12                    ; precision parsed from the format string (-1 if none)
-    CALL __builtin_ftoa
+    CALL __builtin_ftoa_scratch_a  ; was __builtin_ftoa
     IADD SP, 2
     POP  R6
     POP  R5
@@ -1186,7 +1377,7 @@ __string_format_handle_efg:
     PUSH R6
     PUSH R0
     PUSH R12
-    CALL __builtin_ftoa
+    CALL __builtin_ftoa_scratch_a  ; was __builtin_ftoa
     IADD SP, 2
     POP  R6
     POP  R5

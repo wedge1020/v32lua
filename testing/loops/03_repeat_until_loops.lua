@@ -185,30 +185,58 @@ function test_repeat_until_loops()
     end
     number_result16 = first_multiple_of_7_over(10) -- 14
     __rawasm__("__debug13:")
+
+    -- === Test 14: break as the VERY FIRST statement in the loop body ===
+    local immediate_break_count2 = 0
+    repeat
+		break
+    until true
+    number_result17 = immediate_break_count2   -- 0
+    __rawasm__("__debug14:")
+
+    -- === Test 15: Three-level-deep nested repeat loops ===
+    local triple_repeat_count = 0
+    local ra = 1
+    repeat
+        local rb = 1
+        repeat
+            local rc = 1
+            repeat
+                triple_repeat_count = triple_repeat_count + 1
+                rc = rc + 1
+            until rc > 2
+            rb = rb + 1
+        until rb > 2
+        ra = ra + 1
+    until ra > 2
+    number_result18 = triple_repeat_count   -- 2*2*2 = 8
+    __rawasm__("__debug15:")
 end
 
 function main()
     ioports.gpu.clear("black")
     test_repeat_until_loops()
 
-    print(000, 00,  "--- Repeat/Until Loops Test ---")
-    print(000, 020, "Test 00 - Count up sum: " ..        number_result00)
-    print(000, 040, "Test 01 - Runs once: " ..           number_result01)
-    print(000, 060, "Test 01 - Final x: " ..             number_result02)
-    print(000, 080, "Test 02 - Body-scope iters: " ..    number_result03)
-    print(000, 100, "Test 02 - Body-scope n: " ..        number_result04)
-    print(000, 120, "Test 03 - Break count: " ..         number_result05)
-    print(000, 140, "Test 04 - Nested total: " ..        number_result06)
-    print(000, 160, "Test 05 - AND cond: " ..            number_result07)
-    print(000, 180, "Test 06 - OR cond + break: " ..     number_result08)
-    print(000, 200, "Test 07 - Func in cond: " ..        number_result09)
-    print(000, 220, "Test 08 - Until true: " ..          number_result10)
-    print(000, 240, "Test 09 - Outer passes: " ..        number_result11)
-    print(000, 260, "Test 09 - Inner breaks: " ..        number_result12)
-    print(200, 020, "Test 10 - Mixed (for-in-repeat): " .. number_result13)
-    print(200, 040, "Test 11 - Mixed (repeat-in-for): " .. number_result14)
-    print(200, 060, "Test 12 - Table drain: " ..         number_result15)
-    print(200, 080, "Test 13 - Return unwind: " ..       number_result16)
+    print(  0,   0,  "--- Repeat/Until Loops Test ---")
+    print(  0,  20, "Test 00 - Count up sum: " ..        number_result00)
+    print(  0,  40, "Test 01 - Runs once: " ..           number_result01)
+    print(  0,  60, "Test 01 - Final x: " ..             number_result02)
+    print(  0,  80, "Test 02 - Body-scope iters: " ..    number_result03)
+    print(  0, 100, "Test 02 - Body-scope n: " ..        number_result04)
+    print(  0, 120, "Test 03 - Break count: " ..         number_result05)
+    print(  0, 140, "Test 04 - Nested total: " ..        number_result06)
+    print(  0, 160, "Test 05 - AND cond: " ..            number_result07)
+    print(  0, 180, "Test 06 - OR cond + break: " ..     number_result08)
+    print(  0, 200, "Test 07 - Func in cond: " ..        number_result09)
+    print(  0, 220, "Test 08 - Until true: " ..          number_result10)
+    print(  0, 240, "Test 09 - Outer passes: " ..        number_result11)
+    print(  0, 260, "Test 09 - Inner breaks: " ..        number_result12)
+    print(320,  20, "Test 10 - Mixed (for-in-repeat): " .. number_result13)
+    print(320,  40, "Test 11 - Mixed (repeat-in-for): " .. number_result14)
+    print(320,  60, "Test 12 - Table drain: " ..         number_result15)
+    print(320,  80, "Test 13 - Return unwind: " ..       number_result16)
+    print(320, 100, "Test 14 - Immediate break: " ..     number_result17)
+    print(320, 120, "Test 15 - Triple nested: " ..       number_result18)
 end
 
 --[[
@@ -231,5 +259,7 @@ number_result13: 2.0000
 number_result14: 6.0000
 number_result15: 3.0000
 number_result16: 14.0000
+number_result17: 0.0000
+number_result18: 8.0000
 
 --]]

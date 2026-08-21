@@ -1,7 +1,7 @@
 #include "v32lua.h"
 
 // Address 0 is reserved for the HEAP_POINTER variable itself!
-int next_ram_address = 1;
+int next_ram_address = 3;
 
 CompilerConfig o_config;
 

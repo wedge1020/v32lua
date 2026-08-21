@@ -274,37 +274,76 @@ function test_while_loops()
     end
     number_result23 = mod_cond_count
 	__rawasm__("__debug23:")
+
+    -- === Test 24: Condition false on the VERY FIRST check -- body ===
+    -- === must never execute ===
+    local never_ran = 0
+    local zero_start = 100
+    while zero_start < 0 do
+        never_ran = never_ran + 1
+    end
+    number_result24 = never_ran   -- 0
+	__rawasm__("__debug24:")
+
+    -- === Test 25: break as the VERY FIRST statement in the loop body ===
+    local immediate_break_count = 0
+    while true do
+        break
+    end
+    number_result25 = immediate_break_count   -- 0
+	__rawasm__("__debug25:")
+
+    -- === Test 26: Three-level-deep nested while loops ===
+    local level1 = 1
+    local triple_count = 0
+    while level1 <= 2 do
+        local level2 = 1
+        while level2 <= 2 do
+            local level3 = 1
+            while level3 <= 2 do
+                triple_count = triple_count + 1
+                level3 = level3 + 1
+            end
+            level2 = level2 + 1
+        end
+        level1 = level1 + 1
+    end
+    number_result26 = triple_count   -- 2*2*2 = 8
+	__rawasm__("__debug26:")
 end
 
 function main()
     ioports.gpu.clear("black")
     test_while_loops()
 
-    print(000, 00,  "--- While Loops Expanded Test ---")
-    print(000, 020, "Test 00 - Count up sum: " ..    number_result00)
-    print(000, 040, "Test 01 - Break at 3: " ..      number_result01)
-    print(000, 060, "Test 02 - Countdown iter: " ..   number_result02)
-    print(000, 080, "Test 03 - Nested sum: " ..     number_result03)
-    print(000, 100, "Test 04 - AND cond: " ..        number_result04)
-    print(000, 120, "Test 05 - OR cond: " ..         number_result05)
-    print(000, 140, "Test 06 - Func call: " ..       number_result06)
-    print(000, 160, "Test 07 - Side effect: " ..      number_result07)
-    print(000, 180, "Test 08 - While true: " ..      number_result08)
-    print(000, 200, "Test 09 - Empty body: " ..      number_result09)
-    print(000, 220, "Test 10 - No body: " ..        number_result10)
-    print(000, 240, "Test 11 - Multi break: " ..     number_result11)
-    print(000, 260, "Test 12 - Inner break: " ..     number_result12)
-    print(200, 020, "Test 13 - Outer break: " ..     number_result13)
-    print(200, 040, "Test 14 - Not equal: " ..      number_result14)
-    print(200, 060, "Test 15 - Less/equal: " ..     number_result15)
-    print(200, 080, "Test 16 - Greater/equal: " ..   number_result16)
-    print(200, 100, "Test 17 - Str length: " ..      number_result17)
-    print(200, 120, "Test 18 - Bool flag: " ..      number_result18)
-    print(200, 140, "Test 19 - Nil check: " ..      number_result19)
-    print(200, 160, "Test 20 - Arithmetic: " ..      number_result20)
-    print(200, 180, "Test 21 - Modulo: " ..         number_result21)
-    print(200, 200, "Test 22 - Table iter: " ..      number_result22)
-    print(200, 220, "Test 23 - Mod in cond: " ..     number_result23)
+    print(  0,   0, "--- While Loops Expanded Test ---")
+    print(  0,  20, "Test 00 - Count up sum: " ..    number_result00)
+    print(  0,  40, "Test 01 - Break at 3: " ..      number_result01)
+    print(  0,  60, "Test 02 - Countdown iter: " ..   number_result02)
+    print(  0,  80, "Test 03 - Nested sum: " ..     number_result03)
+    print(  0, 100, "Test 04 - AND cond: " ..        number_result04)
+    print(  0, 120, "Test 05 - OR cond: " ..         number_result05)
+    print(  0, 140, "Test 06 - Func call: " ..       number_result06)
+    print(  0, 160, "Test 07 - Side effect: " ..      number_result07)
+    print(  0, 180, "Test 08 - While true: " ..      number_result08)
+    print(  0, 200, "Test 09 - Empty body: " ..      number_result09)
+    print(  0, 220, "Test 10 - No body: " ..        number_result10)
+    print(  0, 240, "Test 11 - Multi break: " ..     number_result11)
+    print(  0, 260, "Test 12 - Inner break: " ..     number_result12)
+    print(320,  20, "Test 13 - Outer break: " ..     number_result13)
+    print(320,  40, "Test 14 - Not equal: " ..      number_result14)
+    print(320,  60, "Test 15 - Less/equal: " ..     number_result15)
+    print(320,  80, "Test 16 - Greater/equal: " ..   number_result16)
+    print(320, 100, "Test 17 - Str length: " ..      number_result17)
+    print(320, 120, "Test 18 - Bool flag: " ..      number_result18)
+    print(320, 140, "Test 19 - Nil check: " ..      number_result19)
+    print(320, 160, "Test 20 - Arithmetic: " ..      number_result20)
+    print(320, 180, "Test 21 - Modulo: " ..         number_result21)
+    print(320, 200, "Test 22 - Table iter: " ..      number_result22)
+    print(320, 220, "Test 23 - Mod in cond: " ..     number_result23)
+    print(320, 240, "Test 24 - Zero iterations: " .. number_result24)
+    print(320, 260, "Test 25 - Immediate break: " .. number_result25)
+    print(320, 280, "Test 26 - Triple nested: " ..   number_result26)
 end
 
 --[[
@@ -334,5 +373,8 @@ number_result20: 5.0000
 number_result21: 3.0000
 number_result22: 15.0000
 number_result23: 15.0000
+number_result24: 0.0000
+number_result25: 0.0000
+number_result26: 8.0000
 
 --]]

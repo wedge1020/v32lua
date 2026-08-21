@@ -538,6 +538,8 @@ int   emit_variable_map (void)
     fprintf (out(), "%%define  BOXED_CLOSURE_FLAG       0x00200000\n");
     fprintf (out(), "%%define  CLOSURE_ADDR_MASK        0x001FFFFF\n");
     fprintf (out(), "%%define  HEAP_POINTER             0x00000000\n");
+    fprintf (out(), "%%define  FTOA_SCRATCH_PTR_A       0x00000001\n");
+    fprintf (out(), "%%define  FTOA_SCRATCH_PTR_B       0x00000002\n");
 
     if (runtime_req.needs_tic80)
     {

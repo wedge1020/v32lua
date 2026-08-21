@@ -530,18 +530,69 @@ void node_for_generic(ASTNode *node)
     // Store new key for next iteration
     emit_asm("MOV %s, R0        ; Save new key for next iteration\n", access_key);
 
-    // Assign loop variables from R0/R2/R3
+    // -----------------------------------------------------------------
+    // FIX: assign loop variables from R0/R2/R3 THROUGH emit_initialize_
+    // local(), not a raw MOV into get_variable_access_string()'s slot.
+    //
+    // Two separate problems with the raw MOV this replaces:
+    //
+    //   1. It completely ignored sym->is_boxed. get_variable_access_
+    //      string() only ever returns a variable's SLOT address -- it
+    //      has no idea whether that slot holds a raw value or a BOX
+    //      POINTER (for a variable captured by a nested closure); that
+    //      distinction is applied by the emit_load_variable()/emit_
+    //      store_variable()/emit_initialize_local() layer, which this
+    //      code bypassed entirely. For a boxed loop variable, the raw
+    //      MOV overwrote the box POINTER itself with the raw iteration
+    //      value -- not the box's contents. Every later read of that
+    //      variable (including from inside the closure capturing it)
+    //      then dereferenced that raw value as if it were a valid heap
+    //      address, corrupting whatever memory happened to sit there.
+    //      (Confirmed directly: v32sim faulted with a stack-overflow
+    //      trap inside the closure's own body, at the exact `MOV R5,
+    //      [R5]` dereference of a corrupted "box pointer" that was
+    //      actually just the raw captured value's own NaN-tagged bit
+    //      pattern being read as a memory address.)
+    //
+    //   2. Even routed through emit_store_variable() (write through the
+    //      EXISTING box) instead, every closure created across every
+    //      iteration would still alias the SAME one box -- exactly the
+    //      bug node_for_numeric's own CLOSURE_NOTE already documents
+    //      and fixes for its index variable, via emit_initialize_local()
+    //      instead of emit_store_variable(): a closure created in
+    //      iteration N must keep seeing iteration N's value even after
+    //      later iterations run, which requires a FRESH box every
+    //      iteration, not a shared one.
+    //
+    // emit_initialize_local() itself internally calls __malloc for any
+    // BOXED variable, which clobbers R0-R3 and R6 (see its own comment).
+    // With up to 3 loop variables all sourced from R0/R2/R3, boxing the
+    // FIRST one would destroy the raw values still waiting in R2/R3 for
+    // the second and third -- so PASS 1 spills all of them to the
+    // hardware stack in one unbroken block BEFORE any per-variable
+    // store/box logic runs, and PASS 2 pops them back one at a time,
+    // right before each is actually consumed. Same two-pass shape as
+    // node_return()'s and node_multiple_assignment()'s equivalent fixes.
+    // -----------------------------------------------------------------
     int raw_regs[3] = {0, 2, 3};
-    for (int i = 0; i < var_count && i < 3; i++) {
-        char var_access[128];
-        get_variable_access_string(var_names[i], var_access);
-        emit_asm("MOV %s, R%d        ; Assign to loop variable '%s'\n",
-                 var_access, raw_regs[i], var_names[i]);
+    int used_count = (var_count < 3) ? var_count : 3;
+
+    for (int i = 0; i < used_count; i++) {
+        emit_asm("PUSH R%d ; spill loop variable %d's raw value (protect across possible boxing __malloc)\n",
+                 raw_regs[i], i);
     }
 
-    // R2/R3 have now been fully consumed (saved to memory) -- safe to release.
+    // R2/R3 have now been fully consumed (spilled to the hardware stack)
+    // -- safe to release the lock taken above.
     unlock_register(2);
     unlock_register(3);
+
+    for (int i = used_count - 1; i >= 0; i--) {
+        int tmp_reg = allocate_register();
+        emit_asm("POP R%d ; restore loop variable %d's raw value\n", tmp_reg, i);
+        emit_initialize_local(var_syms[i], tmp_reg);
+        unlock_register(tmp_reg);
+    }
 
     // ---------------------------------------------------------------------
     // STEP 6: Execute Loop Body
