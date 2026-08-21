@@ -24,52 +24,72 @@
 ;;
 ;; Clobbers: R0-R5
 ;; ===========================================================================
+;; ===========================================================================
+;; Built-in: math.random()
+;;
+;; Generates pseudorandom numbers using Vircon32's RNG hardware port.
+;;
+;; Behavior:
+;;   math.random()     -> float in [0, 1)
+;;   math.random(n)    -> integer in [1, n]
+;;   math.random(m, n) -> integer in [m, n]
+;;
+;; Stack on entry:
+;;   [BP+2] = first argument (if any)
+;;   [BP+3] = second argument (if any)
+;;
+;; Returns:
+;;   R0 = random value as Lua float
+;;
+;; Clobbers: R0-R6
+;; ===========================================================================
 __builtin_random:
-    PUSH BP
-    MOV  BP, SP
+    PUSH  BP
+    MOV   BP, SP
 
     ;; --- Read RNG value from hardware port 0x100 ---
-    IN   R0, RNG_CurrentValue   ; R0 = raw random integer from RNG
+    IN    R0, RNG_CurrentValue   ; R0 = raw random integer from RNG
 
-    ;; --- Check argument count using scratch register R5 ---
-    MOV  R2, BP
-    IADD R2, 2                ; R2 = address of first arg slot
+    ;; --- FIXED: Proper argument count detection ---
+    ;; Check if first argument slot is a valid number (not NaN-boxed)
+    MOV   R4, [BP+2]           ; Load first arg slot
 
-    MOV  R4, SP
-    IADD R4, 2                ; R4 = top of args
-    MOV  R5, R2
-    ILT  R5, R4
-    JT   R5, _random_0args    ; No args: math.random()
+    MOV   R5, R4
+    AND   R5, NAN_VALUE        ; Mask with NaN tag
+    IEQ   R5, NAN_VALUE
+    JT    R5, _random_0args    ; If NaN-boxed, no arguments
 
-    ;; We have at least 1 argument
-    MOV  R4, [R2]             ; Load first arg
+    ;; Check if second argument slot is a valid number
+    MOV   R5, [BP+3]           ; Load second arg slot
 
-    IADD R2, 1
-    MOV  R5, R2
-    ILT  R5, R4
-    JT   R5, _random_1arg     ; Only 1 arg: math.random(n)
+    MOV   R6, R5
+    AND   R6, NAN_VALUE        ; Mask with NaN tag
+    IEQ   R6, NAN_VALUE
+    JT    R6, _random_1arg      ; If NaN-boxed, only 1 argument
+
+    ;; Special case: [BP+3] == 0 means no second argument
+    ;; (stack initialized to 0 by ISUB SP, N in caller)
+    IEQ   R5, 0
+    JT    R5, _random_1arg      ; Zero = no second argument
 
     ;; We have 2 arguments
-    MOV  R1, [R2]             ; R1 = second arg (n)
-    MOV  R2, [R2-1]           ; R2 = first arg (m)
-    JMP  _random_2args
+    MOV   R1, R5               ; R1 = arg2 (n)
+    MOV   R2, R4               ; R2 = arg1 (m)
+    JMP   _random_2args
 
 ;; --- Case 0: math.random() -> float in [0, 1) ---
 _random_0args:
-    ;; Convert R0 (integer) to float
-    CIF  R0                  ; R0 = float(random_int)
-
-    ;; Scale to [0, 1) range using 0x7FFFFFFF (max 31-bit int) approximation
-    MOV  R1, 2147483647       ; 0x7FFFFFFF = 2^31 - 1
-    CIF  R1
-    FDIV R0, R1              ; R0 = random / max_int (~[0, 1))
-    JMP  _random_done
+    CIF   R0                  ; Convert to float
+    MOV   R1, 2147483647
+    CIF   R1
+    FDIV  R0, R1              ; R0 = random / max_int (~[0, 1))
+    JMP   _random_done
 
 ;; --- Case 1: math.random(n) -> integer in [1, n] ---
 _random_1arg:
     CFI   R4                  ; Convert n to integer
 
-    ;; Triple-redundant safety checks
+    ;; Validate n > 0
     IEQ   R4, 0
     JT    R4, _random_bad
     ILT   R4, 1
@@ -77,41 +97,36 @@ _random_1arg:
     IGT   R4, 0
     JF    R4, _random_bad
 
-    ;; Now we are 100% certain R4 > 0
+    ;; Generate random integer in [1, n]
     IMOD  R0, R4              ; R0 = random % n
     IADD  R0, 1               ; R0 = random % n + 1
     CIF   R0
     JMP   _random_done
 
-_random_bad:
-    MOV   R0, 0               ; Return 0 for any invalid input
+;; --- Case 2: math.random(m, n) -> integer in [m, n] ---
+_random_2args:
+    CFI   R2                  ; Convert m to integer
+    CFI   R1                  ; Convert n to integer
+
+    ;; Compute range: n - m + 1
+    MOV   R3, R1
+    ISUB  R3, R2
+    IADD  R3, 1
+
+    ;; Generate random integer in [m, n]
+    IMOD  R0, R3              ; R0 = random % range
+    IADD  R0, R2              ; R0 = m + (random % range)
     CIF   R0
     JMP   _random_done
 
-;; --- Case 2: math.random(m, n) -> integer in [m, n] ---
-_random_2args:
-    ;; Ensure both are integers
-    CFI  R2
-    CFI  R1
+_random_bad:
+    MOV   R0, 0
+    CIF   R0
+    JMP   _random_done
 
-    ;; Compute range: n - m + 1
-    MOV  R3, R1
-    ISUB R3, R2              ; R3 = n - m
-    IADD R3, 1               ; R3 = n - m + 1
-
-    ;; Compute random % range
-    IMOD R0, R3              ; R0 = random % range
-
-    ;; Add m to get result in [m, n]
-    IADD R0, R2              ; R0 = m + (random % range)
-
-    ;; Convert back to float
-    CIF  R0
-
-;; --- Done: return result in R0 ---
 _random_done:
-    MOV  SP, BP
-    POP  BP
+    MOV   SP, BP
+    POP   BP
     RET
 
 ;; ===========================================================================
