@@ -1,5 +1,8 @@
 #include "v32lua.h"
 
+// ============================================================================
+// FUNCTION DEFINITION: function name(params) ... end
+// ============================================================================
 void  node_function_def (ASTNode *node)
 {
     const char *func_name = node->as.function_def.name;
@@ -156,6 +159,61 @@ void  node_function_def (ASTNode *node)
 
     generate_block(node->as.function_def.body);
     pop_scope();
+
+    // -------------------------------------------------------------------
+    // FIX: Re-establish nil return value(s) for the IMPLICIT ("fell off
+    // the end of the function body without hitting a `return`")
+    // fall-through case.
+    //
+    // R0/R2/R3 were already set to BOXED_NIL once, at function ENTRY
+    // (see "Default implicit return value(s)" above) -- but those same
+    // registers are this compiler's general-purpose scratch registers,
+    // reused throughout the body for completely unrelated intermediate
+    // work (the last operand of a comparison, a table_get result, an
+    // eq/relcmp call's raw boolean result, etc). By the time control
+    // naturally falls off the end of the body, R0/R2 hold whatever
+    // scratch garbage was left behind by the last thing the body
+    // happened to compute -- NOT the nil the entry-point reset intended.
+    //
+    // Every EXPLICIT `return` statement (see node_return(), which emits
+    // "JMP __funcname_return") already loads R0/R2/R3 with its own real
+    // values and jumps directly to the label below, skipping over this
+    // block entirely -- so real return values are completely unaffected
+    // by this reset. Only code that falls through normally (no `return`
+    // was reached on this path) flows into it.
+    //
+    // This was silently corrupting generic-for loops driven by a custom
+    // Lua iterator: a function like `function iter(t,i) ... if cond then
+    // return k,v end end` (no explicit "return nil" on the false path)
+    // was hand-back whatever register garbage its own internal condition
+    // check left behind -- often a boxed `true`/`false` from the last
+    // comparison -- instead of nil. Since that garbage is neither nil
+    // nor false, node_for_generic()'s falsy check on the returned key
+    // never fires, and the loop runs forever instead of terminating.
+    // -------------------------------------------------------------------
+    {
+        SymbolNode *self_sym          = resolve_symbol(func_name);
+        int         self_return_count = (self_sym != NULL) ? self_sym->return_count : 1;
+        if (self_return_count < 1) self_return_count = 1;
+
+        emit_asm("    ; --- Re-establish Nil for IMPLICIT (fall-through) return ---\n");
+        if (self_return_count >= 1) emit_asm("MOV R0, BOXED_NIL ; implicit return: fell off the end without 'return'\n");
+        if (self_return_count >= 2) emit_asm("MOV R2, BOXED_NIL\n");
+        if (self_return_count >= 3) emit_asm("MOV R3, BOXED_NIL\n");
+
+        if (self_return_count > 3) {
+            int pad_reg = allocate_register();
+            emit_asm("MOV R%d, BOXED_NIL ; default value for extra return slots (implicit return)\n", pad_reg);
+
+            for (int idx = 3; idx < self_return_count; idx++) {
+                char slot_access[128];
+                get_extra_return_slot_access(idx - 3, slot_access);
+                emit_asm("MOV %s, R%d\n", slot_access, pad_reg);
+            }
+
+            unlock_register(pad_reg);
+        }
+    }
 
     emit_asm ("__%s_return:\n", func_name);
     emit_asm ("MOV SP, BP\n");

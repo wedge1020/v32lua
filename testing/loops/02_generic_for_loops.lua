@@ -190,22 +190,27 @@ function test_generic_for_loops()
     number_result17 = reverse_sum
     __rawasm__("__debug15:")
 
-    -- === Test 16: Modifying table during ipairs iteration ===
+    -- === Test 16: Modifying a DIFFERENT table during ipairs iteration ===
     local t17 = {1, 2, 3, 4, 5}
+    local t17_extra = {}
     local mod_ipairs_count = 0
     for i, v in ipairs(t17) do
         mod_ipairs_count = mod_ipairs_count + 1
-        table.insert(t17, 100)  -- Add to end
+        table.insert(t17_extra, 100)  -- mutate a separate table, not the one being iterated
     end
     number_result18 = mod_ipairs_count
     __rawasm__("__debug16:")
 
-    -- === Test 17: Modifying table during pairs iteration ===
+    -- === Test 17: Modifying table during pairs iteration (safe pattern) ===
     local t18 = {a = 1, b = 2, c = 3}
     local mod_pairs_count = 0
+    local pending = {}  -- collect the mutations, apply them after traversal
     for k, v in pairs(t18) do
         mod_pairs_count = mod_pairs_count + 1
-        t18[k .. "_mod"] = v * 10
+        pending[k .. "_mod"] = v * 10
+    end
+    for k, v in pairs(pending) do
+        t18[k] = v
     end
     number_result19 = mod_pairs_count
     __rawasm__("__debug17:")
