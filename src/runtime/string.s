@@ -1083,60 +1083,6 @@ __string_byte_done:
     POP   BP
     RET
 
-;; =============================================================================
-;; PATCH: runtime_s.txt -- __builtin_string_char copy-loop destructive-compare bug
-;; =============================================================================
-;;
-;; BUG: __string_char_copy_loop does:
-;;     MOV   R3, [R1]            ; Load current argument
-;;     IEQ   R3, BOXED_NIL       ; Check for terminator
-;;     JT    R3, __string_char_copy_done
-;;     CFI   R3                  ; Convert float to integer (byte value)
-;;
-;; IEQ is destructive -- it overwrites R3 with the 0/1 comparison result,
-;; not the original argument. Since the argument being copied is never
-;; actually BOXED_NIL at this point (that case already took the JT branch
-;; above), R3 becomes the literal value 0 immediately after the check --
-;; and CFI then converts THAT 0, not the real byte value that was just
-;; loaded from [R1]. Every character string.char() copies becomes a null
-;; byte, regardless of the arguments passed in, on every call.
-;;
-;; __string_char_count_loop directly above this has the identical
-;; MOV/IEQ/JT shape and is NOT affected, because it never reuses R3
-;; afterward -- it only needs to know whether the value was the
-;; terminator, not what the value actually was. Only the copy loop, which
-;; needs the real value after the check, has the bug.
-;;
-;; This was found by hand-tracing 01_string_char.lua's actual generated
-;; .asm (confirmed the argument-passing codegen itself is correct for all
-;; 6 test cases -- right push order, right counts, right terminator) down
-;; into the runtime routine, matching the observed symptom exactly: every
-;; result comes back as an empty string, because a 1-character call
-;; writes a null byte then an explicit terminator right after it (an
-;; all-zero buffer), and a 5-character call writes five null bytes
-;; followed by the terminator (still an all-zero buffer, still decodes
-;; as "").
-;;
-;; FIX: use a scratch register for the nil-check, exactly like the
-;; existing scratch-copy idiom already used everywhere a destructively-
-;; compared value needs to survive its own check (e.g.
-;; __builtin_string_byte's "MOV R5, R2; ILT R5, 0" pattern). Applied the
-;; same defensive pattern to the count loop too, even though it isn't
-;; currently broken -- it's the same MOV/IEQ shape, and leaving R3 itself
-;; destroyed by the check is exactly the kind of thing a future edit
-;; could reintroduce a bug into, the same way this one apparently
-;; happened here.
-;;
-;; HOW TO APPLY: replace the existing __builtin_string_char routine
-;; (runtime_s.txt, currently ~3365-3430) with the version below in full.
-;; Only the two loop bodies changed; everything else (allocation, OOM
-;; handling, boxing/return) is unchanged from the original.
-;;
-;; VERIFICATION STATUS: hand-traced against all 6 cases in
-;; 01_string_char.lua, matching the reported all-empty-string symptom
-;; exactly. Not yet re-run through v32sim after the fix -- please confirm.
-;; =============================================================================
-
 ;; ===========================================================================
 ;; Built-in: string.char(b1, b2, ..., bn)
 ;; Creates a new string from byte values
@@ -1157,9 +1103,9 @@ __builtin_string_char:
 
 __string_char_count_loop:
     MOV   R3, [R1]            ; Load current argument from stack
-    MOV   R6, R3               ; scratch copy -- IEQ is destructive (defensive;
-                                ; this loop doesn't reuse R3 afterward today, but
-                                ; keep the same safe idiom as the copy loop below)
+    MOV   R6, R3               ; scratch copy -- IEQ is destructive (this
+                                ; loop doesn't reuse R3 afterward, but keep
+                                ; the same safe idiom as the copy loop below)
     IEQ   R6, BOXED_NIL       ; Check if this is the terminator
     JT    R6, __string_char_count_done
     IADD  R2, 1               ; Increment argument counter
@@ -1176,9 +1122,15 @@ __string_char_count_done:
     IADD  SP, 1
     MOV   R4, R0              ; R4 = heap pointer (preserve for return)
 
-    ;; Handle out-of-memory
-    IEQ   R4, 0
-    JT    R4, __string_char_oom
+    ;; FIXED: use a scratch register (R3) for the OOM check instead of
+    ;; testing R4 directly. R4 must survive intact -- Step 3 immediately
+    ;; below reads it via "MOV R5, R4" to set up the write cursor. R3 is
+    ;; free here: its value from the count loop above is no longer
+    ;; needed, and the copy loop below reassigns it fresh from [R1] before
+    ;; ever reading it again.
+    MOV   R3, R4
+    IEQ   R3, 0
+    JT    R3, __string_char_oom
 
     ;; --- Step 3: Copy byte values from stack to heap ---
     MOV   R1, BP               ; Reset R1 to base pointer
@@ -1187,10 +1139,9 @@ __string_char_count_done:
 
 __string_char_copy_loop:
     MOV   R3, [R1]            ; Load current argument
-    ;; FIXED: use a scratch register (R6) for the nil-check instead of
-    ;; testing R3 directly. IEQ is destructive -- comparing R3 itself
-    ;; would overwrite it with the 0/1 result, and CFI below needs R3 to
-    ;; still hold the REAL argument value, not the check's own result.
+    ;; Use a scratch register (R6) for the nil-check instead of testing R3
+    ;; directly -- IEQ is destructive, and CFI below needs R3 to still
+    ;; hold the REAL argument value, not the check's own result.
     MOV   R6, R3               ; scratch copy for the nil-check
     IEQ   R6, BOXED_NIL       ; Check for terminator
     JT    R6, __string_char_copy_done
