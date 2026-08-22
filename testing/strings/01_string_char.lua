@@ -5,6 +5,7 @@
 --@ A __debugN label follows every individual test.
 
 function test_string_char()
+    __rawasm__("__debug0:")
     string_result1 = string.char(65)  -- Expected: "A"
     __rawasm__("__debug1:")
 
