@@ -554,6 +554,57 @@ void generate_global_setup (ASTNode *node)
         emit_asm ("MOV R0, 4  ; heap start (minimum bound, for nil/false/true)");
     emit_asm ("MOV [HEAP_POINTER], R0");
 
+    // NEW: FTOA_SCRATCH_PTR_A/B MUST start at 0 -- their lazy-allocate
+    // check in __builtin_ftoa_scratch_a/b treats "nonzero" as "a real
+    // buffer already lives here." See the header comment above for what
+    // goes wrong if that's not true. This is two words, unconditionally,
+    // regardless of whether this program ever actually uses tostring()
+    // on a float -- cheap enough that there's no reason to make it
+    // conditional.
+    emit_asm ("MOV R0, 0\n");
+    emit_asm ("MOV [FTOA_SCRATCH_PTR_A], R0 ; must start at 0 -- see generate_global_setup() comment\n");
+    emit_asm ("MOV [FTOA_SCRATCH_PTR_B], R0 ; must start at 0 -- see generate_global_setup() comment\n");
+
+    // NEW: Explicitly nil-initialize every plain (non-function) global.
+    // Previously a global's value before its first assignment was
+    // whatever raw bits already happened to be sitting in that RAM
+    // address -- not guaranteed to decode as BOXED_NIL, or even as a
+    // well-formed boxed value at all. Two separate problems, one fix:
+    //   (1) Correctness: reading an unassigned Lua global should always
+    //       observe `nil`, the same as a real Lua table lookup on a
+    //       missing key. Nothing previously guaranteed that here.
+    //   (2) Defense in depth: even if some other lazy-init mechanism
+    //       someday has the same "assumes zero at boot" bug the scratch
+    //       pointers had, every ordinary global at least starts in a
+    //       well-defined, easily-recognized (BOXED_NIL) state instead of
+    //       silently inheriting stale memory from a previous run.
+    // This intentionally EXCLUDES function-slot globals (is_function ==
+    // 1): those get their real value (a boxed function pointer) written
+    // unconditionally by the existing top-level-statement loop below (or
+    // by codegen elsewhere for every declared function), so nil-ing them
+    // here first is redundant, not incorrect -- but skipping them keeps
+    // this loop's intent ("nil is a global's correct pre-assignment
+    // default") honest; a function slot's pre-assignment default was
+    // never meant to be nil, it's meant to be its own address.
+    if (global_scope != NULL)
+    {
+        SymbolNode *sym = global_scope->symbols;
+        bool wrote_nil_setup = false;
+        while (sym != NULL)
+        {
+            if (sym->type == SYM_GLOBAL && !sym->is_function)
+            {
+                if (!wrote_nil_setup)
+                {
+                    emit_asm ("MOV R0, BOXED_NIL\n");
+                    wrote_nil_setup = true;
+                }
+                emit_asm ("MOV [var_%s], R0 ; nil-init global '%s'\n", sym->name, sym->name);
+            }
+            sym = sym->next;
+        }
+    }
+
     if (node != NULL)
     {
         ASTNode *current = node;

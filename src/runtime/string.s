@@ -984,7 +984,7 @@ __ftoa_done:
 ;; Incoming Stack: [BP+2] = string, [BP+3] = optional start index (1-based),
 ;;                 [BP+4] = optional end index
 ;; Returns: R0 = byte value (as boxed float), or BOXED_NIL on error
-;; Clobbers: R0-R4
+;; Clobbers: R0-R5
 ;; ===========================================================================
 __builtin_string_byte:
     PUSH  BP
@@ -1027,16 +1027,26 @@ __string_byte_default_end:
 
     ;; --- Step 4: Validate indices are within string bounds ---
 __string_byte_validate:
-    ;; __builtin_string_len clobbers R0-R2 internally with no callee-save,
-    ;; so R1 (our string pointer) does not survive this CALL unless we
-    ;; explicitly preserve it ourselves -- pushing it as the argument does
-    ;; NOT count as preserving it, since it's never popped back.
+    ;; FIXED: __builtin_string_len clobbers R0-R2 internally (its loop
+    ;; uses R2 as scratch, and its terminating destructive IEQ always
+    ;; leaves R2 == 1 on exit -- see the header comment on this patch).
+    ;; R1, R2, AND R3 all need to be preserved across this call -- pushing
+    ;; an argument copy does NOT count as preserving it, since it's never
+    ;; popped back. R3 happened to survive before this fix only because
+    ;; __builtin_string_len's current implementation doesn't happen to
+    ;; touch it -- that's an accident of the callee's implementation, not
+    ;; a guarantee, so it's preserved explicitly now too rather than left
+    ;; implicit.
     PUSH  R1                  ; preserve string pointer across the CALL below
+    PUSH  R2                  ; preserve start index across the CALL below
+    PUSH  R3                  ; preserve end index across the CALL below
     PUSH  R1                  ; Arg 1 for __builtin_string_len
     CALL  __builtin_string_len
     IADD  SP, 1               ; Clean up the length-call's own argument
     MOV   R4, R0              ; R4 = length as float
     CFI   R4                  ; Convert float length to integer for comparisons
+    POP   R3                  ; restore end index
+    POP   R2                  ; restore start index
     POP   R1                  ; restore string pointer
 
     ;; Validate: start >= 0 AND start < length. Use a scratch register (R5)
@@ -1080,7 +1090,7 @@ __string_byte_done:
 ;; Incoming Stack: [BP+2] = first byte, [BP+3] = second byte, ...
 ;;                 Arguments MUST be terminated by BOXED_NIL
 ;; Returns: R0 = new string (boxed as RAM string)
-;; Clobbers: R0-R5
+;; Clobbers: R0-R6
 ;; ===========================================================================
 __builtin_string_char:
     PUSH  BP
@@ -1093,8 +1103,11 @@ __builtin_string_char:
 
 __string_char_count_loop:
     MOV   R3, [R1]            ; Load current argument from stack
-    IEQ   R3, BOXED_NIL       ; Check if this is the terminator
-    JT    R3, __string_char_count_done  ; ⚠️ FIX: JT (not TB) jumps if R3 != 0 (equal)
+    MOV   R6, R3               ; scratch copy -- IEQ is destructive (defensive;
+                                ; this loop doesn't reuse R3 afterward today, but
+                                ; keep the same safe idiom as the copy loop below)
+    IEQ   R6, BOXED_NIL       ; Check if this is the terminator
+    JT    R6, __string_char_count_done
     IADD  R2, 1               ; Increment argument counter
     IADD  R1, 1               ; Move pointer to next stack word
     JMP   __string_char_count_loop
@@ -1120,11 +1133,18 @@ __string_char_count_done:
 
 __string_char_copy_loop:
     MOV   R3, [R1]            ; Load current argument
-    IEQ   R3, BOXED_NIL       ; Check for terminator
-    JT    R3, __string_char_copy_done  ; ⚠️ FIX: JT (not TB) jumps if equal
+    ;; FIXED: use a scratch register (R6) for the nil-check instead of
+    ;; testing R3 directly. IEQ is destructive -- comparing R3 itself
+    ;; would overwrite it with the 0/1 result, and CFI below needs R3 to
+    ;; still hold the REAL argument value, not the check's own result.
+    MOV   R6, R3               ; scratch copy for the nil-check
+    IEQ   R6, BOXED_NIL       ; Check for terminator
+    JT    R6, __string_char_copy_done
 
     ;; Convert Lua float byte to integer and store
-    CFI   R3                  ; Convert float to integer (byte value)
+    CFI   R3                  ; Convert float to integer (byte value) --
+                                ; R3 is untouched by the check above, so
+                                ; this now converts the real argument.
     MOV   [R5], R3            ; Store byte at current heap position
     IADD  R5, 1               ; Advance write pointer (by 1 word)
     IADD  R1, 1               ; Advance read pointer to next argument
@@ -1488,5 +1508,796 @@ __string_format_oom:
     MOV  R0, BOXED_NIL
     MOV  SP, BP
     POP  BP
+    RET
+
+;; ===========================================================================
+;; Built-in: string.sub(s, i [, j])
+;; Incoming Stack: [BP+2] = string, [BP+3] = start index i (1-based Lua
+;;                 float, may be negative -- negative counts from the end),
+;;                 [BP+4] = end index j (same rules), or BOXED_NIL to
+;;                 default to the end of the string (Lua's j = -1).
+;; Returns: R0 = new string (boxed RAM string). Out-of-range indices are
+;;          clamped, not errors, matching Lua semantics. i > j (after
+;;          normalization) returns an empty string.
+;; Clobbers: R0-R8
+;; ===========================================================================
+__builtin_string_sub:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; --- Step 1: Unbox string, compute length ---
+    MOV   R0, [BP+2]
+    CALL  __unbox_string
+    MOV   R1, R0               ; R1 = unboxed string pointer (persist)
+
+    PUSH  R1
+    PUSH  R1                   ; Arg 1 for __builtin_string_len
+    CALL  __builtin_string_len
+    IADD  SP, 1
+    MOV   R4, R0
+    CFI   R4                   ; R4 = length (integer)
+    POP   R1                   ; restore string pointer
+
+    ;; --- Step 2: Load & normalize start index i (required, 1-based) ---
+    MOV   R6, [BP+3]
+    CFI   R6                   ; R6 = i (raw integer, may be negative or 0)
+
+    MOV   R5, R6
+    ILT   R5, 0
+    JF    R5, __string_sub_i_norm_done
+    ;; i < 0: counts from the end -> i = len + i + 1
+    MOV   R5, R4
+    IADD  R5, R6
+    IADD  R5, 1
+    MOV   R6, R5
+__string_sub_i_norm_done:
+    ;; clamp: i < 1 -> i = 1
+    MOV   R5, R6
+    ILT   R5, 1
+    JF    R5, __string_sub_j_load
+    MOV   R6, 1
+
+    ;; --- Step 3: Load & normalize end index j (optional, defaults to len) ---
+__string_sub_j_load:
+    MOV   R7, [BP+4]
+    MOV   R5, R7
+    IEQ   R5, BOXED_NIL
+    JT    R5, __string_sub_j_default
+
+    MOV   R7, [BP+4]            ; reload -- IEQ above only clobbered R5
+    CFI   R7                    ; R7 = j (raw integer, may be negative)
+
+    MOV   R5, R7
+    ILT   R5, 0
+    JF    R5, __string_sub_j_clamp
+    ;; j < 0: j = len + j + 1
+    MOV   R5, R4
+    IADD  R5, R7
+    IADD  R5, 1
+    MOV   R7, R5
+    JMP   __string_sub_j_clamp
+
+__string_sub_j_default:
+    MOV   R7, R4                ; no j given -> defaults to len (last char)
+
+__string_sub_j_clamp:
+    ;; clamp: j > len -> j = len
+    MOV   R5, R7
+    IGT   R5, R4
+    JF    R5, __string_sub_range_check
+    MOV   R7, R4
+
+    ;; --- Step 4: If i > j after normalization, result is empty ---
+__string_sub_range_check:
+    MOV   R5, R6
+    IGT   R5, R7
+    JT    R5, __string_sub_empty
+
+    ;; --- Step 5: Allocate result buffer and copy [i-1, j-1] inclusive (0-based) ---
+    MOV   R8, R7
+    ISUB  R8, R6
+    IADD  R8, 1                 ; R8 = count of chars to copy = j - i + 1
+    MOV   R2, R8
+    IADD  R2, 1                 ; +1 for null terminator
+    PUSH  R2
+    CALL  __malloc
+    IADD  SP, 1
+    MOV   R3, R0                 ; R3 = destination heap pointer
+
+    IEQ   R3, 0
+    JT    R3, __string_sub_oom
+
+    MOV   R2, R1                 ; R2 = read pointer = string base + (i-1)
+    IADD  R2, R6
+    ISUB  R2, 1
+
+    MOV   R5, R3                 ; R5 = write pointer
+
+__string_sub_copy_loop:
+    MOV   R6, R8                 ; scratch copy -- IEQ is destructive
+    IEQ   R6, 0
+    JT    R6, __string_sub_copy_done
+    MOV   R6, [R2]
+    MOV   [R5], R6
+    IADD  R2, 1
+    IADD  R5, 1
+    ISUB  R8, 1
+    JMP   __string_sub_copy_loop
+
+__string_sub_copy_done:
+    MOV   R6, 0
+    MOV   [R5], R6                ; null terminator
+    MOV   R0, R3
+    OR    R0, BOXED_RAMSTRING
+    JMP   __string_sub_done
+
+__string_sub_empty:
+    MOV   R3, 0
+    PUSH  R3
+    CALL  __malloc
+    IADD  SP, 1
+    MOV   R3, R0
+    IEQ   R3, 0
+    JT    R3, __string_sub_oom
+    MOV   R6, 0
+    MOV   [R3], R6
+    MOV   R0, R3
+    OR    R0, BOXED_RAMSTRING
+    JMP   __string_sub_done
+
+__string_sub_oom:
+    MOV   R0, BOXED_NIL
+
+__string_sub_done:
+    MOV   SP, BP
+    POP   BP
+    RET
+
+
+;; ===========================================================================
+;; Built-in: string.upper(s)
+;; Incoming Stack: [BP+2] = string
+;; Returns: R0 = new string (boxed RAM string), same length as input, with
+;;          ASCII 'a'-'z' converted to 'A'-'Z'. Non-letter bytes pass
+;;          through unchanged.
+;; Clobbers: R0-R6
+;; ===========================================================================
+__builtin_string_upper:
+    PUSH  BP
+    MOV   BP, SP
+
+    MOV   R0, [BP+2]
+    CALL  __unbox_string
+    MOV   R1, R0                ; R1 = source string pointer (persist)
+
+    PUSH  R1
+    PUSH  R1
+    CALL  __builtin_string_len
+    IADD  SP, 1
+    MOV   R4, R0
+    CFI   R4                    ; R4 = length (integer)
+    POP   R1
+
+    MOV   R2, R4
+    IADD  R2, 1                 ; +1 for null terminator
+    PUSH  R2
+    CALL  __malloc
+    IADD  SP, 1
+    MOV   R3, R0                 ; R3 = destination heap pointer
+
+    IEQ   R3, 0
+    JT    R3, __string_upper_oom
+
+    MOV   R2, R1                 ; R2 = read pointer
+    MOV   R5, R3                 ; R5 = write pointer
+
+__string_upper_loop:
+    MOV   R0, [R2]
+    IEQ   R0, 0
+    JT    R0, __string_upper_done_copy
+
+    ;; is it lowercase 'a'-'z' (ASCII 97-122)?
+    MOV   R6, R0
+    ILT   R6, 97
+    JT    R6, __string_upper_write
+    MOV   R6, R0
+    IGT   R6, 122
+    JT    R6, __string_upper_write
+
+    ISUB  R0, 32                 ; shift into uppercase range
+
+__string_upper_write:
+    MOV   [R5], R0
+    IADD  R2, 1
+    IADD  R5, 1
+    JMP   __string_upper_loop
+
+__string_upper_done_copy:
+    MOV   R0, 0
+    MOV   [R5], R0                ; null terminator
+    MOV   R0, R3
+    OR    R0, BOXED_RAMSTRING
+    JMP   __string_upper_finish
+
+__string_upper_oom:
+    MOV   R0, BOXED_NIL
+
+__string_upper_finish:
+    MOV   SP, BP
+    POP   BP
+    RET
+
+
+;; ===========================================================================
+;; Built-in: string.lower(s)
+;; Incoming Stack: [BP+2] = string
+;; Returns: R0 = new string (boxed RAM string), same length as input, with
+;;          ASCII 'A'-'Z' converted to 'a'-'z'. Non-letter bytes pass
+;;          through unchanged.
+;; Clobbers: R0-R6
+;; ===========================================================================
+__builtin_string_lower:
+    PUSH  BP
+    MOV   BP, SP
+
+    MOV   R0, [BP+2]
+    CALL  __unbox_string
+    MOV   R1, R0                ; R1 = source string pointer (persist)
+
+    PUSH  R1
+    PUSH  R1
+    CALL  __builtin_string_len
+    IADD  SP, 1
+    MOV   R4, R0
+    CFI   R4                    ; R4 = length (integer)
+    POP   R1
+
+    MOV   R2, R4
+    IADD  R2, 1
+    PUSH  R2
+    CALL  __malloc
+    IADD  SP, 1
+    MOV   R3, R0                 ; R3 = destination heap pointer
+
+    IEQ   R3, 0
+    JT    R3, __string_lower_oom
+
+    MOV   R2, R1                 ; R2 = read pointer
+    MOV   R5, R3                 ; R5 = write pointer
+
+__string_lower_loop:
+    MOV   R0, [R2]
+    IEQ   R0, 0
+    JT    R0, __string_lower_done_copy
+
+    ;; is it uppercase 'A'-'Z' (ASCII 65-90)?
+    MOV   R6, R0
+    ILT   R6, 65
+    JT    R6, __string_lower_write
+    MOV   R6, R0
+    IGT   R6, 90
+    JT    R6, __string_lower_write
+
+    IADD  R0, 32                 ; shift into lowercase range
+
+__string_lower_write:
+    MOV   [R5], R0
+    IADD  R2, 1
+    IADD  R5, 1
+    JMP   __string_lower_loop
+
+__string_lower_done_copy:
+    MOV   R0, 0
+    MOV   [R5], R0                ; null terminator
+    MOV   R0, R3
+    OR    R0, BOXED_RAMSTRING
+    JMP   __string_lower_finish
+
+__string_lower_oom:
+    MOV   R0, BOXED_NIL
+
+__string_lower_finish:
+    MOV   SP, BP
+    POP   BP
+    RET
+
+
+;; ===========================================================================
+;; Built-in: string.rep(s, n)
+;; Incoming Stack: [BP+2] = string, [BP+3] = repeat count n (Lua float)
+;; Returns: R0 = new string (boxed RAM string) = s repeated n times.
+;;          n <= 0, or an empty source string, both yield "".
+;; Clobbers: R0-R7
+;; ===========================================================================
+__builtin_string_rep:
+    PUSH  BP
+    MOV   BP, SP
+
+    MOV   R0, [BP+2]
+    CALL  __unbox_string
+    MOV   R1, R0                ; R1 = source string pointer (persist)
+
+    PUSH  R1
+    PUSH  R1
+    CALL  __builtin_string_len
+    IADD  SP, 1
+    MOV   R4, R0
+    CFI   R4                    ; R4 = source length (integer)
+    POP   R1
+
+    MOV   R6, [BP+3]
+    CFI   R6                    ; R6 = n (integer, may be <= 0)
+
+    ;; n <= 0 -> empty string. (Expressed as "not (n > 0)" since this ISA
+    ;; has no ILE instruction.)
+    MOV   R5, R6
+    IGT   R5, 0
+    JF    R5, __string_rep_empty
+    MOV   R5, R4
+    IEQ   R5, 0
+    JT    R5, __string_rep_empty
+
+    ;; total length = source_length * n
+    MOV   R7, R4
+    IMUL  R7, R6
+
+    MOV   R2, R7
+    IADD  R2, 1                 ; +1 for null terminator
+    PUSH  R2
+    CALL  __malloc
+    IADD  SP, 1
+    MOV   R3, R0                 ; R3 = destination heap pointer
+
+    IEQ   R3, 0
+    JT    R3, __string_rep_oom
+
+    MOV   R5, R3                 ; R5 = write pointer
+
+__string_rep_outer_loop:
+    MOV   R2, R6                 ; scratch copy of remaining repeat count
+    IEQ   R2, 0
+    JT    R2, __string_rep_done_copy
+
+    MOV   R0, R1                 ; R0 = read pointer, reset to source start
+
+__string_rep_inner_loop:
+    MOV   R2, [R0]
+    IEQ   R2, 0
+    JT    R2, __string_rep_inner_done
+    MOV   [R5], R2
+    IADD  R0, 1
+    IADD  R5, 1
+    JMP   __string_rep_inner_loop
+
+__string_rep_inner_done:
+    ISUB  R6, 1
+    JMP   __string_rep_outer_loop
+
+__string_rep_done_copy:
+    MOV   R2, 0
+    MOV   [R5], R2                ; null terminator
+    MOV   R0, R3
+    OR    R0, BOXED_RAMSTRING
+    JMP   __string_rep_finish
+
+__string_rep_empty:
+    MOV   R3, 1
+    PUSH  R3
+    CALL  __malloc
+    IADD  SP, 1
+    MOV   R3, R0
+    IEQ   R3, 0
+    JT    R3, __string_rep_oom
+    MOV   R2, 0
+    MOV   [R3], R2
+    MOV   R0, R3
+    OR    R0, BOXED_RAMSTRING
+    JMP   __string_rep_finish
+
+__string_rep_oom:
+    MOV   R0, BOXED_NIL
+
+__string_rep_finish:
+    MOV   SP, BP
+    POP   BP
+    RET
+
+
+;; ===========================================================================
+;; Built-in: string.reverse(s)
+;; Incoming Stack: [BP+2] = string
+;; Returns: R0 = new string (boxed RAM string) with byte order reversed.
+;; Clobbers: R0-R6
+;; ===========================================================================
+__builtin_string_reverse:
+    PUSH  BP
+    MOV   BP, SP
+
+    MOV   R0, [BP+2]
+    CALL  __unbox_string
+    MOV   R1, R0                ; R1 = source string pointer (persist)
+
+    PUSH  R1
+    PUSH  R1
+    CALL  __builtin_string_len
+    IADD  SP, 1
+    MOV   R4, R0
+    CFI   R4                    ; R4 = length (integer)
+    POP   R1
+
+    MOV   R2, R4
+    IADD  R2, 1
+    PUSH  R2
+    CALL  __malloc
+    IADD  SP, 1
+    MOV   R3, R0                 ; R3 = destination heap pointer
+
+    IEQ   R3, 0
+    JT    R3, __string_reverse_oom
+
+    ;; write destination front-to-back from source back-to-front:
+    ;; dest[k] = src[len-1-k]
+    MOV   R5, R1
+    IADD  R5, R4
+    ISUB  R5, 1                  ; R5 = pointer to LAST char of source
+                                  ; (harmless one-before-start if len==0 --
+                                  ; never dereferenced in that case, see below)
+    MOV   R6, R3                 ; R6 = write pointer (dest, forward)
+    MOV   R2, R4                 ; R2 = remaining count
+
+__string_reverse_loop:
+    MOV   R0, R2
+    IEQ   R0, 0
+    JT    R0, __string_reverse_done_copy
+
+    MOV   R0, [R5]
+    MOV   [R6], R0
+    ISUB  R5, 1
+    IADD  R6, 1
+    ISUB  R2, 1
+    JMP   __string_reverse_loop
+
+__string_reverse_done_copy:
+    MOV   R0, 0
+    MOV   [R6], R0                ; null terminator
+    MOV   R0, R3
+    OR    R0, BOXED_RAMSTRING
+    JMP   __string_reverse_finish
+
+__string_reverse_oom:
+    MOV   R0, BOXED_NIL
+
+__string_reverse_finish:
+    MOV   SP, BP
+    POP   BP
+    RET
+
+
+;; ===========================================================================
+;; Built-in: string.find(s, pattern) -- PLAIN SUBSTRING SEARCH ONLY
+;; No Lua pattern-matching support (no magic characters interpreted; the
+;; second argument is always a literal substring). No init/plain-flag
+;; arguments. Only the start index is returned (no end index, no captures)
+;; -- real Lua's find() returns two values here.
+;; Incoming Stack: [BP+2] = string s, [BP+3] = substring to find
+;; Returns: R0 = 1-based start index of the first match (as a Lua float),
+;;          or BOXED_NIL if not found. An empty needle matches at index 1,
+;;          mirroring real Lua's find("", ...) behavior.
+;; Clobbers: R0-R9
+;; ===========================================================================
+__builtin_string_find:
+    PUSH  BP
+    MOV   BP, SP
+
+    MOV   R0, [BP+2]
+    CALL  __unbox_string
+    MOV   R1, R0                 ; R1 = haystack pointer
+
+    MOV   R0, [BP+3]
+    CALL  __unbox_string
+    MOV   R2, R0                 ; R2 = needle pointer
+
+    ;; Empty needle matches at position 1
+    MOV   R3, [R2]
+    IEQ   R3, 0
+    JT    R3, __string_find_match_at_start
+
+    MOV   R5, R1                 ; R5 = outer scan pointer into haystack
+    MOV   R8, 1                  ; R8 = 1-based index of R5 within haystack
+
+__string_find_outer:
+    MOV   R3, [R5]
+    IEQ   R3, 0
+    JT    R3, __string_find_not_found    ; ran off the end of haystack
+
+    MOV   R6, R5                 ; R6 = inner haystack cursor
+    MOV   R7, R2                 ; R7 = inner needle cursor
+
+__string_find_inner:
+    MOV   R3, [R7]                ; R3 = needle char
+    MOV   R9, R3
+    IEQ   R9, 0
+    JT    R9, __string_find_matched       ; needle exhausted -> full match
+
+    MOV   R4, [R6]                ; R4 = haystack char
+    MOV   R9, R4
+    IEQ   R9, 0
+    JT    R9, __string_find_advance_outer ; haystack ended before needle did
+
+    MOV   R9, R3
+    INE   R9, R4
+    JT    R9, __string_find_advance_outer ; characters differ
+
+    IADD  R6, 1
+    IADD  R7, 1
+    JMP   __string_find_inner
+
+__string_find_advance_outer:
+    IADD  R5, 1
+    IADD  R8, 1
+    JMP   __string_find_outer
+
+__string_find_matched:
+    MOV   R0, R8
+    CIF   R0
+    JMP   __string_find_done
+
+__string_find_match_at_start:
+    MOV   R0, 1
+    CIF   R0
+    JMP   __string_find_done
+
+__string_find_not_found:
+    MOV   R0, BOXED_NIL
+
+__string_find_done:
+    MOV   SP, BP
+    POP   BP
+    RET
+
+
+;; ===========================================================================
+;; Built-in: string.gsub(s, pattern, repl) -- PLAIN SUBSTITUTION ONLY
+;; No Lua pattern-matching support (pattern is a literal substring, same
+;; limitation as __builtin_string_find above). No init/n-limit arguments.
+;; Only the resulting string is returned as R0 -- real Lua's gsub also
+;; returns a substitution count as a second value; not supported here.
+;; An empty pattern is treated as "zero matches" (s is returned unchanged)
+;; rather than Lua's true zero-width match-between-every-character
+;; semantics, specifically to avoid an infinite loop.
+;;
+;; Implementation is two-pass: Pass 1 counts non-overlapping matches (and
+;; is used to size the output buffer exactly); Pass 2 re-scans with
+;; IDENTICAL matching logic and writes the substituted result. Both passes
+;; MUST stay in lockstep (same greedy left-to-right, skip-by-pattern-length
+;; matching) or the size computed in Pass 1 won't fit what Pass 2 writes.
+;;
+;; Incoming Stack: [BP+2] = string s, [BP+3] = pattern, [BP+4] = repl
+;; Returns: R0 = new string (boxed RAM string)
+;; Clobbers: R0-R13 (all general-purpose registers -- see the register
+;; map below; this is the highest register-pressure routine in this file
+;; and the one most worth verifying carefully with v32sim before trusting).
+;;
+;; Register map (held constant across both passes):
+;;   R7  = s pointer (unboxed)          R3 = len(s)
+;;   R8  = pattern pointer (unboxed)    R4 = len(pattern)
+;;   R9  = repl pointer (unboxed)       R5 = len(repl)
+;;   R6  = match count (Pass 1 only)    R13 = destination heap pointer
+;; Everything else (R0-R2, R10-R12) is scratch, reused freely within and
+;; across the matching loops.
+;; ===========================================================================
+__builtin_string_gsub:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; --- Unbox all three operands up front. __unbox_string is documented
+    ;; to clobber only R0/R1, so holding these in R7/R8/R9 keeps them safe
+    ;; across every later CALL in this routine (__unbox_string and
+    ;; __builtin_string_len are the only two CALLs used below, and
+    ;; __builtin_string_len only touches R0/R1/R2). ---
+    MOV   R0, [BP+2]
+    CALL  __unbox_string
+    MOV   R7, R0                 ; R7 = s pointer (persist)
+
+    MOV   R0, [BP+3]
+    CALL  __unbox_string
+    MOV   R8, R0                 ; R8 = pattern pointer (persist)
+
+    MOV   R0, [BP+4]
+    CALL  __unbox_string
+    MOV   R9, R0                 ; R9 = repl pointer (persist)
+
+    ;; --- Compute lengths ---
+    PUSH  R7
+    CALL  __builtin_string_len
+    IADD  SP, 1
+    MOV   R3, R0
+    CFI   R3                     ; R3 = len(s)
+
+    PUSH  R8
+    CALL  __builtin_string_len
+    IADD  SP, 1
+    MOV   R4, R0
+    CFI   R4                     ; R4 = len(pattern)
+
+    ;; Empty pattern -- treated as "no matches" (see header comment above).
+    MOV   R1, R4
+    IEQ   R1, 0
+    JT    R1, __string_gsub_no_match_copy
+
+    PUSH  R9
+    CALL  __builtin_string_len
+    IADD  SP, 1
+    MOV   R5, R0
+    CFI   R5                     ; R5 = len(repl)
+
+    ;; --- Pass 1: count non-overlapping matches ---
+    MOV   R0, R7                 ; R0 = scan pointer into s
+    MOV   R6, 0                  ; R6 = match count
+
+__string_gsub_count_loop:
+    MOV   R1, [R0]
+    IEQ   R1, 0
+    JT    R1, __string_gsub_count_done
+
+    MOV   R10, R0                ; R10 = inner s cursor
+    MOV   R11, R8                ; R11 = inner pattern cursor
+
+__string_gsub_count_inner:
+    MOV   R1, [R11]
+    MOV   R2, R1
+    IEQ   R2, 0
+    JT    R2, __string_gsub_count_hit      ; pattern exhausted -> matched
+
+    MOV   R12, [R10]
+    MOV   R2, R12
+    IEQ   R2, 0
+    JT    R2, __string_gsub_count_advance  ; s ended first -> no match here
+
+    MOV   R2, R1
+    INE   R2, R12
+    JT    R2, __string_gsub_count_advance  ; characters differ
+
+    IADD  R10, 1
+    IADD  R11, 1
+    JMP   __string_gsub_count_inner
+
+__string_gsub_count_hit:
+    IADD  R6, 1
+    IADD  R0, R4                 ; skip past the whole match (non-overlapping)
+    JMP   __string_gsub_count_loop
+
+__string_gsub_count_advance:
+    IADD  R0, 1
+    JMP   __string_gsub_count_loop
+
+__string_gsub_count_done:
+    MOV   R1, R6
+    IEQ   R1, 0
+    JT    R1, __string_gsub_no_match_copy
+
+    ;; --- Allocate exact-size output buffer ---
+    ;; out_len = len(s) + count * (len(repl) - len(pattern))
+    MOV   R1, R5
+    ISUB  R1, R4                 ; R1 = (len(repl) - len(pattern)), may be negative
+    IMUL  R1, R6                 ; R1 = count * delta
+    MOV   R2, R3
+    IADD  R2, R1                 ; R2 = total output length
+    IADD  R2, 1                  ; +1 for null terminator
+    PUSH  R2
+    CALL  __malloc
+    IADD  SP, 1
+    MOV   R13, R0                ; R13 = destination heap pointer (persist)
+
+    IEQ   R13, 0
+    JT    R13, __string_gsub_oom
+
+    ;; --- Pass 2: copy, substituting each match ---
+    MOV   R0, R7                 ; R0 = scan pointer into s
+    MOV   R12, R13                ; R12 = write pointer into destination
+
+__string_gsub_copy_loop:
+    MOV   R1, [R0]
+    IEQ   R1, 0
+    JT    R1, __string_gsub_copy_done
+
+    MOV   R10, R0
+    MOV   R11, R8
+
+__string_gsub_copy_inner:
+    MOV   R1, [R11]
+    MOV   R2, R1
+    IEQ   R2, 0
+    JT    R2, __string_gsub_copy_hit
+
+    MOV   R1, [R10]
+    MOV   R2, R1
+    IEQ   R2, 0
+    JT    R2, __string_gsub_copy_advance
+
+    MOV   R2, [R11]
+    INE   R2, R1
+    JT    R2, __string_gsub_copy_advance
+
+    IADD  R10, 1
+    IADD  R11, 1
+    JMP   __string_gsub_copy_inner
+
+__string_gsub_copy_hit:
+    ;; write repl bytes, then skip past the matched region in s
+    MOV   R10, R9                 ; R10 = repl read cursor
+__string_gsub_copy_write_repl:
+    MOV   R1, [R10]
+    IEQ   R1, 0
+    JT    R1, __string_gsub_copy_hit_done
+    MOV   [R12], R1
+    IADD  R10, 1
+    IADD  R12, 1
+    JMP   __string_gsub_copy_write_repl
+__string_gsub_copy_hit_done:
+    IADD  R0, R4                  ; advance s past the whole match
+    JMP   __string_gsub_copy_loop
+
+__string_gsub_copy_advance:
+    ;; no match at this position -- copy one literal byte through
+    MOV   R1, [R0]
+    MOV   [R12], R1
+    IADD  R0, 1
+    IADD  R12, 1
+    JMP   __string_gsub_copy_loop
+
+__string_gsub_copy_done:
+    MOV   R1, 0
+    MOV   [R12], R1                ; null terminator
+    MOV   R0, R13
+    OR    R0, BOXED_RAMSTRING
+    JMP   __string_gsub_finish
+
+__string_gsub_no_match_copy:
+    ;; Plain copy of s, unchanged (empty pattern, or zero matches found).
+    ;; Re-derive s's pointer and length fresh from [BP+2] rather than
+    ;; relying on earlier register state, since this label is reachable
+    ;; from two different points above.
+    MOV   R0, [BP+2]
+    CALL  __unbox_string
+    MOV   R7, R0
+
+    PUSH  R7
+    CALL  __builtin_string_len
+    IADD  SP, 1
+    MOV   R3, R0
+    CFI   R3
+
+    MOV   R1, R3
+    IADD  R1, 1
+    PUSH  R1
+    CALL  __malloc
+    IADD  SP, 1
+    MOV   R13, R0
+
+    IEQ   R13, 0
+    JT    R13, __string_gsub_oom
+
+    MOV   R0, R7
+    MOV   R12, R13
+__string_gsub_plain_copy_loop:
+    MOV   R1, [R0]
+    MOV   [R12], R1
+    IEQ   R1, 0
+    JT    R1, __string_gsub_plain_copy_done
+    IADD  R0, 1
+    IADD  R12, 1
+    JMP   __string_gsub_plain_copy_loop
+__string_gsub_plain_copy_done:
+    MOV   R0, R13
+    OR    R0, BOXED_RAMSTRING
+    JMP   __string_gsub_finish
+
+__string_gsub_oom:
+    MOV   R0, BOXED_NIL
+
+__string_gsub_finish:
+    MOV   SP, BP
+    POP   BP
     RET
 

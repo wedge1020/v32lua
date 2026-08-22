@@ -161,6 +161,7 @@ bool is_raw_integer_expression (ASTNode *node) {
     return (false);
 }
 
+
 int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     char func_name[256] = {0};
     if (!resolve_static_path(node->as.call.target, func_name)) {
@@ -247,7 +248,7 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         {
             return (emit_tic80_print_intrinsic (node));
         }
-        else 
+        else
         {
             emit_print_intrinsic (node);
             return (1);
@@ -273,6 +274,20 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     if (strcmp(func_name, "system.wait") == 0 ) {
         emit_system_wait_intrinsic();
         return 1;
+    }
+
+    // NEW: hard error for any other system.* call. Without this, an
+    // unrecognized system.foo() -- like every other dotted call --
+    // desugars to a NODE_TABLE_GET target, which skips the generic
+    // "Undeclared function" check in node_function_call() and silently
+    // miscompiles into a dynamic lookup against a "system" global table
+    // that doesn't exist. See AUDIT_string_functionality.md section 2 for
+    // the full explanation (written against string.*, but the mechanism
+    // is identical for every dotted prefix handled in this function).
+    if (strncmp(func_name, "system.", 7) == 0) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+            "Unknown system function '%s'", func_name);
+        return 0;
     }
 
     // hex("0x...")
@@ -518,6 +533,71 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         return emit_string_format_intrinsic(node, dest_reg);
     }
 
+    // NEW: string.len(s) -- the runtime routine (__builtin_string_len)
+    // already existed and is correct (it's what the # operator calls);
+    // it was simply never reachable from string.len(...) call syntax.
+    if (strcmp(func_name, "string.len") == 0)
+    {
+        return emit_string_len_intrinsic(node, dest_reg);
+    }
+
+    // NEW: string.sub(s, i [, j])
+    if (strcmp(func_name, "string.sub") == 0)
+    {
+        return emit_string_sub_intrinsic(node, dest_reg);
+    }
+
+    // NEW: string.upper(s)
+    if (strcmp(func_name, "string.upper") == 0)
+    {
+        return emit_string_upper_intrinsic(node, dest_reg);
+    }
+
+    // NEW: string.lower(s)
+    if (strcmp(func_name, "string.lower") == 0)
+    {
+        return emit_string_lower_intrinsic(node, dest_reg);
+    }
+
+    // NEW: string.rep(s, n)
+    if (strcmp(func_name, "string.rep") == 0)
+    {
+        return emit_string_rep_intrinsic(node, dest_reg);
+    }
+
+    // NEW: string.reverse(s)
+    if (strcmp(func_name, "string.reverse") == 0)
+    {
+        return emit_string_reverse_intrinsic(node, dest_reg);
+    }
+
+    // NEW: string.find(s, pattern) -- PLAIN substring search only, no Lua
+    // pattern magic characters, no init/plain-flag arguments. See the
+    // header comment on emit_string_find_intrinsic() below.
+    if (strcmp(func_name, "string.find") == 0)
+    {
+        return emit_string_find_intrinsic(node, dest_reg);
+    }
+
+    // NEW: string.gsub(s, pattern, repl) -- PLAIN substring replacement
+    // only, single return value (no substitution count, no n-limit). See
+    // the header comment on emit_string_gsub_intrinsic() below.
+    if (strcmp(func_name, "string.gsub") == 0)
+    {
+        return emit_string_gsub_intrinsic(node, dest_reg);
+    }
+
+    // NEW: hard error for any remaining string.* call -- covers typos,
+    // and (until they're implemented) string.match/string.gmatch. See
+    // AUDIT_string_functionality.md section 2. This must stay AFTER every
+    // recognized string.* case above and BEFORE the math.* section below.
+    if (strncmp(func_name, "string.", 7) == 0)
+    {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+            "Unknown string method '%s'", func_name);
+        return 0;
+    }
+
     //////////////////////////////////////////////////////////////////////////
     //
     // math library intrinsics
@@ -688,6 +768,16 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         return 0;
     }
 
+    // NEW: hard error for any remaining math.* call -- same rationale as
+    // the string.* guard above. Must stay AFTER every recognized math.*
+    // case and BEFORE pairs/ipairs/type/table.* below.
+    if (strncmp(func_name, "math.", 5) == 0)
+    {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+            "Unknown math function '%s'", func_name);
+        return 0;
+    }
+
     // loop iters
     if (strcmp(func_name, "pairs") == 0) {
         return emit_pairs_intrinsic(node);
@@ -709,6 +799,15 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
 
     if (strcmp(func_name, "table.remove") == 0) {
         return emit_table_remove_intrinsic(node, dest_reg);
+    }
+
+    // NEW: hard error for any remaining table.* call -- same rationale as
+    // the string.* guard above.
+    if (strncmp(func_name, "table.", 6) == 0)
+    {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+            "Unknown table function '%s'", func_name);
+        return 0;
     }
 
     return 0; // Not an intrinsic

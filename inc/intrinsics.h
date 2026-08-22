@@ -100,10 +100,18 @@ void  emit_system_halt_intrinsic ();
 //
 // string intrinsics
 //
-bool  emit_string_byte_intrinsic   (ASTNode *, int);
-bool  emit_string_char_intrinsic   (ASTNode *, int);
-bool  emit_tostring_intrinsic      (ASTNode *, int);
-bool  emit_string_format_intrinsic (ASTNode *, int);
+bool  emit_string_byte_intrinsic    (ASTNode *, int);
+bool  emit_string_char_intrinsic    (ASTNode *, int);
+bool  emit_tostring_intrinsic       (ASTNode *, int);
+bool  emit_string_format_intrinsic  (ASTNode *, int);
+bool  emit_string_len_intrinsic     (ASTNode *, int);
+bool  emit_string_sub_intrinsic     (ASTNode *, int);
+bool  emit_string_upper_intrinsic   (ASTNode *, int);
+bool  emit_string_lower_intrinsic   (ASTNode *, int);
+bool  emit_string_rep_intrinsic     (ASTNode *, int);
+bool  emit_string_reverse_intrinsic (ASTNode *, int);
+bool  emit_string_find_intrinsic    (ASTNode *, int);
+bool  emit_string_gsub_intrinsic    (ASTNode *, int);
 
 //////////////////////////////////////////////////////////////////////////////    
 //

@@ -240,3 +240,278 @@ bool emit_string_format_intrinsic(ASTNode *node, int dest_reg) {
     unlock_pinned_register(fmt_reg);
     return true;
 }
+
+// string.len(s)
+bool emit_string_len_intrinsic(ASTNode *node, int dest_reg) {
+    ASTNode *arg = node->as.call.args_head;
+    if (!arg) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+            "string.len() requires 1 argument");
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: string.len(s) ---\n");
+
+    int str_reg = allocate_pinned_register();
+    generate_asm(arg, str_reg);
+
+    emit_asm("PUSH R%d             ; Arg 1: string\n", str_reg);
+    emit_asm("CALL __builtin_string_len\n");
+    emit_asm("IADD SP, 1           ; Clean up 1 argument\n");
+
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R0         ; Store result\n", dest_reg);
+    }
+
+    unlock_pinned_register(str_reg);
+    return true;
+}
+
+bool emit_string_sub_intrinsic(ASTNode *node, int dest_reg) {
+    ASTNode *arg_s = node->as.call.args_head;
+    if (!arg_s || !arg_s->next) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+            "string.sub() requires at least 2 arguments (s, i)");
+        return false;
+    }
+    ASTNode *arg_i = arg_s->next;
+    ASTNode *arg_j = arg_i->next;  // optional -- defaults to end of string
+
+    emit_asm("    ;; --- Intrinsic: string.sub(s, i [, j]) ---\n");
+
+    int str_reg = allocate_pinned_register();
+    generate_asm(arg_s, str_reg);
+
+    int i_reg = allocate_pinned_register();
+    generate_asm(arg_i, i_reg);
+
+    int j_reg = 0;
+    bool has_j = false;
+    if (arg_j) {
+        j_reg = allocate_pinned_register();
+        generate_asm(arg_j, j_reg);
+        has_j = true;
+    }
+
+    // Push in reverse: j, i, s -> after CALL: [BP+2]=s [BP+3]=i [BP+4]=j
+    if (has_j) {
+        emit_asm("PUSH R%d             ; Arg 3: j (end index)\n", j_reg);
+        unlock_pinned_register(j_reg);
+    } else {
+        emit_asm("MOV R0, BOXED_NIL\n");
+        emit_asm("PUSH R0             ; No j provided -- runtime defaults to end of string\n");
+    }
+
+    emit_asm("PUSH R%d             ; Arg 2: i (start index)\n", i_reg);
+    unlock_pinned_register(i_reg);
+    emit_asm("PUSH R%d             ; Arg 1: string\n", str_reg);
+    unlock_pinned_register(str_reg);
+
+    emit_asm("CALL __builtin_string_sub\n");
+    emit_asm("IADD SP, 3           ; Clean up 3 arguments\n");
+
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R0         ; Store result\n", dest_reg);
+    }
+    return true;
+}
+
+// string.upper(s)
+bool emit_string_upper_intrinsic(ASTNode *node, int dest_reg) {
+    ASTNode *arg = node->as.call.args_head;
+    if (!arg) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+            "string.upper() requires 1 argument");
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: string.upper(s) ---\n");
+
+    int str_reg = allocate_pinned_register();
+    generate_asm(arg, str_reg);
+
+    emit_asm("PUSH R%d             ; Arg 1: string\n", str_reg);
+    emit_asm("CALL __builtin_string_upper\n");
+    emit_asm("IADD SP, 1           ; Clean up 1 argument\n");
+
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R0         ; Store result\n", dest_reg);
+    }
+
+    unlock_pinned_register(str_reg);
+    return true;
+}
+
+// string.lower(s)
+bool emit_string_lower_intrinsic(ASTNode *node, int dest_reg) {
+    ASTNode *arg = node->as.call.args_head;
+    if (!arg) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+            "string.lower() requires 1 argument");
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: string.lower(s) ---\n");
+
+    int str_reg = allocate_pinned_register();
+    generate_asm(arg, str_reg);
+
+    emit_asm("PUSH R%d             ; Arg 1: string\n", str_reg);
+    emit_asm("CALL __builtin_string_lower\n");
+    emit_asm("IADD SP, 1           ; Clean up 1 argument\n");
+
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R0         ; Store result\n", dest_reg);
+    }
+
+    unlock_pinned_register(str_reg);
+    return true;
+}
+
+// string.rep(s, n)
+bool emit_string_rep_intrinsic(ASTNode *node, int dest_reg) {
+    ASTNode *arg_s = node->as.call.args_head;
+    if (!arg_s || !arg_s->next) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+            "string.rep() requires 2 arguments (s, n)");
+        return false;
+    }
+    ASTNode *arg_n = arg_s->next;
+
+    emit_asm("    ;; --- Intrinsic: string.rep(s, n) ---\n");
+
+    int str_reg = allocate_pinned_register();
+    generate_asm(arg_s, str_reg);
+
+    int n_reg = allocate_pinned_register();
+    generate_asm(arg_n, n_reg);
+
+    // Push in reverse: n, s -> after CALL: [BP+2]=s [BP+3]=n
+    emit_asm("PUSH R%d             ; Arg 2: n\n", n_reg);
+    unlock_pinned_register(n_reg);
+    emit_asm("PUSH R%d             ; Arg 1: string\n", str_reg);
+    unlock_pinned_register(str_reg);
+
+    emit_asm("CALL __builtin_string_rep\n");
+    emit_asm("IADD SP, 2           ; Clean up 2 arguments\n");
+
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R0         ; Store result\n", dest_reg);
+    }
+    return true;
+}
+
+// string.reverse(s)
+bool emit_string_reverse_intrinsic(ASTNode *node, int dest_reg) {
+    ASTNode *arg = node->as.call.args_head;
+    if (!arg) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+            "string.reverse() requires 1 argument");
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: string.reverse(s) ---\n");
+
+    int str_reg = allocate_pinned_register();
+    generate_asm(arg, str_reg);
+
+    emit_asm("PUSH R%d             ; Arg 1: string\n", str_reg);
+    emit_asm("CALL __builtin_string_reverse\n");
+    emit_asm("IADD SP, 1           ; Clean up 1 argument\n");
+
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R0         ; Store result\n", dest_reg);
+    }
+
+    unlock_pinned_register(str_reg);
+    return true;
+}
+
+// string.find(s, pattern) -- PLAIN SUBSTRING SEARCH ONLY.
+//
+// Real Lua's string.find(s, pattern [, init [, plain]]) interprets
+// `pattern` as a Lua pattern (magic characters like %a, *, ^, $, etc.)
+// unless the 4th `plain` argument is truthy, and returns TWO values
+// (start, end) plus any captures. This implementation always behaves as
+// if plain=true and pattern has no magic characters, doesn't support
+// `init`, and only returns the start index as a single value (no end
+// index, no captures). Full pattern support (needed for a correct find,
+// match, and gmatch) is deliberately out of scope here -- see
+// AUDIT_string_functionality.md and 13_string_match_gmatch.lua.
+bool emit_string_find_intrinsic(ASTNode *node, int dest_reg) {
+    ASTNode *arg_s = node->as.call.args_head;
+    if (!arg_s || !arg_s->next) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+            "string.find() requires at least 2 arguments (s, pattern)");
+        return false;
+    }
+    ASTNode *arg_pat = arg_s->next;
+
+    emit_asm("    ;; --- Intrinsic: string.find(s, pattern) [plain substring only] ---\n");
+
+    int str_reg = allocate_pinned_register();
+    generate_asm(arg_s, str_reg);
+
+    int pat_reg = allocate_pinned_register();
+    generate_asm(arg_pat, pat_reg);
+
+    // Push in reverse: pattern, s -> after CALL: [BP+2]=s [BP+3]=pattern
+    emit_asm("PUSH R%d             ; Arg 2: pattern (plain substring)\n", pat_reg);
+    unlock_pinned_register(pat_reg);
+    emit_asm("PUSH R%d             ; Arg 1: string\n", str_reg);
+    unlock_pinned_register(str_reg);
+
+    emit_asm("CALL __builtin_string_find\n");
+    emit_asm("IADD SP, 2           ; Clean up 2 arguments\n");
+
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R0         ; Store result\n", dest_reg);
+    }
+    return true;
+}
+
+// string.gsub(s, pattern, repl) -- PLAIN SUBSTITUTION ONLY.
+//
+// Same plain-substring limitation as string.find() above: `pattern` is
+// always treated as a literal substring, never a Lua pattern. Real Lua's
+// gsub also accepts an optional 4th `n` argument capping the number of
+// replacements, and returns TWO values (result, count) -- neither is
+// supported here; this always replaces every non-overlapping occurrence
+// and returns only the resulting string.
+bool emit_string_gsub_intrinsic(ASTNode *node, int dest_reg) {
+    ASTNode *arg_s = node->as.call.args_head;
+    if (!arg_s || !arg_s->next || !arg_s->next->next) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+            "string.gsub() requires 3 arguments (s, pattern, repl)");
+        return false;
+    }
+    ASTNode *arg_pat  = arg_s->next;
+    ASTNode *arg_repl = arg_pat->next;
+
+    emit_asm("    ;; --- Intrinsic: string.gsub(s, pattern, repl) [plain substitution only] ---\n");
+
+    int str_reg = allocate_pinned_register();
+    generate_asm(arg_s, str_reg);
+
+    int pat_reg = allocate_pinned_register();
+    generate_asm(arg_pat, pat_reg);
+
+    int repl_reg = allocate_pinned_register();
+    generate_asm(arg_repl, repl_reg);
+
+    // Push in reverse: repl, pattern, s -> after CALL: [BP+2]=s [BP+3]=pattern [BP+4]=repl
+    emit_asm("PUSH R%d             ; Arg 3: repl\n", repl_reg);
+    unlock_pinned_register(repl_reg);
+    emit_asm("PUSH R%d             ; Arg 2: pattern (plain substring)\n", pat_reg);
+    unlock_pinned_register(pat_reg);
+    emit_asm("PUSH R%d             ; Arg 1: string\n", str_reg);
+    unlock_pinned_register(str_reg);
+
+    emit_asm("CALL __builtin_string_gsub\n");
+    emit_asm("IADD SP, 3           ; Clean up 3 arguments\n");
+
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R0         ; Store result\n", dest_reg);
+    }
+    return true;
+}
