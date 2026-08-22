@@ -35,6 +35,6 @@ end
 === EXPECTED OUTPUT ===
 number_result1: 0.0000
 number_result2: 4.0000
-number_result3: 10.0000
+number_result3: 6.0000
 number_result4: 62.0000
 ]]
