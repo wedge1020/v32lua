@@ -1599,10 +1599,21 @@ __string_sub_range_check:
     IADD  R8, 1                 ; R8 = count of chars to copy = j - i + 1
     MOV   R2, R8
     IADD  R2, 1                 ; +1 for null terminator
+
+    ;; FIXED: __malloc clobbers R0-R3 and R6 (see the patch header comment).
+    ;; R1 (string base pointer) and R6 (normalized start index i) are both
+    ;; read again immediately after this call to compute the read pointer
+    ;; -- neither was preserved before. R8 (remaining copy count) is also
+    ;; live across this call but is NOT in __malloc's clobber set, so it
+    ;; doesn't need protecting.
+    PUSH  R1
+    PUSH  R6
     PUSH  R2
     CALL  __malloc
     IADD  SP, 1
     MOV   R3, R0                 ; R3 = destination heap pointer
+    POP   R6                     ; restore start index
+    POP   R1                     ; restore string pointer
 
     IEQ   R3, 0
     JT    R3, __string_sub_oom
@@ -1632,7 +1643,13 @@ __string_sub_copy_done:
     JMP   __string_sub_done
 
 __string_sub_empty:
-    MOV   R3, 0
+    ;; No registers need to survive this call -- nothing here reads R1/R6
+    ;; afterward, so no PUSH/POP needed for this one. Requests exactly 1
+    ;; word, for the null terminator. PUSH requires a register operand on
+    ;; this ISA (not a literal), so the size is loaded into R3 first --
+    ;; safe to use as scratch here since it gets overwritten by the
+    ;; return value immediately after the call anyway.
+    MOV   R3, 1
     PUSH  R3
     CALL  __malloc
     IADD  SP, 1
@@ -1652,7 +1669,6 @@ __string_sub_done:
     MOV   SP, BP
     POP   BP
     RET
-
 
 ;; ===========================================================================
 ;; Built-in: string.upper(s)
@@ -1680,10 +1696,16 @@ __builtin_string_upper:
 
     MOV   R2, R4
     IADD  R2, 1                 ; +1 for null terminator
+
+    ;; FIXED: __malloc clobbers R0-R3 and R6. R1 (source pointer) is read
+    ;; again right after this call ("MOV R2, R1" below) and was not
+    ;; preserved before.
+    PUSH  R1
     PUSH  R2
     CALL  __malloc
     IADD  SP, 1
     MOV   R3, R0                 ; R3 = destination heap pointer
+    POP   R1                     ; restore source pointer
 
     IEQ   R3, 0
     JT    R3, __string_upper_oom
@@ -1727,7 +1749,6 @@ __string_upper_finish:
     POP   BP
     RET
 
-
 ;; ===========================================================================
 ;; Built-in: string.lower(s)
 ;; Incoming Stack: [BP+2] = string
@@ -1754,10 +1775,15 @@ __builtin_string_lower:
 
     MOV   R2, R4
     IADD  R2, 1
+
+    ;; FIXED: same as string.upper above -- R1 is read right after this
+    ;; call and was not preserved.
+    PUSH  R1
     PUSH  R2
     CALL  __malloc
     IADD  SP, 1
     MOV   R3, R0                 ; R3 = destination heap pointer
+    POP   R1                     ; restore source pointer
 
     IEQ   R3, 0
     JT    R3, __string_lower_oom
@@ -1801,7 +1827,6 @@ __string_lower_finish:
     POP   BP
     RET
 
-
 ;; ===========================================================================
 ;; Built-in: string.rep(s, n)
 ;; Incoming Stack: [BP+2] = string, [BP+3] = repeat count n (Lua float)
@@ -1843,10 +1868,23 @@ __builtin_string_rep:
 
     MOV   R2, R7
     IADD  R2, 1                 ; +1 for null terminator
+
+    ;; FIXED: __malloc clobbers R0-R3 and R6. Both R1 (source pointer) and
+    ;; R6 (repeat count n) are read again after this call -- R1 inside the
+    ;; copy loop ("MOV R0, R1"), R6 as the outer loop's own continue
+    ;; condition ("MOV R2, R6"). Neither was preserved before: in the
+    ;; ordinary non-OOM case __malloc's internal check left R6 == 0, so
+    ;; the outer loop saw "zero repeats remaining" on its very first check
+    ;; and the copy body never ran -- every call silently returned an
+    ;; empty string no matter what was requested.
+    PUSH  R1
+    PUSH  R6
     PUSH  R2
     CALL  __malloc
     IADD  SP, 1
     MOV   R3, R0                 ; R3 = destination heap pointer
+    POP   R6                     ; restore repeat count
+    POP   R1                     ; restore source pointer
 
     IEQ   R3, 0
     JT    R3, __string_rep_oom
@@ -1881,6 +1919,10 @@ __string_rep_done_copy:
     JMP   __string_rep_finish
 
 __string_rep_empty:
+    ;; No registers need to survive this call. PUSH requires a register
+    ;; operand (not a literal) -- load the size into R3 first, safe to
+    ;; use as scratch here since it's overwritten by the return value
+    ;; immediately after the call.
     MOV   R3, 1
     PUSH  R3
     CALL  __malloc
@@ -1901,7 +1943,6 @@ __string_rep_finish:
     MOV   SP, BP
     POP   BP
     RET
-
 
 ;; ===========================================================================
 ;; Built-in: string.reverse(s)
@@ -1927,10 +1968,17 @@ __builtin_string_reverse:
 
     MOV   R2, R4
     IADD  R2, 1
+
+    ;; FIXED: __malloc clobbers R0-R3 and R6. R1 (source pointer) is read
+    ;; again right after this call ("MOV R5, R1" below) and was not
+    ;; preserved. R4 (length) is also read right after, but R4 is NOT in
+    ;; __malloc's clobber set, so it doesn't need protecting.
+    PUSH  R1
     PUSH  R2
     CALL  __malloc
     IADD  SP, 1
     MOV   R3, R0                 ; R3 = destination heap pointer
+    POP   R1                     ; restore source pointer
 
     IEQ   R3, 0
     JT    R3, __string_reverse_oom
@@ -1972,7 +2020,6 @@ __string_reverse_finish:
     POP   BP
     RET
 
-
 ;; ===========================================================================
 ;; Built-in: string.find(s, pattern) -- PLAIN SUBSTRING SEARCH ONLY
 ;; No Lua pattern-matching support (no magic characters interpreted; the
@@ -1989,9 +2036,16 @@ __builtin_string_find:
     PUSH  BP
     MOV   BP, SP
 
+    ;; FIXED: previously stored the haystack pointer in R1 here, then made
+    ;; a second CALL __unbox_string (for the needle) right below --
+    ;; __unbox_string's own first instruction is "MOV R1, R0", so that
+    ;; second call destroyed the haystack pointer before it was ever used.
+    ;; Store it directly in R5 instead (the register it eventually needs to
+    ;; end up in anyway, for the outer scan pointer) -- __unbox_string only
+    ;; touches R0/R1, so R5 survives the second call untouched.
     MOV   R0, [BP+2]
     CALL  __unbox_string
-    MOV   R1, R0                 ; R1 = haystack pointer
+    MOV   R5, R0                 ; R5 = haystack pointer (persist)
 
     MOV   R0, [BP+3]
     CALL  __unbox_string
@@ -2002,7 +2056,6 @@ __builtin_string_find:
     IEQ   R3, 0
     JT    R3, __string_find_match_at_start
 
-    MOV   R5, R1                 ; R5 = outer scan pointer into haystack
     MOV   R8, 1                  ; R8 = 1-based index of R5 within haystack
 
 __string_find_outer:
@@ -2054,7 +2107,6 @@ __string_find_done:
     MOV   SP, BP
     POP   BP
     RET
-
 
 ;; ===========================================================================
 ;; Built-in: string.gsub(s, pattern, repl) -- PLAIN SUBSTITUTION ONLY
