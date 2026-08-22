@@ -306,7 +306,7 @@ bool emit_math_random_intrinsic(ASTNode *node, int dest_reg)
 {
     ASTNode *arg = node->as.call.args_head;
     int arg_count = 0;
-
+ 
     // Count arguments (0, 1, or 2 are valid)
     if (arg) {
         arg_count++;
@@ -319,43 +319,47 @@ bool emit_math_random_intrinsic(ASTNode *node, int dest_reg)
             }
         }
     }
-
+ 
     emit_asm("    ;; --- Intrinsic: math.random() ---\n");
-
-    // Push arguments onto stack in reverse order (C ABI)
-    // Lua passes: arg1, arg2 (for math.random(m, n))
-    // C expects:  n, m (right-to-left)
-
+ 
+    // Push arguments in REVERSE order, matching every other intrinsic in
+    // this codebase and __builtin_random's own documented contract:
+    // [BP+2] = first argument, [BP+3] = second argument. Since the last
+    // value pushed ends up at [BP+2], arg2 must be pushed BEFORE arg1.
+ 
     int arg1_reg = 0, arg2_reg = 0;
-
+ 
     if (arg_count >= 1) {
         arg1_reg = allocate_pinned_register();
         generate_asm(arg, arg1_reg);
-        emit_asm("    PUSH R%d       ; Push first argument\n", arg1_reg);
     }
-
+ 
     if (arg_count == 2) {
         arg2_reg = allocate_pinned_register();
         generate_asm(arg->next, arg2_reg);
         emit_asm("    PUSH R%d       ; Push second argument\n", arg2_reg);
     }
-
+ 
+    if (arg_count >= 1) {
+        emit_asm("    PUSH R%d       ; Push first argument\n", arg1_reg);
+    }
+ 
     // Call the runtime subroutine
     emit_asm("    CALL __builtin_random\n");
-
+ 
     // Clean up stack: 2 args = pop 2, 1 arg = pop 1, 0 args = pop 0
     if (arg_count > 0) {
         emit_asm("    IADD SP, %d    ; Clean up %d argument(s)\n", arg_count, arg_count);
     }
-
+ 
     // Result is in R0
     if (dest_reg != 0) {
         emit_asm("    MOV R%d, R0    ; Transfer result to dest_reg\n", dest_reg);
     }
-
+ 
     if (arg1_reg) unlock_pinned_register(arg1_reg);
     if (arg2_reg) unlock_pinned_register(arg2_reg);
-
+ 
     return true;
 }
 

@@ -89,13 +89,11 @@ _random_0args:
 _random_1arg:
     CFI   R4                  ; Convert n to integer
 
-    ;; Validate n > 0
-    IEQ   R4, 0
-    JT    R4, _random_bad
-    ILT   R4, 1
-    JT    R4, _random_bad
-    IGT   R4, 0
-    JF    R4, _random_bad
+    ;; Validate n > 0. Single non-destructive check via scratch register
+    ;; R5 -- R4 must stay intact for IMOD below.
+    MOV   R5, R4
+    IGT   R5, 0
+    JF    R5, _random_bad
 
     ;; Generate random integer in [1, n]
     IMOD  R0, R4              ; R0 = random % n
