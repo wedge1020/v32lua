@@ -1901,10 +1901,23 @@ __string_rep_outer_loop:
 
     MOV   R0, R1                 ; R0 = read pointer, reset to source start
 
+;; Register note: R6 is NOT available as scratch here -- it holds the
+;; remaining repeat count (n) and is live across every inner-loop
+;; iteration, read again at __string_rep_inner_done ("ISUB R6, 1"). R4 is
+;; used instead: it held the source string length earlier in the routine
+;; (for the total-length multiply, before the __malloc call) and is never
+;; read again after that, so it's genuinely free here.
+
 __string_rep_inner_loop:
     MOV   R2, [R0]
-    IEQ   R2, 0
-    JT    R2, __string_rep_inner_done
+    ;; FIXED: scratch copy (R4) for the nil-check, instead of testing R2
+    ;; directly. R4 is free here (only used earlier for source length,
+    ;; already consumed by the total-length calculation before the
+    ;; __malloc call). R6 is NOT available -- it holds the repeat count,
+    ;; live across every iteration of this loop.
+    MOV   R4, R2
+    IEQ   R4, 0
+    JT    R4, __string_rep_inner_done
     MOV   [R5], R2
     IADD  R0, 1
     IADD  R5, 1
@@ -2269,10 +2282,19 @@ __string_gsub_copy_inner:
 
 __string_gsub_copy_hit:
     MOV   R10, R9
+
+;; Register note: R2 is free here -- by the time this loop runs, the
+;; matching-inner-loop code that also uses R2 as scratch has already
+;; exited (this label is only reached via that loop's own JT branch), and
+;; nothing in this loop or after it depends on R2's prior value.
+
 __string_gsub_copy_write_repl:
     MOV   R1, [R10]
-    IEQ   R1, 0
-    JT    R1, __string_gsub_copy_hit_done
+    ;; FIXED: scratch copy (R2) for the nil-check, instead of testing R1
+    ;; directly. R2 is free here -- see note above.
+    MOV   R2, R1
+    IEQ   R2, 0
+    JT    R2, __string_gsub_copy_hit_done
     MOV   [R12], R1
     IADD  R10, 1
     IADD  R12, 1
