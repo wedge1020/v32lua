@@ -617,7 +617,7 @@ __tostring_table:
 
 __tostring_function:
     MOV   R0, __const_str_function  ; Load result directly
-    OR    R0, BOXED_FUNCTION
+    OR    R0, BOXED_ROMSTRING       ; FIXED: was BOXED_FUNCTION
     MOV   SP, BP                 ; Restore stack
     POP   BP
     RET                           ; Return to caller
@@ -1720,8 +1720,9 @@ __builtin_string_upper:
 
 __string_upper_loop:
     MOV   R0, [R2]
-    IEQ   R0, 0
-    JT    R0, __string_upper_done_copy
+	MOV   R6, R0
+    IEQ   R6, 0
+    JT    R6, __string_upper_done_copy
 
     MOV   R6, R0
     ILT   R6, 97
@@ -1798,8 +1799,9 @@ __builtin_string_lower:
 
 __string_lower_loop:
     MOV   R0, [R2]
-    IEQ   R0, 0
-    JT    R0, __string_lower_done_copy
+	MOV   R6, R0
+    IEQ   R6, 0
+    JT    R6, __string_lower_done_copy
 
     MOV   R6, R0
     ILT   R6, 65
