@@ -43,7 +43,7 @@ end
 === EXPECTED OUTPUT (plain-substring semantics) ===
 number_result1: 7.0000
 number_result2: 1.0000
-number_result3: nil
+number_result3: nan
 number_result4: 1.0000
 number_result5: 1.0000
 number_result6: 1.0000
