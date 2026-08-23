@@ -71,18 +71,18 @@ end
 
 --[[
 === EXPECTED OUTPUT ===
-number_result1: 1
-number_result2: 3
-number_result3: 5
+number_result1: 1.0000
+number_result2: 3.0000
+number_result3: 5.0000
 string_result1: "a"
 string_result2: "b"
 string_result3: "z"
-number_result4: 42
-number_result5: 0
-number_result6: 1
-number_result7: 4
-number_result8: 1
-number_result9: 5
-number_result10: 5
-number_result11: 1
+number_result4: 42.0000
+number_result5: 0.0000
+number_result6: 1.0000
+number_result7: 4.0000
+number_result8: 1.0000
+number_result9: 5.0000
+number_result10: 5.0000
+number_result11: 1.0000
 ]]

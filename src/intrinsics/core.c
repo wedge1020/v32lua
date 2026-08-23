@@ -805,12 +805,16 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         return emit_table_move_intrinsic(node, dest_reg);
     }
 
-    if (strcmp(func_name, "table.pack") == 0) {
-        return emit_table_pack_intrinsic(node, dest_reg);
-    }
-
     if (strcmp(func_name, "table.concat") == 0) {
         return emit_table_concat_intrinsic(node, dest_reg);
+    }
+
+    if (strcmp(func_name, "table.sort") == 0) {
+        return emit_table_sort_intrinsic(node, dest_reg);
+    }
+
+    if (strcmp(func_name, "table.pack") == 0) {
+        return emit_table_pack_intrinsic(node, dest_reg);
     }
 
     // NEW: hard error for any remaining table.* call -- same rationale as

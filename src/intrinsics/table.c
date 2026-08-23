@@ -194,6 +194,53 @@ int emit_table_move_intrinsic(ASTNode *node, int dest_reg)
 }
 
 // ============================================================================
+// table.sort(t, [comp]) - Sorts a table's elements in-place. Default order
+// is ascending via the same __builtin_relcmp the < operator uses; an
+// optional comp(a, b) function may override the ordering (comp returns
+// true when a should sort before b, matching real Lua's contract).
+// ============================================================================
+int emit_table_sort_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg_t = node->as.call.args_head;
+    if (!arg_t) {
+        compiler_error(ERR_SYNTAX, node->line_number,
+            "table.sort() expects at least one argument");
+        return 0;
+    }
+    ASTNode *arg_comp = arg_t->next;
+
+    emit_asm("    ;; --- Intrinsic: table.sort(t, [comp]) ---\n");
+
+    int t_reg = allocate_register();
+    generate_asm(arg_t, t_reg);
+    ensure_in_register(t_reg);
+    emit_asm("    PUSH R%d ; spill table pointer\n", t_reg);
+
+    int comp_reg = allocate_register();
+    if (arg_comp) {
+        generate_asm(arg_comp, comp_reg);
+        ensure_in_register(comp_reg);
+    } else {
+        emit_asm("    MOV R%d, BOXED_NIL ; default: no custom comparator\n", comp_reg);
+    }
+
+    emit_asm("    POP  R%d ; reload table pointer\n", t_reg);
+
+    emit_asm("    PUSH R%d ; Table Pointer\n", t_reg);
+    emit_asm("    PUSH R%d ; Comparator\n", comp_reg);
+    emit_asm("    CALL __builtin_table_sort\n");
+    emit_asm("    IADD SP, 2\n");
+
+    if (dest_reg != 0) {
+        emit_asm("    MOV R%d, R0\n", dest_reg);
+    }
+
+    unlock_register(t_reg);
+    unlock_register(comp_reg);
+    return 1;
+}
+
+// ============================================================================
 // table.pack(...) - Packs a positional argument list into a new table with
 // a .n field set to the argument count.
 //

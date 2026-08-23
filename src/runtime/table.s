@@ -1290,152 +1290,197 @@ __table_remove_done:
     POP  BP
     RET
 
-;; ===========================================================================
-;; SECTION: TABLE SORT
-;; ===========================================================================
-
 ;; ---------------------------------------------------------------------------
-;; table.sort(t, [comp]) - Sorts table elements in-place
-;; Uses simple bubble sort for now (can be optimized later)
+;; table.sort(t, [comp]) - Sorts table elements in-place (bubble sort).
+;; Ascending by default, or via a custom comp(a, b) function that returns
+;; true when a should sort before b.
 ;;
-;; Incoming Stack: [BP+4] = Tagged Table Pointer, [BP+3] = Compare function (optional)
-;; Returns: none (table sorted in-place)
-;; Register Usage: R1-R10
+;; Incoming Stack (pushed t, comp in that order):
+;;   [BP+3] = t (boxed table pointer)
+;;   [BP+2] = comp (boxed function, or BOXED_NIL for default ascending order)
+;; Returns: R0 = BOXED_NIL (table.sort returns nothing in real Lua)
+;;
+;; REPLACES the previous version, which (a) never used its comp argument
+;; at all, and (b) walked the table's "array part" directly via raw
+;; pointer arithmetic on header word 2, which is NEVER actually allocated
+;; by this runtime (same discovery as the table.move/table.concat
+;; rewrites) -- so the old bubble sort's very first check, "is the array
+;; pointer null?", was always true for every real table, and it silently
+;; did nothing, for anything, ever.
+;;
+;; This version goes entirely through __builtin_len / __builtin_table_get
+;; / __builtin_table_set, and invokes a user comparator via __builtin_exec
+;; when provided -- the same mechanism generic-for uses for iterator
+;; functions. NOTE: Lua function calls push arguments RIGHT-TO-LEFT
+;; (param 1 ends up at [BP+2] inside the callee), the OPPOSITE convention
+;; from this runtime's own internal builtins (which push left-to-right) --
+;; see the comparator-invocation block below.
+;;
+;; Default comparator uses __builtin_relcmp -- the same three-way compare
+;; the < operator is built on -- which already correctly handles both
+;; numbers and strings, unlike the old stub's raw FLT-on-NaN-boxed-values
+;; approach (undefined/always-false for any two strings).
+;;
+;; Incomparable-type pairs (e.g. sorting a table with a mix of numbers and
+;; non-numbers) make __builtin_relcmp return its error sentinel, which
+;; this treats as "not less than" -- the pair is simply never swapped
+;; relative to each other, rather than raising an error. Matches this
+;; runtime's existing permissive style elsewhere (no hard error on
+;; incomparable relational operands), NOT real Lua's behavior (which
+;; raises "attempt to compare" errors). Worth knowing if a test ever
+;; deliberately sorts mixed types.
 ;; ---------------------------------------------------------------------------
 __builtin_table_sort:
     PUSH BP
     MOV  BP, SP
+    ISUB SP, 7   ; [BP-1]=n  [BP-2]=i  [BP-3]=j  [BP-4]=comp (boxed)
+                 ; [BP-5]=t[j+1]  [BP-6]=t[j+2]  [BP-7]=should_swap
 
-    ;; --- Callee-Save: Preserve 10 working registers ---
     PUSH R1
     PUSH R2
     PUSH R3
     PUSH R4
-    PUSH R5
-    PUSH R6
-    PUSH R7
-    PUSH R8
-    PUSH R9
-    PUSH R10
-
-    ;; --- Load arguments ---
-    MOV  R1, [BP+4]          ; R1 = Tagged Table Pointer
-    MOV  R2, [BP+3]          ; R2 = Compare function (may be NIL)
 
     ;; --- Validate table ---
-    MOV  R3, R1
-    AND  R3, BOXED_DATA
-    IEQ  R3, BOXED_TABLE
-    JF   R3, __runtime_error_not_table
+    MOV  R1, [BP+3]
+    MOV  R2, R1
+    AND  R2, BOXED_DATA
+    IEQ  R2, BOXED_TABLE
+    JF   R2, __runtime_error_not_table
 
-    ;; --- Unbox table pointer ---
-    AND  R1, BOXED_PAYLOAD   ; R1 = raw table header address
+    MOV  R1, [BP+2]
+    MOV  [BP-4], R1          ; save comparator (boxed function, or nil)
 
-    ;; --- Get array info ---
-    MOV  R3, [R1+1]          ; R3 = array length
-    MOV  R4, [R1+2]          ; R4 = array data pointer
+    ;; --- n = #t ---
+    MOV  R1, [BP+3]
+    PUSH R1
+    CALL __builtin_len
+    IADD SP, 1
+    MOV  R1, R0
+    CFI  R1
+    MOV  [BP-1], R1          ; n
 
-    ;; --- Check if array exists or has elements ---
-    MOV  R5, R4
-    IEQ  R5, 0
-    JT   R5, __table_sort_done
+    MOV  R1, [BP-1]
+    ILT  R1, 2
+    JT   R1, __sort_done      ; fewer than 2 elements -- nothing to sort
 
-    MOV  R5, R3
-    ILT  R5, 2
-    JT   R5, __table_sort_done      ; Need at least 2 elements to sort
+    MOV  R1, 0
+    MOV  [BP-2], R1           ; i = 0
 
-    ;; --- Bubble sort implementation ---
-    MOV  R5, R3              ; R5 = outer loop counter (n)
-    ISUB R5, 1
+__sort_outer_loop:
+    MOV  R1, [BP-2]
+    MOV  R2, [BP-1]
+    ISUB R2, 1
+    IGE  R1, R2
+    JT   R1, __sort_done      ; i >= n-1?
 
-__table_sort_outer_loop:
-    MOV  R6, 0               ; R6 = inner loop counter (i)
-    MOV  R7, R5              ; R7 = outer loop limit
+    MOV  R1, 0
+    MOV  [BP-3], R1           ; j = 0
 
-__table_sort_inner_loop:
-    MOV  R8, R6
-    ILT  R8, R7
-    JF   R8, __table_sort_outer_continue
+__sort_inner_loop:
+    MOV  R1, [BP-3]
+    MOV  R2, [BP-1]
+    ISUB R2, 1
+    MOV  R3, [BP-2]
+    ISUB R2, R3
+    IGE  R1, R2
+    JT   R1, __sort_inner_done   ; j >= n-1-i?
 
-    ;; --- Compare elements at positions R6+1 and R6+2 ---
-    ;; Calculate address of element i
-    MOV  R8, R4
-    IADD R8, R6
+    ;; --- Fetch t[j+1] ---
+    MOV  R1, [BP-3]
+    IADD R1, 1
+    CIF  R1
+    MOV  R2, [BP+3]
+    PUSH R2
+    PUSH R1
+    CALL __builtin_table_get
+    IADD SP, 2
+    MOV  [BP-5], R0            ; t[j+1]
 
-    ;; Calculate address of element i+1
-    MOV  R9, R4
-    IADD R9, R6
-    IADD R9, 1
+    ;; --- Fetch t[j+2] ---
+    MOV  R1, [BP-3]
+    IADD R1, 2
+    CIF  R1
+    MOV  R2, [BP+3]
+    PUSH R2
+    PUSH R1
+    CALL __builtin_table_get
+    IADD SP, 2
+    MOV  [BP-6], R0            ; t[j+2]
 
-    ;; Load values
-    MOV  R10, [R8]           ; R10 = t[i]
-    MOV  R11, [R9]           ; R11 = t[i+1]
+    ;; --- should_swap: does t[j+2] belong before t[j+1]? ---
+    MOV  R1, [BP-4]
+    IEQ  R1, BOXED_NIL
+    JF   R1, __sort_use_comp
 
-    ;; For now, use simple numeric comparison
-    ;; TODO: Implement custom compare function support
+    ;; --- Default: __builtin_relcmp(t[j+2], t[j+1]) == -1 ---
+    ;; (relcmp pushes left-to-right: Left pushed first, Right pushed last)
+    MOV  R1, [BP-6]             ; Left = t[j+2]
+    MOV  R2, [BP-5]             ; Right = t[j+1]
+    PUSH R1
+    PUSH R2
+    CALL __builtin_relcmp
+    IADD SP, 2
+    IEQ  R0, -1
+    MOV  [BP-7], R0
+    JMP  __sort_check_swap
 
-    ;; Check if R10 is a number (not NaN-boxed)
-    MOV  R8, R10
-    AND  R8, NAN_VALUE
-    IEQ  R8, NAN_VALUE
-    JT   R8, __table_sort_compare_as_float
+__sort_use_comp:
+    ;; --- Custom: comp(t[j+2], t[j+1]) -- Lua calls push RIGHT-TO-LEFT, ---
+    ;; --- so param 2 (b) is pushed first, param 1 (a) pushed last. ---
+    MOV  R1, [BP-6]              ; a = t[j+2] (param 1)
+    MOV  R2, [BP-5]              ; b = t[j+1] (param 2)
+    PUSH R2                      ; param 2 pushed first
+    PUSH R1                      ; param 1 pushed last
+    MOV  R0, [BP-4]
+    CALL __builtin_exec
+    IADD SP, 2
+    IEQ  R0, BOXED_TRUE
+    MOV  [BP-7], R0
 
-    ;; It's a number, convert R10 to integer
-    CFI  R10
+__sort_check_swap:
+    MOV  R1, [BP-7]
+    IEQ  R1, 0
+    JT   R1, __sort_no_swap
 
-    ;; Check if R11 is a number
-    MOV  R8, R11
-    AND  R8, NAN_VALUE
-    IEQ  R8, NAN_VALUE
-    JT   R8, __table_sort_compare_as_float
+    ;; --- Swap: t[j+1] = old t[j+2], t[j+2] = old t[j+1] ---
+    MOV  R1, [BP-3]
+    IADD R1, 1
+    CIF  R1
+    MOV  R2, [BP+3]
+    MOV  R3, [BP-6]
+    PUSH R2
+    PUSH R1
+    PUSH R3
+    CALL __builtin_table_set
+    IADD SP, 3
 
-    ;; It's a number, convert R11 to integer
-    CFI  R11
+    MOV  R1, [BP-3]
+    IADD R1, 2
+    CIF  R1
+    MOV  R2, [BP+3]
+    MOV  R3, [BP-5]
+    PUSH R2
+    PUSH R1
+    PUSH R3
+    CALL __builtin_table_set
+    IADD SP, 3
 
-    ;; Compare R10 and R11 (use R8 for comparison result)
-    MOV  R8, R10
-    ILT  R8, R11
-    JT   R8, __table_sort_no_swap
-    JMP  __table_sort_swap
+__sort_no_swap:
+    MOV  R1, [BP-3]
+    IADD R1, 1
+    MOV  [BP-3], R1
+    JMP  __sort_inner_loop
 
-__table_sort_compare_as_float:
-    ;; For non-numbers, use direct float comparison
-    FLT  R8, R10
-    JT   R8, __table_sort_no_swap
+__sort_inner_done:
+    MOV  R1, [BP-2]
+    IADD R1, 1
+    MOV  [BP-2], R1
+    JMP  __sort_outer_loop
 
-__table_sort_swap:
-    ;; --- Swap elements ---
-    MOV  R8, R4
-    IADD R8, R6              ; Address of t[i]
+__sort_done:
+    MOV  R0, BOXED_NIL
 
-    MOV  R9, R4
-    IADD R9, R6
-    IADD R9, 1               ; Address of t[i+1]
-
-    MOV  R10, [R8]           ; Load t[i]
-    MOV  R11, [R9]           ; Load t[i+1]
-
-    MOV  [R8], R11           ; Store t[i+1] at t[i]
-    MOV  [R9], R10           ; Store t[i] at t[i+1]
-
-__table_sort_no_swap:
-    IADD R6, 1
-    JMP  __table_sort_inner_loop
-
-__table_sort_outer_continue:
-    ISUB R5, 1
-    MOV  R8, R5
-    ILT  R8, 0
-    JF   R8, __table_sort_outer_loop
-
-__table_sort_done:
-    ;; --- Callee-Restore ---
-    POP  R10
-    POP  R9
-    POP  R8
-    POP  R7
-    POP  R6
-    POP  R5
     POP  R4
     POP  R3
     POP  R2
