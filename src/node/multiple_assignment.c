@@ -1,5 +1,37 @@
 #include "v32lua.h"
 
+// Special-cased multi-assignment RHS: table.unpack(t, [i], [j]).
+// target_count is known at COMPILE TIME (the literal number of LHS
+// names), so this unrolls into target_count straight-line fetch blocks
+// rather than needing a runtime loop or the generic multi-return
+// register/global protocol.
+static void emit_multiple_assignment_table_unpack(ASTNode *targets_head, ASTNode *call_node, bool is_local)
+{
+    int target_count = 0;
+    for (ASTNode *t = targets_head; t != NULL; t = t->next) target_count++;
+
+    emit_asm("    ;; --- table.unpack(t, [i], [j]) as multi-assignment RHS (%d targets) ---\n", target_count);
+
+    char t_name[48], i_name[48], j_name[48];
+    emit_table_unpack_resolve_bounds(call_node, t_name, i_name, j_name, sizeof(t_name));
+
+    ASTNode *curr_tgt = targets_head;
+    for (int k = 0; k < target_count && curr_tgt != NULL; k++, curr_tgt = curr_tgt->next) {
+        int val_reg = allocate_register();
+        emit_table_unpack_fetch_element(t_name, i_name, j_name, k, val_reg);
+
+        if (curr_tgt->type == NODE_IDENTIFIER) {
+            if (is_local) {
+                SymbolNode *sym = register_local(curr_tgt->as.id.name);
+                emit_initialize_local(sym, val_reg);
+            } else {
+                emit_store_variable(curr_tgt->as.id.name, val_reg);
+            }
+        }
+        unlock_register(val_reg);
+    }
+}
+
 void node_multiple_assignment(ASTNode *node)
 {
     ASTNode *curr_tgt             = node -> as.mult_assign.targets_head;
@@ -18,6 +50,16 @@ void node_multiple_assignment(ASTNode *node)
             }
             curr_tgt = curr_tgt->next;
         }
+        return;
+    }
+
+    // --- Special case: table.unpack(t, [i], [j]) as a multi-assignment ---
+    // --- RHS -- see emit_multiple_assignment_table_unpack() for why this ---
+    // --- can't go through the generic multi-return path below. ---
+    if (curr_val != NULL && curr_val->next == NULL &&
+        is_table_unpack_call(curr_val))
+    {
+        emit_multiple_assignment_table_unpack(curr_tgt, curr_val, node->as.mult_assign.is_local);
         return;
     }
 

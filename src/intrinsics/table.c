@@ -403,3 +403,21 @@ int emit_table_concat_intrinsic(ASTNode *node, int dest_reg)
     unlock_register(j_reg);
     return 1;
 }
+
+// FALLBACK single-value form of table.unpack(t, [i], [j]) -- used
+// whenever the call doesn't match either context with real expansion
+// support. Returns the FIRST element of the requested range, same as
+// real Lua's first result, just without the additional values a true
+// multi-return would carry.
+int emit_table_unpack_intrinsic(ASTNode *node, int dest_reg)
+{
+    emit_asm("    ;; --- Intrinsic: table.unpack(t, [i], [j]) [single-value fallback] ---\n");
+
+    char t_name[48], i_name[48], j_name[48];
+    emit_table_unpack_resolve_bounds(node, t_name, i_name, j_name, sizeof(t_name));
+
+    if (dest_reg != 0) {
+        emit_table_unpack_fetch_element(t_name, i_name, j_name, 0, dest_reg);
+    }
+    return 1;
+}

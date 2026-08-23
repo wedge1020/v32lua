@@ -17,6 +17,7 @@
 #include "emit.h"
 #include "ast.h"
 #include "context.h"
+#include "table.h"
 #include "intrinsics.h"
 #include "generate.h"
 #include "internals.h"

@@ -468,7 +468,6 @@ void  node_function_call (ASTNode *node, int  dest_reg)
     // -------------------------------------------------------------------------
     // STEP 2: Evaluate & Push Explicit Arguments (Right-to-Left)
     // -------------------------------------------------------------------------
-    // Count explicit arguments
     int explicit_arg_count = 0;
     ASTNode *curr = node->as.call.args_head;
     while (curr != NULL) {
@@ -476,10 +475,40 @@ void  node_function_call (ASTNode *node, int  dest_reg)
         curr = curr->next;
     }
 
-    // --- Handle Missing Arguments (Arity Padding) ---
-    int actual_passed_count = explicit_arg_count +
-                            (node->as.call.is_method_call ? 1 : 0);
     int expected_arity = get_expected_arity(node->as.call.target);
+
+    // --- Detect a trailing table.unpack(...) call -- the only expression ---
+    // --- form that can expand into more than one argument slot, matching ---
+    // --- real Lua's rule that only the LAST expression in an argument ---
+    // --- list may expand. unpack_extra_slots counts how many EXTRA slots ---
+    // --- the expansion fills beyond the 1 slot the call already occupies ---
+    // --- in explicit_arg_count. Stays 0 if there's no trailing unpack ---
+    // --- call, or if the callee's arity can't be determined statically ---
+    // --- (a call through a function VALUE, where expected_arity is -1) -- ---
+    // --- in either case this falls through to ordinary single-value ---
+    // --- handling, same as any other expression. ---
+    int unpack_extra_slots = 0;
+    ASTNode *last_arg = NULL;
+    if (explicit_arg_count > 0) {
+        last_arg = node->as.call.args_head;
+        while (last_arg->next != NULL) last_arg = last_arg->next;
+    }
+    bool last_arg_is_unpack = (last_arg != NULL && is_table_unpack_call(last_arg));
+
+    if (last_arg_is_unpack && expected_arity >= 0) {
+        int self_slot = node->as.call.is_method_call ? 1 : 0;
+        int needed = expected_arity - self_slot - (explicit_arg_count - 1);
+        if (needed > 1) {
+            unpack_extra_slots = needed - 1;
+        }
+    }
+
+    // --- Handle Missing Arguments (Arity Padding) ---
+    // unpack_extra_slots is already counted in actual_passed_count, so if
+    // the expansion covers everything needed, padding is correctly skipped.
+    int actual_passed_count = explicit_arg_count +
+                            (node->as.call.is_method_call ? 1 : 0) +
+                            unpack_extra_slots;
 
     if (expected_arity > actual_passed_count) {
         int missing_args = expected_arity - actual_passed_count;
@@ -512,7 +541,6 @@ void  node_function_call (ASTNode *node, int  dest_reg)
             compiler_error(ERR_INTERNAL, -1, "Out of memory for arg buffer");
         }
 
-        // Collect arguments
         curr = node->as.call.args_head;
         for (int i = 0; i < explicit_arg_count; i++) {
             arg_array[i] = curr;
@@ -521,10 +549,36 @@ void  node_function_call (ASTNode *node, int  dest_reg)
 
         emit_asm("    ; --- Pushing explicit arguments Right-to-Left ---\n");
 
-        // REGISTER FIX: Because target_reg is only LOCKED (not pinned),
-        // argument evaluation can now reuse other registers or even spill
-        // target_reg if absolutely necessary. This prevents exhaustion.
         for (int i = explicit_arg_count - 1; i >= 0; i--) {
+            if (i == explicit_arg_count - 1 && unpack_extra_slots > 0) {
+                // --- Trailing table.unpack(...) expanding into ---
+                // --- (1 + unpack_extra_slots) argument slots. Pushed in ---
+                // --- reverse among themselves too, so the FIRST unpacked ---
+                // --- value ends up closest to the callee's param-1 slot. ---
+                emit_asm("    ; --- Expanding trailing table.unpack() into %d argument slots ---\n",
+                         1 + unpack_extra_slots);
+
+                char t_name[48], i_name[48], j_name[48];
+                emit_table_unpack_resolve_bounds(arg_array[i], t_name, i_name, j_name, sizeof(t_name));
+
+                for (int k = unpack_extra_slots; k >= 0; k--) {
+                    int val_reg = allocate_register();
+                    emit_table_unpack_fetch_element(t_name, i_name, j_name, k, val_reg);
+
+                    if (is_c_call) {
+                        emit_asm("    ; --- Unbox for C ABI ---\n");
+                        emit_asm("AND R%d, BOXED_PAYLOAD ; Strip NaN tag bits\n", val_reg);
+                    }
+
+                    ensure_in_register(val_reg);
+                    emit_asm("PUSH R%d\n", val_reg);
+                    unlock_register(val_reg);
+                    total_arg_count++;
+                }
+
+                continue;
+            }
+
             int arg_reg = allocate_register();
             mark_register_live(arg_reg, 2);
 

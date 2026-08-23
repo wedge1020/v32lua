@@ -77,5 +77,5 @@ string_result7: "c"
 boolean_result1: true
 string_result8: "only"
 boolean_result2: true
-number_result1: 60
+number_result1: 60.0000
 ]]

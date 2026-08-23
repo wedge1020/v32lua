@@ -163,5 +163,6 @@ int   emit_table_move_intrinsic      (ASTNode *, int);
 int   emit_table_concat_intrinsic    (ASTNode *, int);
 int   emit_table_sort_intrinsic      (ASTNode *, int);
 int   emit_table_pack_intrinsic      (ASTNode *, int);
+int   emit_table_unpack_intrinsic    (ASTNode *, int);
 
 #endif
