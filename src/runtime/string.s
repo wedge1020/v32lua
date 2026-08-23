@@ -1216,6 +1216,15 @@ __string_char_oom:
 __builtin_string_format:
     PUSH BP
     MOV  BP, SP
+    ISUB SP, 4                 ; [BP-1] = width accumulator (parse-time)
+                                 ; [BP-2] = width snapshot for current specifier
+                                 ; [BP-3] = left-justify flag (parse-time)
+                                 ; [BP-4] = left-justify snapshot for current specifier
+    MOV  R0, 0
+    MOV  [BP-1], R0
+    MOV  [BP-2], R0
+    MOV  [BP-3], R0
+    MOV  [BP-4], R0
 
     ;; Load and unbox format string
     MOV  R0, [BP+2]
@@ -1270,7 +1279,19 @@ __string_format_loop:
     IEQ  R2, 37
     JT   R2, __string_format_literal_percent
 
-    ;; --- Skip width digits (parsed, but padding is not implemented) ---
+    ;; --- Optional '-' flag (left-justify). Only '-' is handled -- other
+    ;; C flags ('+', ' ', '0', '#') aren't recognized and fall through to
+    ;; the same broken behavior described in the diagnosis above if used.
+__string_format_check_flags:
+    MOV  R2, R3
+    IEQ  R2, 45                 ; '-'
+    JF   R2, __string_format_skip_width
+    MOV  R2, 1
+    MOV  [BP-3], R2
+    IADD R1, 1
+    MOV  R3, [R1]
+
+    ;; --- Parse width digits (if any) into [BP-1]; 0 = "no width given" ---
 __string_format_skip_width:
     MOV  R2, R3
     ISUB R2, 48
@@ -1280,6 +1301,15 @@ __string_format_skip_width:
     ISUB R2, 48
     IGT  R2, 9
     JT   R2, __string_format_check_dot
+
+    MOV  R2, [BP-1]
+    MOV  R8, 10
+    IMUL R2, R8
+    MOV  R8, R3
+    ISUB R8, 48
+    IADD R2, R8
+    MOV  [BP-1], R2
+
     IADD R1, 1
     MOV  R3, [R1]
     JMP  __string_format_skip_width
@@ -1316,6 +1346,16 @@ __string_format_precision_digits:
 
     ;; --- Now that we're at a real specifier char, consume the argument ---
 __string_format_dispatch_specifier:
+    MOV  R2, [BP-1]
+    MOV  [BP-2], R2
+    MOV  R2, 0
+    MOV  [BP-1], R2
+
+    MOV  R2, [BP-3]          ; snapshot left-justify flag for THIS specifier
+    MOV  [BP-4], R2
+    MOV  R2, 0
+    MOV  [BP-3], R2           ; reset for the NEXT specifier
+
     MOV  R0, [R6]
     IADD R6, 1
 
@@ -1640,9 +1680,46 @@ __string_format_arg_nil:
     IADD R1, 1
     JMP  __string_format_loop
 
-    ;; --- Used by %d/%i/%u/%f/%e/%g/%s: copies a C string from R7, then
-    ;;     resumes the outer format loop at the next format-string char ---
+    ;; --- Entry point used by %d/%i/%u/%f/%e/%g/%s/%x/%X: applies width
+    ;;     padding (if any was requested, e.g. "%5d"), then copies the C
+    ;;     string from R7, then resumes the outer format loop.
+    ;;
+    ;; PADDING SCOPE: only these 9 specifiers -- the ones that funnel
+    ;; through this shared routine -- are padded. %c and %q write through
+    ;; separate dedicated paths (direct inline write / copy_string_inner)
+    ;; and do NOT respect a requested width; not extended to cover them
+    ;; since nothing currently needs it and it'd mean duplicating this
+    ;; same measure-then-pad logic in two more places for an untested case.
 __string_format_copy_string:
+    MOV  R8, R7
+    MOV  R2, 0
+__string_format_copy_string_measure:
+    MOV  R3, [R8]
+    IEQ  R3, 0
+    JT   R3, __string_format_copy_string_measured
+    IADD R8, 1
+    IADD R2, 1
+    JMP  __string_format_copy_string_measure
+__string_format_copy_string_measured:
+
+    MOV  R3, [BP-2]               ; requested width
+    ISUB R3, R2                     ; R3 = pad count (width - length, may be <= 0)
+
+    MOV  R2, [BP-4]                 ; left-justify flag
+    JT   R2, __string_format_copy_string_emit_left
+
+    ;; --- Right-justify (default): spaces BEFORE the value ---
+__string_format_copy_string_pad_right:
+    MOV  R2, R3
+    ILT  R2, 1
+    JT   R2, __string_format_copy_string_emit_right
+    MOV  R2, 32
+    MOV  [R5], R2
+    IADD R5, 1
+    ISUB R3, 1
+    JMP  __string_format_copy_string_pad_right
+
+__string_format_copy_string_emit_right:
     MOV  R3, [R7]
     MOV  R2, R3
     IEQ  R2, 0
@@ -1650,7 +1727,33 @@ __string_format_copy_string:
     MOV  [R5], R3
     IADD R5, 1
     IADD R7, 1
-    JMP  __string_format_copy_string
+    JMP  __string_format_copy_string_emit_right
+
+    ;; --- Left-justify: value FIRST, spaces AFTER ---
+__string_format_copy_string_emit_left:
+    MOV  R9, R3                     ; stash pad count -- R3 becomes a
+                                       ; char-scratch register during the copy
+__string_format_copy_string_emit_left_loop:
+    MOV  R3, [R7]
+    MOV  R2, R3
+    IEQ  R2, 0
+    JT   R2, __string_format_pad_left
+    MOV  [R5], R3
+    IADD R5, 1
+    IADD R7, 1
+    JMP  __string_format_copy_string_emit_left_loop
+__string_format_pad_left:
+    MOV  R3, R9
+__string_format_copy_string_pad_left_loop:
+    MOV  R2, R3
+    ILT  R2, 1
+    JT   R2, __string_format_after_copy
+    MOV  R2, 32
+    MOV  [R5], R2
+    IADD R5, 1
+    ISUB R3, 1
+    JMP  __string_format_copy_string_pad_left_loop
+
 __string_format_after_copy:
     IADD R1, 1
     JMP  __string_format_loop

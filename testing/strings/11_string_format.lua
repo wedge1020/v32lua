@@ -56,15 +56,18 @@ function test_string_format()
     string_result11 = string.format("%x", 255)  -- Expected: "ff"
     __rawasm__("__debug11:")
 
-    -- === Test 12: %f with no explicit precision (SPECULATIVE -- default ===
+    -- === Test 12: %f with no explicit precision ===
     -- === precision behavior unconfirmed; real Lua/C default is 6 places) ===
     string_result12 = string.format("%f", 2.5)  -- Expected: "2.500000" if C-default precision
     __rawasm__("__debug12:")
 
-    -- === Test 13: Width padding, e.g. %5d (SPECULATIVE -- may not be ===
-    -- === implemented at all) ===
+    -- === Test 13: Width padding, e.g. %5d ===
     string_result13 = string.format("%5d", 7)  -- Expected: "    7" (padded to width 5)
     __rawasm__("__debug13:")
+
+    -- === Test 14: Width padding, e.g. %-4d ===
+    string_result14 = string.format("%-4d", 3)  -- Expected: "3   " (padded to width 4)
+    __rawasm__("__debug14:")
 end
 
 function main()
@@ -86,6 +89,7 @@ function main()
     print(100, 240, "Test 11 - %x: " ..          string_result11)
     print(100, 260, "Test 12 - %f default: " ..  string_result12)
     print(100, 280, "Test 13 - %5d width: '" ..  string_result13 .. "'")
+    print(100, 280, "Test 14 - %-4d width: '" ..  string_result13 .. "'")
 end
 
 --[[
@@ -104,4 +108,5 @@ string_result10: "50%"
 string_result11: "ff"
 string_result12: "2.500000"
 string_result13: "    7"
+string_result14: "3   "
 ]]
