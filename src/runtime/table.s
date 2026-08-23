@@ -1445,25 +1445,49 @@ __table_sort_done:
     POP  BP
     RET
 
-;; ===========================================================================
-;; SECTION: TABLE CONCAT
-;; ===========================================================================
+;; ---------------------------------------------------------------------------
+;; __concat_make_empty_string: allocate a fresh zero-length RAM string.
+;; Output: R0 = boxed empty string. Clobbers: R0, R1, R2 only.
+;; ---------------------------------------------------------------------------
+__concat_make_empty_string:
+    MOV  R1, [HEAP_POINTER]   ; R1 = base address for this new string
+    MOV  R2, 0
+    MOV  [R1], R2             ; write null terminator
+    MOV  R0, R1
+    IADD R0, 1
+    MOV  [HEAP_POINTER], R0   ; bump heap pointer past the 1 byte used
+    MOV  R0, R1
+    OR   R0, BOXED_RAMSTRING  ; box the STRING BASE (not the bumped pointer)
+    RET
 
 ;; ---------------------------------------------------------------------------
-;; table.concat(t, [sep], [i], [j]) - Concatenates array elements
+;; table.concat(t, [sep], [i], [j]) - Concatenates array elements into a string
 ;;
-;; Incoming Stack: [BP+6] = Tagged Table Pointer
-;;                 [BP+5] = Separator (optional, may be NIL)
-;;                 [BP+4] = Start index (optional, may be NIL)
-;;                 [BP+3] = End index (optional, may be NIL)
-;; Returns: R0 = concatenated string
-;; Register Usage: R1-R10
+;; Incoming Stack (pushed t, sep, i, j in that order):
+;;   [BP+5] = t (boxed table pointer)
+;;   [BP+4] = sep (boxed string, or BOXED_NIL for "no separator")
+;;   [BP+3] = i (boxed float, or BOXED_NIL for "default 1")
+;;   [BP+2] = j (boxed float, or BOXED_NIL for "default #t")
+;; Returns: R0 = boxed result string
+;;
+;; REPLACES the previous stub, which ignored the separator entirely,
+;; returned the first element raw/unstringified instead of concatenating,
+;; and returned BOXED_NIL instead of "" for an empty range.
+;;
+;; STACK-OFFSET NOTE: the previous version of this routine documented and
+;; read from [BP+6]..[BP+3], one slot higher across the board than every
+;; other proven N-argument builtin in this file ([BP+(N+1)]..[BP+2] --
+;; see table_get, table_insert). That looks like an authoring bug in the
+;; abandoned stub. This rewrite uses the established convention instead:
+;; [BP+5]..[BP+2] for 4 arguments, matching emit_table_concat_intrinsic's
+;; push order (t, sep, i, j).
 ;; ---------------------------------------------------------------------------
 __builtin_table_concat:
     PUSH BP
     MOV  BP, SP
+    ISUB SP, 6   ; [BP-1]=i  [BP-2]=j  [BP-3]=accumulator  [BP-4]=loop idx
+                 ; [BP-5]=resolved sep  [BP-6]=first-element flag
 
-    ;; --- Callee-Save: Preserve 10 working registers ---
     PUSH R1
     PUSH R2
     PUSH R3
@@ -1472,109 +1496,106 @@ __builtin_table_concat:
     PUSH R6
     PUSH R7
     PUSH R8
-    PUSH R9
-    PUSH R10
 
-    ;; --- Load arguments ---
-    MOV  R1, [BP+6]          ; R1 = Tagged Table Pointer
-    MOV  R2, [BP+5]          ; R2 = Separator (may be NIL)
-    MOV  R3, [BP+4]          ; R3 = Start index (may be NIL)
-    MOV  R4, [BP+3]          ; R4 = End index (may be NIL)
+    ;; --- Validate table type up front ---
+    MOV  R1, [BP+5]
+    MOV  R2, R1
+    AND  R2, BOXED_DATA
+    IEQ  R2, BOXED_TABLE
+    JF   R2, __runtime_error_not_table
 
-    ;; --- Validate table ---
-    MOV  R5, R1
-    AND  R5, BOXED_DATA
-    IEQ  R5, BOXED_TABLE
-    JF   R5, __runtime_error_not_table
+    ;; --- Resolve j: default to #t if nil ---
+    MOV  R1, [BP+2]
+    MOV  R2, R1
+    IEQ  R2, BOXED_NIL
+    JF   R2, __concat_j_given
+    MOV  R3, [BP+5]        ; table pointer (still boxed -- __builtin_len wants it boxed)
+    PUSH R3
+    CALL __builtin_len      ; R0 = float length
+    IADD SP, 1
+    MOV  R1, R0
+__concat_j_given:
+    CFI  R1
+    MOV  [BP-2], R1
 
-    ;; --- Unbox table pointer ---
-    AND  R1, BOXED_PAYLOAD   ; R1 = raw table header address
+    ;; --- Resolve i: default to 1 if nil ---
+    MOV  R1, [BP+3]
+    MOV  R2, R1
+    IEQ  R2, BOXED_NIL
+    JF   R2, __concat_i_given
+    MOV  R1, 1.0
+__concat_i_given:
+    CFI  R1
+    MOV  [BP-1], R1
 
-    ;; --- Get array info ---
-    MOV  R5, [R1+1]          ; R5 = array length
-    MOV  R6, [R1+2]          ; R6 = array data pointer
+    ;; --- Resolve sep: default to a fresh empty string if nil ---
+    MOV  R1, [BP+4]
+    MOV  R2, R1
+    IEQ  R2, BOXED_NIL
+    JF   R2, __concat_sep_given
+    CALL __concat_make_empty_string
+    MOV  R1, R0
+__concat_sep_given:
+    MOV  [BP-5], R1
 
-    ;; --- Set default values ---
-    ;; Default start index = 1
-    MOV  R7, R3
-    IEQ  R7, BOXED_NIL
-    JT   R7, __table_concat_start_default
+    ;; --- Seed accumulator with a fresh empty string, first-flag = true ---
+    CALL __concat_make_empty_string
+    MOV  [BP-3], R0
+    MOV  R1, 1
+    MOV  [BP-6], R1
 
-    ;; Convert start index to integer
-    MOV  R7, R3
-    CFI  R7
-    JMP  __table_concat_start_set
+    MOV  R1, [BP-1]
+    MOV  [BP-4], R1      ; loop index = i
 
-__table_concat_start_default:
-    MOV  R7, 1
+__concat_loop:
+    MOV  R1, [BP-4]
+    MOV  R2, [BP-2]
+    IGT  R1, R2
+    JT   R1, __concat_done
 
-__table_concat_start_set:
-    ;; Default end index = length
-    MOV  R8, R4
-    IEQ  R8, BOXED_NIL
-    JT   R8, __table_concat_end_default
+    ;; --- If not the first element, append the separator first ---
+    MOV  R1, [BP-6]
+    IEQ  R1, 1
+    JT   R1, __concat_skip_sep
 
-    ;; Convert end index to integer
-    MOV  R8, R4
-    CFI  R8
-    JMP  __table_concat_end_set
+    MOV  R3, [BP-3]       ; accumulator
+    PUSH R3
+    MOV  R4, [BP-5]       ; separator
+    PUSH R4
+    CALL __builtin_strcat
+    IADD SP, 2
+    MOV  [BP-3], R0       ; accumulator = accumulator .. sep
 
-__table_concat_end_default:
-    MOV  R8, R5
+__concat_skip_sep:
+    ;; --- Fetch element and append it ---
+    MOV  R5, [BP-4]        ; raw int loop index
+    MOV  R6, R5
+    CIF  R6                ; boxed float key
+    MOV  R7, [BP+5]        ; table pointer
+    PUSH R7
+    PUSH R6
+    CALL __builtin_table_get
+    IADD SP, 2
+    MOV  R8, R0            ; R8 = element value (any type; strcat coerces)
 
-__table_concat_end_set:
-    ;; --- Validate indices ---
-    MOV  R9, R7
-    ILT  R9, 1
-    JT   R9, __table_concat_invalid_range
-    MOV  R9, R7
-    IGT  R9, R5
-    JT   R9, __table_concat_invalid_range
-    MOV  R9, R8
-    ILT  R9, 1
-    JT   R9, __table_concat_invalid_range
-    MOV  R9, R8
-    IGT  R9, R5
-    JT   R9, __table_concat_end_adjust
-    JMP  __table_concat_validate_range
+    MOV  R3, [BP-3]        ; accumulator
+    PUSH R3
+    PUSH R8
+    CALL __builtin_strcat
+    IADD SP, 2
+    MOV  [BP-3], R0        ; accumulator = accumulator .. tostring(element)
 
-__table_concat_end_adjust:
-    MOV  R8, R5
+    ;; --- Clear the first-flag, advance loop index ---
+    MOV  R1, 0
+    MOV  [BP-6], R1
+    MOV  R1, [BP-4]
+    IADD R1, 1
+    MOV  [BP-4], R1
+    JMP  __concat_loop
 
-__table_concat_validate_range:
-    MOV  R9, R8
-    ILT  R9, R7
-    JT   R9, __table_concat_empty_result
+__concat_done:
+    MOV  R0, [BP-3]         ; R0 = final accumulator string
 
-    ;; --- Check if array exists ---
-    MOV  R9, R6
-    IEQ  R9, 0
-    JT   R9, __table_concat_empty_result
-
-    ;; --- Calculate total string length needed ---
-    ;; For now, use a simple approach: create string on stack
-    ;; TODO: Implement proper string concatenation with memory allocation
-
-    ;; --- Simple implementation: just return first element for now ---
-    MOV  R9, R6
-    IADD R9, R7
-    ISUB R9, 1               ; Address of first element
-
-    MOV  R0, [R9]            ; Return first element (simplified)
-    JMP  __table_concat_done
-
-__table_concat_empty_result:
-    ;; Return empty string
-    MOV  R0, BOXED_NIL       ; For now, return nil for empty
-    JMP  __table_concat_done
-
-__table_concat_invalid_range:
-    MOV  R0, BOXED_NIL
-
-__table_concat_done:
-    ;; --- Callee-Restore ---
-    POP  R10
-    POP  R9
     POP  R8
     POP  R7
     POP  R6

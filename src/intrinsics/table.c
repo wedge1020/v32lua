@@ -206,3 +206,78 @@ int emit_table_pack_intrinsic(ASTNode *node, int dest_reg)
     unlock_register(t_reg);
     return 1;
 }
+
+// ============================================================================
+// table.concat(list [, sep [, i [, j]]]) - Concatenate array elements into a string
+// ============================================================================
+int emit_table_concat_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg_t = node->as.call.args_head;
+    if (!arg_t) {
+        compiler_error(ERR_SYNTAX, node->line_number,
+            "table.concat() expects at least one argument");
+        return 0;
+    }
+    ASTNode *arg_sep = arg_t->next;
+    ASTNode *arg_i   = arg_sep ? arg_sep->next : NULL;
+    ASTNode *arg_j   = arg_i   ? arg_i->next   : NULL;
+
+    emit_asm("    ;; --- Intrinsic: table.concat(t, [sep], [i], [j]) ---\n");
+
+    // Evaluate every argument first, spilling each to the stack immediately
+    // -- any of these sub-expressions could contain a nested CALL, and
+    // runtime helpers clobber R0-R2 with no callee-save. Same defensive
+    // pattern as table.insert/table.remove/table.pack.
+    int t_reg = allocate_register();
+    generate_asm(arg_t, t_reg);
+    ensure_in_register(t_reg);
+    emit_asm("    PUSH R%d ; spill table pointer\n", t_reg);
+
+    int sep_reg = allocate_register();
+    if (arg_sep) {
+        generate_asm(arg_sep, sep_reg);
+        ensure_in_register(sep_reg);
+    } else {
+        emit_asm("    MOV R%d, BOXED_NIL ; default: no separator\n", sep_reg);
+    }
+    emit_asm("    PUSH R%d ; spill separator\n", sep_reg);
+
+    int i_reg = allocate_register();
+    if (arg_i) {
+        generate_asm(arg_i, i_reg);
+        ensure_in_register(i_reg);
+    } else {
+        emit_asm("    MOV R%d, BOXED_NIL ; default: i = 1\n", i_reg);
+    }
+    emit_asm("    PUSH R%d ; spill i\n", i_reg);
+
+    int j_reg = allocate_register();
+    if (arg_j) {
+        generate_asm(arg_j, j_reg);
+        ensure_in_register(j_reg);
+    } else {
+        emit_asm("    MOV R%d, BOXED_NIL ; default: j = #t\n", j_reg);
+    }
+
+    // Reload in reverse (LIFO) now that everything is safely computed.
+    emit_asm("    POP  R%d ; reload i\n", i_reg);
+    emit_asm("    POP  R%d ; reload separator\n", sep_reg);
+    emit_asm("    POP  R%d ; reload table pointer\n", t_reg);
+
+    emit_asm("    PUSH R%d ; Table Pointer\n", t_reg);
+    emit_asm("    PUSH R%d ; Separator\n", sep_reg);
+    emit_asm("    PUSH R%d ; i\n", i_reg);
+    emit_asm("    PUSH R%d ; j\n", j_reg);
+    emit_asm("    CALL __builtin_table_concat\n");
+    emit_asm("    IADD SP, 4\n");
+
+    if (dest_reg != 0) {
+        emit_asm("    MOV R%d, R0\n", dest_reg);
+    }
+
+    unlock_register(t_reg);
+    unlock_register(sep_reg);
+    unlock_register(i_reg);
+    unlock_register(j_reg);
+    return 1;
+}
