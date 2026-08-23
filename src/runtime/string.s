@@ -1216,15 +1216,16 @@ __string_char_oom:
 __builtin_string_format:
     PUSH BP
     MOV  BP, SP
-    ISUB SP, 4                 ; [BP-1] = width accumulator (parse-time)
-                                 ; [BP-2] = width snapshot for current specifier
-                                 ; [BP-3] = left-justify flag (parse-time)
-                                 ; [BP-4] = left-justify snapshot for current specifier
+    ISUB SP, 6                 ; [BP-1]=width accum      [BP-2]=width snapshot
+                                 ; [BP-3]=left-justify accum [BP-4]=left-justify snapshot
+                                 ; [BP-5]=zero-pad accum   [BP-6]=zero-pad snapshot
     MOV  R0, 0
     MOV  [BP-1], R0
     MOV  [BP-2], R0
     MOV  [BP-3], R0
     MOV  [BP-4], R0
+    MOV  [BP-5], R0
+    MOV  [BP-6], R0
 
     ;; Load and unbox format string
     MOV  R0, [BP+2]
@@ -1279,19 +1280,37 @@ __string_format_loop:
     IEQ  R2, 37
     JT   R2, __string_format_literal_percent
 
-    ;; --- Optional '-' flag (left-justify). Only '-' is handled -- other
-    ;; C flags ('+', ' ', '0', '#') aren't recognized and fall through to
-    ;; the same broken behavior described in the diagnosis above if used.
+    ;; --- Flags: '-' (left-justify) and '0' (zero-pad). Loops so either
+    ;; can repeat or appear in any order; anything else falls through to
+    ;; width parsing. Only these two are recognized -- '+', ' ', '#' still
+    ;; hit the same silent-misparse failure mode described previously.
 __string_format_check_flags:
     MOV  R2, R3
     IEQ  R2, 45                 ; '-'
-    JF   R2, __string_format_skip_width
+    JT   R2, __string_format_flag_left_justify
+    MOV  R2, R3
+    IEQ  R2, 48                  ; '0'
+    JT   R2, __string_format_flag_zero_pad
+    JMP  __string_format_skip_width
+
+__string_format_flag_left_justify:
     MOV  R2, 1
     MOV  [BP-3], R2
     IADD R1, 1
     MOV  R3, [R1]
+    JMP  __string_format_check_flags
+
+__string_format_flag_zero_pad:
+    MOV  R2, 1
+    MOV  [BP-5], R2
+    IADD R1, 1
+    MOV  R3, [R1]
+    JMP  __string_format_check_flags
 
     ;; --- Parse width digits (if any) into [BP-1]; 0 = "no width given" ---
+    ;; --- Optional '-' flag (left-justify). Only '-' is handled -- other
+    ;; C flags ('+', ' ', '0', '#') aren't recognized and fall through to
+    ;; the same broken behavior described in the diagnosis above if used.
 __string_format_skip_width:
     MOV  R2, R3
     ISUB R2, 48
@@ -1351,10 +1370,15 @@ __string_format_dispatch_specifier:
     MOV  R2, 0
     MOV  [BP-1], R2
 
-    MOV  R2, [BP-3]          ; snapshot left-justify flag for THIS specifier
+    MOV  R2, [BP-3]
     MOV  [BP-4], R2
     MOV  R2, 0
-    MOV  [BP-3], R2           ; reset for the NEXT specifier
+    MOV  [BP-3], R2
+
+    MOV  R2, [BP-5]          ; snapshot zero-pad flag for THIS specifier
+    MOV  [BP-6], R2
+    MOV  R2, 0
+    MOV  [BP-5], R2            ; reset for the NEXT specifier
 
     MOV  R0, [R6]
     IADD R6, 1
@@ -1413,7 +1437,8 @@ __string_format_handle_x_lower:
     PUSH R4
     PUSH R5
     PUSH R6
-    MOV  R1, 0              ; uppercase = false
+    MOV  R2, R12             ; NEW: pass through the already-parsed precision
+    MOV  R1, 0                 ; uppercase = false
     CALL __string_format_itoa_hex
     POP  R6
     POP  R5
@@ -1430,7 +1455,8 @@ __string_format_handle_x_upper:
     PUSH R4
     PUSH R5
     PUSH R6
-    MOV  R1, 1               ; uppercase = true
+    MOV  R2, R12             ; NEW
+    MOV  R1, 1                 ; uppercase = true
     CALL __string_format_itoa_hex
     POP  R6
     POP  R5
@@ -1564,45 +1590,62 @@ __string_format_handle_q:
 
 ;; ---------------------------------------------------------------------------
 ;; __string_format_itoa_hex: converts R0 (boxed Lua float) to a
-;; null-terminated hex string. R1 = uppercase flag (0 = lowercase a-f,
-;; nonzero = uppercase A-F).
+;; null-terminated hex string. R1 = uppercase flag, R2 = requested
+;; precision (-1 = none; minimum digit count, zero-padded -- e.g. "%.8X"
+;; on 0xFF gives "000000ff", NOT just "ff").
 ;;
-;; SCOPE: sign+magnitude, not two's-complement -- see call-site comment.
+;; SCOPE: sign+magnitude, not two's-complement (unchanged from before).
+;; Precision is clamped to 16 digits -- generous headroom over the
+;; natural 8-digit ceiling of a 32-bit value, for deliberate alignment
+;; padding, without letting a pathological request overflow the buffer.
 ;; Output: R0 = raw (unboxed) pointer to the result string.
 ;; Clobbers R0-R6.
 ;; ---------------------------------------------------------------------------
 __string_format_itoa_hex:
     PUSH BP
     MOV  BP, SP
-    ISUB SP, 2          ; [BP-1] = uppercase flag   [BP-2] = is_negative flag
+    ISUB SP, 3          ; [BP-1]=uppercase  [BP-2]=is_negative  [BP-3]=precision
 
-    MOV  [BP-1], R1     ; save uppercase flag before anything can clobber R1
+    MOV  [BP-1], R1
+    MOV  [BP-3], R2
 
-    CALL __string_format_trunc_toward_zero   ; R0 = truncated boxed float
+    ;; --- Clamp precision to 16 so a pathological caller can't overflow ---
+    MOV  R3, [BP-3]
+    MOV  R4, R3
+    IEQ  R4, -1
+    JT   R4, __hex_precision_clamped
+    MOV  R4, R3
+    IGT  R4, 16
+    JF   R4, __hex_precision_clamped
+    MOV  R3, 16
+    MOV  [BP-3], R3
+__hex_precision_clamped:
+
+    CALL __string_format_trunc_toward_zero
 
     MOV  R3, R0
-    FLT  R3, 0.0                              ; R3 = (value < 0)?
+    FLT  R3, 0.0
     MOV  [BP-2], R3
 
     JF   R3, __hex_have_magnitude
     MOV  R4, -1.0
-    FMUL R0, R4                                ; negate to magnitude
+    FMUL R0, R4
 __hex_have_magnitude:
-    CFI  R0                                     ; R0 = raw non-negative int magnitude
-    PUSH R0                                       ; spill across __malloc (clobbers R0-R2)
+    CFI  R0
+    PUSH R0
 
-    MOV  R5, 10                                    ; optional '-' + up to 8 hex digits + null
+    MOV  R5, 20          ; sign + up to 16 (clamped) digits + null + margin
     PUSH R5
     CALL __malloc
     IADD SP, 1
-    MOV  R6, R0                                     ; R6 = buffer base (return value)
+    MOV  R6, R0
 
-    POP  R0                                          ; reload magnitude
+    POP  R0
 
-    MOV  R1, R6                                       ; R1 = write cursor
-    MOV  R3, [BP-2]                                     ; reload is_negative
+    MOV  R1, R6
+    MOV  R3, [BP-2]
     JF   R3, __hex_no_sign
-    MOV  R4, 45                                          ; '-'
+    MOV  R4, 45          ; '-'
     MOV  [R1], R4
     IADD R1, 1
 __hex_no_sign:
@@ -1610,13 +1653,16 @@ __hex_no_sign:
     MOV  R4, R0
     IEQ  R4, 0
     JF   R4, __hex_nonzero
-    MOV  R4, 48                                            ; '0'
-    MOV  [R1], R4
-    IADD R1, 1
-    JMP  __hex_terminate
+    MOV  R5, 0
+    MOV  R4, 48          ; '0'
+    PUSH R4
+    IADD R5, 1
+    JMP  __hex_extract_done   ; route through the SAME precision-padding
+                                ; path as the nonzero case below, so
+                                ; "%.4X" on 0 correctly gives "0000"
 
 __hex_nonzero:
-    MOV  R5, 0                                               ; digit count pushed
+    MOV  R5, 0
 __hex_extract_loop:
     MOV  R4, R0
     IEQ  R4, 0
@@ -1624,24 +1670,24 @@ __hex_extract_loop:
 
     MOV  R4, R0
     MOV  R3, 16
-    IMOD R4, R3                                                ; R4 = nibble (0-15)
+    IMOD R4, R3
 
     MOV  R3, 16
-    IDIV R0, R3                                                 ; R0 = value / 16
+    IDIV R0, R3
 
     MOV  R3, R4
     ILT  R3, 10
     JT   R3, __hex_digit_09
 
-    MOV  R3, [BP-1]           ; reload uppercase flag
+    MOV  R3, [BP-1]
     JF   R3, __hex_digit_lower
-    IADD R4, 55                ; 'A'-10
+    IADD R4, 55          ; 'A'-10
     JMP  __hex_store_digit
 __hex_digit_lower:
-    IADD R4, 87                 ; 'a'-10
+    IADD R4, 87           ; 'a'-10
     JMP  __hex_store_digit
 __hex_digit_09:
-    IADD R4, 48                  ; '0'
+    IADD R4, 48            ; '0'
 
 __hex_store_digit:
     PUSH R4
@@ -1649,6 +1695,25 @@ __hex_store_digit:
     JMP  __hex_extract_loop
 
 __hex_extract_done:
+    ;; --- Precision: pad with leading zeros if fewer digits than requested ---
+    MOV  R3, [BP-3]
+    MOV  R4, R3
+    IEQ  R4, -1
+    JT   R4, __hex_precision_done
+    MOV  R4, R3
+    ISUB R4, R5             ; R4 = precision - digit_count
+    ILT  R4, 1
+    JT   R4, __hex_precision_done
+__hex_precision_pad_loop:
+    MOV  R3, 48              ; '0'
+    PUSH R3
+    IADD R5, 1
+    ISUB R4, 1
+    MOV  R3, R4
+    ILT  R3, 1
+    JF   R3, __hex_precision_pad_loop
+__hex_precision_done:
+
     MOV  R4, R5
 __hex_write_loop:
     JF   R4, __hex_terminate
@@ -1713,7 +1778,13 @@ __string_format_copy_string_pad_right:
     MOV  R2, R3
     ILT  R2, 1
     JT   R2, __string_format_copy_string_emit_right
-    MOV  R2, 32
+    MOV  R2, [BP-6]            ; zero-pad flag
+    JF   R2, __string_format_pad_right_space
+    MOV  R2, 48                  ; '0'
+    JMP  __string_format_pad_right_write
+__string_format_pad_right_space:
+    MOV  R2, 32                   ; ' '
+__string_format_pad_right_write:
     MOV  [R5], R2
     IADD R5, 1
     ISUB R3, 1
