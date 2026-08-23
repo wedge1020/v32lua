@@ -1352,6 +1352,12 @@ __string_format_dispatch_specifier:
     MOV  R2, R3
     IEQ  R2, 113          ; 'q'
     JT   R2, __string_format_handle_q
+    MOV  R2, R3
+    IEQ  R2, 120           ; 'x'
+    JT   R2, __string_format_handle_x_lower
+    MOV  R2, R3
+    IEQ  R2, 88             ; 'X'
+    JT   R2, __string_format_handle_x_upper
     JMP  __string_format_write_char
 
 __string_format_literal_percent:
@@ -1359,22 +1365,53 @@ __string_format_literal_percent:
     JMP  __string_format_copy_char   ; FIX: was "JMP write_char", which skipped
                                        ; the actual write -- "%%" wrote nothing.
 
+__string_format_handle_x_lower:
+    MOV  R2, R0
+    IEQ  R2, BOXED_NIL
+    JT   R2, __string_format_arg_nil
+    PUSH R1
+    PUSH R4
+    PUSH R5
+    PUSH R6
+    MOV  R1, 0              ; uppercase = false
+    CALL __string_format_itoa_hex
+    POP  R6
+    POP  R5
+    POP  R4
+    POP  R1
+    MOV  R7, R0
+    JMP  __string_format_copy_string
+
+__string_format_handle_x_upper:
+    MOV  R2, R0
+    IEQ  R2, BOXED_NIL
+    JT   R2, __string_format_arg_nil
+    PUSH R1
+    PUSH R4
+    PUSH R5
+    PUSH R6
+    MOV  R1, 1               ; uppercase = true
+    CALL __string_format_itoa_hex
+    POP  R6
+    POP  R5
+    POP  R4
+    POP  R1
+    MOV  R7, R0
+    JMP  __string_format_copy_string
+
 __string_format_handle_di:
     MOV  R2, R0
     IEQ  R2, BOXED_NIL
     JT   R2, __string_format_arg_nil
-    PUSH R1                     ; save loop state: ftoa clobbers R1/R4/R5/R6 internally
+    PUSH R1
     PUSH R4
     PUSH R5
     PUSH R6
-    PUSH R0                     ; value (kept as float -- no CFI: %d no longer
-                                  ; feeds raw integer bits into ftoa's float ops)
+    CALL __string_format_trunc_toward_zero  ; NEW: R0 = truncated (was: raw rounding via precision-0 ftoa)
+    PUSH R0
     MOV  R2, 0
-    PUSH R2                     ; force precision 0: round to integer, no '.'
-    CALL __builtin_ftoa_scratch_a  ; was __builtin_ftoa -- result is fully
-                                     ; copied out by __string_format_copy_string
-                                     ; below and never touched again, so it
-                                     ; never needs its own permanent allocation
+    PUSH R2                     ; precision 0: no '.' (value is already integral now)
+    CALL __builtin_ftoa_scratch_a
     IADD SP, 2
     POP  R6
     POP  R5
@@ -1391,6 +1428,7 @@ __string_format_handle_u:
     PUSH R4
     PUSH R5
     PUSH R6
+    CALL __string_format_trunc_toward_zero
     PUSH R0
     MOV  R2, 0
     PUSH R2
@@ -1484,6 +1522,111 @@ __string_format_handle_q:
     IADD R1, 1
     JMP  __string_format_loop
 
+;; ---------------------------------------------------------------------------
+;; __string_format_itoa_hex: converts R0 (boxed Lua float) to a
+;; null-terminated hex string. R1 = uppercase flag (0 = lowercase a-f,
+;; nonzero = uppercase A-F).
+;;
+;; SCOPE: sign+magnitude, not two's-complement -- see call-site comment.
+;; Output: R0 = raw (unboxed) pointer to the result string.
+;; Clobbers R0-R6.
+;; ---------------------------------------------------------------------------
+__string_format_itoa_hex:
+    PUSH BP
+    MOV  BP, SP
+    ISUB SP, 2          ; [BP-1] = uppercase flag   [BP-2] = is_negative flag
+
+    MOV  [BP-1], R1     ; save uppercase flag before anything can clobber R1
+
+    CALL __string_format_trunc_toward_zero   ; R0 = truncated boxed float
+
+    MOV  R3, R0
+    FLT  R3, 0.0                              ; R3 = (value < 0)?
+    MOV  [BP-2], R3
+
+    JF   R3, __hex_have_magnitude
+    MOV  R4, -1.0
+    FMUL R0, R4                                ; negate to magnitude
+__hex_have_magnitude:
+    CFI  R0                                     ; R0 = raw non-negative int magnitude
+    PUSH R0                                       ; spill across __malloc (clobbers R0-R2)
+
+    MOV  R5, 10                                    ; optional '-' + up to 8 hex digits + null
+    PUSH R5
+    CALL __malloc
+    IADD SP, 1
+    MOV  R6, R0                                     ; R6 = buffer base (return value)
+
+    POP  R0                                          ; reload magnitude
+
+    MOV  R1, R6                                       ; R1 = write cursor
+    MOV  R3, [BP-2]                                     ; reload is_negative
+    JF   R3, __hex_no_sign
+    MOV  R4, 45                                          ; '-'
+    MOV  [R1], R4
+    IADD R1, 1
+__hex_no_sign:
+
+    MOV  R4, R0
+    IEQ  R4, 0
+    JF   R4, __hex_nonzero
+    MOV  R4, 48                                            ; '0'
+    MOV  [R1], R4
+    IADD R1, 1
+    JMP  __hex_terminate
+
+__hex_nonzero:
+    MOV  R5, 0                                               ; digit count pushed
+__hex_extract_loop:
+    MOV  R4, R0
+    IEQ  R4, 0
+    JT   R4, __hex_extract_done
+
+    MOV  R4, R0
+    MOV  R3, 16
+    IMOD R4, R3                                                ; R4 = nibble (0-15)
+
+    MOV  R3, 16
+    IDIV R0, R3                                                 ; R0 = value / 16
+
+    MOV  R3, R4
+    ILT  R3, 10
+    JT   R3, __hex_digit_09
+
+    MOV  R3, [BP-1]           ; reload uppercase flag
+    JF   R3, __hex_digit_lower
+    IADD R4, 55                ; 'A'-10
+    JMP  __hex_store_digit
+__hex_digit_lower:
+    IADD R4, 87                 ; 'a'-10
+    JMP  __hex_store_digit
+__hex_digit_09:
+    IADD R4, 48                  ; '0'
+
+__hex_store_digit:
+    PUSH R4
+    IADD R5, 1
+    JMP  __hex_extract_loop
+
+__hex_extract_done:
+    MOV  R4, R5
+__hex_write_loop:
+    JF   R4, __hex_terminate
+    POP  R3
+    MOV  [R1], R3
+    IADD R1, 1
+    ISUB R4, 1
+    JMP  __hex_write_loop
+
+__hex_terminate:
+    MOV  R3, 0
+    MOV  [R1], R3
+
+    MOV  R0, R6
+    MOV  SP, BP
+    POP  BP
+    RET
+
 __string_format_arg_nil:
     MOV  R3, 110
     MOV  [R5], R3
@@ -1541,6 +1684,27 @@ __string_format_done:
     OR   R0, BOXED_RAMSTRING
     MOV  SP, BP
     POP  BP
+    RET
+
+;; ---------------------------------------------------------------------------
+;; __string_format_trunc_toward_zero: truncates R0 (a boxed Lua float)
+;; toward zero (C/Lua %d semantics) -- NOT round-to-nearest, and NOT floor
+;; (floor(-9.9) = -10, but %d on -9.9 must give -9).
+;; Output: R0 = truncated boxed float. Clobbers R0, R1 only.
+;; ---------------------------------------------------------------------------
+__string_format_trunc_toward_zero:
+    MOV  R1, R0
+    FLT  R1, 0.0                ; R1 = (value < 0)?
+    JT   R1, __trunc_negative
+
+    FLR  R0                     ; non-negative: floor == truncate
+    RET
+
+__trunc_negative:
+    MOV  R1, -1.0
+    FMUL R0, R1                 ; negate to positive magnitude
+    FLR  R0                     ; floor the magnitude
+    FMUL R0, R1                 ; negate back
     RET
 
 __string_format_oom:
