@@ -1609,7 +1609,7 @@ __string_format_itoa_hex:
     MOV  [BP-1], R1
     MOV  [BP-3], R2
 
-    ;; --- Clamp precision to 16 so a pathological caller can't overflow ---
+    ;; --- Clamp precision to 16 (unchanged) ---
     MOV  R3, [BP-3]
     MOV  R4, R3
     IEQ  R4, -1
@@ -1631,8 +1631,24 @@ __hex_precision_clamped:
     MOV  R4, -1.0
     FMUL R0, R4
 __hex_have_magnitude:
-    CFI  R0
-    PUSH R0
+    ;; --- NEW: split magnitude into hi/lo 16-bit halves BEFORE converting
+    ;; to int. CFI saturates at INT32_MAX (2147483647); a full 32-bit
+    ;; magnitude like 0xDEADBEEF (3735928559) exceeds that and would
+    ;; silently clamp to 0x7FFFFFFF otherwise. Each half maxes at 65535,
+    ;; safely inside int32 for the entire uint32 span.
+    MOV  R6, R0              ; R6 = magnitude (float), full precision kept
+    MOV  R5, 65536.0
+    FDIV R0, R5                ; R0 = magnitude / 65536
+    FLR  R0                      ; R0 = hi (float)
+    MOV  R4, R0                   ; R4 = hi (float), stashed
+    FMUL R0, R5                    ; R0 = hi * 65536
+    FSUB R6, R0                      ; R6 = magnitude - hi*65536 = lo (float)
+    CFI  R6                            ; R6 = lo (raw int, 0-65535)
+    MOV  R0, R4
+    CFI  R0                              ; R0 = hi (raw int, 0-65535)
+
+    PUSH R0                    ; spill hi across the malloc call below
+    PUSH R6                     ; spill lo across the malloc call below
 
     MOV  R5, 20          ; sign + up to 16 (clamped) digits + null + margin
     PUSH R5
@@ -1640,76 +1656,120 @@ __hex_have_magnitude:
     IADD SP, 1
     MOV  R6, R0
 
-    POP  R0
+    POP  R0             ; R0 = lo (reloaded)
+    POP  R4             ; R4 = hi (reloaded)
 
     MOV  R1, R6
     MOV  R3, [BP-2]
     JF   R3, __hex_no_sign
-    MOV  R4, 45          ; '-'
-    MOV  [R1], R4
+    MOV  R3, 45          ; '-'
+    MOV  [R1], R3
     IADD R1, 1
 __hex_no_sign:
 
-    MOV  R4, R0
-    IEQ  R4, 0
-    JF   R4, __hex_nonzero
+    ;; --- Extract lo's digits first (natural stop-on-zero, same as before) ---
     MOV  R5, 0
-    MOV  R4, 48          ; '0'
-    PUSH R4
-    IADD R5, 1
-    JMP  __hex_extract_done   ; route through the SAME precision-padding
-                                ; path as the nonzero case below, so
-                                ; "%.4X" on 0 correctly gives "0000"
-
-__hex_nonzero:
-    MOV  R5, 0
-__hex_extract_loop:
-    MOV  R4, R0
-    IEQ  R4, 0
-    JT   R4, __hex_extract_done
-
-    MOV  R4, R0
-    MOV  R3, 16
-    IMOD R4, R3
-
-    MOV  R3, 16
-    IDIV R0, R3
-
-    MOV  R3, R4
-    ILT  R3, 10
-    JT   R3, __hex_digit_09
-
-    MOV  R3, [BP-1]
-    JF   R3, __hex_digit_lower
-    IADD R4, 55          ; 'A'-10
-    JMP  __hex_store_digit
-__hex_digit_lower:
-    IADD R4, 87           ; 'a'-10
-    JMP  __hex_store_digit
-__hex_digit_09:
-    IADD R4, 48            ; '0'
-
-__hex_store_digit:
-    PUSH R4
-    IADD R5, 1
-    JMP  __hex_extract_loop
-
-__hex_extract_done:
-    ;; --- Precision: pad with leading zeros if fewer digits than requested ---
-    MOV  R3, [BP-3]
-    MOV  R4, R3
-    IEQ  R4, -1
-    JT   R4, __hex_precision_done
-    MOV  R4, R3
-    ISUB R4, R5             ; R4 = precision - digit_count
-    ILT  R4, 1
-    JT   R4, __hex_precision_done
-__hex_precision_pad_loop:
-    MOV  R3, 48              ; '0'
+    MOV  R3, R0
+    IEQ  R3, 0
+    JF   R3, __hex_lo_nonzero
+    MOV  R3, 48          ; '0'
     PUSH R3
     IADD R5, 1
-    ISUB R4, 1
+    JMP  __hex_lo_done
+__hex_lo_nonzero:
+__hex_lo_extract_loop:
+    MOV  R3, R0
+    IEQ  R3, 0
+    JT   R3, __hex_lo_done
+
+    MOV  R3, R0
+    MOV  R2, 16
+    IMOD R3, R2
+    MOV  R2, 16
+    IDIV R0, R2
+
+    MOV  R2, R3
+    ILT  R2, 10
+    JT   R2, __hex_lo_digit_09
+    MOV  R2, [BP-1]
+    JF   R2, __hex_lo_digit_lower
+    IADD R3, 55          ; 'A'-10
+    JMP  __hex_lo_store
+__hex_lo_digit_lower:
+    IADD R3, 87           ; 'a'-10
+    JMP  __hex_lo_store
+__hex_lo_digit_09:
+    IADD R3, 48            ; '0'
+__hex_lo_store:
+    PUSH R3
+    IADD R5, 1
+    JMP  __hex_lo_extract_loop
+__hex_lo_done:
+
+    ;; --- If hi is nonzero, pad lo up to exactly 4 digits (they're now
+    ;; internal digits, not leading padding), then extract hi's digits ---
     MOV  R3, R4
+    IEQ  R3, 0
+    JT   R3, __hex_extract_done   ; hi==0: lo's natural digits are the whole answer
+
+    MOV  R2, 4
+    ISUB R2, R5             ; R2 = how many zero-pads lo needs to reach 4
+__hex_lo_pad_loop:
+    MOV  R3, R2
+    ILT  R3, 1
+    JT   R3, __hex_hi_extract
+    MOV  R3, 48
+    PUSH R3
+    IADD R5, 1
+    ISUB R2, 1
+    JMP  __hex_lo_pad_loop
+
+__hex_hi_extract:
+    MOV  R0, R4                 ; R0 = hi
+__hex_hi_extract_loop:
+    MOV  R3, R0
+    IEQ  R3, 0
+    JT   R3, __hex_extract_done
+
+    MOV  R3, R0
+    MOV  R2, 16
+    IMOD R3, R2
+    MOV  R2, 16
+    IDIV R0, R2
+
+    MOV  R2, R3
+    ILT  R2, 10
+    JT   R2, __hex_hi_digit_09
+    MOV  R2, [BP-1]
+    JF   R2, __hex_hi_digit_lower
+    IADD R3, 55
+    JMP  __hex_hi_store
+__hex_hi_digit_lower:
+    IADD R3, 87
+    JMP  __hex_hi_store
+__hex_hi_digit_09:
+    IADD R3, 48
+__hex_hi_store:
+    PUSH R3
+    IADD R5, 1
+    JMP  __hex_hi_extract_loop
+
+__hex_extract_done:
+    ;; --- Precision padding (unchanged from before) ---
+    MOV  R3, [BP-3]
+    MOV  R2, R3
+    IEQ  R2, -1
+    JT   R2, __hex_precision_done
+    MOV  R2, R3
+    ISUB R2, R5
+    ILT  R2, 1
+    JT   R2, __hex_precision_done
+__hex_precision_pad_loop:
+    MOV  R3, 48
+    PUSH R3
+    IADD R5, 1
+    ISUB R2, 1
+    MOV  R3, R2
     ILT  R3, 1
     JF   R3, __hex_precision_pad_loop
 __hex_precision_done:
