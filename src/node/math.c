@@ -171,14 +171,28 @@ void  node_mod (ASTNode *node, int  dest_reg)
 
     emit_asm ("POP R%d ; reload spilled left operand\n", dest_reg);
 
-    // Cast to integers for modulo (Lua % uses integer division)
-    emit_asm ("CFI R%d ; Cast left to int\n", dest_reg);
-    emit_asm ("CFI R%d ; Cast right to int\n", right_reg);
+    // Lua's % is FLOOR modulo: a % b == a - floor(a/b)*b -- NOT C's
+    // truncating modulo, which the old CFI->IMOD->CIF implementation
+    // used. Truncating and floor modulo only agree when a and b share a
+    // sign; they diverge whenever the operands have opposite signs (e.g.
+    // -5 % 3 must be 1 in Lua, not -2), which is exactly the case the
+    // old implementation got wrong. Computed here in pure floats, the
+    // same way node_floordiv() computes // via FDIV+FLR, so this also
+    // stays correct for fractional operands, not just integers.
+    //
+    // Needs a third register: dest_reg (a) and right_reg (b) both have
+    // to survive intact until the final subtract, so the quotient can't
+    // be computed in either of them.
+    int quot_reg = allocate_register ();
+    mark_register_live (quot_reg, 1);
 
-    emit_asm ("IMOD R%d, R%d\n", dest_reg, right_reg);
+    emit_asm ("MOV R%d, R%d ; quot = a\n", quot_reg, dest_reg);
+    emit_asm ("FDIV R%d, R%d ; quot = a / b\n", quot_reg, right_reg);
+    emit_asm ("FLR  R%d ; quot = floor(a / b)\n", quot_reg);
+    emit_asm ("FMUL R%d, R%d ; quot = floor(a / b) * b\n", quot_reg, right_reg);
+    emit_asm ("FSUB R%d, R%d ; dest = a - floor(a / b) * b\n", dest_reg, quot_reg);
 
-    emit_asm ("CIF R%d ; Cast result back to float\n", dest_reg);
-
+    unlock_register (quot_reg);
     unlock_register (right_reg);
 }
 

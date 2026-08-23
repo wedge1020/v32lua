@@ -100,27 +100,42 @@ __builtin_len:
 
     MOV  R0, [BP+2]            ; Load argument
 
-    ;; --- Type check: Is it a TABLE? ---
-    MOV  R1, R0
-    AND  R1, BOXED_DATA        ; Extract tag bits
-    IEQ  R1, BOXED_TABLE
-    JT   R1, __builtin_len_table
-
     ;; --- Type check: Is it a STRING (ROM or RAM)? ---
-    MOV  R1, R0
-    AND  R1, BOXED_DATA        ; Extract tag bits
-    IEQ  R1, BOXED_ROMSTRING
-    JT   R1, __builtin_len_string
+    MOV   R1, R0
+    AND   R1, BOXED_DATA        ; Extract tag bits
+    IEQ   R1, BOXED_ROMSTRING
+    JT    R1, __builtin_len_string
 
-    MOV  R1, R0
-    AND  R1, BOXED_DATA        ; Extract tag bits
-    IEQ  R1, BOXED_RAMSTRING
-    JT   R1, __builtin_len_string
+    MOV   R1, R0
+    AND   R1, BOXED_DATA        ; Extract tag bits
+    IEQ   R1, BOXED_RAMSTRING
+    JF    R1, __builtin_len_check_table
 
+    ;; tag matched RAMSTRING -- confirm payload >= 4 before treating it
+    ;; as a real string. nil/true/false/tombstone fall through to the
+    ;; table check below (and from there to default, since none of them
+    ;; carry the TABLE tag either).
+    MOV   R1, R0
+    AND   R1, BOXED_PAYLOAD
+    IGE   R1, 4
+    JT    R1, __builtin_len_string
+
+__builtin_len_check_table:
+    ;; FIX: this check was missing entirely. __builtin_len_table below
+    ;; was unreachable dead code -- nothing in this function ever tested
+    ;; for the TABLE tag, so every table (regardless of contents) fell
+    ;; through to __builtin_len_default and silently returned 0. Adding
+    ;; the actual dispatch here.
+    MOV   R1, R0
+    AND   R1, BOXED_DATA
+    IEQ   R1, BOXED_TABLE
+    JT    R1, __builtin_len_table
+
+__builtin_len_default:
     ;; --- Default: Not a string or table (number, boolean, nil, function) ---
-    MOV  R0, 0                 ; Return 0 as integer
-    CIF  R0                    ; Convert to float
-    JMP  __builtin_len_done
+    MOV   R0, 0                 ; Return 0 as integer
+    CIF   R0                    ; Convert to float
+    JMP   __builtin_len_done
 
 __builtin_len_string:
     PUSH R0                    ; need to repush the boxed pointer

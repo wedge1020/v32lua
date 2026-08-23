@@ -33,52 +33,63 @@ __builtin_strcat:
     MOV  BP, SP
 
     ;; === Type-check and coerce LEFT operand if needed ===
-    MOV  R1, [BP+3]          ; Load Left value
-    MOV  R3, R1
-    AND  R3, BOXED_DATA      ; Extract tag
-    IEQ  R3, BOXED_ROMSTRING
-    JT   R3, __strcat_left_is_string
-    IEQ  R3, BOXED_RAMSTRING
-    JT   R3, __strcat_left_is_string
+    MOV   R1, [BP+3]          ; Load Left value
+    MOV   R3, R1
+    AND   R3, BOXED_DATA      ; Extract tag
+    IEQ   R3, BOXED_ROMSTRING
+    JT    R3, __strcat_left_is_string
+    IEQ   R3, BOXED_RAMSTRING
+    JF    R3, __strcat_left_coerce
 
+    ;; FIXED: tag matched RAMSTRING -- confirm payload >= 4 before
+    ;; accepting it as a real string. nil/true/false fall through to the
+    ;; coercion path below, which is where they belong.
+    MOV   R3, R1
+    AND   R3, BOXED_PAYLOAD
+    ILT   R3, 4
+    JT    R3, __strcat_left_coerce
+    JMP   __strcat_left_is_string
+
+__strcat_left_coerce:
     ;; Not a string - coerce it via the "A" scratch-buffer tostring
-    ;; variant (was __builtin_tostring). The result only needs to
-    ;; survive long enough for the length-measure + copy phases below
-    ;; -- it never becomes an independent Lua value -- so it doesn't
-    ;; need a fresh permanent allocation. See __builtin_ftoa_scratch_a
-    ;; and __builtin_ftoa_scratch_b's header comments for why LEFT
-    ;; specifically uses "A" and RIGHT (below) uses "B": both coerced
-    ;; operands must remain valid simultaneously here, since this
-    ;; routine measures both lengths before it ever allocates its own
-    ;; final buffer.
-    PUSH R1
-    CALL __builtin_tostring_scratch_a  ; Returns string in R0
-    IADD SP, 1
-    MOV  R1, R0              ; R1 = string version
-    MOV  [BP+3], R1          ; Replace left operand on stack
+    ;; variant (was __builtin_tostring). (comment and code below this
+    ;; point unchanged from the original -- this label is new, added
+    ;; only so both the "tag never matched" and "tag matched but payload
+    ;; < 4" cases can reach the same coercion code.)
+    PUSH  R1
+    CALL  __builtin_tostring_scratch_a  ; Returns string in R0
+    IADD  SP, 1
+    MOV   R1, R0              ; R1 = string version
+    MOV   [BP+3], R1          ; Replace left operand on stack
 
 __strcat_left_is_string:
 
     ;; === Type-check and coerce RIGHT operand if needed ===
-    MOV  R1, [BP+2]          ; Load Right value
-    MOV  R3, R1
-    AND  R3, BOXED_DATA      ; Extract tag
-    IEQ  R3, BOXED_ROMSTRING
-    JT   R3, __strcat_right_is_string
-    IEQ  R3, BOXED_RAMSTRING
-    JT   R3, __strcat_right_is_string
+    MOV   R1, [BP+2]          ; Load Right value
+    MOV   R3, R1
+    AND   R3, BOXED_DATA      ; Extract tag
+    IEQ   R3, BOXED_ROMSTRING
+    JT    R3, __strcat_right_is_string
+    IEQ   R3, BOXED_RAMSTRING
+    JF    R3, __strcat_right_coerce
 
+    ;; FIXED: same payload check for the right operand.
+    MOV   R3, R1
+    AND   R3, BOXED_PAYLOAD
+    ILT   R3, 4
+    JT    R3, __strcat_right_coerce
+    JMP   __strcat_right_is_string
+
+__strcat_right_coerce:
     ;; Not a string - coerce it via the "B" scratch-buffer tostring
-    ;; variant (was __builtin_tostring). Must be the INDEPENDENT "B"
-    ;; buffer, not "A" -- if LEFT was also just coerced above, its
-    ;; result is still sitting in scratch buffer "A" and hasn't been
-    ;; copied into strcat's own final buffer yet (that happens further
-    ;; below); reusing "A" here would silently overwrite it.
-    PUSH R1
-    CALL __builtin_tostring_scratch_b  ; Returns string in R0
-    IADD SP, 1
-    MOV  R1, R0              ; R1 = string version
-    MOV  [BP+2], R1          ; Replace right operand on stack
+    ;; variant. (comment and code below this point unchanged -- see the
+    ;; original's note on why RIGHT specifically uses the independent "B"
+    ;; buffer.)
+    PUSH  R1
+    CALL  __builtin_tostring_scratch_b  ; Returns string in R0
+    IADD  SP, 1
+    MOV   R1, R0              ; R1 = string version
+    MOV   [BP+2], R1          ; Replace right operand on stack
 
 __strcat_right_is_string:
 
@@ -202,30 +213,41 @@ __eq_both_numbers:
 
 ;; --- String comparison path ---
 __eq_check_left_string:
-    ;; Validate LEFT Operand is a String (Tag 0x7FC0... or 0xFFC0... with
-    ;; payload >= 4)
-    MOV  R1, [BP+3]
-    MOV  R3, R1
-    AND  R3, BOXED_DATA
-    IEQ  R3, BOXED_ROMSTRING
-    JT   R3, __eq_left_valid
+    MOV   R1, [BP+3]
+    MOV   R3, R1
+    AND   R3, BOXED_DATA
+    IEQ   R3, BOXED_ROMSTRING
+    JT    R3, __eq_left_valid
 
-    MOV  R3, R1
-    AND  R3, BOXED_DATA
-    IEQ  R3, BOXED_RAMSTRING
-    JF   R3, __eq_return_false
+    MOV   R3, R1
+    AND   R3, BOXED_DATA
+    IEQ   R3, BOXED_RAMSTRING
+    JF    R3, __eq_return_false
+
+    ;; FIXED: tag matches RAMSTRING, but nil/true/false/tombstone share
+    ;; that tag with payload < 4 -- only payload >= 4 is a real RAM string.
+    MOV   R3, R1
+    AND   R3, BOXED_PAYLOAD
+    ILT   R3, 4
+    JT    R3, __eq_return_false
 
 __eq_left_valid:
     ;; Validate RIGHT Operand is a String
-    MOV  R3, R2
-    AND  R3, BOXED_DATA
-    IEQ  R3, BOXED_ROMSTRING
-    JT   R3, __eq_right_valid
+    MOV   R3, R2
+    AND   R3, BOXED_DATA
+    IEQ   R3, BOXED_ROMSTRING
+    JT    R3, __eq_right_valid
 
-    MOV  R3, R2
-    AND  R3, BOXED_DATA
-    IEQ  R3, BOXED_RAMSTRING
-    JF   R3, __eq_return_false
+    MOV   R3, R2
+    AND   R3, BOXED_DATA
+    IEQ   R3, BOXED_RAMSTRING
+    JF    R3, __eq_return_false
+
+    ;; FIXED: same payload check for the right operand.
+    MOV   R3, R2
+    AND   R3, BOXED_PAYLOAD
+    ILT   R3, 4
+    JT    R3, __eq_return_false
 
 __eq_right_valid:
     ;; Unbox both validated string pointers!
@@ -312,29 +334,41 @@ __builtin_relcmp:
 
     ;; --- Left is tagged: it must be a String for a valid comparison ---
 __relcmp_check_left_string:
-    MOV  R3, R1
-    AND  R3, BOXED_DATA
-    IEQ  R3, BOXED_ROMSTRING
-    JT   R3, __relcmp_check_right_string
-
-    MOV  R3, R1
-    AND  R3, BOXED_DATA
-    IEQ  R3, BOXED_RAMSTRING
-    JF   R3, __relcmp_error     ; Left tagged but not a String -> error
-
+    MOV   R3, R1
+    AND   R3, BOXED_DATA
+    IEQ   R3, BOXED_ROMSTRING
+    JT    R3, __relcmp_check_right_string
+ 
+    MOV   R3, R1
+    AND   R3, BOXED_DATA
+    IEQ   R3, BOXED_RAMSTRING
+    JF    R3, __relcmp_error
+ 
+    ;; FIXED: payload >= 4 check, same rationale as __builtin_eq above.
+    MOV   R3, R1
+    AND   R3, BOXED_PAYLOAD
+    ILT   R3, 4
+    JT    R3, __relcmp_error
+ 
 __relcmp_check_right_string:
-    MOV  R3, R2
-    AND  R3, BOXED_DATA
-    IEQ  R3, BOXED_ROMSTRING
-    JT   R3, __relcmp_strings
-
-    MOV  R3, R2
-    AND  R3, BOXED_DATA
-    IEQ  R3, BOXED_RAMSTRING
-    JF   R3, __relcmp_error     ; Right is not a String -> mismatched types
-
-    ;; --- Both operands are Strings: unbox and compare lexicographically ---
+    MOV   R3, R2
+    AND   R3, BOXED_DATA
+    IEQ   R3, BOXED_ROMSTRING
+    JT    R3, __relcmp_strings
+ 
+    MOV   R3, R2
+    AND   R3, BOXED_DATA
+    IEQ   R3, BOXED_RAMSTRING
+    JF    R3, __relcmp_error
+ 
+    ;; FIXED: same payload check for the right operand.
+    MOV   R3, R2
+    AND   R3, BOXED_PAYLOAD
+    ILT   R3, 4
+    JT    R3, __relcmp_error
+ 
 __relcmp_strings:
+    ;; --- Both operands are Strings: unbox and compare lexicographically ---
     MOV  R0, R1
     CALL __unbox_string
     PUSH R0                     ; Save unboxed Left pointer
@@ -1720,7 +1754,7 @@ __builtin_string_upper:
 
 __string_upper_loop:
     MOV   R0, [R2]
-	MOV   R6, R0
+    MOV   R6, R0
     IEQ   R6, 0
     JT    R6, __string_upper_done_copy
 
@@ -1799,7 +1833,7 @@ __builtin_string_lower:
 
 __string_lower_loop:
     MOV   R0, [R2]
-	MOV   R6, R0
+    MOV   R6, R0
     IEQ   R6, 0
     JT    R6, __string_lower_done_copy
 

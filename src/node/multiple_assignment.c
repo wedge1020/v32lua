@@ -37,30 +37,6 @@ void node_multiple_assignment(ASTNode *node)
             return_count = get_builtin_return_count(callee_path);
         }
 
-        // -----------------------------------------------------------------
-        // FIX: resolve the callee symbol for BOTH plain identifier calls
-        // (foo()) AND method/dotted calls (obj:foo() / obj.foo()).
-        //
-        // Method and dotted calls always desugar their call target into a
-        // NODE_TABLE_GET (table_expr + string key) -- never a bare
-        // NODE_IDENTIFIER -- regardless of whether the source used '.' or
-        // ':'. The old check here only looked up the callee's symbol when
-        // curr_val->as.call.target->type == NODE_IDENTIFIER, which is
-        // NEVER true for a method call. That meant return_count silently
-        // stayed at its default of 1 for every method/dotted call, so the
-        // Pass-1/Pass-2 multi-value extraction below never ran: only R0
-        // (the first return value) was ever captured, and every additional
-        // assignment target got nil-padded instead of reading R2/R3 --
-        // e.g. `local min, max = obj:min_max(5)` always left `max` as nil.
-        //
-        // resolve_static_path() already flattened the call target into a
-        // dotted path (e.g. "obj.min_max") above. Try that directly first
-        // (covers plain identifiers too, and any oddball global registered
-        // with a literal dot in its name), then fall back to the mangled
-        // underscore form that mangle_method_name() / the colon-method
-        // parser rules actually register table:method()/table.method()
-        // definitions under (e.g. "obj_min_max").
-        // -----------------------------------------------------------------
         if (return_count == 1) {
             SymbolNode *callee_sym = NULL;
 
@@ -212,69 +188,109 @@ void node_multiple_assignment(ASTNode *node)
     }
 
     // --- Standard & Multiple Assignment Evaluation ---
-    while (curr_tgt != NULL)
+    //
+    // FIX: values must ALL be evaluated BEFORE any target is written, or a
+    // swap idiom like `a, b = b, a` breaks. The old version evaluated and
+    // immediately stored one target/value pair at a time -- so by the time
+    // the SECOND value expression (reading 'a') was evaluated, the FIRST
+    // target ('a') had already been overwritten with 'b's original value.
+    // That's exactly the bug: `sa, sb = sb, sa` produced sa=2 (correct)
+    // then sb=2 (wrong -- should be 1, sa's ORIGINAL value).
+    //
+    // This mirrors the same evaluate-everything-first discipline the
+    // multi-return-call branch above already uses for the identical class
+    // of hazard. PASS 1 evaluates every value and pushes it to the stack;
+    // PASS 2 (after every value is safely evaluated, before any target is
+    // touched) pops them back off in reverse and performs the actual
+    // assignments/table-sets.
+    //
+    // NOTE: this bypasses the try_emit_table_set_intrinsic() fast path
+    // that used to run per-pair for NODE_TABLE_GET targets -- table-set
+    // targets now always go through the general __builtin_table_set CALL
+    // in Pass 2 instead. That's a correctness-over-micro-optimization
+    // trade-off; flagging it in case that intrinsic mattered for perf and
+    // you want to fold it back into Pass 2's NODE_TABLE_GET branch later.
     {
-        if (curr_tgt->type == NODE_TABLE_GET && curr_val != NULL) {
-            if (try_emit_table_set_intrinsic(curr_tgt->as.table_get.table_expr,
-                                             curr_tgt->as.table_get.key,
-                                             curr_val))
-            {
-                curr_tgt = curr_tgt->next;
-                curr_val = curr_val->next;
-                continue;
+        ASTNode *targets_arr[64];
+        int      n = 0;
+        ASTNode *t = curr_tgt;
+        while (t != NULL) {
+            if (n >= 64) {
+                compiler_error(ERR_INTERNAL, -1,
+                    "Multiple assignment exceeds 64-target internal limit");
             }
+            targets_arr[n++] = t;
+            t = t->next;
         }
 
-        val_reg = allocate_pinned_register();
-        mark_register_live(val_reg, 1);
+        // PASS 1: evaluate every RHS value (nil-padding missing ones) and
+        // push it to the stack immediately, in target order, BEFORE any
+        // target is written.
+        ASTNode *scan_val = curr_val;
+        for (int i = 0; i < n; i++) {
+            int tmp_reg = allocate_pinned_register();
+            mark_register_live(tmp_reg, 1);
 
-        if (curr_val != NULL) {
-            generate_asm(curr_val, val_reg);
-            curr_val = curr_val->next;
-        } else {
-            emit_asm("MOV R%d, BOXED_NIL ; Pad missing value with Nil", val_reg);
-        }
-
-        ensure_in_register(val_reg);
-
-        if (curr_tgt->type == NODE_IDENTIFIER) {
-            if (node->as.mult_assign.is_local) {
-                SymbolNode *sym = register_local(curr_tgt->as.id.name);
-
-                if (g_verbose_debug) {
-                    fprintf(stderr, "[debug] node_multiple_assignment() Declaring local: %s (val_reg=R%d, boxed=%d)\n",
-                            curr_tgt->as.id.name, val_reg, sym->is_boxed);
-                }
-
-                emit_initialize_local(sym, val_reg);
+            if (scan_val != NULL) {
+                generate_asm(scan_val, tmp_reg);
+                scan_val = scan_val->next;
             } else {
-                if (g_verbose_debug) {
-                    fprintf(stderr, "[debug] node_multiple_assignment() Assigning: %s (val_reg=R%d)\n",
-                            curr_tgt->as.id.name, val_reg);
-                }
-
-                emit_store_variable(curr_tgt->as.id.name, val_reg);
+                emit_asm("MOV R%d, BOXED_NIL ; Pad missing value with Nil", tmp_reg);
             }
-        }
-        else if (curr_tgt->type == NODE_TABLE_GET)
-        {
-            int table_reg = allocate_pinned_register();
-            int key_reg   = allocate_pinned_register();
 
-            generate_asm(curr_tgt->as.table_get.table_expr, table_reg);
-            generate_asm(curr_tgt->as.table_get.key, key_reg);
-
-            emit_asm("PUSH R%d ; Push Table Pointer", table_reg);
-            emit_asm("PUSH R%d ; Push Key", key_reg);
-            emit_asm("PUSH R%d ; Push Value", val_reg);
-            emit_asm("CALL __builtin_table_set");
-            emit_asm("IADD SP, 3 ; Clean up stack");
-
-            unlock_pinned_register(table_reg);
-            unlock_pinned_register(key_reg);
+            ensure_in_register(tmp_reg);
+            emit_asm("PUSH R%d ; Pass 1: hold evaluated RHS value #%d until all targets are known", tmp_reg, i);
+            unlock_pinned_register(tmp_reg);
         }
 
-        unlock_pinned_register(val_reg);
-        curr_tgt = curr_tgt->next;
+        // PASS 2: pop values back off in REVERSE (stack is LIFO, so the
+        // LAST value pushed -- the last target's -- comes off first) and
+        // perform the actual assignments.
+        for (int i = n - 1; i >= 0; i--) {
+            ASTNode *tgt = targets_arr[i];
+
+            val_reg = allocate_pinned_register();
+            mark_register_live(val_reg, 1);
+            emit_asm("POP R%d ; Pass 2: retrieve evaluated RHS value for target #%d", val_reg, i);
+
+            if (tgt->type == NODE_IDENTIFIER) {
+                if (node->as.mult_assign.is_local) {
+                    SymbolNode *sym = register_local(tgt->as.id.name);
+
+                    if (g_verbose_debug) {
+                        fprintf(stderr, "[debug] node_multiple_assignment() Declaring local: %s (val_reg=R%d, boxed=%d)\n",
+                                tgt->as.id.name, val_reg, sym->is_boxed);
+                    }
+
+                    emit_initialize_local(sym, val_reg);
+                } else {
+                    if (g_verbose_debug) {
+                        fprintf(stderr, "[debug] node_multiple_assignment() Assigning: %s (val_reg=R%d)\n",
+                                tgt->as.id.name, val_reg);
+                    }
+
+                    emit_store_variable(tgt->as.id.name, val_reg);
+                }
+            }
+            else if (tgt->type == NODE_TABLE_GET)
+            {
+                int table_reg = allocate_pinned_register();
+                int key_reg   = allocate_pinned_register();
+
+                generate_asm(tgt->as.table_get.table_expr, table_reg);
+                generate_asm(tgt->as.table_get.key, key_reg);
+
+                emit_asm("PUSH R%d ; Push Table Pointer", table_reg);
+                emit_asm("PUSH R%d ; Push Key", key_reg);
+                emit_asm("PUSH R%d ; Push Value", val_reg);
+                emit_asm("CALL __builtin_table_set");
+                emit_asm("IADD SP, 3 ; Clean up stack");
+
+                unlock_pinned_register(table_reg);
+                unlock_pinned_register(key_reg);
+            }
+
+            unlock_pinned_register(val_reg);
+        }
     }
 }

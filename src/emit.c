@@ -567,6 +567,33 @@ int   emit_variable_map (void)
     return (lines_printed);
 }
 
+// ----------------------------------------------------------------------
+// Re-escape a raw, already-decoded string literal for safe embedding in
+// the assembler's `string "..."` directive. process_string_literal() (in
+// the lexer) decodes Lua source escapes like \n, \t, \\ into their raw
+// byte values at lex time -- which is correct, the runtime string must
+// contain real control characters. But that means by the time we get
+// here, current->value may contain a literal 0x0A/0x09/0x0D/'\\'/'"'
+// byte. Writing those bytes straight into the .s TEXT FILE via "%s" is
+// what caused the corruption: a raw newline byte splits the `string`
+// directive across two physical assembly lines, and a raw '"' would
+// prematurely close the assembler's string literal. This re-encodes
+// those bytes back into backslash escapes so the assembly source stays
+// on one line and round-trips correctly.
+static void emit_escaped_asm_string (FILE *f, const char *raw)
+{
+    for (const unsigned char *p = (const unsigned char *) raw; *p; p++) {
+        switch (*p) {
+            case '\n': fputs ("\\n",  f); break;
+            case '\t': fputs ("\\t",  f); break;
+            case '\r': fputs ("\\r",  f); break;
+            case '\\': fputs ("\\\\", f); break;
+            case '"':  fputs ("\\\"", f); break;
+            default:   fputc (*p, f);     break;
+        }
+    }
+}
+
 void  emit_string_data_section (void)
 {
     emit_asm ("\n;; =========================================================");
@@ -580,7 +607,9 @@ void  emit_string_data_section (void)
         while (current             != NULL)
         {
             fprintf (out(), "__string_%d:\n", current -> id);
-            fprintf (out(), "    string \"%s\"\n\n", current -> value);
+            fprintf (out(), "    string \"");
+            emit_escaped_asm_string (out(), current -> value);
+            fprintf (out(), "\"\n\n");
             current                 = current -> next;
         }
     }
