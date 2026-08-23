@@ -63,17 +63,17 @@ end
 string_result1: "a"
 string_result2: "b"
 string_result3: "c"
-number_result1: 3
-number_result2: 42
-number_result3: 1
-number_result4: 0
-number_result5: 1
+number_result1: 3.0000
+number_result2: 42.0000
+number_result3: 1.0000
+number_result4: 0.0000
+number_result5: 1.0000
 string_result4: "two"
 boolean_result1: true
 boolean_result2: true
-number_result6: 4
+number_result6: 4.0000
 string_result5: "a"
 boolean_result3: true
 string_result6: "c"
-number_result7: 3
+number_result7: 3.0000
 ]]

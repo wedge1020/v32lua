@@ -117,3 +117,92 @@ int emit_table_remove_intrinsic(ASTNode *node, int dest_reg)
     unlock_register(pos_reg);
     return 1;
 }
+
+// ============================================================================
+// table.pack(...) - Packs a positional argument list into a new table with
+// a .n field set to the argument count.
+//
+// SCOPE NOTE: this only handles a syntactically-known argument list
+// (table.pack(a, b, c)) -- the same shape as a table constructor {a, b, c}.
+// It does NOT forward an enclosing function's own '...' variadic parameter
+// (table.pack(...) called from inside a variadic function). None of the
+// current unit tests exercise that pattern; flagging it as a known gap.
+//
+// The .n field is set from the STATIC argument count (the AST arg list
+// length), not from #table after the fact -- this matters because a nil
+// argument in the middle (table.pack("a", nil, "c")) creates a hole in the
+// array part, and #table would stop at that hole and undercount. Real
+// Lua's table.pack always sets .n to the true argument count regardless of
+// holes, which is exactly what using the static count gives us for free.
+// ============================================================================
+int emit_table_pack_intrinsic(ASTNode *node, int dest_reg)
+{
+    emit_asm("    ;; --- Intrinsic: table.pack(...) ---\n");
+
+    int arg_count = 0;
+    for (ASTNode *a = node->as.call.args_head; a != NULL; a = a->next) {
+        arg_count++;
+    }
+
+    // --- Create the new table, spill its pointer immediately. ---
+    // Every argument expression below could itself contain a nested CALL,
+    // and __builtin_table_new / __builtin_table_set both clobber R0-R2 with
+    // no callee-save -- same defensive spill-immediately pattern used by
+    // node_table_constructor() and emit_table_insert_intrinsic().
+    emit_asm("    CALL __builtin_table_new\n");
+    int t_reg = allocate_register();
+    emit_asm("    MOV R%d, R0\n", t_reg);
+
+    // --- Evaluate and store each positional argument: t[i] = arg_i ---
+    int idx = 1;
+    for (ASTNode *a = node->as.call.args_head; a != NULL; a = a->next, idx++) {
+        emit_asm("    PUSH R%d ; spill table pointer\n", t_reg);
+
+        int val_reg = allocate_register();
+        generate_asm(a, val_reg);
+        ensure_in_register(val_reg);
+        emit_asm("    PUSH R%d ; spill value\n", val_reg);
+
+        emit_asm("    POP  R%d ; reload value\n", val_reg);
+        emit_asm("    POP  R%d ; reload table pointer\n", t_reg);
+
+        int key_reg = allocate_register();
+        emit_asm("    MOV R%d, %d\n", key_reg, idx);
+        emit_asm("    CIF R%d ; key as Lua float\n", key_reg);
+
+        emit_asm("    PUSH R%d ; Table Pointer\n", t_reg);
+        emit_asm("    PUSH R%d ; Key\n", key_reg);
+        emit_asm("    PUSH R%d ; Value\n", val_reg);
+        emit_asm("    CALL __builtin_table_set\n");
+        emit_asm("    IADD SP, 3\n");
+
+        unlock_register(val_reg);
+        unlock_register(key_reg);
+    }
+
+    // --- Set the .n field: t["n"] = arg_count ---
+    int n_string_id = add_string_literal("n");
+    int n_key_reg = allocate_register();
+    emit_asm("    MOV R%d, __string_%d\n", n_key_reg, n_string_id);
+    emit_asm("    OR  R%d, BOXED_ROMSTRING ; Box as ROM String\n", n_key_reg);
+
+    int n_val_reg = allocate_register();
+    emit_asm("    MOV R%d, %d\n", n_val_reg, arg_count);
+    emit_asm("    CIF R%d ; n as Lua float\n", n_val_reg);
+
+    emit_asm("    PUSH R%d ; Table Pointer\n", t_reg);
+    emit_asm("    PUSH R%d ; Key \"n\"\n", n_key_reg);
+    emit_asm("    PUSH R%d ; Value (count)\n", n_val_reg);
+    emit_asm("    CALL __builtin_table_set\n");
+    emit_asm("    IADD SP, 3\n");
+
+    unlock_register(n_key_reg);
+    unlock_register(n_val_reg);
+
+    if (dest_reg != 0) {
+        emit_asm("    MOV R%d, R%d\n", dest_reg, t_reg);
+    }
+
+    unlock_register(t_reg);
+    return 1;
+}
