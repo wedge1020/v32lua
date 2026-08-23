@@ -119,6 +119,81 @@ int emit_table_remove_intrinsic(ASTNode *node, int dest_reg)
 }
 
 // ============================================================================
+// table.move(a1, f, e, t [, a2]) - Copies elements a1[f..e] to a2 starting at t
+// If a2 is omitted, defaults to a1 (move within the same table).
+// ============================================================================
+int emit_table_move_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg_a1 = node->as.call.args_head;
+    if (!arg_a1 || !arg_a1->next || !arg_a1->next->next || !arg_a1->next->next->next) {
+        compiler_error(ERR_SYNTAX, node->line_number,
+            "table.move() expects at least four arguments (a1, f, e, t)");
+        return 0;
+    }
+    ASTNode *arg_f  = arg_a1->next;
+    ASTNode *arg_e  = arg_f->next;
+    ASTNode *arg_t  = arg_e->next;
+    ASTNode *arg_a2 = arg_t->next;   // optional
+
+    emit_asm("    ;; --- Intrinsic: table.move(a1, f, e, t, [a2]) ---\n");
+
+    // Evaluate every argument first, spilling each to the stack immediately
+    // -- same defensive pattern as every other table.* intrinsic.
+    int a1_reg = allocate_register();
+    generate_asm(arg_a1, a1_reg);
+    ensure_in_register(a1_reg);
+    emit_asm("    PUSH R%d ; spill a1\n", a1_reg);
+
+    int f_reg = allocate_register();
+    generate_asm(arg_f, f_reg);
+    ensure_in_register(f_reg);
+    emit_asm("    PUSH R%d ; spill f\n", f_reg);
+
+    int e_reg = allocate_register();
+    generate_asm(arg_e, e_reg);
+    ensure_in_register(e_reg);
+    emit_asm("    PUSH R%d ; spill e\n", e_reg);
+
+    int t_reg = allocate_register();
+    generate_asm(arg_t, t_reg);
+    ensure_in_register(t_reg);
+    emit_asm("    PUSH R%d ; spill t\n", t_reg);
+
+    int a2_reg = allocate_register();
+    if (arg_a2) {
+        generate_asm(arg_a2, a2_reg);
+        ensure_in_register(a2_reg);
+    } else {
+        emit_asm("    MOV R%d, BOXED_NIL ; default: a2 = a1\n", a2_reg);
+    }
+
+    // Reload in reverse (LIFO) now that everything is safely computed.
+    emit_asm("    POP  R%d ; reload t\n", t_reg);
+    emit_asm("    POP  R%d ; reload e\n", e_reg);
+    emit_asm("    POP  R%d ; reload f\n", f_reg);
+    emit_asm("    POP  R%d ; reload a1\n", a1_reg);
+
+    emit_asm("    PUSH R%d ; a1\n", a1_reg);
+    emit_asm("    PUSH R%d ; f\n", f_reg);
+    emit_asm("    PUSH R%d ; e\n", e_reg);
+    emit_asm("    PUSH R%d ; t\n", t_reg);
+    emit_asm("    PUSH R%d ; a2\n", a2_reg);
+    emit_asm("    CALL __builtin_table_move\n");
+    emit_asm("    IADD SP, 5\n");
+
+    if (dest_reg != 0) {
+        emit_asm("    MOV R%d, R0\n", dest_reg);
+    }
+
+    unlock_register(a1_reg);
+    unlock_register(f_reg);
+    unlock_register(e_reg);
+    unlock_register(t_reg);
+    unlock_register(a2_reg);
+    return 1;
+}
+
+// ============================================================================
 // table.pack(...) - Packs a positional argument list into a new table with
 // a .n field set to the argument count.
 //

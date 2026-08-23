@@ -1609,27 +1609,42 @@ __concat_done:
     POP  BP
     RET
 
-;; ===========================================================================
-;; SECTION: TABLE MOVE
-;; ===========================================================================
-
 ;; ---------------------------------------------------------------------------
-;; table.move(a1, f, e, t, [a2]) - Copies elements from a1[f..e] to a2 starting at t
-;; If a2 is nil, a1 is used as destination
+;; table.move(a1, f, e, t, [a2]) - Copies elements a1[f..e] to a2 starting at t
+;; If a2 is nil, a1 is used as destination (move within the same table).
 ;;
-;; Incoming Stack: [BP+6] = Source Table (a1)
-;;                 [BP+5] = Start index (f)
-;;                 [BP+4] = End index (e)
-;;                 [BP+3] = Target index (t)
-;;                 [BP+2] = Destination Table (a2, optional)
-;; Returns: R0 = destination table
-;; Register Usage: R1-R10
+;; Incoming Stack (pushed a1, f, e, t, a2 in that order):
+;;   [BP+6] = a1 (source table, boxed)
+;;   [BP+5] = f  (start index, boxed float)
+;;   [BP+4] = e  (end index, boxed float)
+;;   [BP+3] = t  (destination start index, boxed float)
+;;   [BP+2] = a2 (destination table, boxed, or BOXED_NIL for "same as a1")
+;; Returns: R0 = boxed destination table
+;;
+;; REPLACES the previous version, which read/wrote the table's "array
+;; part" directly via raw pointer arithmetic on header word 2. That array
+;; part is NEVER actually allocated by this runtime for any table --
+;; __builtin_table_set's own comments confirm array capacity is always 0
+;; and every write goes through the hash-bucket fallback instead. The old
+;; version's destination-resize path was a TODO stub that silently wrote
+;; past a pointer that's always null -- a real heap-corruption risk the
+;; moment the array part ever did get allocated.
+;;
+;; This version goes entirely through __builtin_table_get /
+;; __builtin_table_set instead -- the same primitives table.concat and
+;; every passing tables/ test already rely on. No fixed capacity to
+;; overflow, since the hash-bucket fallback grows dynamically.
+;;
+;; Overlap safety: copies BACKWARD (highest index first) whenever a1 == a2
+;; (by boxed-pointer equality, which also naturally covers "a2 omitted")
+;; and t > f; forward otherwise. Matches real Lua's overlap handling.
 ;; ---------------------------------------------------------------------------
 __builtin_table_move:
     PUSH BP
     MOV  BP, SP
+    ISUB SP, 6   ; [BP-1]=f  [BP-2]=e  [BP-3]=t  [BP-4]=count
+                 ; [BP-5]=resolved a2 (boxed)  [BP-6]=loop counter
 
-    ;; --- Callee-Save: Preserve 10 working registers ---
     PUSH R1
     PUSH R2
     PUSH R3
@@ -1638,147 +1653,148 @@ __builtin_table_move:
     PUSH R6
     PUSH R7
     PUSH R8
-    PUSH R9
-    PUSH R10
 
-    ;; --- Load arguments ---
-    MOV  R1, [BP+6]          ; R1 = Source Table (a1)
-    MOV  R2, [BP+5]          ; R2 = Start index (f)
-    MOV  R3, [BP+4]          ; R3 = End index (e)
-    MOV  R4, [BP+3]          ; R4 = Target index (t)
-    MOV  R5, [BP+2]          ; R5 = Destination Table (a2, may be NIL)
+    ;; --- Validate a1 ---
+    MOV  R1, [BP+6]
+    MOV  R2, R1
+    AND  R2, BOXED_DATA
+    IEQ  R2, BOXED_TABLE
+    JF   R2, __runtime_error_not_table
 
-    ;; --- Validate source table ---
-    MOV  R6, R1
-    AND  R6, BOXED_DATA
-    IEQ  R6, BOXED_TABLE
-    JF   R6, __runtime_error_not_table
+    ;; --- Resolve a2: default to a1 if nil ---
+    MOV  R1, [BP+2]
+    MOV  R2, R1
+    IEQ  R2, BOXED_NIL
+    JF   R2, __move_a2_given
+    MOV  R1, [BP+6]           ; a2 = a1
+    JMP  __move_a2_resolved
+__move_a2_given:
+    MOV  R2, R1
+    AND  R2, BOXED_DATA
+    IEQ  R2, BOXED_TABLE
+    JF   R2, __runtime_error_not_table
+__move_a2_resolved:
+    MOV  [BP-5], R1            ; resolved a2 (boxed)
 
-    ;; --- Unbox source table ---
-    AND  R1, BOXED_PAYLOAD   ; R1 = raw source table header
+    ;; --- Convert f, e, t to raw ints ---
+    MOV  R1, [BP+5]
+    CFI  R1
+    MOV  [BP-1], R1            ; f
 
-    ;; --- Set destination table ---
-    MOV  R6, R5
-    IEQ  R6, BOXED_NIL
-    JT   R6, __table_move_dest_is_source
+    MOV  R1, [BP+4]
+    CFI  R1
+    MOV  [BP-2], R1            ; e
 
-    ;; Validate destination table
-    AND  R6, BOXED_DATA
-    IEQ  R6, BOXED_TABLE
-    JF   R6, __runtime_error_not_table
-    AND  R5, BOXED_PAYLOAD   ; R5 = raw destination table header
-    JMP  __table_move_dest_set
+    MOV  R1, [BP+3]
+    CFI  R1
+    MOV  [BP-3], R1            ; t
 
-__table_move_dest_is_source:
-    MOV  R5, R1              ; Use source as destination
+    ;; --- count = e - f + 1 ---
+    MOV  R1, [BP-2]
+    MOV  R2, [BP-1]
+    ISUB R1, R2
+    IADD R1, 1
+    MOV  [BP-4], R1            ; count (may be < 1 -- empty range, no-op)
 
-__table_move_dest_set:
-    ;; --- Get array info ---
-    MOV  R6, [R1+1]          ; R6 = source array length
-    MOV  R7, [R1+2]          ; R7 = source array data pointer
-    MOV  R8, [R5+1]          ; R8 = destination array length
-    MOV  R9, [R5+2]          ; R9 = destination array data pointer
+    MOV  R1, [BP-4]
+    ILT  R1, 1
+    JT   R1, __move_done       ; count < 1 -> nothing to copy
 
-    ;; --- Convert indices to integers ---
-    CFI  R2                  ; Convert f to integer
-    CFI  R3                  ; Convert e to integer
-    CFI  R4                  ; Convert t to integer
+    ;; --- Choose direction: backward only if a1 == a2 (resolved) AND t > f ---
+    MOV  R1, [BP+6]
+    MOV  R2, [BP-5]
+    IEQ  R1, R2
+    JF   R1, __move_forward_init
 
-    ;; --- Validate indices (use R10 for comparison results) ---
-    MOV  R10, R2
-    ILT  R10, 1
-    JT   R10, __table_move_invalid_range
-    MOV  R10, R2
-    IGT  R10, R6
-    JT   R10, __table_move_invalid_range
-    MOV  R10, R3
-    ILT  R10, R2
-    JT   R10, __table_move_invalid_range
-    MOV  R10, R3
-    IGT  R10, R6
-    JT   R10, __table_move_end_adjust
-    JMP  __table_move_indices_valid
+    MOV  R1, [BP-3]
+    MOV  R2, [BP-1]
+    IGT  R1, R2
+    JT   R1, __move_backward_init
+    JMP  __move_forward_init
 
-__table_move_end_adjust:
-    MOV  R3, R6
+__move_forward_init:
+    MOV  R1, 0
+    MOV  [BP-6], R1             ; counter = 0
+    JMP  __move_forward_loop
 
-__table_move_indices_valid:
-    MOV  R10, R4
-    ILT  R10, 1
-    JT   R10, __table_move_invalid_range
+__move_forward_loop:
+    MOV  R1, [BP-6]
+    MOV  R2, [BP-4]
+    IGE  R1, R2                  ; counter >= count?
+    JT   R1, __move_done
 
-    ;; --- Calculate number of elements to copy ---
-    MOV  R10, R3
-    ISUB R10, R2            ; R10 = e - f
-    IADD R10, 1             ; R10 = e - f + 1 (number of elements)
+    MOV  R3, [BP-1]              ; source index = f + counter
+    MOV  R4, [BP-6]
+    IADD R3, R4
+    CIF  R3
 
-    ;; --- Check if destination has enough space ---
-    MOV  R11, R4
-    IADD R11, R10
-    ISUB R11, 1              ; R11 = t + (e - f) (last destination index)
+    MOV  R5, [BP+6]
+    PUSH R5
+    PUSH R3
+    CALL __builtin_table_get
+    IADD SP, 2
+    MOV  R6, R0                  ; R6 = fetched value
 
-    IGT  R11, R8
-    JT   R11, __table_move_resize_destination
+    MOV  R3, [BP-3]              ; dest index = t + counter
+    MOV  R4, [BP-6]
+    IADD R3, R4
+    CIF  R3
 
-__table_move_copy_loop:
-    ;; --- Copy elements from source to destination ---
-    MOV  R11, 0              ; R11 = counter
+    MOV  R5, [BP-5]
+    PUSH R5
+    PUSH R3
+    PUSH R6
+    CALL __builtin_table_set
+    IADD SP, 3
 
-__table_move_copy_iteration:
-    MOV  R12, R11
-    ILT  R12, R10
-    JF   R12, __table_move_done
+    MOV  R1, [BP-6]
+    IADD R1, 1
+    MOV  [BP-6], R1
+    JMP  __move_forward_loop
 
-    ;; Calculate source address: source_array + (f + counter - 1)
-    MOV  R12, R7
-    IADD R12, R2
-    IADD R12, R11
-    ISUB R12, 1
+__move_backward_init:
+    MOV  R1, [BP-4]
+    ISUB R1, 1
+    MOV  [BP-6], R1              ; counter = count - 1
+    JMP  __move_backward_loop
 
-    ;; Calculate destination address: dest_array + (t + counter - 1)
-    MOV  R13, R9
-    IADD R13, R4
-    IADD R13, R11
-    ISUB R13, 1
+__move_backward_loop:
+    MOV  R1, [BP-6]
+    ILT  R1, 0                    ; counter < 0?
+    JT   R1, __move_done
 
-    ;; Copy value (use R8 as temporary, avoiding R14/R15)
-    MOV  R8, [R12]
-    MOV  [R13], R8
+    MOV  R3, [BP-1]
+    MOV  R4, [BP-6]
+    IADD R3, R4
+    CIF  R3
 
-    IADD R11, 1
-    JMP  __table_move_copy_iteration
+    MOV  R5, [BP+6]
+    PUSH R5
+    PUSH R3
+    CALL __builtin_table_get
+    IADD SP, 2
+    MOV  R6, R0
 
-__table_move_resize_destination:
-    ;; TODO: Implement destination table resizing
-    ;; For now, just copy what we can
-    JMP  __table_move_copy_loop
+    MOV  R3, [BP-3]
+    MOV  R4, [BP-6]
+    IADD R3, R4
+    CIF  R3
 
-__table_move_invalid_range:
-    MOV  R0, BOXED_NIL
-    JMP  __table_move_return
+    MOV  R5, [BP-5]
+    PUSH R5
+    PUSH R3
+    PUSH R6
+    CALL __builtin_table_set
+    IADD SP, 3
 
-__table_move_done:
-    ;; --- Update destination length if needed ---
-    IADD R8, R4
-    IADD R8, R10
-    ISUB R8, 1              ; New length = max(old_length, t + count - 1)
+    MOV  R1, [BP-6]
+    ISUB R1, 1
+    MOV  [BP-6], R1
+    JMP  __move_backward_loop
 
-    MOV  R11, [R5+1]        ; Current destination length
-    IGT  R8, R11
-    JT   R8, __table_move_update_length
-    MOV  R8, R11
+__move_done:
+    MOV  R0, [BP-5]               ; R0 = resolved a2 (already boxed)
 
-__table_move_update_length:
-    MOV  [R5+1], R8          ; Update destination length
-
-    ;; --- Return destination table ---
-    MOV  R0, R5
-    OR   R0, BOXED_TABLE ; Re-box the destination table pointer
-
-__table_move_return:
-    ;; --- Callee-Restore ---
-    POP  R10
-    POP  R9
     POP  R8
     POP  R7
     POP  R6

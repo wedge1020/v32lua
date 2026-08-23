@@ -159,6 +159,7 @@ bool  emit_ipairs_intrinsic     (ASTNode *);
 //
 int   emit_table_insert_intrinsic    (ASTNode *, int);
 int   emit_table_remove_intrinsic    (ASTNode *, int);
+int   emit_table_move_intrinsic      (ASTNode *, int);
 int   emit_table_concat_intrinsic    (ASTNode *, int);
 int   emit_table_pack_intrinsic      (ASTNode *, int);
 

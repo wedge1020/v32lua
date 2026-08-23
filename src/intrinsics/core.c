@@ -801,6 +801,10 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         return emit_table_remove_intrinsic(node, dest_reg);
     }
 
+    if (strcmp(func_name, "table.move") == 0) {
+        return emit_table_move_intrinsic(node, dest_reg);
+    }
+
     if (strcmp(func_name, "table.pack") == 0) {
         return emit_table_pack_intrinsic(node, dest_reg);
     }
