@@ -148,3 +148,28 @@ int get_builtin_return_count(const char *func_name) {
     }
     return 1;  // Default to single return value
 }
+
+// Derives a fallback cart title from the input filename: strips any
+// directory path (handles both '/' and '\' separators defensively,
+// since command-line invocation could come from either) and strips a
+// trailing ".lua" extension if present. Returns a pointer into a static
+// buffer -- caller should copy out before calling this again.
+char *derive_cart_title_from_filename(const char *path)
+{
+    const char *base = strrchr(path, '/');
+    const char *base_bs = strrchr(path, '\\');
+    if (base_bs != NULL && (base == NULL || base_bs > base)) {
+        base = base_bs;
+    }
+    base = (base != NULL) ? base + 1 : path;
+
+    static char title_buf[256];
+    strncpy(title_buf, base, sizeof(title_buf) - 1);
+    title_buf[sizeof(title_buf) - 1] = '\0';
+
+    char *dot = strrchr(title_buf, '.');
+    if (dot != NULL && strcmp(dot, ".lua") == 0) {
+        *dot = '\0';
+    }
+    return title_buf;
+}

@@ -166,6 +166,7 @@ uint32_t tic80_get_palette_color(int index);
 
 extern char cart_version[64];
 extern char cart_title[128];
+extern bool cart_title_was_set;
 extern CARTresource *textures_head;
 extern CARTresource *sounds_head;
 extern int next_texture_id;

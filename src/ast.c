@@ -1,12 +1,13 @@
 #include "v32lua.h"
 
 // Global state for XML generation
-char          cart_version[64]  = "1.0";
-char          cart_title[128]   = "Vircon32 Program";
-CARTresource *textures_head     = NULL;
-CARTresource *sounds_head       = NULL;
-int           next_texture_id   = 0;
-int           next_sound_id     = 0;
+char          cart_version[64]    = "1.0";
+char          cart_title[128]     = "Vircon32 Program";
+bool          cart_title_was_set  = false;
+CARTresource *textures_head       = NULL;
+CARTresource *sounds_head         = NULL;
+int           next_texture_id     = 0;
+int           next_sound_id       = 0;
 
 ASTNode *make_node (NodeType type)
 {
@@ -102,6 +103,7 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
         // e.g., --#title "My Awesome Game"
         char title_buf[128] = {0};
         if (sscanf(raw_hint, "%*s \"%127[^\"]\"", title_buf) == 1) {
+            cart_title_was_set = true;
             strncpy(cart_title, title_buf, sizeof(cart_title) - 1);
             node->as.cart_hint.value = strdup(title_buf);
         }

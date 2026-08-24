@@ -600,6 +600,14 @@ void  emit_string_data_section (void)
     emit_asm (";; Read-Only String Data Section");
     emit_asm (";; =========================================================");
 
+    // Cart title -- emitted first within this section (dedicated,
+    // well-known label, not part of the auto-numbered __string_N table
+    // below it, so external tooling can find it by name regardless of
+    // how many other string literals the program contains) -- but
+    // grouped here with the rest of the read-only string constants
+    // rather than living at a separate location in the file.
+    emit_cart_title_label (g_lua_filename);
+
     if (strings_head               != NULL)
     {
         fprintf (out(), "\n; --- String Literal Allocations ---\n");
@@ -983,4 +991,39 @@ void emit_load_function_value (ASTNode *func_def_node, const char *mangled_name,
     emit_asm("OR R%d, BOXED_FUNCTION", dest_reg);
     emit_asm("OR R%d, BOXED_CLOSURE_FLAG ; mark payload as a closure record, not raw code", dest_reg);
     unlock_pinned_register(rec_reg);
+}
+
+// Emits a fixed, well-known __cart_title label as the VERY FIRST thing
+// in the assembled output -- before the entry vector, before the global
+// variable RAM map, before anything else -- so external tooling (e.g.
+// memory card formatting) can find it at a predictable, stable location
+// regardless of program size. Deliberately a dedicated label rather than
+// just another entry in the normal ROM string table (__string_N), since
+// those are auto-numbered and their position shifts depending on how
+// many other string literals the program happens to contain.
+//
+// Title source: --#title "..." if the program gave one, otherwise the
+// input filename with its directory path and ".lua" extension stripped.
+// Hard-truncated to 20 characters either way -- this is a fixed field
+// width for Vircon32 memory card formatting, not a stylistic choice, so
+// no attempt is made to truncate at a word boundary.
+void emit_cart_title_label(const char *input_filename)
+{
+    const char *title_source;
+
+    if (cart_title_was_set) {
+        title_source = cart_title;
+    } else {
+        title_source = derive_cart_title_from_filename(input_filename);
+    }
+
+    char truncated[21] = {0};
+    strncpy(truncated, title_source, 20);
+    truncated[20] = '\0';
+
+    fprintf(out(), ";; --- Cart Title (Vircon32 memory card formatting, max 20 chars) ---\n");
+    fprintf(out(), "__cart_title:\n");
+    fprintf(out(), "    string \"");
+    emit_escaped_asm_string(out(), truncated);
+    fprintf(out(), "\"\n\n");
 }
