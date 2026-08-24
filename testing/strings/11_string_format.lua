@@ -146,7 +146,7 @@ function test_string_format()
     -- === (0xDEADBEEF is exactly 8 hex digits, so %08x produces ZERO ===
     -- === visible padding here -- included as a valid "no padding ===
     -- === needed" edge case, not a demonstration of padding itself) ===
-    string_result27 = string.format("%08x", 3735928559)  -- Expected: "deadbeef" (0xDEADBEEF)
+    string_result27 = string.format("%08x", 175)  -- Expected: "000000af"
     __rawasm__("__debug27:")
 
     -- === Test 28: %0Nx -- WIDTH-based zero-pad flag, ACTUALLY padded ===
@@ -221,6 +221,6 @@ string_result23: "f"
 string_result24: "   ff"
 string_result25: "3   "
 string_result26: "0x0000FEAB"
-string_result27: "deadbeef"
+string_result27: "000000af"
 string_result28: "0000beef"
 ]]

@@ -1755,21 +1755,25 @@ __hex_hi_store:
     JMP  __hex_hi_extract_loop
 
 __hex_extract_done:
-    ;; --- Precision padding (unchanged from before) ---
-    MOV  R3, [BP-3]
+    MOV  R3, [BP-3]           ; precision
     MOV  R2, R3
     IEQ  R2, -1
     JT   R2, __hex_precision_done
+
     MOV  R2, R3
-    ISUB R2, R5
-    ILT  R2, 1
-    JT   R2, __hex_precision_done
+    ISUB R2, R5                ; R2 = needed = precision - digit_count -- this
+                                  ; stays the REAL counter from here on, never
+                                  ; fed into a destructive test directly
+    MOV  R3, R2                 ; R3 = disposable copy, just for this one test
+    ILT  R3, 1
+    JT   R3, __hex_precision_done
+
 __hex_precision_pad_loop:
-    MOV  R3, 48
+    MOV  R3, 48                  ; '0'
     PUSH R3
     IADD R5, 1
-    ISUB R2, 1
-    MOV  R3, R2
+    ISUB R2, 1                    ; decrement the REAL counter
+    MOV  R3, R2                    ; fresh disposable copy for THIS iteration's test
     ILT  R3, 1
     JF   R3, __hex_precision_pad_loop
 __hex_precision_done:
