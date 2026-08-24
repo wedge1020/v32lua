@@ -515,3 +515,36 @@ bool emit_string_gsub_intrinsic(ASTNode *node, int dest_reg) {
     }
     return true;
 }
+
+// ============================================================================
+// tonumber(v) - Converts v to a number, or returns nil if it can't be.
+// Already-a-number input is returned unchanged. String input is parsed
+// against the SAME numeric-literal grammar the lexer itself accepts
+// (decimal with optional fraction, leading-dot decimal, 0x/0X hex
+// integer) -- nothing more. No exponent notation (matches the lexer),
+// no explicit-base second argument (a separate, deferred feature).
+// ============================================================================
+bool emit_tonumber_intrinsic(ASTNode *node, int dest_reg) {
+    ASTNode *arg = node->as.call.args_head;
+    if (!arg || arg->next != NULL) {
+        compiler_error(ERR_SYNTAX, node->line_number,
+            "tonumber() expects exactly 1 argument (explicit-base form not yet supported)");
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: tonumber(value) ---\n");
+
+    int arg_reg = allocate_pinned_register();
+    generate_asm(arg, arg_reg);
+
+    emit_asm("    PUSH R%d             ; Arg 1: Value to convert\n", arg_reg);
+    emit_asm("    CALL __builtin_string_to_number\n");
+    emit_asm("    IADD SP, 1           ; Clean up 1 argument\n");
+
+    if (dest_reg != 0) {
+        emit_asm("    MOV R%d, R0         ; Store number result (or nil)\n", dest_reg);
+    }
+
+    unlock_pinned_register(arg_reg);
+    return true;
+}

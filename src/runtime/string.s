@@ -1011,6 +1011,260 @@ __ftoa_done:
     POP  BP
     RET
 
+;; ---------------------------------------------------------------------------
+;; __builtin_string_to_number(v): Lua tonumber(v), single-argument form.
+;; Incoming Stack: [BP+2] = v (any boxed Lua value)
+;; Returns: R0 = boxed result -- v unchanged if it was already a number,
+;; the parsed number if v was a string that parses cleanly as one of this
+;; language's own numeric-literal forms (decimal with optional fraction,
+;; leading-dot decimal, 0x/0X hex integer -- the SAME set the lexer
+;; itself accepts, nothing more), or BOXED_NIL for anything else
+;; (non-string/non-number input, or a string with leftover non-whitespace
+;; garbage after the number).
+;;
+;; SCOPE: no exponent notation, no explicit-base second argument, no
+;; fractional/exponent hex ("0x1p4") -- matches the lexer's own grammar.
+;; ---------------------------------------------------------------------------
+__builtin_string_to_number:
+    PUSH BP
+    MOV  BP, SP
+
+    MOV  R0, [BP+2]
+
+    ;; --- Already a number? Return unchanged. A genuine Lua float never
+    ;; matches the NaN-tag pattern every non-number value is built from. ---
+    MOV  R1, R0
+    AND  R1, NAN_VALUE
+    IEQ  R1, NAN_VALUE
+    JF   R1, __ton_already_number
+
+    ;; --- Not a number. Must be a real STRING to proceed. ---
+    MOV  R1, R0
+    AND  R1, BOXED_DATA
+    IEQ  R1, BOXED_ROMSTRING
+    JT   R1, __ton_is_string
+
+    MOV  R1, R0
+    AND  R1, BOXED_DATA
+    IEQ  R1, BOXED_RAMSTRING
+    JF   R1, __ton_not_convertible
+
+    MOV  R1, R0
+    AND  R1, BOXED_PAYLOAD
+    ILT  R1, 4
+    JT   R1, __ton_not_convertible
+
+__ton_is_string:
+    CALL __unbox_string          ; R0 = raw char pointer
+
+__ton_skip_leading_ws:
+    MOV  R1, [R0]
+    MOV  R2, R1
+    IEQ  R2, 32                  ; ' '
+    JT   R2, __ton_ws_leading_advance
+    MOV  R2, R1
+    IEQ  R2, 9                    ; '\t'
+    JT   R2, __ton_ws_leading_advance
+    MOV  R2, R1
+    IEQ  R2, 13                    ; '\r'
+    JT   R2, __ton_ws_leading_advance
+    MOV  R2, R1
+    IEQ  R2, 10                     ; '\n'
+    JF   R2, __ton_check_sign
+__ton_ws_leading_advance:
+    IADD R0, 1
+    JMP  __ton_skip_leading_ws
+
+    ;; --- Optional leading sign ---
+__ton_check_sign:
+    MOV  R3, 0                   ; R3 = is_negative flag
+    MOV  R1, [R0]
+    MOV  R2, R1
+    IEQ  R2, 45                    ; '-'
+    JT   R2, __ton_sign_negative
+    MOV  R2, R1
+    IEQ  R2, 43                    ; '+'
+    JF   R2, __ton_check_hex_prefix
+    IADD R0, 1
+    JMP  __ton_check_hex_prefix
+__ton_sign_negative:
+    MOV  R3, 1
+    IADD R0, 1
+
+    ;; --- Optional "0x"/"0X" prefix -> integer hex path ---
+__ton_check_hex_prefix:
+    MOV  R1, [R0]
+    MOV  R2, R1
+    IEQ  R2, 48                    ; '0'
+    JF   R2, __ton_decimal
+    MOV  R1, [R0+1]
+    MOV  R2, R1
+    IEQ  R2, 120                    ; 'x'
+    JT   R2, __ton_hex_start
+    MOV  R2, R1
+    IEQ  R2, 88                      ; 'X'
+    JF   R2, __ton_decimal
+__ton_hex_start:
+    IADD R0, 2
+    MOV  R4, 0                       ; R4 = accumulated value (float)
+    MOV  R5, 0                        ; R5 = digit-seen count
+__ton_hex_digit_loop:
+    MOV  R1, [R0]
+
+    MOV  R2, R1
+    ISUB R2, 48
+    MOV  R6, R2
+    ILT  R6, 0
+    JT   R6, __ton_hex_try_upper
+    MOV  R6, R2
+    IGT  R6, 9
+    JT   R6, __ton_hex_try_upper
+    JMP  __ton_hex_digit_value_ready
+
+__ton_hex_try_upper:
+    MOV  R2, R1
+    ISUB R2, 65                 ; 'A'
+    MOV  R6, R2
+    ILT  R6, 0
+    JT   R6, __ton_hex_try_lower
+    MOV  R6, R2
+    IGT  R6, 5
+    JT   R6, __ton_hex_try_lower
+    IADD R2, 10
+    JMP  __ton_hex_digit_value_ready
+
+__ton_hex_try_lower:
+    MOV  R2, R1
+    ISUB R2, 97                  ; 'a'
+    MOV  R6, R2
+    ILT  R6, 0
+    JT   R6, __ton_hex_digit_loop_done
+    MOV  R6, R2
+    IGT  R6, 5
+    JT   R6, __ton_hex_digit_loop_done
+    IADD R2, 10
+
+__ton_hex_digit_value_ready:
+    CIF  R2
+    MOV  R7, 16.0
+    FMUL R4, R7
+    FADD R4, R2
+    IADD R5, 1
+    IADD R0, 1
+    JMP  __ton_hex_digit_loop
+
+__ton_hex_digit_loop_done:
+    MOV  R6, R5
+    IEQ  R6, 0
+    JT   R6, __ton_fail            ; "0x" with no digits after -> malformed
+    JMP  __ton_finish_check_trailing
+
+    ;; --- Decimal path: optional integer part, optional fractional part ---
+__ton_decimal:
+    MOV  R4, 0                     ; R4 = accumulated value (float)
+    MOV  R5, 0                      ; R5 = digit-seen count (int + frac combined)
+__ton_decimal_int_loop:
+    MOV  R1, [R0]
+    MOV  R2, R1
+    ISUB R2, 48
+    MOV  R6, R2
+    ILT  R6, 0
+    JT   R6, __ton_decimal_int_done
+    MOV  R6, R2
+    IGT  R6, 9
+    JT   R6, __ton_decimal_int_done
+
+    CIF  R2
+    MOV  R7, 10.0
+    FMUL R4, R7
+    FADD R4, R2
+    IADD R5, 1
+    IADD R0, 1
+    JMP  __ton_decimal_int_loop
+
+__ton_decimal_int_done:
+    MOV  R1, [R0]
+    MOV  R2, R1
+    IEQ  R2, 46                    ; '.'
+    JF   R2, __ton_decimal_done
+
+    IADD R0, 1
+    MOV  R8, 10.0                    ; R8 = running divisor
+__ton_decimal_frac_loop:
+    MOV  R1, [R0]
+    MOV  R2, R1
+    ISUB R2, 48
+    MOV  R6, R2
+    ILT  R6, 0
+    JT   R6, __ton_decimal_done
+    MOV  R6, R2
+    IGT  R6, 9
+    JT   R6, __ton_decimal_done
+
+    CIF  R2
+    MOV  R7, R2
+    FDIV R7, R8
+    FADD R4, R7
+    MOV  R7, 10.0
+    FMUL R8, R7
+    IADD R5, 1
+    IADD R0, 1
+    JMP  __ton_decimal_frac_loop
+
+__ton_decimal_done:
+    MOV  R6, R5
+    IEQ  R6, 0
+    JT   R6, __ton_fail             ; no digits at all -- bare sign/whitespace/empty
+
+    ;; --- Shared tail: skip trailing whitespace, confirm clean end-of-string ---
+__ton_finish_check_trailing:
+__ton_skip_trailing_ws:
+    MOV  R1, [R0]
+    MOV  R2, R1
+    IEQ  R2, 32
+    JT   R2, __ton_ws_trailing_advance
+    MOV  R2, R1
+    IEQ  R2, 9
+    JT   R2, __ton_ws_trailing_advance
+    MOV  R2, R1
+    IEQ  R2, 13
+    JT   R2, __ton_ws_trailing_advance
+    MOV  R2, R1
+    IEQ  R2, 10
+    JF   R2, __ton_check_terminator
+__ton_ws_trailing_advance:
+    IADD R0, 1
+    JMP  __ton_skip_trailing_ws
+
+__ton_check_terminator:
+    MOV  R1, [R0]
+    MOV  R2, R1
+    IEQ  R2, 0
+    JF   R2, __ton_fail             ; leftover garbage after the number
+
+    MOV  R6, R3
+    IEQ  R6, 0
+    JT   R6, __ton_return_positive
+    MOV  R7, -1.0
+    FMUL R4, R7
+__ton_return_positive:
+    MOV  R0, R4
+    MOV  SP, BP
+    POP  BP
+    RET
+
+__ton_fail:
+__ton_not_convertible:
+    MOV  R0, BOXED_NIL
+    MOV  SP, BP
+    POP  BP
+    RET
+
+__ton_already_number:
+    MOV  SP, BP
+    POP  BP
+    RET
+
 ;; ===========================================================================
 ;; Built-in: string.byte(s [, i [, j]])
 ;; Returns byte values from string as Lua numbers

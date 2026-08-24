@@ -78,6 +78,8 @@ if [ -r "${UNIT}.lua" ]; then
             echo "d/s ${value} ${name}" >> ${UNIT}.cmd
         elif [ "${dtype}" = "boolean" ]; then
             echo "d/B ${value} ${name}" >> ${UNIT}.cmd
+        elif [ "${dtype}" = "hex" ]; then
+            echo "d ${value} ${name}"   >> ${UNIT}.cmd
         fi
     done
     #echo "c"                            >> ${UNIT}.cmd

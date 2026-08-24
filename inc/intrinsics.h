@@ -103,6 +103,7 @@ void  emit_system_halt_intrinsic ();
 bool  emit_string_byte_intrinsic    (ASTNode *, int);
 bool  emit_string_char_intrinsic    (ASTNode *, int);
 bool  emit_tostring_intrinsic       (ASTNode *, int);
+bool  emit_tonumber_intrinsic       (ASTNode *, int);
 bool  emit_string_format_intrinsic  (ASTNode *, int);
 bool  emit_string_len_intrinsic     (ASTNode *, int);
 bool  emit_string_sub_intrinsic     (ASTNode *, int);

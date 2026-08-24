@@ -91,6 +91,7 @@ tests:
 	@$(MAKE) -C math tests
 	@$(MAKE) -C strings tests
 	@$(MAKE) -C tables tests
+	@$(MAKE) -C special tests
 
 # Clean target drops all generated assembly and binary test files
 clean:
