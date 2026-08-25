@@ -3,6 +3,18 @@
 --@ Tests ipairs, pairs, and custom iterators with exhaustive edge cases.
 --@ Results are stored in global variables for automated memory scraping.
 
+-- Top-level dotted-table helper, mirroring the shape of the code that
+-- originally triggered a stack-slot collision: a table-dotted function
+-- (Projectiles.overlaps-style) called from inside a NESTED generic-for
+-- loop. Declared as a real global table (not local), same as Projectiles
+-- was, since that's the exact codegen path (resolve_static_path + a
+-- pinned/spilled target_reg) that exposed the bug.
+HitTest = {}
+
+function HitTest.combine(p, e)
+    return p + e
+end
+
 function test_generic_for_loops()
     -- === Test 00: ipairs on array ===
     local t1 = {"a", "b", "c"}
@@ -319,6 +331,80 @@ function test_generic_for_loops()
     end
     number_result29 = triple_ipairs_count   -- 2 planes * 2 rows * 2 cells = 8
     __rawasm__("__debug27:")
+
+    -- === Test 28: Triple-nested generic-for loops with a LOCAL declared ===
+    -- === inside the innermost body, plus a function call there too. ===
+    -- === Regression test for count_function_locals()'s NODE_FOR_GENERIC ===
+    -- === case: it used to recurse via the WRONG union member ===
+    -- === (node->as.for_numeric.body instead of .for_generic.body), ===
+    -- === which -- because every ASTNode is calloc()'d -- silently read ===
+    -- === back NULL and made the entire body of any generic-for loop ===
+    -- === invisible to the locals pre-pass. That undercounted the stack ===
+    -- === frame size, which shifted register spill slots on top of real ===
+    -- === local-variable slots (like this loop's own iterator state). ===
+    local function combine(a, b)
+        local sum = a + b
+        return sum * 2
+    end
+
+    local grid4 = {
+        { {1, 2}, {3, 4} },
+        { {5, 6}, {7, 8} }
+    }
+    local deep_call_sum = 0
+    for pi, plane in ipairs(grid4) do
+        for ri, row in ipairs(plane) do
+            for ci, cell in ipairs(row) do
+                local doubled = combine(pi, ri)
+                deep_call_sum = deep_call_sum + doubled + ci + cell
+            end
+        end
+    end
+    number_result30 = deep_call_sum   -- 96
+    __rawasm__("__debug28:")
+
+    -- === Test 29: numeric-for nested inside generic-for, with a call ===
+    -- === Regression test for count_function_locals()'s NODE_FOR_NUMERIC ===
+    -- === case: node_for_numeric() registers FOUR locals per loop ===
+    -- === (limit_var, step_var, control_var, and the user-visible index ===
+    -- === variable), but the old pre-pass only ever counted 3, ===
+    -- === undercounting by one slot per numeric-for loop. ===
+    local function scale(x)
+        local factor = 3
+        return x * factor
+    end
+
+    local rows5 = { {1, 2, 3}, {4, 5, 6} }
+    local mixed_sum = 0
+    for ri, row in ipairs(rows5) do
+        for ci = 1, 3 do
+            local scaled = scale(row[ci])
+            mixed_sum = mixed_sum + scaled
+        end
+    end
+    number_result31 = mixed_sum   -- 63
+    __rawasm__("__debug29:")
+
+    -- === Test 30: nested ipairs loop calling a dotted-table function ===
+    -- === Direct regression test for the ORIGINAL crash: ===
+    -- === Projectiles.check_hits()'s inner ===
+    -- === `for j, e in ipairs(Enemies.list)` loop stored its iterator ===
+    -- === state at a stack slot that collided with the spilled ===
+    -- === function-pointer register for the ===
+    -- === `Projectiles.overlaps(p, e)` call inside the same loop body. ===
+    -- === This reproduces that exact shape with HitTest.combine(). ===
+    local group_a = {1, 2, 3}
+    local group_b = {10, 20}
+    local collide_sum = 0
+    for i, a in ipairs(group_a) do
+        for j, b in ipairs(group_b) do
+            if HitTest.combine(a, b) > 10 then
+                collide_sum = collide_sum + HitTest.combine(a, b)
+            end
+        end
+    end
+    number_result32 = collide_sum   -- 102
+    __rawasm__("__debug30:")
 end
 
 function main()
@@ -359,6 +445,9 @@ function main()
     print(320, 300, "Test 25 - fewer vars: " ..      number_result27)
     print(320, 320, "Test 26 - immediate break: " .. number_result28)
     print(220, 080, "Test 27 - triple nested: " ..   number_result29)
+    print(220, 100, "Test 28 - deep call sum: " ..   number_result30)
+    print(220, 120, "Test 29 - mixed num/gen: " ..   number_result31)
+    print(220, 140, "Test 30 - dotted collide: " ..  number_result32)
 end
 
 --[[
@@ -394,6 +483,9 @@ number_result26: 96.0000
 number_result27: 3.0000
 number_result28: 0.0000
 number_result29: 8.0000
+number_result30: 96.0000
+number_result31: 63.0000
+number_result32: 102.0000
 string_result00: "a"
 string_result01: "c"
 number_result01: 20.0000

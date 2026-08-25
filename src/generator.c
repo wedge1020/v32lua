@@ -172,14 +172,45 @@ int  count_function_locals(ASTNode* node)
                 break;
 
             case NODE_FOR_NUMERIC:
-                // Adds 3 to the stack requirement frame frame (+1 index, +1 limit, +1 step)
-                count += 3 + count_function_locals(node->as.for_numeric.body);
+                // node_for_numeric() registers FOUR synthetic/user locals per
+                // loop, not three: limit_var, step_var, control_var, AND the
+                // user-visible index_var (control_var is a hidden driver
+                // separate from the index the body sees -- see the
+                // CLOSURE_NOTE comment on node_for_numeric() itself). The
+                // previous "+3" here undercounted by one slot per numeric
+                // for loop.
+                count += 4 + count_function_locals(node->as.for_numeric.body);
                 break;
 
-            case NODE_FOR_GENERIC:
-                // Adds 3 to the stack requirement frame frame (+1 index, +1 limit, +1 step)
-                count += 3 + count_function_locals(node->as.for_numeric.body);
+            case NODE_FOR_GENERIC: {
+                // node_for_generic() registers THREE synthetic iterator-state
+                // locals (__for_iter_N, __for_state_N, __for_key_N) PLUS one
+                // local per user-visible loop variable (e.g. the `j` and `e`
+                // in `for j, e in ipairs(t) do`). The old code only ever
+                // counted the fixed 3 and completely ignored var_list, so
+                // any generic-for loop with loop variables undercounted its
+                // own stack requirement.
+                //
+                // It also recursed using node->as.for_numeric.body instead
+                // of node->as.for_generic.body. Because these are different
+                // union members (for_numeric has 5 pointer-sized fields,
+                // for_generic only 3) and every ASTNode is calloc()'d,
+                // .for_numeric.body silently read back zeroed/NULL memory
+                // instead of the loop's real body -- meaning the entire
+                // contents of every generic-for loop's body (nested ifs,
+                // nested loops, local declarations) were INVISIBLE to this
+                // pre-pass, undercounting far more severely than the missing
+                // var_list alone. This is what let a nested
+                // `for j, e in ipairs(...)` loop's own synthetic locals
+                // and loop variables collide at runtime with an unrelated
+                // register spill slot computed from the too-small total.
+                int var_count = 0;
+                for (ASTNode *v = node->as.for_generic.var_list; v != NULL; v = v->next) {
+                    var_count++;
+                }
+                count += 3 + var_count + count_function_locals(node->as.for_generic.body);
                 break;
+            }
 
             case NODE_FUNCTION_DEF:
                 // CRITICAL BOUNDARY: Do NOT recurse into nested function definitions!
