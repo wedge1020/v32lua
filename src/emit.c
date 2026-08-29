@@ -548,6 +548,11 @@ int   emit_variable_map (void)
         fprintf (out(), "%%define  TIC80_FLAG_BUFFER_WORDS  0x00000080\n");
     }
 
+    if (runtime_req.needs_vircon32)
+    {
+        fprintf (out(), "%%define  VIRCON32_BTN_PREV_STATE  0x%.8X\n", vircon32_btn_prev_state_base);
+    }
+
     SymbolNode *curr = global_scope ? global_scope->symbols : NULL;
     while (curr != NULL) {
         if (curr->is_function) {
@@ -703,6 +708,11 @@ void  emit_runtime_library (void)
         fprintf (out(), "\n");
 
         emit_tic80_map_data (out());
+    }
+
+    if (runtime_req.needs_vircon32)
+    {
+        emit_embedded_asm (runtime_vircon32_start);
     }
 
     ////////////////////////////////////////////////////////////////////////////////////

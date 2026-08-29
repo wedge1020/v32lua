@@ -81,14 +81,16 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
             api_name[sizeof(api_name) - 1] = '\0';
         }
 
-        if (strcmp(api_name, "pico8") == 0) {
-            runtime_req.needs_pico8 = true;
-            runtime_req.needs_tic80 = false;
-            runtime_req.needs_tables = true;
+        if (strcmp(api_name, "pico8")        == 0) {
+            runtime_req.needs_pico8           = true;
+            runtime_req.needs_tic80           = false;
+            runtime_req.needs_vircon32        = false;
+            runtime_req.needs_tables          = true;
         } else if (strcmp(api_name, "tic80") == 0) {
-            runtime_req.needs_tic80 = true;
-            runtime_req.needs_pico8 = false;
-            runtime_req.needs_tables = true;
+            runtime_req.needs_tic80           = true;
+            runtime_req.needs_pico8           = false;
+            runtime_req.needs_vircon32        = false;
+            runtime_req.needs_tables          = true;
         } else {
             compiler_error(ERR_SEMANTIC, -1, "Unknown API: %s. Use 'pico8' or 'tic80'", api_name);
         }

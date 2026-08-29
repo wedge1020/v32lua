@@ -297,7 +297,7 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
 
     //////////////////////////////////////////////////////////////////////////
     //
-    // PICO-8 API
+    // Fantasy console routines: spr(), btn(), btnp()
     //
     //////////////////////////////////////////////////////////////////////////
 
@@ -311,6 +311,10 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         {
             return (emit_tic80_spr_intrinsic (node));
         }
+        else
+        {
+            return (emit_vircon32_spr_intrinsic (node));
+        }
     }
 
     // btn()
@@ -323,6 +327,10 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         {
             return (emit_tic80_btn_intrinsic (node, dest_reg));
         }
+        else
+        {
+            return (emit_vircon32_btn_intrinsic (node, dest_reg));
+        }
     }
 
     // btnp()
@@ -330,11 +338,14 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         if (runtime_req.needs_pico8 == true)
         {
             return (emit_pico8_btnp_intrinsic (node, dest_reg));
-            return (0);
         }
         else if (runtime_req.needs_tic80 == true)
         {
             return (emit_tic80_btnp_intrinsic (node, dest_reg));
+        }
+        else
+        {
+            return (emit_vircon32_btnp_intrinsic (node, dest_reg));
         }
     }
 
@@ -526,11 +537,11 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         return emit_tostring_intrinsic(node, dest_reg);
     }
 
-	if (strcmp(func_name, "tonumber") == 0)
-	{
+    if (strcmp(func_name, "tonumber") == 0)
+    {
         runtime_req.needs_strings          = true;
-		return emit_tonumber_intrinsic(node, dest_reg);
-	}
+        return emit_tonumber_intrinsic(node, dest_reg);
+    }
 
     // string.format(format, ...)
     if (strcmp(func_name, "string.format") == 0)

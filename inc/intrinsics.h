@@ -90,11 +90,19 @@ bool  emit_tic80_circb_intrinsic (ASTNode *, int);
 bool  emit_tic80_time_intrinsic  (ASTNode *, int);
 bool  emit_tic80_exit_intrinsic  (ASTNode *, int);
 
-void  emit_print_intrinsic (ASTNode *node);
-bool  emit_printf_intrinsic(ASTNode *node, int dest_reg);
-void  emit_get_gamepad_inputs_intrinsic(int dest_reg);
+void  emit_print_intrinsic       (ASTNode *node);
+bool  emit_printf_intrinsic      (ASTNode *node, int);
+void  emit_get_gamepad_inputs_intrinsic (int);
 void  emit_system_wait_intrinsic ();
 void  emit_system_halt_intrinsic ();
+
+//////////////////////////////////////////////////////////////////////////////    
+// Forward declarations
+//
+//
+bool  emit_vircon32_spr_intrinsic   (ASTNode *);
+bool  emit_vircon32_btn_intrinsic   (ASTNode *, int);
+bool  emit_vircon32_btnp_intrinsic  (ASTNode *, int);
 
 //////////////////////////////////////////////////////////////////////////////    
 //

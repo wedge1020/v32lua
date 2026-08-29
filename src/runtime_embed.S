@@ -136,6 +136,24 @@
     runtime_iters_end:
 #endif
 
+/* --- Vircon32 fantasy console API (spr(), btn(), btnp()) --- */
+#ifdef __APPLE__
+    .global _runtime_vircon32_start
+    _runtime_vircon32_start:
+#else
+    .global runtime_vircon32_start
+    runtime_vircon32_start:
+#endif
+    .incbin "runtime/vircon32.s"
+    .byte 0
+#ifdef __APPLE__
+    .global _runtime_vircon32_end
+    _runtime_vircon32_end:
+#else
+    .global runtime_vircon32_end
+    runtime_vircon32_end:
+#endif
+
 /* --- PICO-8 API (all-or-nothing) --- */
 #ifdef __APPLE__
     .global _runtime_pico8_start

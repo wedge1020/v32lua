@@ -125,6 +125,7 @@ int  main (int  argc, char** argv)
     runtime_req.needs_strings       = true;
     runtime_req.needs_tables        = true;
     runtime_req.needs_iters         = true;
+    runtime_req.needs_vircon32      = true;
 
     tic80_init_default_palette ();
 
@@ -211,6 +212,11 @@ int  main (int  argc, char** argv)
         register_global ("PICO8_MAP_BUFFER_PTR");
     }
 
+    if (runtime_req.needs_vircon32)
+    {
+        vircon32_btn_prev_state_base  = next_ram_address;
+        next_ram_address              = next_ram_address + 44;
+    }
     
     // Perform full symbol pre-pass before code generation
     register_all_globals_prepass(root_node);

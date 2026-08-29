@@ -24,7 +24,7 @@
 #include "register.h"
 #include "closures.h"
 
-#define  VERSION             "20260825-dev"
+#define  VERSION             "20260829-dev"
 #define  AUTHOR              "Matthew Haas"
 #define  URL                 "https://github.com/wedge1020/v32lua"
 
@@ -60,6 +60,17 @@
 // different bit or widen the check.
 #define  BOXED_CLOSURE_FLAG  0x00200000
 #define  CLOSURE_ADDR_MASK   0x001FFFFF
+
+// GPU Commands
+#define  GPUCommand_DrawRegion           0x11
+#define  GPUCommand_DrawRegionZoomed     0x12
+#define  GPUCommand_DrawRegionRotated    0x13
+#define  GPUCommand_DrawRegionRotozoomed 0x14
+
+// Blending Modes
+#define  GPUBlendingMode_Alpha           0x20
+#define  GPUBlendingMode_Add             0x21
+#define  GPUBlendingMode_Subtract        0x22
 
 extern int g_verbose_debug;      // verbose real-time debug output
 

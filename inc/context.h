@@ -88,6 +88,7 @@ typedef struct {
     bool needs_tables;
 
     // API modes (mutually exclusive)
+    bool needs_vircon32;
     bool needs_pico8;
     bool needs_tic80;
 
@@ -123,6 +124,7 @@ extern ScopeNode *global_scope;
 extern int        next_ram_address;
 extern FunctionContextNode *context_stack_head;
 extern int global_label_counter; 
+extern int  vircon32_btn_prev_state_base;
   
 int         get_next_label               (void);
 void        init_global_scope            (void);

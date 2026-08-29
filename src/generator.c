@@ -596,6 +596,20 @@ void generate_global_setup (ASTNode *node)
     emit_asm ("MOV [FTOA_SCRATCH_PTR_A], R0 ; must start at 0 -- see generate_global_setup() comment\n");
     emit_asm ("MOV [FTOA_SCRATCH_PTR_B], R0 ; must start at 0 -- see generate_global_setup() comment\n");
 
+    if (runtime_req.needs_vircon32)
+    {
+        emit_asm ("MOV R1, VIRCON32_BTN_PREV_STATE ; zero-init btnp() prev-state     table\n");
+        emit_asm ("MOV R2, 44\n");
+        emit_asm ("MOV R3, 0\n");
+        emit_asm ("__vircon32_btn_prev_state_zero_loop:\n");
+        emit_asm ("JF R2, __vircon32_btn_prev_state_zero_done\n");
+        emit_asm ("MOV [R1], R3\n");
+        emit_asm ("IADD R1, 1\n");
+        emit_asm ("ISUB R2, 1\n");
+        emit_asm ("JMP __vircon32_btn_prev_state_zero_loop\n");
+        emit_asm ("__vircon32_btn_prev_state_zero_done:\n");
+    }
+
     // NEW: Explicitly nil-initialize every plain (non-function) global.
     // Previously a global's value before its first assignment was
     // whatever raw bits already happened to be sitting in that RAM
