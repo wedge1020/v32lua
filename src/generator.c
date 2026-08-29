@@ -579,6 +579,21 @@ void generate_global_setup (ASTNode *node)
     emit_asm ("__global_scope_initialization:\n");
     emit_asm ("PUSH BP\n");
     emit_asm ("MOV BP, SP\n");
+
+    // NEW: top-level 'local' declarations get real SYM_LOCAL [BP-N] slots
+    // from register_local() exactly like a local inside any other function
+    // -- register_local() has no idea this is the global-setup scope. Without
+    // reserving stack space for them the same way node_function_def() does,
+    // the first PUSH anywhere later in this routine (and there are many --
+    // most expression codegen spills through PUSH/POP) silently overwrites
+    // whatever a top-level local's [BP-N] slot is holding.
+    int num_locals = count_function_locals (node);
+    reset_spill_slots (-(num_locals + 1));
+    int total_stack = num_locals + NUM_GPRS;
+    if (total_stack > 0) {
+        emit_asm ("ISUB SP, %d ; Reserve stack for top-level locals + spills\n", total_stack);
+    }
+
     if (next_ram_address >= 4)
         emit_asm ("MOV R0, %d ; heap start", next_ram_address);
     else

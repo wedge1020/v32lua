@@ -60,6 +60,7 @@ context:
 	@cp -v runtime/iters.s    runtime/iters.s.txt
 	@cp -v runtime/pico8.s    runtime/pico8.s.txt
 	@cp -v runtime/tic80.s    runtime/tic80.s.txt
+	@cp -v runtime/vircon32.s runtime/vircon32.s.txt
 	@cp -v runtime/constant.s runtime/constant.s.txt
 	@cp -v Makefile           Makefile.txt
 	@cp -v lexer.l            lexer.l.txt
