@@ -415,7 +415,7 @@ void parse_tic80_map_row(int row_index, const char *hex_data) {
 // ============================================================================
 // Sound Data Storage (add to global state)
 // ============================================================================
-uint8_t tic80_waves[TIC80_NUM_WAVES][TIC80_WAVE_SIZE] = {0};
+//uint8_t tic80_waves[TIC80_NUM_WAVES][TIC80_WAVE_SIZE] = {0};
 
 // ============================================================================
 // Track Parsing

@@ -147,6 +147,28 @@ SymbolNode *register_local (const char* name)
     if (sym                             != NULL)
         return sym;
 
+    //////////////////////////////////////////////////////////////////////////
+    //
+    // SAFETY NET: at the chunk's top level, current_scope IS global_scope --
+    // there is no function frame to own a [BP-N] slot, and anything stored
+    // there dies when __global_scope_initialization RETs. Handing out a
+    // stack offset here also appends a SYM_LOCAL to global_scope->symbols,
+    // where emit_variable_map() would print its offset as if it were an
+    // absolute RAM address (offsets 1/2 alias FTOA_SCRATCH_PTR_A/B, 0
+    // aliases HEAP_POINTER).
+    //
+    // register_all_globals_prepass() should already have claimed a real RAM
+    // word for every top-level 'local', so in practice this branch only
+    // catches names introduced by a codegen path the prepass doesn't walk.
+    // Promote rather than fabricate a bogus slot. (Heap placement is safe
+    // either way now: generate_global_setup() emits the symbolic HEAP_START
+    // rather than baking in next_ram_address before this can run.)
+    //
+    if (current_scope                   == global_scope)
+    {
+        return (register_global (name));
+    }
+
     sym                                  = (SymbolNode *) calloc (1, sizeof (SymbolNode));
     sym -> name                          = strdup(name);
     sym -> type                          = SYM_LOCAL;
@@ -491,7 +513,45 @@ SymbolNode *register_parameter (const char *name, int offset)
     return sym;
 }
 
-void  register_all_globals_prepass (ASTNode *node)
+// ============================================================================
+// register_all_globals_prepass() / prepass_walk()
+//
+// `is_chunk_top_level` is 1 ONLY while walking the outermost statement list
+// of the chunk itself -- never inside a function body, and never inside a
+// nested block (if/do/while/repeat/for), all of which push a real child
+// scope at codegen time and therefore own genuine [BP-N] stack slots.
+//
+// WHY TOP-LEVEL 'local' IS REGISTERED AS A GLOBAL HERE:
+//
+// At the top level of the chunk, current_scope IS global_scope. register_local()
+// has no way to know that, so it happily hands the name a *stack* offset from
+// global_scope->local_offset_counter (1, 2, 3, ...) and appends a SYM_LOCAL
+// node to global_scope->symbols -- the very list emit_variable_map() turns
+// into the cart's RAM map. Offsets 1 and 2 alias FTOA_SCRATCH_PTR_A/B and
+// offset 0 aliases HEAP_POINTER, so those names came out of the variable map
+// pointing straight at reserved low memory.
+//
+// Worse, whether that happened at all was pure luck of ordering: functions are
+// generated BEFORE generate_global_setup(), so any top-level local that some
+// function body happened to mention got silently promoted to a real global by
+// get_variable_access_string() -> register_global() first, and register_local()
+// then just found that existing symbol and reused it. Two 'local' declarations
+// on adjacent lines could therefore land in two completely different storage
+// classes depending only on whether a function elsewhere in the file named
+// them. (Concretely: ORB_MINX..ORB_MAXY were referenced inside define_region()
+// and got clean sequential RAM words; ORB_W/ORB_H were never referenced by any
+// function and got "RAM addresses" 0x1 and 0x2 -- the FTOA scratch pointers.)
+//
+// A top-level local also cannot live on the stack even in principle: its slot
+// belongs to __global_scope_initialization's frame, which RETs before init()
+// or game_loop() ever run. Anything that outlives that RET has to be in RAM.
+//
+// So: top-level 'local' is now uniformly a global, which is exactly the
+// behavior the referenced ones already had. Doing it HERE, in the prepass,
+// rather than lazily at codegen time matters -- next_ram_address must be
+// final before generate_global_setup() computes the heap start from it.
+// ============================================================================
+static void  prepass_walk (ASTNode *node, int is_chunk_top_level)
 {
     while (node != NULL)
     {
@@ -500,11 +560,15 @@ void  register_all_globals_prepass (ASTNode *node)
             case NODE_FUNCTION_DEF:
                 // ✅ Always register as global (local keyword is silently ignored)
                 mark_global_as_function (node);
-                register_all_globals_prepass (node->as.function_def.body);
+                prepass_walk (node->as.function_def.body, 0);
                 break;
 
             case NODE_MULTIPLE_ASSIGNMENT:
-                if (!node->as.mult_assign.is_local) {
+                // Plain (non-local) assignment anywhere => global, as before.
+                // A 'local' declaration => global ONLY at the chunk's own top
+                // level; inside a function or a nested block it stays a real
+                // stack local. See the header comment above.
+                if (!node->as.mult_assign.is_local || is_chunk_top_level) {
                     ASTNode *tgt = node->as.mult_assign.targets_head;
                     while (tgt != NULL) {
                         if (tgt->type == NODE_IDENTIFIER) {
@@ -517,25 +581,25 @@ void  register_all_globals_prepass (ASTNode *node)
 
             // ✅ NEW: Recurse into control structures
             case NODE_IF:
-                register_all_globals_prepass(node->as.if_stmt.if_body);
-                register_all_globals_prepass(node->as.if_stmt.else_body);
+                prepass_walk(node->as.if_stmt.if_body,   0);
+                prepass_walk(node->as.if_stmt.else_body, 0);
                 break;
 
             case NODE_DO_BLOCK:
-                register_all_globals_prepass(node->as.do_block.body);
+                prepass_walk(node->as.do_block.body, 0);
                 break;
 
             case NODE_WHILE:
-                register_all_globals_prepass(node->as.while_loop.body);
+                prepass_walk(node->as.while_loop.body, 0);
                 break;
 
             case NODE_REPEAT:
-                register_all_globals_prepass(node->as.repeat_loop.body);
+                prepass_walk(node->as.repeat_loop.body, 0);
                 break;
 
             case NODE_FOR_NUMERIC:
             case NODE_FOR_GENERIC:
-                register_all_globals_prepass(node->as.for_numeric.body);
+                prepass_walk(node->as.for_numeric.body, 0);
                 break;
 
             default:
@@ -543,6 +607,11 @@ void  register_all_globals_prepass (ASTNode *node)
         }
         node = node->next;
     }
+}
+
+void  register_all_globals_prepass (ASTNode *node)
+{
+    prepass_walk (node, 1);
 }
 
 // ============================================================================

@@ -580,13 +580,18 @@ void generate_global_setup (ASTNode *node)
     emit_asm ("PUSH BP\n");
     emit_asm ("MOV BP, SP\n");
 
-    // NEW: top-level 'local' declarations get real SYM_LOCAL [BP-N] slots
-    // from register_local() exactly like a local inside any other function
-    // -- register_local() has no idea this is the global-setup scope. Without
-    // reserving stack space for them the same way node_function_def() does,
-    // the first PUSH anywhere later in this routine (and there are many --
-    // most expression codegen spills through PUSH/POP) silently overwrites
-    // whatever a top-level local's [BP-N] slot is holding.
+    // Top-level 'local' declarations no longer take [BP-N] slots at all --
+    // register_all_globals_prepass() gives every one of them a real RAM word,
+    // because this routine's frame is gone the moment it RETs and a chunk
+    // local has to outlive that. (See the prepass header comment for the
+    // storage-class-by-luck bug that motivated the change.)
+    //
+    // count_function_locals() still counts them, so this over-reserves by
+    // however many top-level locals the chunk declares. That is deliberately
+    // left alone: it is slack, not corruption, and the reservation still has
+    // to cover the genuine stack locals that nested blocks (if/do/while/for)
+    // at the top level DO allocate -- plus the NUM_GPRS spill window that
+    // every PUSH/POP in top-level expression codegen relies on.
     int num_locals = count_function_locals (node);
     reset_spill_slots (-(num_locals + 1));
     int total_stack = num_locals + NUM_GPRS;
@@ -594,10 +599,14 @@ void generate_global_setup (ASTNode *node)
         emit_asm ("ISUB SP, %d ; Reserve stack for top-level locals + spills\n", total_stack);
     }
 
-    if (next_ram_address >= 4)
-        emit_asm ("MOV R0, %d ; heap start", next_ram_address);
-    else
-        emit_asm ("MOV R0, 4  ; heap start (minimum bound, for nil/false/true)");
+    // HEAP_START is emitted by emit_variable_map(), which runs after ALL
+    // codegen -- so it reflects the FINAL next_ram_address. Baking the
+    // literal in here instead was wrong the moment any global got
+    // registered later in this very routine (a top-level 'local', an
+    // __extra_ret_N slot, an implicitly-created global): the heap would
+    // then start on top of those words. The clamp to a minimum of 4
+    // (reserving nil/false/true) lives in emit_variable_map() now.
+    emit_asm ("MOV R0, HEAP_START ; heap start (see variable map)");
     emit_asm ("MOV [HEAP_POINTER], R0");
 
     // NEW: FTOA_SCRATCH_PTR_A/B MUST start at 0 -- their lazy-allocate

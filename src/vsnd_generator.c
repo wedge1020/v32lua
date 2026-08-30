@@ -3,7 +3,7 @@
 #include "tic80_assets.h"
 
 // Global sound data storage
-static uint8_t tic80_waves[TIC80_NUM_WAVES][TIC80_WAVE_SIZE] = {0};
+uint8_t tic80_waves[TIC80_NUM_WAVES][TIC80_WAVE_SIZE] = {0};
 bool tic80_has_waves = false;
 bool tic80_has_sfx = false;
 bool tic80_has_tracks = false;

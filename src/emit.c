@@ -555,6 +555,21 @@ int   emit_variable_map (void)
 
     SymbolNode *curr = global_scope ? global_scope->symbols : NULL;
     while (curr != NULL) {
+        // ONLY true globals get a RAM address here. A SYM_LOCAL that ended up
+        // on this list carries a STACK OFFSET in ->location, not an address;
+        // printing it as "%define var_X 0x<offset>" produced symbols pointing
+        // at reserved low memory (0 = HEAP_POINTER, 1/2 = FTOA_SCRATCH_PTR_A/B).
+        // register_local() no longer creates those at global scope, but if one
+        // ever reappears we want a loud diagnostic and an undefined symbol at
+        // assembly time -- not a silent write into the scratch pointers.
+        if (curr->type != SYM_GLOBAL) {
+            compiler_warning (ERR_INTERNAL, -1,
+                "Non-global symbol '%s' (stack offset %d) leaked into the global "
+                "symbol list; omitted from the RAM map", curr->name, curr->location);
+            curr = curr->next;
+            continue;
+        }
+
         if (curr->is_function) {
             if (curr->location != -2) {  // Skip functions (they use labels, not RAM)
                 fprintf(out(), "%%define  func_%-19s 0x%.8X\n", curr->name, curr->location);
@@ -565,7 +580,19 @@ int   emit_variable_map (void)
         lines_printed    = lines_printed + 1;
         curr = curr->next;
     }
-    
+
+    // Heap base as a SYMBOL, not a baked-in literal. generate_global_setup()
+    // used to emit "MOV R0, <next_ram_address>" at the top of the init
+    // routine -- but codegen for the top-level statements that follows can
+    // still register new globals, bumping next_ram_address past the value
+    // already emitted and putting the heap on top of them. This map is
+    // written after ALL codegen, so the number here is always the final one.
+    {
+        int heap_start = (next_ram_address >= 4) ? next_ram_address : 4;
+        fprintf(out(), "%%define  HEAP_START               0x%.8X\n", heap_start);
+        lines_printed    = lines_printed + 1;
+    }
+
     fprintf(out(), "\n;; Highest used global RAM address: 0x%.8X\n", next_ram_address - 1);
     fprintf(out(), ";; Dynamic heap will start at runtime address: 0x%.8X\n\n", next_ram_address);
     lines_printed    = lines_printed + 2;
