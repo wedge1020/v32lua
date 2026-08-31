@@ -215,7 +215,8 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
             } else if (strcmp(func_name, "ioports.gpu.blending") == 0) {
                 emit_gpu_blending_intrinsic(node, dest_reg);
                 handled = true;
-            } else if (strcmp(func_name, "ioports.spu.command") == 0) {
+            } else if (strcmp(func_name, "ioports.spu.command") == 0 ||
+                       strcmp(func_name, "ioports.spu.cmd")     == 0) {
                 emit_spu_cmd_intrinsic(node, dest_reg);
                 handled = true;
             }
@@ -349,6 +350,24 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         }
     }
 
+    // stop() / pause() / resume() -- native Vircon32 SPU channel control
+    //
+    // These three names are much likelier to collide with game code than
+    // "btnp" ever was, so unlike spr()/btn()/btnp() they step aside for a
+    // user-defined function of the same name rather than silently
+    // shadowing it. Globals are registered by register_all_globals_prepass()
+    // before generate_program() runs, so this lookup is reliable here.
+    if (strcmp(func_name, "stop")   == 0 ||
+        strcmp(func_name, "pause")  == 0 ||
+        strcmp(func_name, "resume") == 0) {
+        if (runtime_req.needs_tic80 != true && runtime_req.needs_pico8 != true) {
+            SymbolNode *user = resolve_symbol(func_name);
+            if (user == NULL || !user->is_function) {
+                return emit_vircon32_channel_cmd_intrinsic(node, dest_reg, func_name);
+            }
+        }
+    }
+
     // add()
     if (strcmp (func_name, "add") == 0) {
         if (runtime_req.needs_pico8 == true)
@@ -399,10 +418,17 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         }
     }
 
-    // play()
+    // play() -- TIC-80 form, or the native Vircon32 form
     if (strcmp(func_name, "play") == 0) {
         if (runtime_req.needs_tic80 == true) {
             return emit_tic80_play_intrinsic(node, dest_reg);
+        }
+        else if (runtime_req.needs_pico8 != true) {
+            // Don't shadow a user-defined play()
+            SymbolNode *user = resolve_symbol(func_name);
+            if (user == NULL || !user->is_function) {
+                return emit_vircon32_play_intrinsic(node, dest_reg);
+            }
         }
     }
 
@@ -882,6 +908,21 @@ int try_emit_table_set_intrinsic(ASTNode *table_expr, ASTNode *key_expr, ASTNode
                 return 1;
             }
 
+            // A literal true/false/nil into a boolean port is resolvable
+            // right here: emit the bare 0/1 immediate, no register, no
+            // branch. This is the common case -- "chanloop = true" and
+            // "chanloop = false" both land here.
+            if ((ioports[i].type & IOPORT_TYPE_BOOLEAN) == IOPORT_TYPE_BOOLEAN &&
+                (val_node->type == NODE_BOOLEAN || val_node->type == NODE_NIL)) {
+
+                int truth = (val_node->type == NODE_BOOLEAN && val_node->as.boolean.val) ? 1 : 0;
+
+                emit_asm("    ;; --- Intrinsic: Literal Boolean Hardware Write (%s) ---\n", full_path);
+                emit_asm("OUT %s, %d ; %s\n", ioports[i].asm_port, truth,
+                         truth ? "true" : (val_node->type == NODE_NIL ? "nil -> false" : "false"));
+                return 1;
+            }
+
             // On-demand register evaluation
             int val_reg = allocate_register();
             register_pinned[val_reg] = 1;
@@ -899,8 +940,34 @@ int try_emit_table_set_intrinsic(ASTNode *table_expr, ASTNode *key_expr, ASTNode
                     emit_asm("    ;; --- Intrinsic: Cast Lua Float to Hardware Integer ---\n");
                     emit_asm("CFI R%d\n", out_reg);
                 } else if ((ioports[i].type & IOPORT_TYPE_BOOLEAN) == IOPORT_TYPE_BOOLEAN) {
-                    emit_asm("    ;; --- Intrinsic: Cast Lua Float to Hardware Boolean ---\n");
-                    emit_asm("CFB R%d\n", out_reg);
+                    // Decode Lua truthiness rather than asking CFB whether
+                    // the bits happen to be a non-zero float. Only nil and
+                    // false are falsy; every number, 0 included, is truthy.
+                    int         lbl = get_next_label();
+                    const char *ctx = get_current_function_name();
+
+                    char false_label[192], end_label[192];
+                    snprintf(false_label, sizeof(false_label), "__%s_ioport_bool_false_%d", ctx, lbl);
+                    snprintf(end_label,   sizeof(end_label),   "__%s_ioport_bool_end_%d",   ctx, lbl);
+
+                    int scratch = allocate_register();
+                    register_pinned[scratch] = 1;
+
+                    emit_asm("    ;; --- Intrinsic: Decode Lua Truthiness to Hardware Boolean ---\n");
+                    emit_asm("MOV R%d, R%d\n", scratch, out_reg);
+                    emit_asm("IEQ R%d, BOXED_NIL ; nil is falsy\n", scratch);
+                    emit_asm("JT  R%d, %s\n", scratch, false_label);
+                    emit_asm("MOV R%d, R%d\n", scratch, out_reg);
+                    emit_asm("IEQ R%d, BOXED_FALSE ; false is falsy\n", scratch);
+                    emit_asm("JT  R%d, %s\n", scratch, false_label);
+                    emit_asm("MOV R%d, 1 ; everything else is truthy\n", out_reg);
+                    emit_asm("JMP %s\n", end_label);
+                    emit_asm("%s:\n", false_label);
+                    emit_asm("MOV R%d, 0\n", out_reg);
+                    emit_asm("%s:\n", end_label);
+
+                    register_pinned[scratch] = 0;
+                    unlock_register(scratch);
                 }
             }
 
@@ -1013,9 +1080,31 @@ int try_emit_table_get_intrinsic(ASTNode *table_expr, ASTNode *key_expr, int des
                     emit_asm("    CIF R%d ; Cast hardware int to Lua float\n", dest_reg);
                 }
                 else if ((ioports[i].type & IOPORT_TYPE_BOOLEAN) == IOPORT_TYPE_BOOLEAN) {
+                    // Produce a real Lua boolean, not the float 0.0/1.0 that
+                    // CIF yields -- 0.0 is truthy in Lua, so the old form
+                    // made every boolean port read as true.
+                    //
+                    // IEQ is destructive and 2-operand, overwriting its
+                    // destination with the 0/1 result. That is fine here:
+                    // the port value is not needed after the test, so
+                    // dest_reg doubles as the scratch and no second
+                    // register is allocated.
+                    int         lbl = get_next_label();
+                    const char *ctx = get_current_function_name();
+
+                    char false_label[192], end_label[192];
+                    snprintf(false_label, sizeof(false_label), "__%s_ioport_read_false_%d", ctx, lbl);
+                    snprintf(end_label,   sizeof(end_label),   "__%s_ioport_read_end_%d",   ctx, lbl);
+
                     emit_asm("    ;; --- Intrinsic: Read Hardware Boolean (%s) ---\n", full_path);
-                    emit_asm("    IN R%d, %s\n", dest_reg, ioports[i].asm_port);
-                    emit_asm("    CIF R%d ; Cast hardware bool to Lua float\n", dest_reg);
+                    emit_asm("    IN  R%d, %s\n", dest_reg, ioports[i].asm_port);
+                    emit_asm("    IEQ R%d, 0 ; hardware 0 -> Lua false\n", dest_reg);
+                    emit_asm("    JT  R%d, %s\n", dest_reg, false_label);
+                    emit_asm("    MOV R%d, BOXED_TRUE\n", dest_reg);
+                    emit_asm("    JMP %s\n", end_label);
+                    emit_asm("%s:\n", false_label);
+                    emit_asm("    MOV R%d, BOXED_FALSE\n", dest_reg);
+                    emit_asm("%s:\n", end_label);
                 }
                 else {
                     emit_asm("    ;; --- Intrinsic: Read Hardware Float (%s) ---\n", full_path);

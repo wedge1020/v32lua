@@ -100,9 +100,11 @@ void  emit_system_halt_intrinsic ();
 // Forward declarations
 //
 //
-bool  emit_vircon32_spr_intrinsic   (ASTNode *);
-bool  emit_vircon32_btn_intrinsic   (ASTNode *, int);
-bool  emit_vircon32_btnp_intrinsic  (ASTNode *, int);
+bool  emit_vircon32_spr_intrinsic         (ASTNode *);
+bool  emit_vircon32_btn_intrinsic         (ASTNode *, int);
+bool  emit_vircon32_btnp_intrinsic        (ASTNode *, int);
+bool  emit_vircon32_play_intrinsic        (ASTNode *, int);
+bool  emit_vircon32_channel_cmd_intrinsic (ASTNode *, int, const char *);
 
 //////////////////////////////////////////////////////////////////////////////    
 //
