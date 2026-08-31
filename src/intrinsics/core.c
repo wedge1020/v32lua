@@ -43,7 +43,7 @@ const IOPortMap ioports[] = {
     { "ioports.spu.chanvolume", "SPU_ChannelVolume",       IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_FLOAT   },
     { "ioports.spu.chanspeed", "SPU_ChannelSpeed",         IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_FLOAT   },
     { "ioports.spu.chanloop",  "SPU_ChannelLoopEnabled",   IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_BOOLEAN },
-    { "ioports.spu.chanpos",   "SPU_ChannelPosition",      IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_FLOAT   },
+    { "ioports.spu.chanpos",   "SPU_ChannelPosition",      IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
     { "ioports.inp.gamepad",   "INP_SelectedGamepad",      IOPORT_READ | IOPORT_WRITE,  IOPORT_TYPE_INTEGER },
     { "ioports.inp.status",    "INP_GamepadConnected",     IOPORT_READ,                 IOPORT_TYPE_BOOLEAN },
     { "ioports.inp.inputs",    "ioports.inp.inputs",       IOPORT_READ | IOPORT_ACTION, IOPORT_TYPE_INTEGER },

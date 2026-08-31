@@ -622,7 +622,7 @@ _vircon32_btnp_end:
 ;; [BP+3]: channel    (Lua float 0-15,        or BOXED_NIL -> 0)
 ;; [BP+4]: chanloop   (any Lua value,         or BOXED_NIL -> false)
 ;; [BP+5]: chanvol    (Lua float,             or BOXED_NIL -> 1.0)
-;; [BP+6]: startindex (Lua float,             or BOXED_NIL -> no seek)
+;; [BP+6]: startindex (Lua float sample index, or BOXED_NIL -> no seek)
 ;;
 ;; Returns: R0 = the channel actually used, as a Lua float
 ;;
@@ -630,32 +630,50 @@ _vircon32_btnp_end:
 ;; calls this when at least one argument is NOT known at compile time. A call
 ;; whose arguments are all literals -- including a bare --#sound name, which
 ;; the compiler folds to its resource id -- is emitted as a straight-line OUT
-;; sequence instead and never reaches this routine.
+;; sequence instead and never reaches this routine. Both paths emit the SAME
+;; port order, and that order is not arbitrary:
 ;;
-;; Three things are worth spelling out, because each one is a place where the
-;; obvious implementation is wrong:
+;;   1. SPU_SelectedChannel        -- every per-channel port acts on it
+;;   2. SPUCommand_StopSelectedChannel
+;;   3. SPU_ChannelAssignedSound
+;;   4. SPU_ChannelVolume
+;;   5. SPUCommand_PlaySelectedChannel
+;;   6. SPU_ChannelLoopEnabled     <-- AFTER the play command
+;;   7. SPU_ChannelPosition        <-- AFTER the play command
 ;;
-;; 1. SPU_SelectedChannel is written FIRST. SPU_ChannelAssignedSound,
-;;    SPU_ChannelVolume, SPU_ChannelLoopEnabled and SPU_ChannelPosition are
-;;    all per-channel ports that act on whatever channel is currently
-;;    selected -- setting them before selecting the channel configures
-;;    whichever channel the last play() happened to leave selected.
+;; Three console behaviours force that shape. All three are silent when you
+;; get them wrong -- no error, no port-write rejection, just the wrong sound:
 ;;
-;;    (SPU_SelectedSound is a DIFFERENT port: it selects a sound for
-;;    sound-level queries like SPU_SoundLength and SPU_SoundLoopStart. It has
-;;    nothing to do with what a channel plays. Assigning a sound to a channel
-;;    is SPU_ChannelAssignedSound, which is what this routine writes.)
+;; A. A SOUND CANNOT BE ASSIGNED TO A BUSY CHANNEL.
+;;    WriteSPUChannelAssignedSound() ignores the write outright unless the
+;;    channel is Stopped ("sounds can only be assigned to a non playing
+;;    channel"). Without the stop at step 2, calling play() with a new sound
+;;    on a channel that is still sounding replays the OLD sound. Stopping an
+;;    already-idle channel costs nothing.
 ;;
-;; 2. The loop flag is decoded by Lua truthiness, not by CFB. A Lua boolean
-;;    is a NaN-boxed bit pattern (BOXED_TRUE 0xFFC00002, BOXED_FALSE
-;;    0xFFC00001, BOXED_NIL 0xFFC00000), and all three are non-zero as
-;;    floats -- so "is it non-zero" answers TRUE for false and nil alike.
-;;    Only nil and false are falsy in Lua; every number, 0 included, is
-;;    truthy.
+;; B. THE PLAY COMMAND OVERWRITES THE CHANNEL'S LOOP FLAG.
+;;    PlayChannel(), for a Stopped or already-Playing channel, does:
+;;        TargetChannel.LoopEnabled = ChannelSound->PlayWithLoop;
+;;        TargetChannel.Position    = 0;
+;;    so SPU_ChannelLoopEnabled written BEFORE the command is thrown away and
+;;    replaced by the SOUND's own PlayWithLoop -- which is false unless
+;;    something set SPU_SoundPlayWithLoop on that sound. That is why loop is
+;;    written at step 6: by then the channel is Playing and the value sticks.
+;;    It is written even when it is 0, because step 5 has just replaced it
+;;    with the sound's flag and "no loop argument" must mean no loop.
 ;;
-;; 3. The optional seek is issued AFTER SPUCommand_PlaySelectedChannel.
-;;    Starting a stopped channel resets its position to 0, so a seek written
-;;    before the play command would simply be discarded.
+;; C. THE PLAY COMMAND REWINDS THE CHANNEL.
+;;    Same two lines: Position = 0. A seek written before the command is
+;;    discarded, so the optional startindex is applied at step 7.
+;;
+;;    (For a PAUSED channel PlayChannel() takes neither branch -- it just
+;;    sets State = Playing -- which is what makes resume() work. So on a
+;;    resume neither the loop flag nor the position is disturbed.)
+;;
+;; SPU_ChannelPosition is an INTEGER port: a sample index, clamped by the
+;; console to 0..length-1. It takes CFI like the sound and channel ids, NOT
+;; a raw Lua float. SPU_ChannelVolume and SPU_ChannelSpeed are the genuine
+;; float ports here.
 ;;
 ;; Register use follows __builtin_vircon32_spr/btn/btnp: R1-R3 are used
 ;; freely without saving, since the emitter frees its registers before the
@@ -668,9 +686,6 @@ __builtin_vircon32_play:
     MOV   BP, SP
 
     ;; --- 1. Resolve the channel: nil -> 0, otherwise clamp to 0-15 ---
-    ;; An out-of-range channel would otherwise be handed straight to
-    ;; SPU_SelectedChannel; clamping keeps a bad index from touching
-    ;; whatever the hardware does with one.
     MOV   R1, [BP+3]
     MOV   R2, R1
     IEQ   R2, BOXED_NIL
@@ -692,19 +707,18 @@ _vircon32_play_chan_zero:
 _vircon32_play_chan_ready:
     OUT   SPU_SelectedChannel, R1
 
-    ;; --- 2. Assign the sound to that channel ---
-    ;; A nil sound leaves the channel untouched and returns early: there is
-    ;; nothing meaningful to start, and issuing Play would replay whatever
-    ;; sound the channel was last assigned.
+    ;; --- 2. Fetch the sound; a nil sound leaves the channel alone ---
     MOV   R2, [BP+2]
     MOV   R3, R2
     IEQ   R3, BOXED_NIL
     JT    R3, _vircon32_play_done
 
+    ;; --- 3. Stop, THEN assign (see note A above) ---
+    OUT   SPU_Command, SPUCommand_StopSelectedChannel
     CFI   R2
     OUT   SPU_ChannelAssignedSound, R2
 
-    ;; --- 3. Channel volume: nil -> 1.0 (float port, no cast) ---
+    ;; --- 4. Channel volume: nil -> 1.0 (true float port, no cast) ---
     MOV   R2, [BP+5]
     MOV   R3, R2
     IEQ   R3, BOXED_NIL
@@ -714,7 +728,12 @@ _vircon32_play_chan_ready:
 _vircon32_play_vol_ready:
     OUT   SPU_ChannelVolume, R2
 
-    ;; --- 4. Loop flag: Lua truthiness (only nil and false are falsy) ---
+    ;; --- 5. Start playback ---
+    OUT   SPU_Command, SPUCommand_PlaySelectedChannel
+
+    ;; --- 6. Loop flag, AFTER the play command (see note B above) ---
+    ;; Lua truthiness: only nil and false are falsy; every number, 0
+    ;; included, is truthy.
     MOV   R2, [BP+4]
     MOV   R3, R2
     IEQ   R3, BOXED_NIL
@@ -724,20 +743,18 @@ _vircon32_play_vol_ready:
     JT    R3, _vircon32_play_loop_off
 
     OUT   SPU_ChannelLoopEnabled, 1
-    JMP   _vircon32_play_start
+    JMP   _vircon32_play_seek
 
 _vircon32_play_loop_off:
     OUT   SPU_ChannelLoopEnabled, 0
 
-    ;; --- 5. Start playback ---
-_vircon32_play_start:
-    OUT   SPU_Command, SPUCommand_PlaySelectedChannel
-
-    ;; --- 6. Optional seek, AFTER the play command (see note 3 above) ---
+    ;; --- 7. Optional seek, AFTER the play command (see note C above) ---
+_vircon32_play_seek:
     MOV   R2, [BP+6]
     MOV   R3, R2
     IEQ   R3, BOXED_NIL
     JT    R3, _vircon32_play_done
+    CFI   R2                      ; integer sample index, not a float
     OUT   SPU_ChannelPosition, R2
 
 _vircon32_play_done:
@@ -768,8 +785,16 @@ _vircon32_play_done:
 ;;   resume(ch)  PlaySelectedChannel     resume()  ResumeAllChannels
 ;;
 ;; resume(ch) uses Play rather than a "resume selected channel" command
-;; because Vircon32 has no such command -- Play on a PAUSED channel resumes
-;; from its current position, and only a STOPPED channel restarts from 0.
+;; because the console has no such command. PlayChannel() leaves a PAUSED
+;; channel's position and loop flag untouched and simply sets it Playing, so
+;; Play IS the per-channel resume. (ResumeAllChannels is literally a loop
+;; calling PlayChannel on every paused channel.)
+;;
+;; Note that Play only resumes a channel that is genuinely PAUSED. On a
+;; STOPPED channel it rewinds to 0 and restarts -- so a "resume" that
+;; restarts from the beginning means the channel had stopped, not paused.
+;; The usual cause is a sound that ran to its end because its loop flag was
+;; lost; see note B on __builtin_vircon32_play above.
 ;;
 ;; The two command arguments are pushed by the compiler as raw hardware
 ;; integers (MOV R0, SPUCommand_...), not as Lua floats, so they are OUT-ed

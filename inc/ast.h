@@ -169,6 +169,8 @@ extern char cart_title[128];
 extern bool cart_title_was_set;
 extern CARTresource *textures_head;
 extern CARTresource *sounds_head;
+extern CARTresource *textures_tail;
+extern CARTresource *sounds_tail;
 extern int next_texture_id;
 extern int next_sound_id;
 extern int yylineno;
@@ -191,6 +193,7 @@ ASTNode *make_node_table_get         (ASTNode    *, ASTNode    *);
 ASTNode *make_node_table_set         (ASTNode    *, ASTNode    *, ASTNode *);
 ASTNode *make_node_boolean           (bool);
 ASTNode *make_node_nil               (void);
+CARTresource *cart_resource_append   (CARTresource **, CARTresource **, int, const char *, const char *);
 bool     try_get_immediate_operand   (ASTNode    *, char       *, size_t);
 
 #endif

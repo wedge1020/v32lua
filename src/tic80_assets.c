@@ -190,13 +190,8 @@ void process_all_tic80_sections(void)
         // Generate VSND file from accumulated sound data
         generate_vsnd_from_tic80_sounds("tic80_sounds.vsnd");
 
-        // Register in global sounds list for XML generation
-        CARTresource* res = (CARTresource*)malloc(sizeof(CARTresource));
-        res->id = next_sound_id++;
-        res->var_name = strdup("tic80_sounds");
-        res->filename = strdup("tic80_sounds.vsnd");
-        res->next = sounds_head;
-        sounds_head = res;
+		cart_resource_append (&sounds_head, &sounds_tail,
+                              next_sound_id++, "tic80_sounds", "tic80_sounds.vsnd");
     }
 }
 

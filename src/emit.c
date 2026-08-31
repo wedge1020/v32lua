@@ -389,7 +389,21 @@ void  emit_cart_xml (const char *input_filename, int  verbose)
     if (textures_head != NULL) {
         fprintf(xml, "<textures>\n");
         CARTresource* curr = textures_head;
-        while (curr != NULL) {
+        int           index = 0;
+
+        while (curr        != NULL)
+        {
+            // Vircon32 numbers textures by their position here. If that ever
+            // stops matching the id the compiler baked into the generated
+            // code, every texture reference silently targets the
+            // wrong texture -- so say so loudly instead.
+            if (curr->id != index) {                   // <-- ADD
+                compiler_warning (ERR_INTERNAL, -1,
+                    "cart XML: texture '%s' has resource id %d but is emitted at "
+                    "position %d; generated code will reference the wrong texture",
+                    (curr->var_name != NULL) ? curr->var_name : "<unnamed>",
+                    curr->id, index);
+            }
 
             len           = strlen (curr -> filename);
             resource      = (char *) malloc (sizeof (char) * (len + 6));
@@ -410,6 +424,7 @@ void  emit_cart_xml (const char *input_filename, int  verbose)
             fprintf(xml, "    <texture path=\"%s\" /> <!-- %s -->\n", 
                     resource, curr -> var_name);
             curr = curr->next;
+            index++;
             free (resource);
             resource      = NULL;
         }
@@ -424,8 +439,22 @@ void  emit_cart_xml (const char *input_filename, int  verbose)
     {
         fprintf (xml, "<sounds>\n");
         CARTresource *curr  = sounds_head;
+        int           index = 0;                       // <-- ADD
+
         while (curr        != NULL)
         {
+            // Vircon32 numbers sounds by their position here. If that ever
+            // stops matching the id the compiler baked into the generated
+            // code, every play()/chansound reference silently targets the
+            // wrong sound -- so say so loudly instead.
+            if (curr->id != index) {                   // <-- ADD
+                compiler_warning (ERR_INTERNAL, -1,
+                    "cart XML: sound '%s' has resource id %d but is emitted at "
+                    "position %d; generated code will reference the wrong sound",
+                    (curr->var_name != NULL) ? curr->var_name : "<unnamed>",
+                    curr->id, index);
+            }
+
             len           = strlen (curr -> filename);
             resource      = (char *) malloc (sizeof (char) * (len + 6));
             last_dot      = NULL;
@@ -443,6 +472,7 @@ void  emit_cart_xml (const char *input_filename, int  verbose)
             fprintf (xml, "    <sound path=\"%s\" /> <!-- %s -->\n",
                      resource, curr -> var_name);
             curr            = curr -> next;
+            index++;
             free (resource);
             resource      = NULL;
         }

@@ -6,6 +6,8 @@ char          cart_title[128]     = "Vircon32 Program";
 bool          cart_title_was_set  = false;
 CARTresource *textures_head       = NULL;
 CARTresource *sounds_head         = NULL;
+CARTresource *textures_tail       = NULL;
+CARTresource *sounds_tail         = NULL;
 int           next_texture_id     = 0;
 int           next_sound_id       = 0;
 
@@ -51,6 +53,35 @@ void handle_compiler_directive(const char *line) {
         }
     }
 }*/
+
+// Append one resource, keeping id == list position == XML position.
+// Returns the new node, or NULL if allocation failed.
+CARTresource *cart_resource_append (CARTresource **head, CARTresource **tail,
+                                    int id, const char *var_name, const char *filename)
+{
+    CARTresource *res = (CARTresource *) malloc (sizeof (CARTresource));
+
+    if (res == NULL) {
+        compiler_error (ERR_INTERNAL, -1,
+                        "Memory allocation failed registering cart resource '%s'",
+                        (var_name != NULL) ? var_name : "<unnamed>");
+        return NULL;
+    }
+
+    res->id       = id;
+    res->var_name = (var_name != NULL) ? strdup (var_name) : NULL;
+    res->filename = (filename != NULL) ? strdup (filename) : NULL;
+    res->next     = NULL;
+
+    if (*tail != NULL) {
+        (*tail)->next = res;
+    } else {
+        *head = res;
+    }
+    *tail = res;
+
+    return res;
+}
 
 ASTNode *make_node_cart_hint (const char *raw_hint)
 {
@@ -119,12 +150,8 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
         node->as.cart_hint.resource_id = assigned_id;    // ID: 0, 1, 2...
 
         // Register in our XML linked list
-        CARTresource* res = (CARTresource*)malloc(sizeof(CARTresource));
-        res->id = assigned_id;
-        res->var_name = strdup(param1);
-        res->filename = strdup(param2);
-        res->next = textures_head;
-        textures_head = res;
+        cart_resource_append (&textures_head, &textures_tail,
+                              assigned_id, param1, param2);
     }
     // In make_node_cart_hint(), after texture handling:
     else if (strcmp (action, "sound") == 0 && tokens == 3) {
@@ -135,12 +162,8 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
         node -> as.cart_hint.resource_id  = assigned_id;
 
         // Register in sound linked list
-        CARTresource *res                 = (CARTresource *) malloc (sizeof (CARTresource));
-        res->id = assigned_id;
-        res->var_name = strdup(param1);
-        res->filename = strdup(param2);
-        res->next = sounds_head;
-        sounds_head = res;
+        cart_resource_append (&sounds_head, &sounds_tail,
+                              assigned_id, param1, param2);
     }
 
     return node;

@@ -5,65 +5,30 @@
 ioports.spu.volume = 0.50          -- global volume
 
 function main()
-    -- folds to 6 instructions, no CALL:
-    --   OUT SPU_SelectedChannel, 0
-    --   OUT SPU_ChannelAssignedSound, 0
-    --   MOV R1, 1.000000 / OUT SPU_ChannelVolume, R1
-    --   OUT SPU_ChannelLoopEnabled, 1
-    --   OUT SPU_Command, SPUCommand_PlaySelectedChannel
+    -- Channel 0 is the music channel, channel 1 is the sfx channel.
+    -- Keeping them separate is what makes pause(0)/resume(0) meaningful:
+    -- they act on ONE channel, so a blip on channel 1 is unaffected.
     play(MUSIC, 0, true)
 
     local sfx_channel = 1
 
     while true do
         ioports.gpu.clear("black")
-        if btnp(5) then
-            play(BLIP, sfx_channel, false, 0.8)   -- still fully folded
+
+        if btnp(5) then                                -- A
+            play(BLIP, sfx_channel, false, 0.8)
         end
 
-        if btnp(4) then
-            pause(0)                              -- pause the music only
+        if btnp(4) then                                -- Start
+            pause(0)                                   -- pause the music
         end
-        if btnp(6) then
-            resume(0)                             -- pick it back up
+        if btnp(6) then                                -- B
+            resume(0)                                  -- pick it back up
         end
-        if btnp(8) then
-            stop()                                -- hard stop, all channels
+        if btnp(8) then                                -- Y
+            stop()                                     -- hard stop, all channels
         end
 
         system.wait()
-    end
-end
-
--- Other shapes:
---   local ch = play(MUSIC)              -- ch == 0.0
---   play(MUSIC, ch, true, 1.0, 44100)   -- seek 1s in at 44.1kHz
---   stop(ch)
-
--- ---------------------------------------------------------------------
--- Lower-level control, for sequences play()/stop()/pause()/resume()
--- don't cover. cmd() acts on whatever SPU_SelectedChannel names and
--- does no defaulting of its own.
--- ---------------------------------------------------------------------
-function crossfade_to(sound)
-    ioports.spu.channel    = 0
-    ioports.spu.chanvolume = 0.0
-    ioports.spu.chansound  = sound
-    ioports.spu.chanloop   = true
-    ioports.spu.cmd("play")
-
-    for v = 0, 10 do
-        ioports.spu.chanvolume = v / 10
-        system.wait()
-    end
-end
-
-function check_gamepad()
-    -- ioports.inp.status is now a real boolean: true only when a
-    -- gamepad is actually connected.
-    if ioports.inp.status then
-        print(0, 0, "gamepad connected")
-    else
-        print(0, 0, "no gamepad")
     end
 end

@@ -172,21 +172,14 @@ int  main (int  argc, char** argv)
         // Register all 17 textures in CORRECT order (0-16)
         CARTresource *prev = NULL;
         for (int tex_idx = 0; tex_idx < 17; tex_idx++) {
-            CARTresource *res = malloc(sizeof(CARTresource));
-            res->id = next_texture_id++;
-            res->var_name = malloc(32);
-            snprintf(res->var_name, 32, "tic80_spritesheet_%d", tex_idx);
-            res->filename = malloc(strlen(base_path) + 32);
-            snprintf(res->filename, strlen(base_path) + 32,
-                     "%s_colorkey_%d", base_path, tex_idx);
-            res->next = NULL;  // Append, don't prepend
+            char sheet_name[32];
+            char sheet_path[512];
 
-            if (prev) {
-                prev->next = res;
-            } else {
-                textures_head = res;
-            }
-            prev = res;
+            snprintf (sheet_name, sizeof (sheet_name), "tic80_spritesheet_%d", tex_idx);
+            snprintf (sheet_path, sizeof (sheet_path), "%s_colorkey_%d", base_path, tex_idx);
+
+            cart_resource_append (&textures_head, &textures_tail,
+                                  next_texture_id++, sheet_name, sheet_path);
         }
     }
 

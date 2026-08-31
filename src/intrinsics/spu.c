@@ -389,32 +389,53 @@ bool emit_vircon32_play_intrinsic (ASTNode *node, int dest_reg)
     if (sound_ok && channel_ok && loop_ok && volume_ok && start_ok) {
         emit_asm("    ;; --- Vircon32 play() Intrinsic (static fold) ---");
 
-        // Channel first: SPU_ChannelAssignedSound and every other
-        // per-channel port below act on whatever SPU_SelectedChannel
-        // currently names.
+        // Channel first: every per-channel port below acts on whatever
+        // SPU_SelectedChannel currently names.
         emit_asm("OUT  SPU_SelectedChannel, %d", static_channel);
+
+        // Stop before assigning. WriteSPUChannelAssignedSound() in the
+        // console silently IGNORES the write unless the channel is in the
+        // Stopped state ("sounds can only be assigned to a non playing
+        // channel"), so playing a new sound on a channel that is still
+        // busy would otherwise replay whatever was assigned last, with no
+        // error anywhere. Stopping first is free on an idle channel.
+        emit_asm("OUT  SPU_Command, SPUCommand_StopSelectedChannel ; a sound only assigns to a stopped channel");
         emit_asm("OUT  SPU_ChannelAssignedSound, %d ; sound id", static_sound);
 
-        // SPU_ChannelVolume and SPU_ChannelPosition are float ports.
-        // Integer immediates in OUT are used throughout this codebase and
-        // are known good; float immediates are not, so those two are
-        // staged through a register rather than emitted as immediates.
+        // SPU_ChannelVolume is a float port (clamped 0-8 by the console);
+        // integer immediates in OUT are proven throughout this codebase but
+        // float immediates are not, so stage it through a register.
         int vol_reg = allocate_register();
         emit_asm("MOV  R%d, %f", vol_reg, static_volume);
         emit_asm("OUT  SPU_ChannelVolume, R%d ; channel volume", vol_reg);
         unlock_register(vol_reg);
 
-        emit_asm("OUT  SPU_ChannelLoopEnabled, %d ; loop", static_loop);
         emit_asm("OUT  SPU_Command, SPUCommand_PlaySelectedChannel");
 
-        // The seek is issued AFTER the play command on purpose: starting a
-        // stopped channel resets its position to 0, so writing
-        // SPU_ChannelPosition first would simply be overwritten.
+        // Loop and position are written AFTER the play command, and this
+        // ordering is load-bearing. PlayChannel() in the console does, for
+        // a stopped or already-playing channel:
+        //
+        //     TargetChannel.LoopEnabled = ChannelSound->PlayWithLoop;
+        //     TargetChannel.Position    = 0;
+        //
+        // so a loop flag or a seek written BEFORE the command is discarded
+        // by the command itself. Writing them after makes both stick --
+        // the channel is in the Playing state by then, and nothing else
+        // touches either field.
+        //
+        // The loop flag is written unconditionally, including when it is
+        // 0: play() has just overwritten it from the sound's own
+        // PlayWithLoop, which may be true, and play(s, ch) with no loop
+        // argument must mean "do not loop" rather than "inherit whatever
+        // the sound happens to say".
+        emit_asm("OUT  SPU_ChannelLoopEnabled, %d ; loop (after play: play overwrites this)", static_loop);
+
         if (has_start) {
-            int pos_reg = allocate_register();
-            emit_asm("MOV  R%d, %f", pos_reg, static_start);
-            emit_asm("OUT  SPU_ChannelPosition, R%d ; seek to start index", pos_reg);
-            unlock_register(pos_reg);
+            // SPU_ChannelPosition is an INTEGER port -- a sample index,
+            // clamped by the console to 0..length-1. It is not a float.
+            emit_asm("OUT  SPU_ChannelPosition, %d ; seek (after play: play rewinds to 0)",
+                     (int) static_start);
         }
 
         if (dest_reg != 0) {
@@ -542,274 +563,6 @@ bool emit_vircon32_channel_cmd_intrinsic (ASTNode *node, int dest_reg, const cha
     if (dest_reg != 0) {
         emit_asm("MOV  R%d, BOXED_NIL ; return nil", dest_reg);
     }
-
-    return true;
-}
-
-// ============================================================================
-// ioports.spu.cmd(mode) / ioports.spu.command(mode)
-//
-// The low-level escape hatch beneath play()/stop()/pause()/resume(): issues
-// one raw SPU command against whatever channel SPU_SelectedChannel currently
-// names, with no channel selection, no sound assignment and no defaulting of
-// its own. Pair it with the ioports.spu.* properties when the intrinsics
-// don't expose the exact sequence you need:
-//
-//     ioports.spu.channel   = 2
-//     ioports.spu.chansound = MUSIC
-//     ioports.spu.chanloop  = true
-//     ioports.spu.cmd("play")
-//
-// Accepted argument forms:
-//   omitted           -> "play"
-//   string literal    -> name below (compile-time resolved)
-//   number literal    -> index below (compile-time resolved)
-//   anything else     -> evaluated at runtime as a number index
-//
-//   name         index  SPU command
-//   ----------   -----  --------------------------------
-//   "play"           0  SPUCommand_PlaySelectedChannel
-//   "pause"          1  SPUCommand_PauseSelectedChannel
-//   "stop"           2  SPUCommand_StopSelectedChannel
-//   "pauseall"       3  SPUCommand_PauseAllChannels
-//   "resume"         4  SPUCommand_ResumeAllChannels
-//   "allstop"        5  SPUCommand_StopAllChannels
-//
-//   Also accepted as names: "resumeall" (= "resume"), "stopall" (= "allstop").
-//
-// Returns nil.
-//
-// CHANGES FROM THE PREVIOUS IMPLEMENTATION
-// ----------------------------------------
-// 1. An unrecognized name or index is now a compile error. It used to fall
-//    back to "play" silently, so ioports.spu.cmd("halt") -- or a typo like
-//    "stopAll" -- started playback instead of doing what was asked, with
-//    nothing emitted to say so.
-//
-// 2. The dynamic path no longer OUTs the mode index raw. It used to emit
-//    CFI + "OUT SPU_Command, Rmode", writing 0-5 to a port whose commands
-//    are 0x30-0x35 -- so every dynamic ioports.spu.cmd(n) sent a command
-//    the SPU does not define, while the literal paths (which emit the
-//    SPUCommand_* symbols) worked. The index is now resolved through an
-//    explicit compare chain against those same symbols, so the two paths
-//    agree and neither depends on the numeric opcode layout.
-// ============================================================================
-
-// Defined alongside the play()/stop() emitters further down this file.
-// A static function may be declared before it is defined within the same
-// translation unit, which is what lets this routine sit at its original
-// position while sharing that helper.
-static bool spu_static_number (ASTNode *node, double *out_value);
-
-typedef struct {
-    const char *name;      // spelling accepted in Lua source
-    int         index;     // numeric form accepted in Lua source
-    const char *asm_cmd;   // assembler constant actually emitted
-} SPUCommandMap;
-
-// The six commands, in index order. The dynamic compare chain walks this
-// table, so index N must stay at position N.
-static const SPUCommandMap spu_commands[] = {
-    { "play",     0, "SPUCommand_PlaySelectedChannel"  },
-    { "pause",    1, "SPUCommand_PauseSelectedChannel" },
-    { "stop",     2, "SPUCommand_StopSelectedChannel"  },
-    { "pauseall", 3, "SPUCommand_PauseAllChannels"     },
-    { "resume",   4, "SPUCommand_ResumeAllChannels"    },
-    { "allstop",  5, "SPUCommand_StopAllChannels"      }
-};
-
-#define SPU_COMMAND_COUNT ((int)(sizeof(spu_commands) / sizeof(spu_commands[0])))
-
-// Alternate spellings for the all-channel commands, whose original names
-// ("resume", "allstop") read oddly next to "pauseall".
-static const SPUCommandMap spu_command_aliases[] = {
-    { "resumeall", 4, "SPUCommand_ResumeAllChannels" },
-    { "stopall",   5, "SPUCommand_StopAllChannels"   }
-};
-
-#define SPU_ALIAS_COUNT ((int)(sizeof(spu_command_aliases) / sizeof(spu_command_aliases[0])))
-
-// Every accepted name, for error messages.
-static void spu_command_name_list (char *buffer, size_t size)
-{
-    buffer[0] = '\0';
-
-    for (int i = 0; i < SPU_COMMAND_COUNT; i++) {
-        strncat(buffer, "\"", size - strlen(buffer) - 1);
-        strncat(buffer, spu_commands[i].name, size - strlen(buffer) - 1);
-        strncat(buffer, "\", ", size - strlen(buffer) - 1);
-    }
-
-    for (int i = 0; i < SPU_ALIAS_COUNT; i++) {
-        strncat(buffer, "\"", size - strlen(buffer) - 1);
-        strncat(buffer, spu_command_aliases[i].name, size - strlen(buffer) - 1);
-        strncat(buffer, (i + 1 < SPU_ALIAS_COUNT) ? "\", " : "\"", size - strlen(buffer) - 1);
-    }
-}
-
-static const SPUCommandMap *spu_command_by_name (const char *name)
-{
-    for (int i = 0; i < SPU_COMMAND_COUNT; i++) {
-        if (strcmp(spu_commands[i].name, name) == 0) {
-            return &spu_commands[i];
-        }
-    }
-
-    for (int i = 0; i < SPU_ALIAS_COUNT; i++) {
-        if (strcmp(spu_command_aliases[i].name, name) == 0) {
-            return &spu_command_aliases[i];
-        }
-    }
-
-    return NULL;
-}
-
-static const SPUCommandMap *spu_command_by_index (int index)
-{
-    if (index < 0 || index >= SPU_COMMAND_COUNT) {
-        return NULL;
-    }
-    return &spu_commands[index];
-}
-
-bool emit_spu_cmd_intrinsic (ASTNode *node, int dest_reg)
-{
-    ASTNode *arg_mode = node->as.call.args_head;
-
-    emit_asm("    ;; --- Intrinsic: ioports.spu.cmd(mode) ---");
-
-    if (arg_mode != NULL && arg_mode->next != NULL) {
-        compiler_warning(ERR_SEMANTIC, node->line_number,
-                         "ioports.spu.cmd() takes at most 1 argument (mode); extra arguments ignored");
-    }
-
-    // =====================================================================
-    // CASE A: omitted, or an explicit nil -> "play"
-    // =====================================================================
-    if (arg_mode == NULL || arg_mode->type == NODE_NIL) {
-        emit_asm("OUT  SPU_Command, %s ; default mode", spu_commands[0].asm_cmd);
-
-        if (dest_reg != 0) {
-            emit_asm("MOV  R%d, BOXED_NIL ; return nil", dest_reg);
-        }
-        return true;
-    }
-
-    // =====================================================================
-    // CASE B: string literal -> resolved now
-    // =====================================================================
-    if (arg_mode->type == NODE_STRING) {
-        const char          *val = arg_mode->as.string_val.value;
-        const SPUCommandMap *cmd = spu_command_by_name(val);
-
-        if (cmd == NULL) {
-            char names[256];
-            spu_command_name_list(names, sizeof(names));
-            compiler_error(ERR_SEMANTIC, node->line_number,
-                           "ioports.spu.cmd(): unknown mode \"%s\". Valid modes: %s", val, names);
-            return false;
-        }
-
-        emit_asm("OUT  SPU_Command, %s ; \"%s\"", cmd->asm_cmd, val);
-
-        if (dest_reg != 0) {
-            emit_asm("MOV  R%d, BOXED_NIL ; return nil", dest_reg);
-        }
-        return true;
-    }
-
-    // =====================================================================
-    // CASE C: number literal -> resolved now
-    // =====================================================================
-    {
-        double literal;
-        if (spu_static_number(arg_mode, &literal)) {
-            const SPUCommandMap *cmd = spu_command_by_index((int) literal);
-
-            if (cmd == NULL) {
-                compiler_error(ERR_SEMANTIC, node->line_number,
-                               "ioports.spu.cmd(): mode index must be 0-%d (got %g)",
-                               SPU_COMMAND_COUNT - 1, literal);
-                return false;
-            }
-
-            emit_asm("OUT  SPU_Command, %s ; mode %d (\"%s\")",
-                     cmd->asm_cmd, cmd->index, cmd->name);
-
-            if (dest_reg != 0) {
-                emit_asm("MOV  R%d, BOXED_NIL ; return nil", dest_reg);
-            }
-            return true;
-        }
-    }
-
-    // =====================================================================
-    // CASE D: runtime value -> nil-check, then resolve the index through an
-    // explicit compare chain.
-    //
-    // The chain exists so that the emitted command is always one of the
-    // SPUCommand_* symbols, exactly as in the literal paths above. Adding a
-    // base opcode to the index would be shorter, but would bake in the
-    // assumption that the six commands occupy contiguous opcodes -- and
-    // would silently emit an undefined command the day that stops holding.
-    //
-    // An out-of-range index at runtime issues no command at all. There is no
-    // sensible fallback: guessing "play" here is what made the previous
-    // silent-fallback behaviour so hard to debug.
-    // =====================================================================
-    int mode_reg = allocate_register();
-    register_pinned[mode_reg] = 1;
-    generate_asm(arg_mode, mode_reg);
-
-    int         label_id = get_next_label();
-    const char *ctx      = get_current_function_name();
-
-    char end_label[160], case_label[160];
-    snprintf(end_label, sizeof(end_label), "__%s_spu_cmd_end_%d", ctx, label_id);
-
-    int scratch = allocate_register();
-    register_pinned[scratch] = 1;
-
-    // nil -> the same default as an omitted argument
-    emit_asm("MOV  R%d, R%d", scratch, mode_reg);
-    emit_asm("IEQ  R%d, BOXED_NIL ; check for runtime nil", scratch);
-    emit_asm("JT   R%d, __%s_spu_cmd_default_%d", scratch, ctx, label_id);
-
-    emit_asm("CFI  R%d ; Lua float -> mode index", mode_reg);
-
-    for (int i = 0; i < SPU_COMMAND_COUNT; i++) {
-        emit_asm("MOV  R%d, R%d", scratch, mode_reg);
-        emit_asm("IEQ  R%d, %d", scratch, spu_commands[i].index);
-        emit_asm("JT   R%d, __%s_spu_cmd_%d_%d", scratch, ctx, spu_commands[i].index, label_id);
-    }
-
-    emit_asm("JMP  %s ; unknown mode -> no command issued", end_label);
-
-    emit_asm("__%s_spu_cmd_default_%d:", ctx, label_id);
-    emit_asm("OUT  SPU_Command, %s ; nil -> default mode", spu_commands[0].asm_cmd);
-    emit_asm("JMP  %s", end_label);
-
-    for (int i = 0; i < SPU_COMMAND_COUNT; i++) {
-        snprintf(case_label, sizeof(case_label), "__%s_spu_cmd_%d_%d",
-                 ctx, spu_commands[i].index, label_id);
-        emit_asm("%s:", case_label);
-        emit_asm("OUT  SPU_Command, %s ; \"%s\"", spu_commands[i].asm_cmd, spu_commands[i].name);
-
-        if (i + 1 < SPU_COMMAND_COUNT) {
-            emit_asm("JMP  %s", end_label);
-        }
-    }
-
-    emit_asm("%s:", end_label);
-
-    if (dest_reg != 0) {
-        emit_asm("MOV  R%d, BOXED_NIL ; return nil", dest_reg);
-    }
-
-    register_pinned[mode_reg] = 0;
-    register_pinned[scratch]  = 0;
-    unlock_register(scratch);
-    unlock_register(mode_reg);
 
     return true;
 }
