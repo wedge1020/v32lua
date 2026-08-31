@@ -209,10 +209,16 @@ int  main (int  argc, char** argv)
     {
         vircon32_btn_prev_state_base  = next_ram_address;
         next_ram_address              = next_ram_address + 44;
+        vircon32_sfx_cursor_base      = next_ram_address;
+        next_ram_address              = next_ram_address + 1;
     }
     
     // Perform full symbol pre-pass before code generation
     register_all_globals_prepass(root_node);
+
+    // Aliases are recorded before codegen so that "play = music.play" at the
+    // bottom of a file still governs a play(...) call at the top.
+    register_intrinsic_aliases_prepass(root_node);
 
     // --- Stage 5: Emitter ---
     log_stage(5, "emitter", verbose);

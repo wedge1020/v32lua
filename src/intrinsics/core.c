@@ -168,6 +168,16 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         return 0; // Dynamic call, not an intrinsic
     }
 
+    // A compile-time alias ("play = music.play") is resolved here, before
+    // any dispatch, so an aliased call is indistinguishable from the real
+    // path from this point on.
+    {
+        const char *aliased = resolve_intrinsic_alias(func_name);
+        if (aliased != NULL) {
+            snprintf(func_name, sizeof(func_name), "%s", aliased);
+        }
+    }
+
     // =========================================================================
     // IOPorts Method Validation (e.g., ioports.gpu.clear())
     // =========================================================================
@@ -350,21 +360,12 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         }
     }
 
-    // stop() / pause() / resume() -- native Vircon32 SPU channel control
-    //
-    // These three names are much likelier to collide with game code than
-    // "btnp" ever was, so unlike spr()/btn()/btnp() they step aside for a
-    // user-defined function of the same name rather than silently
-    // shadowing it. Globals are registered by register_all_globals_prepass()
-    // before generate_program() runs, so this lookup is reliable here.
-    if (strcmp(func_name, "stop")   == 0 ||
-        strcmp(func_name, "pause")  == 0 ||
-        strcmp(func_name, "resume") == 0) {
-        if (runtime_req.needs_tic80 != true && runtime_req.needs_pico8 != true) {
-            SymbolNode *user = resolve_symbol(func_name);
-            if (user == NULL || !user->is_function) {
-                return emit_vircon32_channel_cmd_intrinsic(node, dest_reg, func_name);
-            }
+    // music.* / sfx.* -- native Vircon32 sound API
+    if (runtime_req.needs_vircon32 == true)
+    {
+        if (strncmp(func_name, "music.", 6) == 0 ||
+            strncmp(func_name, "sfx.",   4) == 0) {
+            return try_emit_sound_namespace_intrinsic (node, dest_reg, func_name);
         }
     }
 
@@ -422,13 +423,6 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     if (strcmp(func_name, "play") == 0) {
         if (runtime_req.needs_tic80 == true) {
             return emit_tic80_play_intrinsic(node, dest_reg);
-        }
-        else if (runtime_req.needs_pico8 != true) {
-            // Don't shadow a user-defined play()
-            SymbolNode *user = resolve_symbol(func_name);
-            if (user == NULL || !user->is_function) {
-                return emit_vircon32_play_intrinsic(node, dest_reg);
-            }
         }
     }
 

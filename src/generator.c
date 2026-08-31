@@ -632,6 +632,9 @@ void generate_global_setup (ASTNode *node)
         emit_asm ("ISUB R2, 1\n");
         emit_asm ("JMP __vircon32_btn_prev_state_zero_loop\n");
         emit_asm ("__vircon32_btn_prev_state_zero_done:\n");
+
+        emit_asm ("MOV R1, 1 ; sfx.play() round-robin starts at channel 1\n");
+        emit_asm ("MOV [VIRCON32_SFX_CURSOR], R1\n");
     }
 
     // NEW: Explicitly nil-initialize every plain (non-function) global.

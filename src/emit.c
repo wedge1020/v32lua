@@ -581,6 +581,7 @@ int   emit_variable_map (void)
     if (runtime_req.needs_vircon32)
     {
         fprintf (out(), "%%define  VIRCON32_BTN_PREV_STATE  0x%.8X\n", vircon32_btn_prev_state_base);
+        fprintf (out(), "%%define  VIRCON32_SFX_CURSOR      0x%.8X\n", vircon32_sfx_cursor_base);
     }
 
     SymbolNode *curr = global_scope ? global_scope->symbols : NULL;

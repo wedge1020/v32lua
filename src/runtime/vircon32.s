@@ -844,3 +844,160 @@ _vircon32_chancmd_done:
     POP   BP
     RET
 
+;; ============================================================================
+;; __builtin_vircon32_sfx_play: fire a transient sound effect
+;; ============================================================================
+;; Stack layout relative to BP:
+;; [BP+2]: sound   (Lua float resource id, or BOXED_NIL -> nothing to play)
+;; [BP+3]: channel (Lua float 0-15, or BOXED_NIL -> allocate one)
+;; [BP+4]: volume  (Lua float,      or BOXED_NIL -> 1.0)
+;; [BP+5]: speed   (Lua float,      or BOXED_NIL -> 1.0)
+;;
+;; Returns: R0 = the channel actually used, as a Lua float
+;;
+;; Port order is the same as __builtin_vircon32_play and for the same three
+;; reasons -- stop before assigning (a sound only assigns to a stopped
+;; channel), and clear the loop flag AFTER the play command (which overwrites
+;; it from the sound's own PlayWithLoop). See the notes on that routine.
+;;
+;; CHANNEL ALLOCATION
+;; ------------------
+;; With no channel given, the next one is taken from VIRCON32_SFX_CURSOR, a
+;; single compiler-reserved RAM word cycling over channels 1-15. Channel 0 is
+;; never handed out, so music.play() on the default channel is never cut off
+;; by a sound effect.
+;;
+;; The cursor is advanced unconditionally rather than searching for a channel
+;; that is actually idle. Searching would cost up to 15 IN + compare on the
+;; hot path -- sfx.play() runs on every jump and footstep -- to protect
+;; against a case that only arises when 15 effects overlap, at which point
+;; the oldest is the right one to lose anyway.
+;;
+;; The cursor holds a plain hardware integer, not a Lua float: nothing but
+;; this routine ever reads it. generate_global_setup() initialises it to 1.
+;;
+;; Register use follows the other __builtin_vircon32_* routines: R1-R3 used
+;; freely without saving, since the emitter frees its registers before the
+;; CALL. Comparisons are 2-operand and destructive, so R1 (the channel) is
+;; only ever compared through a throwaway copy.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_vircon32_sfx_play:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; --- 1. Resolve the channel ---
+    MOV   R1, [BP+3]
+    MOV   R2, R1
+    IEQ   R2, BOXED_NIL
+    JT    R2, _vircon32_sfx_auto_channel
+
+    ;; Explicit channel: cast and clamp to 0-15
+    CFI   R1
+    MOV   R2, R1
+    ILT   R2, 0
+    JT    R2, _vircon32_sfx_clamp_low
+    MOV   R2, R1
+    IGT   R2, 15
+    JF    R2, _vircon32_sfx_channel_ready
+    MOV   R1, 15
+    JMP   _vircon32_sfx_channel_ready
+
+_vircon32_sfx_clamp_low:
+    MOV   R1, 0
+    JMP   _vircon32_sfx_channel_ready
+
+_vircon32_sfx_auto_channel:
+    ;; Take the cursor, then advance it with wrap 1 -> 15 -> 1
+    MOV   R1, [VIRCON32_SFX_CURSOR]
+
+    MOV   R2, R1
+    IADD  R2, 1
+    MOV   R3, R2
+    IGT   R3, 15
+    JF    R3, _vircon32_sfx_store_cursor
+    MOV   R2, 1
+
+_vircon32_sfx_store_cursor:
+    MOV   [VIRCON32_SFX_CURSOR], R2
+
+_vircon32_sfx_channel_ready:
+    OUT   SPU_SelectedChannel, R1
+
+    ;; --- 2. Fetch the sound; a nil sound leaves the channel alone ---
+    MOV   R2, [BP+2]
+    MOV   R3, R2
+    IEQ   R3, BOXED_NIL
+    JT    R3, _vircon32_sfx_done
+
+    ;; --- 3. Stop, THEN assign ---
+    OUT   SPU_Command, SPUCommand_StopSelectedChannel
+    CFI   R2
+    OUT   SPU_ChannelAssignedSound, R2
+
+    ;; --- 4. Volume: nil -> 1.0 (true float port, no cast) ---
+    MOV   R2, [BP+4]
+    MOV   R3, R2
+    IEQ   R3, BOXED_NIL
+    JF    R3, _vircon32_sfx_volume_ready
+    MOV   R2, 1.0
+
+_vircon32_sfx_volume_ready:
+    OUT   SPU_ChannelVolume, R2
+
+    ;; --- 5. Speed / pitch: nil -> 1.0 (float port, console clamps 0-128) ---
+    MOV   R2, [BP+5]
+    MOV   R3, R2
+    IEQ   R3, BOXED_NIL
+    JF    R3, _vircon32_sfx_speed_ready
+    MOV   R2, 1.0
+
+_vircon32_sfx_speed_ready:
+    OUT   SPU_ChannelSpeed, R2
+
+    ;; --- 6. Start, then clear the loop flag the command just set ---
+    OUT   SPU_Command, SPUCommand_PlaySelectedChannel
+    OUT   SPU_ChannelLoopEnabled, 0
+
+_vircon32_sfx_done:
+    ;; Return the channel used, as a Lua number, so the caller can hold on to
+    ;; it (local ch = sfx.play(ENGINE) ... sfx.stop(ch)).
+    MOV   R0, R1
+    CIF   R0
+
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; ============================================================================
+;; __builtin_vircon32_sfx_stop_all: stop channels 1-15, leaving 0 alone
+;; ============================================================================
+;; Takes no arguments. Returns R0 = BOXED_NIL.
+;;
+;; This is what bare sfx.stop() compiles to. It deliberately does NOT use
+;; SPUCommand_StopAllChannels: that would stop channel 0 as well and cut the
+;; music, which is the one thing a caller asking to silence sound EFFECTS
+;; does not mean.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_vircon32_sfx_stop_all:
+    PUSH  BP
+    MOV   BP, SP
+
+    MOV   R1, 1
+
+_vircon32_sfx_stop_loop:
+    OUT   SPU_SelectedChannel, R1
+    OUT   SPU_Command, SPUCommand_StopSelectedChannel
+
+    IADD  R1, 1
+    MOV   R2, R1
+    IGT   R2, 15
+    JF    R2, _vircon32_sfx_stop_loop
+
+    MOV   R0, BOXED_NIL
+
+    MOV   SP, BP
+    POP   BP
+    RET
+

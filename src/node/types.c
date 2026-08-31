@@ -2,6 +2,17 @@
 
 void  node_identifier (ASTNode *node, int  dest_reg)
 {
+    // An alias resolves at compile time and has no boxed value, so it cannot
+    // be read as one. Say so instead of emitting a load from a global slot
+    // that nothing ever initializes.
+    if (is_intrinsic_alias(node->as.id.name)) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+            "'%s' is a compile-time alias for %s and has no runtime value; "
+            "call it directly", node->as.id.name,
+            resolve_intrinsic_alias(node->as.id.name));
+        return;
+    }
+
     ////////////////////////////////////////////////////////////////////////
     //
     // Dynamically lookup identifier location

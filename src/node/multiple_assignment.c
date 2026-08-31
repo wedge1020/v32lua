@@ -8,6 +8,7 @@
 static void emit_multiple_assignment_table_unpack(ASTNode *targets_head, ASTNode *call_node, bool is_local)
 {
     int target_count = 0;
+
     for (ASTNode *t = targets_head; t != NULL; t = t->next) target_count++;
 
     emit_asm("    ;; --- table.unpack(t, [i], [j]) as multi-assignment RHS (%d targets) ---\n", target_count);
@@ -37,6 +38,11 @@ void node_multiple_assignment(ASTNode *node)
     ASTNode *curr_tgt             = node -> as.mult_assign.targets_head;
     ASTNode *curr_val             = node -> as.mult_assign.values_head;
     int      val_reg              = -1;
+
+    // "play = music.play" has no runtime value to store.
+    if (is_intrinsic_alias_assignment(node)) {
+        return;
+    }
 
     // --- Intercept Bare Local Declarations ---
      if (node->as.mult_assign.is_local && node->as.mult_assign.values_head == NULL) {

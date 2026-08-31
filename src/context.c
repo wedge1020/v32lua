@@ -11,6 +11,7 @@ ScopeNode* global_scope = NULL;
 FunctionContextNode *context_stack_head = NULL;
 int global_label_counter = 0; 
 int vircon32_btn_prev_state_base = -1;
+int vircon32_sfx_cursor_base       = -1;
 
 void init_global_scope(void) {
     if (global_scope != NULL) return;

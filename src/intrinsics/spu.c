@@ -1,6 +1,274 @@
 #include "v32lua.h"
 
 // ============================================================================
+// ioports.spu.cmd(mode) / ioports.spu.command(mode)
+//
+// The low-level escape hatch beneath play()/stop()/pause()/resume(): issues
+// one raw SPU command against whatever channel SPU_SelectedChannel currently
+// names, with no channel selection, no sound assignment and no defaulting of
+// its own. Pair it with the ioports.spu.* properties when the intrinsics
+// don't expose the exact sequence you need:
+//
+//     ioports.spu.channel   = 2
+//     ioports.spu.chansound = MUSIC
+//     ioports.spu.chanloop  = true
+//     ioports.spu.cmd("play")
+//
+// Accepted argument forms:
+//   omitted           -> "play"
+//   string literal    -> name below (compile-time resolved)
+//   number literal    -> index below (compile-time resolved)
+//   anything else     -> evaluated at runtime as a number index
+//
+//   name         index  SPU command
+//   ----------   -----  --------------------------------
+//   "play"           0  SPUCommand_PlaySelectedChannel
+//   "pause"          1  SPUCommand_PauseSelectedChannel
+//   "stop"           2  SPUCommand_StopSelectedChannel
+//   "pauseall"       3  SPUCommand_PauseAllChannels
+//   "resume"         4  SPUCommand_ResumeAllChannels
+//   "allstop"        5  SPUCommand_StopAllChannels
+//
+//   Also accepted as names: "resumeall" (= "resume"), "stopall" (= "allstop").
+//
+// Returns nil.
+//
+// CHANGES FROM THE PREVIOUS IMPLEMENTATION
+// ----------------------------------------
+// 1. An unrecognized name or index is now a compile error. It used to fall
+//    back to "play" silently, so ioports.spu.cmd("halt") -- or a typo like
+//    "stopAll" -- started playback instead of doing what was asked, with
+//    nothing emitted to say so.
+//
+// 2. The dynamic path no longer OUTs the mode index raw. It used to emit
+//    CFI + "OUT SPU_Command, Rmode", writing 0-5 to a port whose commands
+//    are 0x30-0x35 -- so every dynamic ioports.spu.cmd(n) sent a command
+//    the SPU does not define, while the literal paths (which emit the
+//    SPUCommand_* symbols) worked. The index is now resolved through an
+//    explicit compare chain against those same symbols, so the two paths
+//    agree and neither depends on the numeric opcode layout.
+// ============================================================================
+
+// Defined alongside the play()/stop() emitters further down this file.
+// A static function may be declared before it is defined within the same
+// translation unit, which is what lets this routine sit at its original
+// position while sharing that helper.
+static bool spu_static_number (ASTNode *node, double *out_value);
+
+typedef struct {
+    const char *name;      // spelling accepted in Lua source
+    int         index;     // numeric form accepted in Lua source
+    const char *asm_cmd;   // assembler constant actually emitted
+} SPUCommandMap;
+
+// The six commands, in index order. The dynamic compare chain walks this
+// table, so index N must stay at position N.
+static const SPUCommandMap spu_commands[] = {
+    { "play",     0, "SPUCommand_PlaySelectedChannel"  },
+    { "pause",    1, "SPUCommand_PauseSelectedChannel" },
+    { "stop",     2, "SPUCommand_StopSelectedChannel"  },
+    { "pauseall", 3, "SPUCommand_PauseAllChannels"     },
+    { "resume",   4, "SPUCommand_ResumeAllChannels"    },
+    { "allstop",  5, "SPUCommand_StopAllChannels"      }
+};
+
+#define SPU_COMMAND_COUNT ((int)(sizeof(spu_commands) / sizeof(spu_commands[0])))
+
+// Alternate spellings for the all-channel commands, whose original names
+// ("resume", "allstop") read oddly next to "pauseall".
+static const SPUCommandMap spu_command_aliases[] = {
+    { "resumeall", 4, "SPUCommand_ResumeAllChannels" },
+    { "stopall",   5, "SPUCommand_StopAllChannels"   }
+};
+
+#define SPU_ALIAS_COUNT ((int)(sizeof(spu_command_aliases) / sizeof(spu_command_aliases[0])))
+
+// Every accepted name, for error messages.
+static void spu_command_name_list (char *buffer, size_t size)
+{
+    buffer[0] = '\0';
+
+    for (int i = 0; i < SPU_COMMAND_COUNT; i++) {
+        strncat(buffer, "\"", size - strlen(buffer) - 1);
+        strncat(buffer, spu_commands[i].name, size - strlen(buffer) - 1);
+        strncat(buffer, "\", ", size - strlen(buffer) - 1);
+    }
+
+    for (int i = 0; i < SPU_ALIAS_COUNT; i++) {
+        strncat(buffer, "\"", size - strlen(buffer) - 1);
+        strncat(buffer, spu_command_aliases[i].name, size - strlen(buffer) - 1);
+        strncat(buffer, (i + 1 < SPU_ALIAS_COUNT) ? "\", " : "\"", size - strlen(buffer) - 1);
+    }
+}
+
+static const SPUCommandMap *spu_command_by_name (const char *name)
+{
+    for (int i = 0; i < SPU_COMMAND_COUNT; i++) {
+        if (strcmp(spu_commands[i].name, name) == 0) {
+            return &spu_commands[i];
+        }
+    }
+
+    for (int i = 0; i < SPU_ALIAS_COUNT; i++) {
+        if (strcmp(spu_command_aliases[i].name, name) == 0) {
+            return &spu_command_aliases[i];
+        }
+    }
+
+    return NULL;
+}
+
+static const SPUCommandMap *spu_command_by_index (int index)
+{
+    if (index < 0 || index >= SPU_COMMAND_COUNT) {
+        return NULL;
+    }
+    return &spu_commands[index];
+}
+
+bool emit_spu_cmd_intrinsic (ASTNode *node, int dest_reg)
+{
+    ASTNode *arg_mode = node->as.call.args_head;
+
+    emit_asm("    ;; --- Intrinsic: ioports.spu.cmd(mode) ---");
+
+    if (arg_mode != NULL && arg_mode->next != NULL) {
+        compiler_warning(ERR_SEMANTIC, node->line_number,
+                         "ioports.spu.cmd() takes at most 1 argument (mode); extra arguments ignored");
+    }
+
+    // =====================================================================
+    // CASE A: omitted, or an explicit nil -> "play"
+    // =====================================================================
+    if (arg_mode == NULL || arg_mode->type == NODE_NIL) {
+        emit_asm("OUT  SPU_Command, %s ; default mode", spu_commands[0].asm_cmd);
+
+        if (dest_reg != 0) {
+            emit_asm("MOV  R%d, BOXED_NIL ; return nil", dest_reg);
+        }
+        return true;
+    }
+
+    // =====================================================================
+    // CASE B: string literal -> resolved now
+    // =====================================================================
+    if (arg_mode->type == NODE_STRING) {
+        const char          *val = arg_mode->as.string_val.value;
+        const SPUCommandMap *cmd = spu_command_by_name(val);
+
+        if (cmd == NULL) {
+            char names[256];
+            spu_command_name_list(names, sizeof(names));
+            compiler_error(ERR_SEMANTIC, node->line_number,
+                           "ioports.spu.cmd(): unknown mode \"%s\". Valid modes: %s", val, names);
+            return false;
+        }
+
+        emit_asm("OUT  SPU_Command, %s ; \"%s\"", cmd->asm_cmd, val);
+
+        if (dest_reg != 0) {
+            emit_asm("MOV  R%d, BOXED_NIL ; return nil", dest_reg);
+        }
+        return true;
+    }
+
+    // =====================================================================
+    // CASE C: number literal -> resolved now
+    // =====================================================================
+    {
+        double literal;
+        if (spu_static_number(arg_mode, &literal)) {
+            const SPUCommandMap *cmd = spu_command_by_index((int) literal);
+
+            if (cmd == NULL) {
+                compiler_error(ERR_SEMANTIC, node->line_number,
+                               "ioports.spu.cmd(): mode index must be 0-%d (got %g)",
+                               SPU_COMMAND_COUNT - 1, literal);
+                return false;
+            }
+
+            emit_asm("OUT  SPU_Command, %s ; mode %d (\"%s\")",
+                     cmd->asm_cmd, cmd->index, cmd->name);
+
+            if (dest_reg != 0) {
+                emit_asm("MOV  R%d, BOXED_NIL ; return nil", dest_reg);
+            }
+            return true;
+        }
+    }
+
+    // =====================================================================
+    // CASE D: runtime value -> nil-check, then resolve the index through an
+    // explicit compare chain.
+    //
+    // The chain exists so that the emitted command is always one of the
+    // SPUCommand_* symbols, exactly as in the literal paths above. Adding a
+    // base opcode to the index would be shorter, but would bake in the
+    // assumption that the six commands occupy contiguous opcodes -- and
+    // would silently emit an undefined command the day that stops holding.
+    //
+    // An out-of-range index at runtime issues no command at all. There is no
+    // sensible fallback: guessing "play" here is what made the previous
+    // silent-fallback behaviour so hard to debug.
+    // =====================================================================
+    int mode_reg = allocate_register();
+    register_pinned[mode_reg] = 1;
+    generate_asm(arg_mode, mode_reg);
+
+    int         label_id = get_next_label();
+    const char *ctx      = get_current_function_name();
+
+    char end_label[160], case_label[160];
+    snprintf(end_label, sizeof(end_label), "__%s_spu_cmd_end_%d", ctx, label_id);
+
+    int scratch = allocate_register();
+    register_pinned[scratch] = 1;
+
+    // nil -> the same default as an omitted argument
+    emit_asm("MOV  R%d, R%d", scratch, mode_reg);
+    emit_asm("IEQ  R%d, BOXED_NIL ; check for runtime nil", scratch);
+    emit_asm("JT   R%d, __%s_spu_cmd_default_%d", scratch, ctx, label_id);
+
+    emit_asm("CFI  R%d ; Lua float -> mode index", mode_reg);
+
+    for (int i = 0; i < SPU_COMMAND_COUNT; i++) {
+        emit_asm("MOV  R%d, R%d", scratch, mode_reg);
+        emit_asm("IEQ  R%d, %d", scratch, spu_commands[i].index);
+        emit_asm("JT   R%d, __%s_spu_cmd_%d_%d", scratch, ctx, spu_commands[i].index, label_id);
+    }
+
+    emit_asm("JMP  %s ; unknown mode -> no command issued", end_label);
+
+    emit_asm("__%s_spu_cmd_default_%d:", ctx, label_id);
+    emit_asm("OUT  SPU_Command, %s ; nil -> default mode", spu_commands[0].asm_cmd);
+    emit_asm("JMP  %s", end_label);
+
+    for (int i = 0; i < SPU_COMMAND_COUNT; i++) {
+        snprintf(case_label, sizeof(case_label), "__%s_spu_cmd_%d_%d",
+                 ctx, spu_commands[i].index, label_id);
+        emit_asm("%s:", case_label);
+        emit_asm("OUT  SPU_Command, %s ; \"%s\"", spu_commands[i].asm_cmd, spu_commands[i].name);
+
+        if (i + 1 < SPU_COMMAND_COUNT) {
+            emit_asm("JMP  %s", end_label);
+        }
+    }
+
+    emit_asm("%s:", end_label);
+
+    if (dest_reg != 0) {
+        emit_asm("MOV  R%d, BOXED_NIL ; return nil", dest_reg);
+    }
+
+    register_pinned[mode_reg] = 0;
+    register_pinned[scratch]  = 0;
+    unlock_register(scratch);
+    unlock_register(mode_reg);
+
+    return true;
+}
+
+// ============================================================================
 // intrinsics_vircon32_sound.c
 //
 // Native Vircon32 implementations of play(), stop(), pause(), resume().
@@ -565,4 +833,541 @@ bool emit_vircon32_channel_cmd_intrinsic (ASTNode *node, int dest_reg, const cha
     }
 
     return true;
+}
+
+// ============================================================================
+// intrinsics_vircon32_sound_namespaces.c
+//
+// The music.* / sfx.* sound API, plus the compile-time alias mechanism.
+//
+// Paste AFTER the existing sound-intrinsics block (after
+// emit_vircon32_channel_cmd_intrinsic() ends). It reuses spu_static_number(),
+// spu_static_sound_id() and spu_push_optional_arg() from that block.
+//
+//   music.play(SOUND [, CHANNEL [, LOOP [, VOL [, START]]]])  -> channel used
+//   music.pause  ([CHANNEL])
+//   music.resume ([CHANNEL])
+//   music.stop   ([CHANNEL])
+//   music.playing([CHANNEL])                                  -> boolean
+//
+//   sfx.play(SOUND [, CHANNEL [, VOL [, SPEED]]])             -> channel used
+//   sfx.stop([CHANNEL])
+//
+// music defaults to channel 0. sfx, given no channel, round-robins over
+// channels 1-15 so channel 0 stays free for music. sfx never loops: the
+// play command overwrites SPU_ChannelLoopEnabled from the sound's own
+// PlayWithLoop flag, so sfx.play() explicitly clears it afterwards. Anything
+// sustained is what music.play(..., true) is for.
+//
+// The bare play()/pause()/resume()/stop() names are GONE. They were four of
+// the most collision-prone identifiers in a game codebase, which is what the
+// old resolve_symbol() guard in the dispatcher was working around. Anyone who
+// wants them back declares them, which the alias mechanism below makes exact:
+//
+//     play = music.play
+//     blip = sfx.play
+// ============================================================================
+
+
+// ============================================================================
+// Compile-time intrinsic aliases
+//
+// "play = music.play" records an alias and emits nothing. Later calls to
+// play(...) compile to exactly the same inline OUT sequence music.play(...)
+// would have produced -- no runtime value, no CALL, no RAM.
+//
+// The cost of that is that an alias is a NAME, not a VALUE: it cannot be
+// stored in a table, passed to a function, or captured by a closure. Doing
+// so is a compile error that says as much, rather than a silent miscompile.
+// (If first-class sound-function values are ever wanted, the precedent is
+// __mathfn_sin / __mathfn_log in runtime.s -- real labels boxed with
+// BOXED_FUNCTION -- not this table.)
+// ============================================================================
+
+// Intrinsic paths that may be aliased. An alias to anything else is simply
+// not recognized, and the assignment compiles as an ordinary (broken) table
+// read, exactly as it does today.
+static const char *spu_aliasable_paths[] = {
+    "music.play",
+    "music.pause",
+    "music.resume",
+    "music.stop",
+    "music.playing",
+    "sfx.play",
+    "sfx.stop",
+    NULL
+};
+
+// Names an alias may not shadow: doing so would make the namespace itself
+// unreachable for the rest of the program.
+static const char *spu_alias_reserved[] = {
+    "music", "sfx", "ioports", "system", "string", "math", "table", NULL
+};
+
+typedef struct SPUAliasNode {
+    char                *name;   // the alias the program declared
+    const char          *path;   // canonical intrinsic path it stands for
+    struct SPUAliasNode *next;
+} SPUAliasNode;
+
+static SPUAliasNode *spu_alias_head = NULL;
+
+static const char *spu_aliasable_lookup (const char *path)
+{
+    for (int i = 0; spu_aliasable_paths[i] != NULL; i++) {
+        if (strcmp(spu_aliasable_paths[i], path) == 0) {
+            return spu_aliasable_paths[i];
+        }
+    }
+    return NULL;
+}
+
+// Public: the canonical intrinsic path `name` stands for, or NULL.
+const char *resolve_intrinsic_alias (const char *name)
+{
+    if (name == NULL) {
+        return NULL;
+    }
+
+    for (SPUAliasNode *a = spu_alias_head; a != NULL; a = a->next) {
+        if (strcmp(a->name, name) == 0) {
+            return a->path;
+        }
+    }
+    return NULL;
+}
+
+bool is_intrinsic_alias (const char *name)
+{
+    return (resolve_intrinsic_alias(name) != NULL);
+}
+
+static void spu_alias_register (const char *name, const char *path, int line)
+{
+    for (int i = 0; spu_alias_reserved[i] != NULL; i++) {
+        if (strcmp(spu_alias_reserved[i], name) == 0) {
+            compiler_error(ERR_SEMANTIC, line,
+                "'%s' cannot be used as an alias name: it is a sound/library "
+                "namespace", name);
+            return;
+        }
+    }
+
+    const char *existing = resolve_intrinsic_alias(name);
+    if (existing != NULL) {
+        if (strcmp(existing, path) != 0) {
+            compiler_error(ERR_SEMANTIC, line,
+                "'%s' is already a compile-time alias for %s and cannot be "
+                "redefined as %s", name, existing, path);
+        }
+        return;   // same alias declared twice: harmless
+    }
+
+    SPUAliasNode *a = (SPUAliasNode *) malloc (sizeof (SPUAliasNode));
+    if (a == NULL) {
+        compiler_error(ERR_INTERNAL, line, "Memory allocation failed registering alias '%s'", name);
+        return;
+    }
+
+    a->name = strdup(name);
+    a->path = path;
+    a->next = spu_alias_head;
+    spu_alias_head = a;
+}
+
+// True if this assignment node is (entirely) a set of alias declarations.
+// node_multiple_assignment() uses this to emit nothing for it.
+bool is_intrinsic_alias_assignment (ASTNode *node)
+{
+    if (node == NULL) {
+        return false;
+    }
+
+    // One caller, one valid node type. Returning a bland "false" for
+    // anything else hides a wiring mistake behind a cart that emits a doomed
+    // table read and halts at runtime. Say so at compile time instead.
+    if (node->type != NODE_MULTIPLE_ASSIGNMENT) {
+        compiler_error(ERR_INTERNAL, node->line_number,
+            "is_intrinsic_alias_assignment() expects the NODE_MULTIPLE_ASSIGNMENT "
+            "node, got node type %d", (int) node->type);
+        return false;
+    }
+
+    ASTNode *t = node->as.mult_assign.targets_head;
+    if (t == NULL) {
+        return false;
+    }
+
+    int aliases = 0, targets = 0;
+    for (; t != NULL; t = t->next) {
+        targets++;
+        if (t->type == NODE_IDENTIFIER && is_intrinsic_alias(t->as.id.name)) {
+            aliases++;
+        }
+    }
+
+    if (aliases == 0) {
+        return false;
+    }
+
+    if (aliases != targets) {
+        // "a, play = 1, music.play" -- half of this has a runtime value and
+        // half does not, and there is no sensible half-emission. Refuse
+        // rather than pick one.
+        compiler_error(ERR_SEMANTIC, node->line_number,
+            "an intrinsic alias must be declared on its own, not mixed with "
+            "ordinary assignments on the same line");
+        return true;
+    }
+
+    return true;
+}
+
+// Walk the AST recording alias declarations. Run once, before codegen, so an
+// alias declared at the bottom of the file still governs a call at the top.
+//
+// The default case here recurses into nothing, which is the SAFE direction
+// for this pass -- unlike spu_name_is_rebound(), whose default must assume
+// the worst. A node type this walker fails to descend into means a missed
+// alias, and a missed alias produces a loud "Undeclared function" at the
+// call site. A missed REBIND, by contrast, would silently fold the wrong
+// resource id, which is why that walk is exhaustive and this one need not be.
+static void spu_alias_scan (ASTNode *node)
+{
+    for (; node != NULL; node = node->next) {
+        switch (node->type) {
+
+            case NODE_MULTIPLE_ASSIGNMENT: {
+                ASTNode *t = node->as.mult_assign.targets_head;
+                ASTNode *v = node->as.mult_assign.values_head;
+
+                while (t != NULL && v != NULL) {
+                    if (t->type == NODE_IDENTIFIER && v->type == NODE_TABLE_GET) {
+                        char path[256] = {0};
+
+                        if (resolve_static_path(v, path)) {
+                            const char *canon = spu_aliasable_lookup(path);
+                            if (canon != NULL) {
+                                if (node->as.mult_assign.is_local) {
+                                    compiler_warning(ERR_SEMANTIC, node->line_number,
+                                        "'local %s = %s' declares a COMPILE-TIME alias, which is "
+                                        "program-wide -- the 'local' does not scope it",
+                                        t->as.id.name, canon);
+                                }
+                                spu_alias_register(t->as.id.name, canon, node->line_number);
+                            }
+                        }
+                    }
+                    t = t->next;
+                    v = v->next;
+                }
+                break;
+            }
+
+            case NODE_WHILE:
+                spu_alias_scan(node->as.while_loop.body);
+                break;
+            case NODE_REPEAT:
+                spu_alias_scan(node->as.repeat_loop.body);
+                break;
+            case NODE_FOR_NUMERIC:
+                spu_alias_scan(node->as.for_numeric.body);
+                break;
+            case NODE_FOR_GENERIC:
+                spu_alias_scan(node->as.for_generic.body);
+                break;
+            case NODE_IF:
+                spu_alias_scan(node->as.if_stmt.if_body);
+                spu_alias_scan(node->as.if_stmt.else_body);
+                break;
+            case NODE_DO_BLOCK:
+                spu_alias_scan(node->as.do_block.body);
+                break;
+            case NODE_FUNCTION_DEF:
+                spu_alias_scan(node->as.function_def.body);
+                break;
+            case NODE_FUNCTION_POINTER:
+                spu_alias_scan(node->as.func_ptr.func_def);
+                break;
+
+            default:
+                break;
+        }
+    }
+}
+
+void register_intrinsic_aliases_prepass (ASTNode *root)
+{
+    spu_alias_scan(root);
+}
+
+
+// ============================================================================
+// sfx.play(SOUND [, CHANNEL [, VOL [, SPEED]]])
+//
+// Same port ordering rules as music.play() -- stop before assigning, loop
+// and position after the play command -- see the notes on
+// __builtin_vircon32_play in runtime.s.
+//
+// With no CHANNEL the call goes to the runtime routine, which takes the next
+// channel from the round-robin cursor. That is the common form and the
+// smaller emission: five pushes and a CALL, versus the cursor arithmetic
+// inlined at every jump and footstep in the game.
+// ============================================================================
+bool emit_vircon32_sfx_play_intrinsic (ASTNode *node, int dest_reg)
+{
+    ASTNode *args[4] = { NULL };
+    int      arg_count = 0;
+
+    for (ASTNode *curr = node->as.call.args_head;
+         curr != NULL && arg_count < 4;
+         curr = curr->next) {
+        args[arg_count++] = curr;
+    }
+
+    if (arg_count < 1) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+                       "sfx.play() requires at least 1 argument: sfx.play(sound [, channel [, volume [, speed]]])");
+        return false;
+    }
+
+    runtime_req.needs_vircon32 = true;
+
+    int    static_sound   = 0;
+    int    static_channel = 0;
+    double static_volume  = VIRCON32_SPU_DEFAULT_VOL;
+    double static_speed   = 1.0;
+
+    bool sound_ok  = spu_static_sound_id(args[0], &static_sound);
+    bool volume_ok = (args[2] == NULL);
+    bool speed_ok  = (args[3] == NULL);
+
+    // A folded emission needs an explicit channel: the auto path has to read
+    // and advance the cursor, which is the runtime routine's job.
+    bool channel_ok = false;
+
+    if (args[1] != NULL && args[1]->type != NODE_NIL) {
+        double channel_val;
+        if (spu_static_number(args[1], &channel_val)) {
+            if (channel_val < VIRCON32_SPU_MIN_CHANNEL ||
+                channel_val > VIRCON32_SPU_MAX_CHANNEL) {
+                compiler_error(ERR_SEMANTIC, node->line_number,
+                               "sfx.play(): channel must be %d-%d (got %g)",
+                               VIRCON32_SPU_MIN_CHANNEL, VIRCON32_SPU_MAX_CHANNEL, channel_val);
+                return false;
+            }
+            static_channel = (int) channel_val;
+            channel_ok     = true;
+        }
+    }
+
+    if (args[2] != NULL) {
+        volume_ok = spu_static_number(args[2], &static_volume);
+    }
+    if (args[3] != NULL) {
+        speed_ok = spu_static_number(args[3], &static_speed);
+    }
+
+    // ------------------------------------------------------------------
+    // STATIC PATH: explicit literal channel, everything else literal.
+    // ------------------------------------------------------------------
+    if (sound_ok && channel_ok && volume_ok && speed_ok) {
+        emit_asm("    ;; --- Vircon32 sfx.play() Intrinsic (static fold) ---");
+
+        emit_asm("OUT  SPU_SelectedChannel, %d", static_channel);
+        emit_asm("OUT  SPU_Command, SPUCommand_StopSelectedChannel ; a sound only assigns to a stopped channel");
+        emit_asm("OUT  SPU_ChannelAssignedSound, %d ; sound id", static_sound);
+
+        int reg = allocate_register();
+        emit_asm("MOV  R%d, %f", reg, static_volume);
+        emit_asm("OUT  SPU_ChannelVolume, R%d ; channel volume", reg);
+        emit_asm("MOV  R%d, %f", reg, static_speed);
+        emit_asm("OUT  SPU_ChannelSpeed, R%d ; playback speed / pitch", reg);
+        unlock_register(reg);
+
+        emit_asm("OUT  SPU_Command, SPUCommand_PlaySelectedChannel");
+
+        // Cleared AFTER the command, which has just set it from the sound's
+        // own PlayWithLoop flag. An sfx never loops.
+        emit_asm("OUT  SPU_ChannelLoopEnabled, 0 ; sfx never loops");
+
+        if (dest_reg != 0) {
+            emit_asm("MOV  R%d, %f ; sfx.play() returns the channel used",
+                     dest_reg, (double) static_channel);
+        }
+
+        return true;
+    }
+
+    // ------------------------------------------------------------------
+    // RUNTIME PATH. Pushed last-to-first so arg 1 lands at [BP+2].
+    // ------------------------------------------------------------------
+    emit_asm("    ;; --- Vircon32 sfx.play() Intrinsic ---");
+
+    spu_push_optional_arg(args[3], "Arg 4: speed");
+    spu_push_optional_arg(args[2], "Arg 3: volume");
+
+    // An omitted or explicitly-nil channel means "allocate one for me".
+    if (args[1] != NULL && args[1]->type != NODE_NIL) {
+        spu_push_optional_arg(args[1], "Arg 2: channel");
+    } else {
+        emit_asm("MOV  R0, BOXED_NIL");
+        emit_asm("PUSH R0 ; Arg 2: no channel -> round-robin allocation");
+    }
+
+    int sound_reg = allocate_register();
+    generate_asm(args[0], sound_reg);
+    emit_asm("PUSH R%d ; Arg 1: sound", sound_reg);
+    unlock_register(sound_reg);
+
+    emit_asm("CALL __builtin_vircon32_sfx_play");
+    emit_asm("IADD SP, 4 ; Clean up sfx.play() arguments");
+
+    if (dest_reg != 0) {
+        emit_asm("MOV  R%d, R0 ; sfx.play() returns the channel used", dest_reg);
+    }
+
+    return true;
+}
+
+
+// ============================================================================
+// sfx.stop([CHANNEL])
+//
+// With a channel, this is an ordinary per-channel stop. WITHOUT one it must
+// NOT become StopAllChannels the way music.stop() does -- that would silence
+// the music too. It stops channels 1-15 and leaves channel 0 alone.
+// ============================================================================
+bool emit_vircon32_sfx_stop_intrinsic (ASTNode *node, int dest_reg)
+{
+    ASTNode *arg_channel = node->as.call.args_head;
+
+    runtime_req.needs_vircon32 = true;
+
+    if (arg_channel != NULL && arg_channel->type != NODE_NIL) {
+        // Identical to stop(ch); reuse the shared emitter.
+        return emit_vircon32_channel_cmd_intrinsic(node, dest_reg, "stop");
+    }
+
+    emit_asm("    ;; --- Vircon32 sfx.stop() Intrinsic (all sfx channels) ---");
+    emit_asm("CALL __builtin_vircon32_sfx_stop_all ; channels 1-15; music on 0 keeps playing");
+
+    if (dest_reg != 0) {
+        emit_asm("MOV  R%d, BOXED_NIL ; return nil", dest_reg);
+    }
+
+    return true;
+}
+
+
+// ============================================================================
+// music.playing([CHANNEL]) -> true only while the channel is actually playing
+//
+// SPU_ChannelState is a read-only integer port returning one of
+// channel_stopped 0x40, channel_paused 0x41, channel_playing 0x42.
+//
+// This exists so a pause/resume toggle can ask the hardware instead of
+// tracking a Lua flag. A flag drifts the moment a sound ends on its own --
+// the program still believes it is playing, and the next toggle pauses an
+// already-stopped channel instead of resuming it.
+// ============================================================================
+bool emit_vircon32_music_playing_intrinsic (ASTNode *node, int dest_reg)
+{
+    ASTNode *arg_channel = node->as.call.args_head;
+
+    runtime_req.needs_vircon32 = true;
+
+    emit_asm("    ;; --- Vircon32 music.playing() Intrinsic ---");
+
+    // Select the channel (default 0).
+    if (arg_channel == NULL || arg_channel->type == NODE_NIL) {
+        emit_asm("OUT  SPU_SelectedChannel, 0");
+    } else {
+        double channel_val;
+        if (spu_static_number(arg_channel, &channel_val)) {
+            if (channel_val < VIRCON32_SPU_MIN_CHANNEL ||
+                channel_val > VIRCON32_SPU_MAX_CHANNEL) {
+                compiler_error(ERR_SEMANTIC, node->line_number,
+                               "music.playing(): channel must be %d-%d (got %g)",
+                               VIRCON32_SPU_MIN_CHANNEL, VIRCON32_SPU_MAX_CHANNEL, channel_val);
+                return false;
+            }
+            emit_asm("OUT  SPU_SelectedChannel, %d", (int) channel_val);
+        } else {
+            int reg = allocate_register();
+            generate_asm(arg_channel, reg);
+            emit_asm("CFI  R%d ; Lua float -> channel index", reg);
+            emit_asm("OUT  SPU_SelectedChannel, R%d", reg);
+            unlock_register(reg);
+        }
+    }
+
+    if (dest_reg == 0) {
+        // Called for effect only: the port read has no side effect worth
+        // keeping, but the channel selection above might be relied on.
+        return true;
+    }
+
+    int         lbl = get_next_label();
+    const char *ctx = get_current_function_name();
+
+    char true_label[192], end_label[192];
+    snprintf(true_label, sizeof(true_label), "__%s_music_playing_yes_%d", ctx, lbl);
+    snprintf(end_label,  sizeof(end_label),  "__%s_music_playing_end_%d", ctx, lbl);
+
+    // IEQ is destructive and 2-operand: it overwrites dest_reg with the 0/1
+    // result, which is fine -- the raw state is not needed afterwards.
+    emit_asm("IN   R%d, SPU_ChannelState", dest_reg);
+    emit_asm("IEQ  R%d, 0x42 ; channel_playing", dest_reg);
+    emit_asm("JT   R%d, %s", dest_reg, true_label);
+    emit_asm("MOV  R%d, BOXED_FALSE", dest_reg);
+    emit_asm("JMP  %s", end_label);
+    emit_asm("%s:", true_label);
+    emit_asm("MOV  R%d, BOXED_TRUE", dest_reg);
+    emit_asm("%s:", end_label);
+
+    return true;
+}
+
+
+// ============================================================================
+// Dispatch for the whole music.* / sfx.* surface.
+//
+// Called from try_emit_call_intrinsic() once func_name has been resolved
+// (and run through resolve_intrinsic_alias()). Returns 1 if handled.
+// ============================================================================
+int try_emit_sound_namespace_intrinsic (ASTNode *node, int dest_reg, const char *func_name)
+{
+    bool is_music = (strncmp(func_name, "music.", 6) == 0);
+    bool is_sfx   = (strncmp(func_name, "sfx.",   4) == 0);
+
+    if (!is_music && !is_sfx) {
+        return 0;
+    }
+
+    // In PICO-8 / TIC-80 mode the sound API is that console's, not this one.
+    // Without this the call would fall through to a dynamic table lookup
+    // against a "music" global that nothing ever creates.
+    if (runtime_req.needs_pico8 || runtime_req.needs_tic80) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+            "'%s' is the native Vircon32 sound API and is not available under "
+            "the pico8/tic80 API modes", func_name);
+        return 0;
+    }
+
+    if (strcmp(func_name, "music.play")    == 0) return emit_vircon32_play_intrinsic(node, dest_reg);
+    if (strcmp(func_name, "music.stop")    == 0) return emit_vircon32_channel_cmd_intrinsic(node, dest_reg, "stop");
+    if (strcmp(func_name, "music.pause")   == 0) return emit_vircon32_channel_cmd_intrinsic(node, dest_reg, "pause");
+    if (strcmp(func_name, "music.resume")  == 0) return emit_vircon32_channel_cmd_intrinsic(node, dest_reg, "resume");
+    if (strcmp(func_name, "music.playing") == 0) return emit_vircon32_music_playing_intrinsic(node, dest_reg);
+
+    if (strcmp(func_name, "sfx.play")      == 0) return emit_vircon32_sfx_play_intrinsic(node, dest_reg);
+    if (strcmp(func_name, "sfx.stop")      == 0) return emit_vircon32_sfx_stop_intrinsic(node, dest_reg);
+
+    // Same reasoning as the system.* guard: an unrecognized dotted call
+    // otherwise skips the "Undeclared function" check and miscompiles into a
+    // dynamic lookup against a table that does not exist.
+    compiler_error(ERR_SEMANTIC, node->line_number,
+        "Unknown sound function '%s'", func_name);
+    return 0;
 }

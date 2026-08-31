@@ -105,6 +105,17 @@ bool  emit_vircon32_btn_intrinsic         (ASTNode *, int);
 bool  emit_vircon32_btnp_intrinsic        (ASTNode *, int);
 bool  emit_vircon32_play_intrinsic        (ASTNode *, int);
 bool  emit_vircon32_channel_cmd_intrinsic (ASTNode *, int, const char *);
+bool  emit_vircon32_sfx_play_intrinsic      (ASTNode *, int);
+bool  emit_vircon32_sfx_stop_intrinsic      (ASTNode *, int);
+bool  emit_vircon32_music_playing_intrinsic (ASTNode *, int);
+int   try_emit_sound_namespace_intrinsic    (ASTNode *, int, const char *);
+
+const char *resolve_intrinsic_alias         (const char *);
+bool        is_intrinsic_alias              (const char *);
+bool        is_intrinsic_alias_assignment   (ASTNode *);
+void        register_intrinsic_aliases_prepass (ASTNode *);
+
+extern int  vircon32_sfx_cursor_base;
 
 //////////////////////////////////////////////////////////////////////////////    
 //
