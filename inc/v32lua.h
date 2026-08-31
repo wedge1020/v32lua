@@ -78,4 +78,7 @@ extern int g_verbose_debug;      // verbose real-time debug output
 int  yyparse (void);
 extern FILE *yyin;
 
+extern LineMapEntry *g_line_map;
+extern int           g_line_map_count;
+
 #endif
