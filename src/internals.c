@@ -236,7 +236,7 @@ static char *match_include_directive (const char *line)
 // ----------------------------------------------------------------------------
 // Core recursive expansion
 // ----------------------------------------------------------------------------
-static void expand_file (const char *path, const char *referenced_from, int wrap_in_do_end,
+static void expand_file (const char *path, const char *referenced_from, int is_included,
                           StrBuf *out, LineMapBuilder *lm, int *combined_line,
                           IncludeStackNode **stack, DoneListNode **done)
 {
@@ -249,7 +249,7 @@ static void expand_file (const char *path, const char *referenced_from, int wrap
         }
     }
 
-    if (wrap_in_do_end) {
+    if (is_included) {
         for (DoneListNode *d = *done; d != NULL; d = d->next) {
             if (strcmp (d->resolved_path, resolved) == 0) {
                 // Already spliced in once elsewhere -- include-once by
@@ -266,14 +266,26 @@ static void expand_file (const char *path, const char *referenced_from, int wrap
     IncludeStackNode frame = { resolved, *stack };
     *stack = &frame;
 
-    if (wrap_in_do_end) {
+    if (is_included) {
         DoneListNode *dn = (DoneListNode *) malloc (sizeof (DoneListNode));
         dn->resolved_path = strdup (resolved);
         dn->next          = *done;
         *done             = dn;
 
-        sb_append_str (out, "do\n");
-        (*combined_line)++;
+        // NO do/end wrapper. An included file's body must land at the
+        // chunk's genuine top level, exactly as if its text had been
+        // pasted into the including file by hand.
+        //
+        // Wrapping it was actively harmful: prepass_walk() walks a
+        // NODE_DO_BLOCK body with is_chunk_top_level = 0, so a top-level
+        // `local` inside the wrapper never gets promoted to a global. It
+        // instead gets a stack slot in __global_scope_initialization's
+        // frame -- which RETs long before init()/game_loop() run -- while
+        // every function that reads that name resolves it through
+        // get_variable_access_string() -> register_global(), i.e. a RAM
+        // word nothing ever writes. Same root cause as the ORB_W/ORB_H
+        // bug (bug-toplevel-local-ram-allocation.md), different route.
+
     }
 
     char *base_dir = dir_of (path);
@@ -301,7 +313,7 @@ static void expand_file (const char *path, const char *referenced_from, int wrap
             lmb_push (lm, run_start_combined, *combined_line, path, run_start_source);
 
             char *child_path = join_path (base_dir, inc_path);
-            expand_file (child_path, path, /*wrap=*/1, out, lm, combined_line, stack, done);
+            expand_file (child_path, path, /*is_included=*/1, out, lm, combined_line, stack, done);
             free (child_path);
             free (inc_path);
 
@@ -322,11 +334,6 @@ static void expand_file (const char *path, const char *referenced_from, int wrap
     free (base_dir);
     free (text);
 
-    if (wrap_in_do_end) {
-        sb_append_str (out, "end\n");
-        (*combined_line)++;
-    }
-
     *stack = frame.next;
     free (resolved);
 }
@@ -342,7 +349,7 @@ char *expand_includes (const char *entry_path, LineMapEntry **out_map, int *out_
     IncludeStackNode *stack         = NULL;
     DoneListNode     *done          = NULL;
 
-    expand_file (entry_path, NULL, /*wrap=*/0, &out, &lm, &combined_line, &stack, &done);
+    expand_file (entry_path, NULL, /*is_included=*/0, &out, &lm, &combined_line, &stack, &done);
 
     while (done != NULL) {
         DoneListNode *next = done->next;
