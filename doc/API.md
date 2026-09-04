@@ -1,20 +1,46 @@
 # Native Vircon32 fantasy-console API
 
-Status: `music.*`/`sfx.*` and `spr()`/`btn()`/`btnp()` are implemented.
 This document covers ONLY the native Vircon32 API — the surface active when
-neither `--#pico8` nor `--#tic80` compatibility mode is selected. Under
-those modes, `spr()`/`btn()` etc. are that console's own API instead (see
-the PICO-8 / TIC-80 compatibility docs) and the calls below are not
+neither `--#api pico8` nor `--#api tic80` compatibility mode is selected.
+Under those modes, `spr()`/`btn()`/etc. are that console's own API instead
+(see the PICO-8 / TIC-80 compatibility docs), and the calls below are not
 available.
 
 Files: `v32lua_sound_intrinsics.c`, `v32lua_sound_namespaces.c`,
 `v32lua_spu_cmd_intrinsic.c`, `v32lua_ioport_boolean.c`,
-`intrinsics_vircon32.c`, `runtime_vircon32_sound.s`,
-`runtime_vircon32_sfx.s`, `runtime_vircon32_spr.s`,
-`runtime_vircon32_input.s`.
+`intrinsics_vircon32.c`, `intrinsics_vircon32_memcard.c`,
+`runtime_vircon32_sound.s`, `runtime_vircon32_sfx.s`, `runtime_vircon32_spr.s`,
+`runtime_vircon32_input.s`, `runtime_vircon32_memcard.s`.
 
 See also `vircon32-spu-port-ordering.md` — the SPU port write order is
 load-bearing and every sound emitter here depends on it.
+
+---
+
+## Table of Contents
+
+- [Sound: music.\* / sfx.\*](#sound-music--sfx)
+  - [music.volume() / sfx.volume()](#musicvolumevol--channel--sfxvolumevol--channel)
+  - [Why the bare names went away](#why-the-bare-names-went-away)
+  - [Compile-time aliases](#compile-time-aliases)
+  - [music.playing()](#musicplaying-and-why-a-lua-flag-is-the-wrong-toggle)
+  - [Codegen: hybrid fold](#codegen-hybrid-fold)
+- [ioports.spu.cmd() — the raw escape hatch](#ioportsspucmd--the-raw-escape-hatch)
+- [Boolean IO ports](#boolean-io-ports)
+- [Graphics: spr()](#graphics-spr)
+  - [Runtime dispatch](#runtime-dispatch-not-compile-time-fold)
+- [Input: btn() / btnp()](#input-btn--btnp)
+  - [Button IDs](#button-ids)
+  - [btn(): direct polling](#btn-direct-polling)
+  - [btnp(): edge detection](#btnp-edge-detection)
+  - [What's intentionally not here](#whats-intentionally-not-here)
+- [Memory card: memcard.\*](#memory-card-memcard)
+  - [memcard.save() / memcard.load()](#memcardsave--memcardload)
+  - [memcard[position]](#memcardposition)
+  - [memcard.title()](#memcardtitlestr---nil)
+  - [Address layout](#address-layout)
+  - [Type tags (auto-append form only)](#type-tags-auto-append-form-only)
+  - [What's intentionally not here](#whats-intentionally-not-here-1)
 
 ---
 
@@ -244,7 +270,8 @@ Blend modes:
 | `VIRCON32_BLEND_SUBTRACT` | `0x22` |
 
 `spr()` returns nothing (Lua `nil`), matching the console having no
-meaningful value to hand back from a draw call.
+meaningful value to hand back from a draw call. More than 8 arguments is a
+compile-time warning; the extras are ignored.
 
 ## Runtime dispatch, not compile-time fold
 
@@ -274,31 +301,11 @@ in a 32-bit float — it rounds up to `4294967296.0`. The runtime converts it
 through `CFI` (float → integer bit pattern) rather than using it directly,
 which recovers the correct `0xFFFFFFFF` regardless.
 
-## Fixed during the 2026-09-04 audit
-
-Two bugs in the compiler-side emitter (`emit_vircon32_spr_intrinsic`),
-not in `__builtin_vircon32_spr` itself:
-
-1. **Explicit `nil` on an optional argument wasn't defaulted.** Whether an
-   argument counted as "given" was decided purely by argument *count*
-   (`arg_count >= 4` for `scale_x`, etc.), so `spr(id, x, y, nil, nil, 45)`
-   — ordinary Lua for "skip scale_x/scale_y, I want angle_deg" — compiled
-   the `nil`s as real values: the NaN-boxed `nil` bit pattern got pushed
-   and used directly as a scale factor by the runtime routine, which
-   (unlike `music.play()`'s optional arguments) does no nil-checking of
-   its own. This silently corrupted the draw's scale and could send it
-   down the wrong one of the four draw-command branches. Fixed by checking
-   the argument's AST node type, not just its position: "omitted" and
-   "present but `NODE_NIL`" are now both treated as "use the default."
-2. **No return value was ever written to `dest_reg`.** The emitter's
-   signature took no `dest_reg` at all, so a call in an expression context
-   (`local unused = spr(1, 10, 10)`) left the destination register holding
-   whatever value happened to already be there instead of `nil`.
-   `dest_reg` is now threaded through and set to `BOXED_NIL` when
-   non-zero, matching every other intrinsic.
-
-`spr()` also now warns (rather than silently truncating) if called with
-more than 8 arguments.
+An explicitly-passed `nil` for an optional argument (e.g.
+`spr(id, x, y, nil, nil, 45)`) is treated identically to that argument
+being omitted entirely — both fall back to the default. A call sitting in
+an expression context (`local unused = spr(1, 10, 10)`) correctly gets
+`nil` assigned, matching every other intrinsic in this file.
 
 ---
 
@@ -366,3 +373,168 @@ being allowed to compute an address outside it.
 These match the underlying Vircon32 hardware rather than PICO-8/TIC-80
 conventions; that emulation lives entirely in the `--#api pico8`/`--#api tic80`
 compatibility layers, not here.
+
+---
+
+# Memory card: memcard.\*
+
+```
+memcard.save(value, position)   -> value   (raw write, exactly 1 word)
+memcard.save(value)             -> value   (auto-append; see below)
+memcard.load(position)          -> value   (raw read, exactly 1 word)
+memcard.load()                  -> value   (position 0)
+memcard.title(str)              -> nil     (sets the 16-word title)
+
+memcard[position]                  == memcard.load(position)
+memcard[position] = value          == memcard.save(value, position)
+```
+
+The memory card is a real Vircon32 hardware peripheral: a fixed, persistent
+storage range at physical address `0x30000000`, entirely separate from the
+cartridge ROM and from Vircon32 RAM. Unlike RAM, it survives a power cycle
+— it is the console's save-game device.
+
+**This VM is word-addressed throughout**, and the memory card follows the
+same convention: an address (and a `position`) advances by whole 4-byte
+words, not individual bytes. This matches how this VM already stores Lua
+strings internally — one word per character (see `string.len()`) — rather
+than a byte-packed representation.
+
+## memcard.save() / memcard.load()
+
+There are two distinct forms, chosen by whether a `position` is given:
+
+**With an explicit `position`** — the low-level primitive. Writes (or
+reads) exactly one raw word at `position`, with no bookkeeping of any
+kind. `position 0` is the first word of the data region; see
+[Address layout](#address-layout) below for the full range, including how
+negative positions reach into the title. You are fully responsible for
+knowing what you put where — writing the same position twice simply
+overwrites it.
+
+```lua
+memcard.save(1234, 0)     -- word 0: raw number
+memcard.save(true, 1)     -- word 1: raw boolean
+local hi = memcard.load(0)  -- 1234
+```
+
+**With no `position` at all** — `memcard.save(value)` auto-appends through
+a persistent cursor stored *on the card itself* (not in RAM), so repeated
+no-position saves keep extending a log across many play sessions instead
+of overwriting word 0 every run. This form is type-aware: saving a real
+Lua string writes its full contents (tagged and length-prefixed, see
+[Type tags](#type-tags-auto-append-form-only)), not just a raw pointer.
+
+```lua
+memcard.save("high score run")   -- appended at the current cursor
+memcard.save(9001)               -- appended right after it
+```
+
+The cursor itself — "how many words have been auto-appended so far" — is
+readable at any time as `memcard.load(-1)` / `memcard[-1]`; there is no
+separate counting function.
+
+`memcard.load()` with no `position` always reads word 0 — it does **not**
+follow the auto-append cursor the way `memcard.save()` does. Reading back
+an entry written by the auto-append form means reading its tag word
+yourself at a known position (see [Type tags](#type-tags-auto-append-form-only)),
+or simply knowing what you wrote there.
+
+## memcard[position]
+
+`memcard[position]` and `memcard[position] = value` are shorthand for the
+explicit-position form of `load`/`save` above — never the auto-append
+form, since Lua's bracket syntax has no "no index" spelling.
+
+```lua
+memcard[0] = 1234
+local hi = memcard[0]        -- 1234
+memcard[-1]                  -- reads the auto-append cursor
+```
+
+## memcard.title(str) -> nil
+
+Sets the memory card's title — up to 16 characters, one word per
+character, matching this VM's internal string representation. Longer
+strings are truncated; shorter strings are zero-padded. This is
+independent of any `--#title` cart hint, which names the *cartridge*, not
+the *save data* — a single cart can have many memory cards in circulation,
+each with its own title.
+
+```lua
+memcard.title("My Save File")
+```
+
+## Address layout
+
+```
+0x30000000  +-----------------------------------+  position -20
+            |  title: 16 characters               |
+            |  (memcard.title() writes here)      |  position -5
+            +-------------------------------------+
+            |  reserved (3 words, unused)          |  position -4 .. -2
+            +-------------------------------------+
+            |  auto-append cursor                  |  position -1
+0x30000014  +-------------------------------------+  position 0
+            |  data region                         |
+            |  (memcard.save()/.load()/[pos])     |
+            |  ...                                 |
+0x3003FFFF  +-------------------------------------+  last valid word
+```
+
+`position` is always relative to the start of the data region
+(`0x30000014`). Negative positions reach backward into the title/metadata
+block — reachable, but only by consciously going negative.
+
+| Constant | Value | Meaning |
+|---|---|---|
+| `VIRCON32_MEMCARD_BASE` | `0x30000000` | start of the card; position `-20` |
+| `VIRCON32_MEMCARD_DATA_BASE` | `0x30000014` | position `0` |
+| `VIRCON32_MEMCARD_CURSOR_ADDR` | `0x30000013` | the auto-append cursor; position `-1` |
+| `VIRCON32_MEMCARD_END` | `0x3003FFFF` | last valid word, inclusive |
+
+## Type tags (auto-append form only)
+
+`memcard.save(value)` with no position writes one of two shapes at the
+cursor, then advances the cursor by however many words that shape used:
+
+| Value type | Layout | Words used |
+|---|---|---|
+| Real Lua string | `[TAG_STRING][length][char 0][char 1]...` | `2 + length` |
+| Number / boolean / nil / table / function | `[TAG_SCALAR][raw value]` | `2` |
+
+`TAG_SCALAR` is `0`, `TAG_STRING` is `1`. A table or function saved this
+way is stored as its raw boxed pointer under `TAG_SCALAR` — see the safety
+note below, this is not a general serialization.
+
+The explicit-`position` form (`memcard.save(value, position)` /
+`memcard[position] = value`) never writes a tag — it is always exactly one
+raw word, regardless of value type.
+
+### Safety note
+
+A number, boolean, or nil round-trips correctly forever — that bit pattern
+means the same thing on any run. A real Lua string saved through the
+auto-append form round-trips correctly too. A table, a string saved via
+the *explicit-position* form (which stores a raw pointer, not real string
+contents), or a function value round-trips fine **within the same run** —
+its pointer is still valid — but is meaningless after a fresh boot reads
+it back from a real memory card, since heap/ROM layout is not guaranteed
+to match between runs. Stick to numbers/booleans/nil (or real strings via
+the auto-append form) for anything meant to survive an actual
+save/reload cycle.
+
+## What's intentionally NOT here
+
+- No table serialization. A table is always saved as a raw pointer,
+  meaningful only within the current run.
+- `memcard.load()`'s no-position default does not follow the auto-append
+  cursor the way `memcard.save()`'s does — it always reads word 0.
+- No format/erase call — a card is formatted by writing to it, not by a
+  separate call.
+
+Both PICO-8's `dget()`/`dset()` and TIC-80's `pmem()` are unrelated APIs
+that also use this same physical address range under their own layouts —
+`memcard.*` is unavailable (a compile error) under `--#api pico8`/
+`--#api tic80` to prevent a program from mixing the two and corrupting
+whichever one it isn't currently addressing.

@@ -1121,6 +1121,164 @@ _vircon32_sfx_stop_loop:
     RET
 
 ;; ============================================================================
+;; __builtin_vircon32_volume: set one channel's volume, or the true global
+;; volume when the channel is -1
+;; ============================================================================
+;; Stack layout relative to BP:
+;; [BP+2]: volume  (Lua float, or BOXED_NIL -> 1.0 default)
+;; [BP+3]: channel (Lua float; -1 -> SPU_GlobalVolume, else clamped 0-15)
+;;
+;; Returns: R0 = BOXED_NIL
+;;
+;; Backs music.volume(VOL, CHANNEL)/sfx.volume(VOL, CHANNEL) when CHANNEL
+;; was written explicitly at the call site (as opposed to omitted, which
+;; goes to __builtin_vircon32_volume_mask instead -- see that routine).
+;; The compiler-side emitter (emit_vircon32_volume_intrinsic in v32lua.c,
+;; file intrinsics_vircon32_sound.c) only reaches THIS routine when the
+;; volume and/or the channel value isn't known at compile time; an
+;; all-literal call folds to a straight-line OUT sequence instead.
+;;
+;; CHANNEL is guaranteed by the emitter to be a real (non-nil) expression
+;; here -- "no channel argument at all" is a different call site entirely.
+;; The BOXED_NIL check on volume is kept anyway as a cheap defensive
+;; default, same as every other optional numeric argument in this file.
+;;
+;; SPU_ChannelVolume (per-channel, clamped 0-8 by the console) and
+;; SPU_GlobalVolume (clamped 0-2) are both genuine float ports -- the Lua
+;; volume value is used directly, no CFI. The channel argument, when it
+;; isn't -1, takes the same clamp-to-0-15 treatment as every other
+;; per-channel routine in this file (see __builtin_vircon32_play/_chancmd/
+;; _sfx_play above).
+;;
+;; Register use follows the other __builtin_vircon32_* routines: R1-R3 used
+;; freely without saving, since the emitter frees its registers before the
+;; CALL. R1 holds the resolved volume and is never itself compared -- only
+;; the disposable copies in R2/R3 are, since IEQ/ILT/IGT are destructive.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_vircon32_volume:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; --- 1. Resolve the volume: nil -> 1.0 ---
+    MOV   R1, [BP+2]
+    MOV   R2, R1
+    IEQ   R2, BOXED_NIL
+    JF    R2, _vircon32_volume_val_ready
+    MOV   R1, 1.0
+
+_vircon32_volume_val_ready:
+    ;; --- 2. Channel == -1 -> global volume; otherwise clamp and select ---
+    MOV   R2, [BP+3]
+    CFI   R2                      ; Lua float -> hardware integer
+    MOV   R3, R2
+    IEQ   R3, -1
+    JT    R3, _vircon32_volume_global
+
+    MOV   R3, R2
+    ILT   R3, 0
+    JT    R3, _vircon32_volume_chan_low
+    MOV   R3, R2
+    IGT   R3, 15
+    JF    R3, _vircon32_volume_chan_ready
+    MOV   R2, 15                  ; clamp high
+    JMP   _vircon32_volume_chan_ready
+
+_vircon32_volume_chan_low:
+    MOV   R2, 0                   ; clamp low
+
+_vircon32_volume_chan_ready:
+    OUT   SPU_SelectedChannel, R2
+    OUT   SPU_ChannelVolume, R1
+    JMP   _vircon32_volume_done
+
+_vircon32_volume_global:
+    OUT   SPU_GlobalVolume, R1
+
+_vircon32_volume_done:
+    MOV   R0, BOXED_NIL
+
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; ============================================================================
+;; __builtin_vircon32_volume_mask: apply a volume to every channel a
+;; namespace's channel-ownership mask currently marks as claimed
+;; ============================================================================
+;; Stack layout relative to BP:
+;; [BP+2]: volume    (Lua float, or BOXED_NIL -> 1.0 default)
+;; [BP+3]: mask_addr (raw hardware integer -- the RAM address of either
+;;                    VIRCON32_MUSIC_CHANNEL_MASK or VIRCON32_SFX_CHANNEL_MASK,
+;;                    pushed by the compiler as a literal, NOT a Lua value)
+;;
+;; Returns: R0 = BOXED_NIL
+;;
+;; Backs music.volume(VOL)/sfx.volume(VOL) called with NO channel argument
+;; at all. The mask is a 16-bit-relevant bitmask, bit N set meaning channel
+;; N was last assigned a sound by THIS namespace's .play() (see
+;; emit_vircon32_claim_channel_static() in v32lua.c, and the matching
+;; inline claim/release block in __builtin_vircon32_play/_sfx_play above,
+;; for how the mask gets populated). Every set bit's channel gets its
+;; SPU_ChannelVolume written; an empty mask (nothing has played on this
+;; namespace yet) makes this a no-op, which is the correct behaviour --
+;; there is nothing to apply the volume to.
+;;
+;; This intentionally does NOT touch SPU_GlobalVolume. Reaching the true
+;; global port is music.volume(VOL, -1)/sfx.volume(VOL, -1), handled by
+;; __builtin_vircon32_volume above instead.
+;;
+;; Register use: R1 = resolved volume (kept live, never compared directly).
+;; R2 = mask address, then free once the mask value is loaded into R3
+;; (kept live for the whole loop). R4 = channel counter 0-15 (kept live).
+;; R5/R6/R7 are throwaway per-iteration scratch.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_vircon32_volume_mask:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; --- 1. Resolve the volume: nil -> 1.0 ---
+    MOV   R1, [BP+2]
+    MOV   R2, R1
+    IEQ   R2, BOXED_NIL
+    JF    R2, _vircon32_volmask_val_ready
+    MOV   R1, 1.0
+
+_vircon32_volmask_val_ready:
+    ;; --- 2. Load this namespace's channel-ownership mask ---
+    MOV   R2, [BP+3]              ; mask RAM address (raw hardware int)
+    MOV   R3, [R2]                ; mask value: bit N set = channel N is ours
+
+    ;; --- 3. For each set bit 0-15, select that channel and set its volume ---
+    MOV   R4, 0                   ; channel counter
+
+_vircon32_volmask_loop:
+    MOV   R5, R4
+    IGE   R5, 16
+    JT    R5, _vircon32_volmask_done
+
+    MOV   R6, 1
+    SHL   R6, R4                  ; R6 = 1 << channel
+    MOV   R7, R3
+    AND   R7, R6
+    JF    R7, _vircon32_volmask_next   ; bit clear -> not ours, skip
+
+    OUT   SPU_SelectedChannel, R4
+    OUT   SPU_ChannelVolume, R1
+
+_vircon32_volmask_next:
+    IADD  R4, 1
+    JMP   _vircon32_volmask_loop
+
+_vircon32_volmask_done:
+    MOV   R0, BOXED_NIL
+
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; ============================================================================
 ;; __builtin_vircon32_memcard_title: set the memcard's title, one word per
 ;; character, into the first VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS (16) of
 ;; the 20-word title block. The last 4 words (VIRCON32_MEMCARD_DATA_BASE-4
@@ -1160,6 +1318,15 @@ _memcard_title_copy_loop:
     MOV   R4, [R1]
     IEQ   R4, 0
     JT    R4, _memcard_title_pad_loop ; hit NUL -> pad the remainder with 0
+    MOV   R4, [R1]                    ; IEQ above clobbered R4 with its 0/1
+                                       ; result -- reload the real character
+    ;; Character words in this VM's internal string storage are raw
+    ;; hardware-integer ASCII codes, NOT boxed Lua floats (see
+    ;; string.byte()'s own CIF on this exact read, __builtin_string_byte
+    ;; above). CIF it here so a title word reads back through
+    ;; memcard.load()/memcard[pos] as the same value string.byte() would
+    ;; report, not a raw bit pattern.
+    CIF   R4
     MOV   [R2], R4
     IADD  R1, 1
     IADD  R2, 1
@@ -1237,8 +1404,13 @@ __builtin_vircon32_memcard_append:
     PUSH  BP
     MOV   BP, SP
 
-    ;; --- 1. Read the persistent on-card cursor (raw hardware int) ---
+    ;; --- 1. Read the persistent on-card cursor ---
+    ;; Stored as a real Lua number (see the CIF at the bottom of this
+    ;; routine) so memcard.load(-1)/memcard[-1] can read it back directly
+    ;; like any other value -- CFI it back to a raw hardware int here for
+    ;; this routine's own arithmetic.
     MOV   R1, [VIRCON32_MEMCARD_CURSOR_ADDR]
+    CFI   R1
     PUSH  R1                            ; [BP-1] = old_cursor
 
     ;; --- 2. This entry's base address, saturated to stay on-card ---
@@ -1267,12 +1439,19 @@ _memcard_append_addr_ok:
 
 _memcard_append_scalar:
     ;; --- SCALAR PATH: [TAG_SCALAR][raw value] -- 2 words ---
+    ;; The tag is written as a proper Lua number (CIF'd) so a caller can
+    ;; compare "memcard.load(pos) == 0" directly, the same way any other
+    ;; memcard word behaves -- a bare hardware-integer 0 happens to share
+    ;; 0.0's all-zero bit pattern, so this CIF is a no-op for TAG_SCALAR
+    ;; specifically, but it's here for symmetry with TAG_STRING below,
+    ;; where the equivalent CIF is NOT a no-op.
     MOV   R5, [BP-2]                    ; base_addr
     MOV   R7, 0                         ; TAG_SCALAR
+    CIF   R7
     MOV   [R5], R7
     IADD  R5, 1
-    MOV   R6, [BP+2]
-    MOV   [R5], R6
+    MOV   R6, [BP+2]                    ; the value itself is already a
+    MOV   [R5], R6                      ; properly boxed Lua value -- no CIF
 
     MOV   R1, [BP-1]                    ; old_cursor
     IADD  R1, 2                         ; new_cursor = old_cursor + 2
@@ -1285,26 +1464,44 @@ _memcard_append_is_string:
     CALL  __builtin_string_len          ; R0 = length, boxed
     IADD  SP, 1
     CFI   R0                            ; R0 = length, hardware integer
-    PUSH  R0                            ; [BP-3] = length
+    PUSH  R0                            ; [BP-3] = length (raw int -- loop counter)
 
     MOV   R0, [BP+2]
     CALL  __unbox_string                ; R0 = raw char-array pointer
     MOV   R4, R0                        ; R4 = source pointer (no more CALLs after this)
 
     MOV   R5, [BP-2]                    ; R5 = dest pointer, starts at base_addr
-    MOV   R6, [BP-3]                    ; R6 = remaining char count
+    MOV   R6, [BP-3]                    ; R6 = remaining char count (raw int)
 
-    MOV   R7, 1                         ; TAG_STRING
+    ;; TAG_STRING (1) and the length word both need CIF before storage --
+    ;; unlike TAG_SCALAR's 0, a raw hardware integer 1 (0x00000001) is a
+    ;; completely different bit pattern from the Lua float 1.0
+    ;; (0x3F800000), so without this a caller comparing
+    ;; "memcard.load(pos) == 1" against an unconverted tag would never
+    ;; match.
+    MOV   R7, 1
+    CIF   R7                            ; TAG_STRING, as a real Lua number
     MOV   [R5], R7
     IADD  R5, 1
-    MOV   [R5], R6                      ; word 1: length
+
+    MOV   R7, R6                        ; a COPY of the length -- R6 itself
+    CIF   R7                            ; stays a raw int; the loop below
+    MOV   [R5], R7                      ; still needs it that way
     IADD  R5, 1
 
 _memcard_append_str_copy:
     MOV   R7, R6
     IEQ   R7, 0
     JT    R7, _memcard_append_str_done
+    ;; Character words in this VM's internal string storage are raw
+    ;; hardware-integer ASCII codes, NOT boxed Lua floats -- confirmed by
+    ;; string.byte()'s own CIF on this exact read (see __builtin_string_
+    ;; byte above). Copying them verbatim would embed that same raw-int
+    ;; mismatch into the memcard; CIF each one on the way in so
+    ;; memcard.load() at a char's position reads back the same value
+    ;; string.byte() would report for it.
     MOV   R7, [R4]
+    CIF   R7
     MOV   [R5], R7
     IADD  R4, 1
     IADD  R5, 1
@@ -1321,7 +1518,9 @@ _memcard_append_store_cursor:
     ;; Best-effort saturate: once a no-position save would run the cursor
     ;; past the end of the card, pin it at the last valid data offset so
     ;; every further no-position save just keeps overwriting that final
-    ;; slot instead of the cursor wandering out of range forever.
+    ;; slot instead of the cursor wandering out of range forever. This
+    ;; clamp compares raw hardware integers -- CIF happens AFTER, right
+    ;; before the store.
     MOV   R3, R1
     MOV   R2, VIRCON32_MEMCARD_END
     ISUB  R2, VIRCON32_MEMCARD_DATA_BASE
@@ -1329,7 +1528,8 @@ _memcard_append_store_cursor:
     JF    R3, _memcard_append_cursor_ok
     MOV   R1, R2
 _memcard_append_cursor_ok:
-    MOV   [VIRCON32_MEMCARD_CURSOR_ADDR], R1
+    CIF   R1                            ; store as a real Lua number --
+    MOV   [VIRCON32_MEMCARD_CURSOR_ADDR], R1  ; see the read at the top
 
     ;; --- Return the original value, matching save()'s convention ---
     MOV   R0, [BP+2]
