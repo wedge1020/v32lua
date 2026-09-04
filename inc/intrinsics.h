@@ -129,6 +129,7 @@ bool  emit_vircon32_memcard_write           (ASTNode *val_node, ASTNode *pos_nod
 bool  emit_vircon32_memcard_read            (ASTNode *pos_node, int dest_reg, int line_number);
 bool  emit_vircon32_memcard_save_intrinsic  (ASTNode *, int);
 bool  emit_vircon32_memcard_load_intrinsic  (ASTNode *, int);
+bool  emit_vircon32_memcard_load_table_intrinsic (ASTNode *, int);
 bool  emit_vircon32_memcard_title_intrinsic (ASTNode *, int);
 int   try_emit_memcard_namespace_intrinsic  (ASTNode *, int, const char *);
 
