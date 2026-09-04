@@ -1423,7 +1423,7 @@ __builtin_vircon32_memcard_append:
 _memcard_append_addr_ok:
     PUSH  R2                            ; [BP-2] = base_addr
 
-    ;; --- 3. Classify the value: real string, or anything else ---
+    ;; --- 3. Classify the value: real string, table, or anything else ---
     MOV   R1, [BP+2]
     MOV   R3, R1
     AND   R3, BOXED_DATA
@@ -1438,6 +1438,15 @@ _memcard_append_addr_ok:
     JMP   _memcard_append_is_string
 
 _memcard_append_scalar:
+    ;; A table falls through to here from the classify block above (it
+    ;; matches neither BOXED_ROMSTRING nor BOXED_RAMSTRING), so it gets one
+    ;; more check before being treated as an opaque scalar -- see
+    ;; _memcard_append_is_table below for its own dump format.
+    MOV   R3, R1
+    AND   R3, BOXED_DATA
+    IEQ   R3, BOXED_TABLE
+    JT    R3, _memcard_append_is_table
+
     ;; --- SCALAR PATH: [TAG_SCALAR][raw value] -- 2 words ---
     ;; The tag is written as a proper Lua number (CIF'd) so a caller can
     ;; compare "memcard.load(pos) == 0" directly, the same way any other
@@ -1513,6 +1522,92 @@ _memcard_append_str_done:
     IADD  R1, 2                         ; +tag +length words
     MOV   R6, [BP-3]                    ; original length
     IADD  R1, R6                        ; new_cursor = old_cursor + 2 + length
+    JMP   _memcard_append_store_cursor
+
+_memcard_append_is_table:
+    ;; --- TABLE PATH: [TAG_TABLE][pair_count][k1][v1]...[kN][vN] ---
+    ;; A RAW DUMP of the table's hash-bucket storage -- NOT a general
+    ;; recursive serializer. See the design note in v32lua.c
+    ;; (intrinsics_vircon32_memcard.c's header comment) for the full
+    ;; rationale; in short: this compiler's array-part fast path is
+    ;; currently unreachable in practice (__builtin_table_set_reallocate
+    ;; above is a TODO stub -- capacity is always 0), so every table,
+    ;; array-shaped or not, already lives entirely in the hash-bucket
+    ;; chain walked here. Each key/value word is copied exactly as it's
+    ;; boxed -- a number/boolean/nil round-trips correctly forever, but a
+    ;; string/table/function key or value is copied as its raw RAM
+    ;; pointer, valid only within this run, same as the scalar path above.
+    ;; Restored by __builtin_vircon32_memcard_load_table below.
+    MOV   R1, [BP+2]
+    AND   R1, BOXED_PAYLOAD             ; R1 = raw table header address
+
+    ;; --- Pass 1: count total pairs across every bucket in the chain ---
+    MOV   R2, [R1+3]                    ; R2 = first bucket (hash ptr), or 0
+    MOV   R3, 0                         ; R3 = running pair count
+
+_memcard_append_table_count_loop:
+    MOV   R4, R2
+    IEQ   R4, 0
+    JT    R4, _memcard_append_table_count_done
+    MOV   R4, [R2]                      ; PairCount of this bucket
+    IADD  R3, R4
+    MOV   R2, [R2+1]                    ; step to NextBucketPtr
+    JMP   _memcard_append_table_count_loop
+
+_memcard_append_table_count_done:
+    ;; R3 = total pair count (raw int) -- kept live through Pass 2 below,
+    ;; never clobbered (no CALLs happen in this routine's table path).
+
+    ;; --- Write the header: [TAG_TABLE][pair_count] ---
+    MOV   R5, [BP-2]                    ; base_addr
+    MOV   R7, 2                         ; TAG_TABLE
+    CIF   R7
+    MOV   [R5], R7
+    IADD  R5, 1
+
+    MOV   R7, R3                        ; a COPY of the pair count for
+    CIF   R7                            ; storage -- R3 itself stays a raw
+    MOV   [R5], R7                      ; int, needed below for the cursor
+    IADD  R5, 1                         ; math and isn't touched again here
+
+    ;; --- Pass 2: walk the chain again, writing each Key/Value pair ---
+    MOV   R1, [BP+2]
+    AND   R1, BOXED_PAYLOAD
+    MOV   R2, [R1+3]                    ; R2 = first bucket again
+
+_memcard_append_table_write_bucket:
+    MOV   R4, R2
+    IEQ   R4, 0
+    JT    R4, _memcard_append_table_write_done
+    MOV   R6, [R2]                      ; R6 = PairCount in this bucket
+    MOV   R8, R2
+    IADD  R8, 2                         ; R8 = pointer to Key0 in this bucket
+
+_memcard_append_table_write_pair:
+    MOV   R4, R6
+    IEQ   R4, 0
+    JT    R4, _memcard_append_table_write_next_bucket
+    MOV   R7, [R8]                      ; Key -- already a properly boxed
+    MOV   [R5], R7                      ; Lua value (or raw pointer); no CIF
+    IADD  R5, 1
+    IADD  R8, 1
+    MOV   R7, [R8]                      ; Value
+    MOV   [R5], R7
+    IADD  R5, 1
+    IADD  R8, 1
+    ISUB  R6, 1
+    JMP   _memcard_append_table_write_pair
+
+_memcard_append_table_write_next_bucket:
+    MOV   R2, [R2+1]                    ; NextBucketPtr
+    JMP   _memcard_append_table_write_bucket
+
+_memcard_append_table_write_done:
+    MOV   R1, [BP-1]                    ; old_cursor
+    IADD  R1, 2                         ; +tag +pair_count words
+    IADD  R1, R3                        ; +pair_count words for keys
+    IADD  R1, R3                        ; +pair_count words for values
+    JMP   _memcard_append_store_cursor
 
 _memcard_append_store_cursor:
     ;; Best-effort saturate: once a no-position save would run the cursor
@@ -1534,6 +1629,124 @@ _memcard_append_cursor_ok:
     ;; --- Return the original value, matching save()'s convention ---
     MOV   R0, [BP+2]
 
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; ============================================================================
+;; __builtin_vircon32_memcard_load_table: reconstruct a table previously
+;; written by memcard.save(a_table)'s auto-append form
+;; ============================================================================
+;; Stack layout relative to BP:
+;; [BP+2]: position (Lua float, required -- see v32lua.c for why there's
+;;         no "no position" default for this one)
+;;
+;; Returns: R0 = a freshly built table (boxed), or BOXED_NIL if the tag
+;; word at POSITION isn't TAG_TABLE.
+;;
+;; Reads [TAG_TABLE][pair_count][k1][v1]...[kN][vN] starting at POSITION
+;; (see _memcard_append_is_table above for how that layout gets written),
+;; validates the tag, then calls __builtin_table_new once and
+;; __builtin_table_set once per pair to rebuild an equivalent table. Each
+;; restored key/value is used exactly as stored -- no recursive
+;; reconstruction of nested tables/strings/functions; see the safety note
+;; in v32lua.c.
+;;
+;; CALL-CLOBBERS-EVERYTHING DISCIPLINE: __builtin_table_new and
+;; __builtin_table_set are both called from inside the restore loop below,
+;; so nothing this routine needs afterward is trusted to survive in a
+;; plain register across either call -- entry_address, pair_count, the
+;; new table, the current pair pointer, and the loop counter are all kept
+;; in named stack slots ([BP-1] through [BP-5]) and reloaded/rewritten
+;; around every CALL, same discipline as __builtin_vircon32_memcard_append
+;; above.
+;;
+;; UNVERIFIED: written to the same standard as the rest of this file, but
+;; not yet run through v32sim.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_vircon32_memcard_load_table:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; --- 1. Resolve + clamp the entry address (same as every other
+    ;; memcard position argument in this file) ---
+    MOV   R1, [BP+2]
+    CFI   R1
+    IADD  R1, VIRCON32_MEMCARD_DATA_BASE
+    MOV   R2, R1
+    ILT   R2, VIRCON32_MEMCARD_BASE
+    JF    R2, _memcard_loadtable_lo_ok
+    MOV   R1, VIRCON32_MEMCARD_BASE
+_memcard_loadtable_lo_ok:
+    MOV   R2, R1
+    IGT   R2, VIRCON32_MEMCARD_END
+    JF    R2, _memcard_loadtable_hi_ok
+    MOV   R1, VIRCON32_MEMCARD_END
+_memcard_loadtable_hi_ok:
+    PUSH  R1                            ; [BP-1] = entry address
+
+    ;; --- 2. Validate the tag before trusting anything after it ---
+    MOV   R2, [R1]
+    CFI   R2
+    IEQ   R2, 2                         ; TAG_TABLE
+    JF    R2, _memcard_loadtable_bad_tag
+
+    ;; --- 3. Pair count ---
+    MOV   R2, [R1+1]
+    CFI   R2
+    PUSH  R2                            ; [BP-2] = pair_count
+
+    ;; --- 4. Build a fresh table -- nothing live in registers to lose
+    ;; here, so no special handling needed around this CALL ---
+    CALL  __builtin_table_new
+    PUSH  R0                            ; [BP-3] = the new table
+
+    ;; --- 5. Restore each pair. The current pair pointer and the "pairs
+    ;; restored so far" counter both get clobbered by __builtin_table_set,
+    ;; so both live in stack slots, reloaded/rewritten around every
+    ;; iteration rather than trusted to survive in R1/R3. ---
+    MOV   R1, [BP-1]
+    IADD  R1, 2                         ; first Key word
+    PUSH  R1                            ; [BP-4] = current pair pointer
+    MOV   R3, 0
+    PUSH  R3                            ; [BP-5] = pairs restored so far
+
+_memcard_loadtable_restore_loop:
+    MOV   R4, [BP-5]
+    MOV   R5, [BP-2]
+    IGE   R4, R5
+    JT    R4, _memcard_loadtable_done
+
+    MOV   R1, [BP-4]
+    MOV   R6, [R1]                      ; Key
+    MOV   R7, [R1+1]                    ; Value
+
+    MOV   R0, [BP-3]
+    PUSH  R0                            ; Arg: table  (lands at [BP+4])
+    PUSH  R6                            ; Arg: key    (lands at [BP+3])
+    PUSH  R7                            ; Arg: value  (lands at [BP+2])
+    CALL  __builtin_table_set
+    IADD  SP, 3
+
+    MOV   R1, [BP-4]
+    IADD  R1, 2                         ; advance to next Key/Value pair
+    MOV   [BP-4], R1
+
+    MOV   R3, [BP-5]
+    IADD  R3, 1
+    MOV   [BP-5], R3
+
+    JMP   _memcard_loadtable_restore_loop
+
+_memcard_loadtable_done:
+    MOV   R0, [BP-3]                    ; return the reconstructed table
+    JMP   _memcard_loadtable_return
+
+_memcard_loadtable_bad_tag:
+    MOV   R0, BOXED_NIL
+
+_memcard_loadtable_return:
     MOV   SP, BP
     POP   BP
     RET

@@ -5,32 +5,27 @@
 --
 -- Self-checking unit test for the native Vircon32 memcard.* API: exercises
 -- explicit-position save()/load(), the memcard[position] bracket sugar,
--- memcard.title(), and the no-position auto-append form (both scalar and
--- string values), then verifies every value against what should have been
--- written. See API.md's "Memory card: memcard.*" section for the full
--- specification this test is checking against.
+-- memcard.title(), the no-position auto-append form (scalar, string, AND
+-- table values), and memcard.load_table(), then verifies every value
+-- against what should have been written. See API.md's "Memory card:
+-- memcard.*" section for the full specification this test checks against.
 --
 -- Each section owns a disjoint range of memcard positions so sections can't
 -- accidentally corrupt each other's data:
 --   SECTION 1 (explicit-position primitives): data positions 20..24
 --   SECTION 2 (bracket sugar):                data positions 30..31
 --   SECTION 3 (title):                        title positions -20..-5
---   SECTION 4 (auto-append):                  data positions 0..9 (fresh
+--   SECTION 4 (auto-append: scalar/string):    data positions 0..9 (fresh
 --                                              cursor start -- must run
 --                                              before anything else uses
 --                                              the no-position save() form)
+--   SECTION 5 (auto-append: table):           wherever the cursor is right
+--                                              after SECTION 4 -- reads its
+--                                              own position back via
+--                                              memcard[-1] rather than a
+--                                              fixed number
 --
 -- === EXPECTED OUTPUT ===
--- PASS  explicit save/load: number
--- PASS  explicit save/load: true
--- PASS  explicit save/load: false
--- PASS  explicit save/load: float
--- PASS  save() return value
--- PASS  bracket write/read
--- PASS  bracket read-modify-write
--- PASS  bracket: raw string pointer (same run only)
--- PASS  title: characters match
--- PASS  title: remainder zero-padded
 -- PASS  cursor starts at 0 on a blank card
 -- PASS  cursor after 3 auto-appends
 -- PASS  entry1 tag
@@ -42,8 +37,26 @@
 -- PASS  entry3 tag
 -- PASS  entry3 value
 -- PASS  auto-append save() return value
+-- PASS  table save() returns the same table
+-- PASS  table restore: not nil
+-- PASS  table restore: alice
+-- PASS  table restore: bob
+-- PASS  table restore: carol
+-- PASS  table restore: unknown key is nil
+-- PASS  table restore: is a distinct table
+-- PASS  load_table() on a non-table entry returns nil
+-- PASS  explicit save/load: number
+-- PASS  explicit save/load: true
+-- PASS  explicit save/load: false
+-- PASS  explicit save/load: float
+-- PASS  save() return value
+-- PASS  bracket write/read
+-- PASS  bracket read-modify-write
+-- PASS  bracket: raw string pointer (same run only)
+-- PASS  title: characters match
+-- PASS  title: remainder zero-padded
 --
--- PASS: 21  FAIL: 0
+-- PASS: 29  FAIL: 0
 -- ALL TESTS PASSED
 -- === END EXPECTED OUTPUT ===
 -- ============================================================================
@@ -98,6 +111,41 @@ function main()
     -- as the explicit-position form
     local ret2 = memcard.save(555)   -- lands at position 8, cursor -> 10
     check("auto-append save() return value", ret2, 555)
+
+    -- ------------------------------------------------------------------
+    -- SECTION 5: memcard.save(a_table) / memcard.load_table(position) --
+    -- table dump/restore, still through the auto-append form. Continues
+    -- directly from this section's own cursor (no explicit position
+    -- bookkeeping needed for the save itself) rather than a fixed
+    -- position, since the whole point is exercising the auto-append path.
+    -- ------------------------------------------------------------------
+    local scores = {}
+    scores.alice = 500
+    scores.bob = 350
+    scores.carol = 900
+
+    local table_pos = memcard[-1]   -- wherever the cursor is right now
+    local returned_table = memcard.save(scores)
+    check("table save() returns the same table", returned_table, scores)
+
+    local restored = memcard.load_table(table_pos)
+
+    check("table restore: not nil",            restored ~= nil, true)
+    check("table restore: alice",              restored.alice, 500)
+    check("table restore: bob",                restored.bob, 350)
+    check("table restore: carol",              restored.carol, 900)
+    check("table restore: unknown key is nil", restored.dave, nil)
+
+    -- restored is a genuinely NEW table, not the same object as scores
+    check("table restore: is a distinct table", restored ~= scores, true)
+
+    -- Reading a non-table entry as a table should fail gracefully, not
+    -- crash or return garbage -- position 20 is SECTION 1's raw number
+    -- (1234), written with no tag at all (explicit-position saves never
+    -- write one), so the tag check here reads that 1234 and correctly
+    -- rejects it.
+    local bad = memcard.load_table(20)
+    check("load_table() on a non-table entry returns nil", bad, nil)
 
     -- ------------------------------------------------------------------
     -- SECTION 1: memcard.save(value, position) / memcard.load(position)

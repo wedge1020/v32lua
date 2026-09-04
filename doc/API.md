@@ -38,6 +38,7 @@ load-bearing and every sound emitter here depends on it.
   - [memcard.save() / memcard.load()](#memcardsave--memcardload)
   - [memcard[position]](#memcardposition)
   - [memcard.title()](#memcardtitlestr---nil)
+  - [Tables: memcard.save() / memcard.load_table()](#tables-memcardsave--memcardload_table)
   - [Address layout](#address-layout)
   - [Type tags (auto-append form only)](#type-tags-auto-append-form-only)
   - [What's intentionally not here](#whats-intentionally-not-here-1)
@@ -383,6 +384,7 @@ memcard.save(value, position)   -> value   (raw write, exactly 1 word)
 memcard.save(value)             -> value   (auto-append; see below)
 memcard.load(position)          -> value   (raw read, exactly 1 word)
 memcard.load()                  -> value   (position 0)
+memcard.load_table(position)    -> table or nil   (see Tables, below)
 memcard.title(str)              -> nil     (sets the 16-word title)
 
 memcard[position]                  == memcard.load(position)
@@ -465,6 +467,52 @@ each with its own title.
 memcard.title("My Save File")
 ```
 
+## Tables: memcard.save() / memcard.load_table()
+
+`memcard.save(a_table)` — the no-position auto-append form **only** —
+writes a **raw dump** of the table's contents: a straight walk of its
+internal hash-bucket storage, the same way you'd `fwrite()` a struct to a
+file in C. It is not a general recursive serializer.
+
+```lua
+local highscores = { alice = 500, bob = 350, carol = 900 }
+memcard.save(highscores)
+
+local restored = memcard.load_table(0)
+print(restored.alice)   -- 500
+```
+
+`memcard.save(a_table, position)` (the **explicit-position** form) is
+unaffected by any of this — it still writes a single raw pointer word,
+exactly like saving a table that way always has. The table dump format
+below is exclusively a feature of the no-position auto-append form.
+
+**Why "the hash side" and not an array**: this compiler's table
+implementation has an array-part fast path in principle, but its
+reallocation path is currently an unimplemented stub — capacity never
+grows past 0, so **every** table, whether it looks array-shaped
+(`{1, 2, 3}`) or not, is already stored entirely in the hash-bucket chain.
+There is no separate, simpler "array case" to special-case today; dumping
+the hash side covers all tables as they actually exist right now.
+
+**What gets copied, and what doesn't**: each key and value is written
+exactly as it's boxed. A number, boolean, or nil key/value round-trips
+correctly forever. A key or value that is itself a table, string, or
+function is written as its raw pointer — **not** recursively unpacked —
+so it's only meaningful within the same run that wrote it; reloading it in
+a future session (or after the pointer's target has moved/been collected)
+is undefined. This is the same safety boundary the rest of `memcard.*`
+already draws (see [Safety note](#safety-note)) — a table dump doesn't
+cross it, it just applies it per-entry instead of once.
+
+**`memcard.load_table(position)`** rebuilds a fresh table from a dump
+written this way. `position` is **required** — unlike `memcard.load()`,
+there's no sensible "position 0" default for something whose size in
+words isn't known until the entry itself is read. It validates the tag
+word before trusting anything after it; reading at a position that
+doesn't hold a table dump returns `nil` rather than misreading unrelated
+words as a pair count and garbage keys/values.
+
 ## Address layout
 
 ```
@@ -495,39 +543,47 @@ block — reachable, but only by consciously going negative.
 
 ## Type tags (auto-append form only)
 
-`memcard.save(value)` with no position writes one of two shapes at the
+`memcard.save(value)` with no position writes one of three shapes at the
 cursor, then advances the cursor by however many words that shape used:
 
 | Value type | Layout | Words used |
 |---|---|---|
 | Real Lua string | `[TAG_STRING][length][char 0][char 1]...` | `2 + length` |
-| Number / boolean / nil / table / function | `[TAG_SCALAR][raw value]` | `2` |
+| Table | `[TAG_TABLE][pair_count][key 0][val 0]...` | `2 + 2 * pair_count` |
+| Number / boolean / nil / function | `[TAG_SCALAR][raw value]` | `2` |
 
-`TAG_SCALAR` is `0`, `TAG_STRING` is `1`. A table or function saved this
-way is stored as its raw boxed pointer under `TAG_SCALAR` — see the safety
-note below, this is not a general serialization.
+`TAG_SCALAR` is `0`, `TAG_STRING` is `1`, `TAG_TABLE` is `2`. A function
+saved this way is stored as its raw boxed pointer under `TAG_SCALAR` — see
+the safety note below, this is not a general serialization.
 
 The explicit-`position` form (`memcard.save(value, position)` /
 `memcard[position] = value`) never writes a tag — it is always exactly one
-raw word, regardless of value type.
+raw word, regardless of value type. This includes tables: a table saved
+with an explicit position is a single raw pointer word, not a dump — see
+[Tables](#tables-memcardsave--memcardload_table) above.
 
 ### Safety note
 
 A number, boolean, or nil round-trips correctly forever — that bit pattern
-means the same thing on any run. A real Lua string saved through the
-auto-append form round-trips correctly too. A table, a string saved via
-the *explicit-position* form (which stores a raw pointer, not real string
-contents), or a function value round-trips fine **within the same run** —
-its pointer is still valid — but is meaningless after a fresh boot reads
-it back from a real memory card, since heap/ROM layout is not guaranteed
-to match between runs. Stick to numbers/booleans/nil (or real strings via
-the auto-append form) for anything meant to survive an actual
-save/reload cycle.
+means the same thing on any run. A real Lua string or table saved through
+the auto-append form round-trips correctly too — a string's actual
+characters are copied, and a table's actual key/value pairs are copied,
+restorable with `memcard.load_table()`. A table saved via the
+*explicit-position* form, a string saved via the *explicit-position* form
+(which stores a raw pointer, not real string contents), or a function
+value — including any such value found as a *key or value inside a saved
+table*, since those are not recursively unpacked — round-trips fine
+**within the same run** — its pointer is still valid — but is meaningless
+after a fresh boot reads it back from a real memory card, since heap/ROM
+layout is not guaranteed to match between runs. Stick to numbers/booleans/
+nil (or real strings/tables of such, via the auto-append form) for
+anything meant to survive an actual save/reload cycle.
 
 ## What's intentionally NOT here
 
-- No table serialization. A table is always saved as a raw pointer,
-  meaningful only within the current run.
+- No *recursive* table serialization — a table dump copies its direct
+  key/value pairs only; a nested table inside one is a raw pointer, one
+  level, same as everywhere else in `memcard.*`.
 - `memcard.load()`'s no-position default does not follow the auto-append
   cursor the way `memcard.save()`'s does — it always reads word 0.
 - No format/erase call — a card is formatted by writing to it, not by a
