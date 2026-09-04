@@ -582,6 +582,8 @@ int   emit_variable_map (void)
     {
         fprintf (out(), "%%define  VIRCON32_BTN_PREV_STATE  0x%.8X\n", vircon32_btn_prev_state_base);
         fprintf (out(), "%%define  VIRCON32_SFX_CURSOR      0x%.8X\n", vircon32_sfx_cursor_base);
+        fprintf (out(), "%%define  VIRCON32_MUSIC_CHANNEL_MASK 0x%.8X\n", vircon32_music_channel_mask_base);
+        fprintf (out(), "%%define  VIRCON32_SFX_CHANNEL_MASK   0x%.8X\n", vircon32_sfx_channel_mask_base);
     }
 
     SymbolNode *curr = global_scope ? global_scope->symbols : NULL;

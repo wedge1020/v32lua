@@ -585,6 +585,48 @@ static void spu_push_optional_arg (ASTNode *arg, const char *label)
 }
 
 // ============================================================================
+// Channel-ownership tracking for music.volume()/sfx.volume()'s no-channel
+// "apply to every channel I've used" mode.
+//
+// Two RAM words, VIRCON32_MUSIC_CHANNEL_MASK and VIRCON32_SFX_CHANNEL_MASK,
+// each a 16-bit-relevant bitmask: bit N set means channel N was last
+// assigned a sound by that namespace's .play(). Ownership is exclusive --
+// claiming a channel for one namespace releases it from the other -- since
+// a channel doesn't actually belong to music or sfx at the hardware level,
+// only by convention in how the game's .play() calls have been using it.
+// Only .play() ever touches these masks; .pause()/.resume()/.stop()/
+// .volume() leave them alone, so a paused or stopped channel is still
+// found by the tracked-channels mode until something else claims it.
+//
+// This helper handles the COMPILE-TIME-KNOWN channel case (the static-fold
+// branches of emit_vircon32_play_intrinsic/emit_vircon32_sfx_play_intrinsic
+// below). The dynamic (CALL) paths do the identical claim/release directly
+// in assembly -- see the "Track channel ownership" block inline in
+// __builtin_vircon32_play and __builtin_vircon32_sfx_play in vircon32.s --
+// since the channel isn't known until the runtime routine resolves it.
+// ============================================================================
+static void emit_vircon32_claim_channel_static (int channel, bool for_music)
+{
+    const char *own_mask   = for_music ? "VIRCON32_MUSIC_CHANNEL_MASK" : "VIRCON32_SFX_CHANNEL_MASK";
+    const char *other_mask = for_music ? "VIRCON32_SFX_CHANNEL_MASK"   : "VIRCON32_MUSIC_CHANNEL_MASK";
+
+    unsigned int bit        = (1u << (unsigned int) channel);
+    unsigned int clear_mask = ~bit;
+
+    int reg = allocate_register();
+
+    emit_asm("MOV  R%d, [%s]", reg, own_mask);
+    emit_asm("OR   R%d, 0x%X ; claim channel %d", reg, bit, channel);
+    emit_asm("MOV  [%s], R%d", own_mask, reg);
+
+    emit_asm("MOV  R%d, [%s]", reg, other_mask);
+    emit_asm("AND  R%d, 0x%X ; release channel %d, if the other namespace had it", reg, clear_mask, channel);
+    emit_asm("MOV  [%s], R%d", other_mask, reg);
+
+    unlock_register(reg);
+}
+
+// ============================================================================
 // play(SOUND [, CHANNEL [, CHANLOOP [, CHANVOL [, STARTINDEX]]]])
 // ============================================================================
 bool emit_vircon32_play_intrinsic (ASTNode *node, int dest_reg)
@@ -705,6 +747,8 @@ bool emit_vircon32_play_intrinsic (ASTNode *node, int dest_reg)
             emit_asm("OUT  SPU_ChannelPosition, %d ; seek (after play: play rewinds to 0)",
                      (int) static_start);
         }
+
+        emit_vircon32_claim_channel_static(static_channel, true /* for_music */);
 
         if (dest_reg != 0) {
             emit_asm("MOV  R%d, %f ; play() returns the channel used",
@@ -836,7 +880,7 @@ bool emit_vircon32_channel_cmd_intrinsic (ASTNode *node, int dest_reg, const cha
 }
 
 // ============================================================================
-// intrinsics_vircon32_sound_namespaces.c
+// intrinsics/spu sound namespaces
 //
 // The music.* / sfx.* sound API, plus the compile-time alias mechanism.
 //
@@ -849,9 +893,14 @@ bool emit_vircon32_channel_cmd_intrinsic (ASTNode *node, int dest_reg, const cha
 //   music.resume ([CHANNEL])
 //   music.stop   ([CHANNEL])
 //   music.playing([CHANNEL])                                  -> boolean
+//   music.volume (VOL [, CHANNEL])    CHANNEL: omitted/nil -> music's
+//                                      tracked channels; -1 -> true global;
+//                                      0-15 -> that channel
 //
 //   sfx.play(SOUND [, CHANNEL [, VOL [, SPEED]]])             -> channel used
 //   sfx.stop([CHANNEL])
+//   sfx.volume(VOL [, CHANNEL])       CHANNEL: same three modes, against
+//                                      sfx's tracked channels instead
 //
 // music defaults to channel 0. sfx, given no channel, round-robins over
 // channels 1-15 so channel 0 stays free for music. sfx never loops: the
@@ -893,8 +942,10 @@ static const char *spu_aliasable_paths[] = {
     "music.resume",
     "music.stop",
     "music.playing",
+    "music.volume",
     "sfx.play",
     "sfx.stop",
+    "sfx.volume",
     NULL
 };
 
@@ -1191,6 +1242,8 @@ bool emit_vircon32_sfx_play_intrinsic (ASTNode *node, int dest_reg)
         // own PlayWithLoop flag. An sfx never loops.
         emit_asm("OUT  SPU_ChannelLoopEnabled, 0 ; sfx never loops");
 
+        emit_vircon32_claim_channel_static(static_channel, false /* for_music */);
+
         if (dest_reg != 0) {
             emit_asm("MOV  R%d, %f ; sfx.play() returns the channel used",
                      dest_reg, (double) static_channel);
@@ -1329,6 +1382,170 @@ bool emit_vircon32_music_playing_intrinsic (ASTNode *node, int dest_reg)
     return true;
 }
 
+// ============================================================================
+// music.volume(VOL [, CHANNEL]) / sfx.volume(VOL [, CHANNEL])
+//
+// VOL is required. CHANNEL has THREE distinct meanings, chosen by what the
+// call site wrote:
+//
+//   music.volume(VOL)        no channel at all (omitted, or an explicit
+//                             `nil`) -- apply VOL to every channel THIS
+//                             NAMESPACE currently owns (see the channel-
+//                             ownership tracking notes on
+//                             emit_vircon32_claim_channel_static() above).
+//                             sfx.volume(0.3) therefore ducks only the
+//                             sound-effect channels currently in use, and
+//                             leaves music's channel alone -- unlike a
+//                             literal -1, which reaches the true hardware
+//                             global.
+//   music.volume(VOL, -1)    the actual SPU_GlobalVolume port -- every
+//                             channel, unconditionally, regardless of who
+//                             claimed what.
+//   music.volume(VOL, N)     N in 0-15 -- that one channel's
+//                             SPU_ChannelVolume, exactly as before. Does
+//                             NOT change channel ownership -- only .play()
+//                             claims/releases a channel.
+//
+// One emitter serves both namespaces for modes 2 and 3 (which are namespace-
+// agnostic), but mode 1 needs to know which namespace's mask to read, so
+// `lua_name` is used to pick VIRCON32_MUSIC_CHANNEL_MASK vs.
+// VIRCON32_SFX_CHANNEL_MASK.
+// ============================================================================
+bool emit_vircon32_volume_intrinsic (ASTNode *node, int dest_reg, const char *lua_name)
+{
+    ASTNode *arg_vol     = node->as.call.args_head;
+    ASTNode *arg_channel = (arg_vol != NULL) ? arg_vol->next : NULL;
+
+    if (arg_vol == NULL) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+                       "%s() requires a volume argument: %s(volume [, channel])",
+                       lua_name, lua_name);
+        return false;
+    }
+
+    if (arg_channel != NULL && arg_channel->next != NULL) {
+        compiler_warning(ERR_SEMANTIC, node->line_number,
+                         "%s() takes at most 2 arguments (volume, channel); extra arguments ignored",
+                         lua_name);
+    }
+
+    runtime_req.needs_vircon32 = true;
+
+    bool is_music = (strncmp(lua_name, "music.", 6) == 0);
+
+    // ------------------------------------------------------------------
+    // MODE 1: no channel argument at all -- apply to every channel this
+    // namespace currently owns. Which channels those are is only known at
+    // runtime (the ownership mask lives in RAM), so this is always a CALL,
+    // even when VOL is a compile-time literal.
+    // ------------------------------------------------------------------
+    if (arg_channel == NULL || arg_channel->type == NODE_NIL) {
+        const char *own_mask = is_music ? "VIRCON32_MUSIC_CHANNEL_MASK" : "VIRCON32_SFX_CHANNEL_MASK";
+
+        emit_asm("    ;; --- Vircon32 %s() Intrinsic (tracked channels) ---", lua_name);
+
+        emit_asm("MOV  R0, %s", own_mask);
+        emit_asm("PUSH R0 ; Arg 2: mask address");
+
+        int vol_reg = allocate_register();
+        generate_asm(arg_vol, vol_reg);
+        emit_asm("PUSH R%d ; Arg 1: volume", vol_reg);
+        unlock_register(vol_reg);
+
+        emit_asm("CALL __builtin_vircon32_volume_mask");
+        emit_asm("IADD SP, 2 ; Clean up %s() arguments", lua_name);
+
+        if (dest_reg != 0) {
+            emit_asm("MOV  R%d, BOXED_NIL ; return nil", dest_reg);
+        }
+        return true;
+    }
+
+    // ------------------------------------------------------------------
+    // MODES 2 & 3: an explicit channel argument was given. -1 means the
+    // real hardware global; 0-15 means that one channel. Neither mode
+    // touches the ownership masks.
+    // ------------------------------------------------------------------
+    double static_vol;
+    bool   vol_ok = spu_static_number(arg_vol, &static_vol);
+
+    double channel_val;
+    bool   channel_literal = spu_static_number(arg_channel, &channel_val);
+    bool   channel_ok         = false;
+    bool   channel_is_global  = false;
+    int    static_channel     = 0;
+
+    if (channel_literal) {
+        if (channel_val == -1) {
+            channel_ok        = true;
+            channel_is_global = true;
+        } else if (channel_val >= VIRCON32_SPU_MIN_CHANNEL && channel_val <= VIRCON32_SPU_MAX_CHANNEL) {
+            channel_ok     = true;
+            static_channel = (int) channel_val;
+        } else {
+            compiler_error(ERR_SEMANTIC, node->line_number,
+                           "%s(): channel must be -1 (global) or %d-%d (got %g)",
+                           lua_name, VIRCON32_SPU_MIN_CHANNEL, VIRCON32_SPU_MAX_CHANNEL, channel_val);
+            return false;
+        }
+    }
+    // else: dynamic channel -- channel_ok stays false, forces the runtime
+    // path below, which itself checks for -1 vs. 0-15 at runtime.
+
+    // ------------------------------------------------------------------
+    // STATIC PATH: literal volume and a literal channel (-1 or 0-15).
+    // ------------------------------------------------------------------
+    if (vol_ok && channel_ok) {
+        emit_asm("    ;; --- Vircon32 %s() Intrinsic (static fold) ---", lua_name);
+
+        // Float port either way -- stage through a register, same reasoning
+        // as SPU_ChannelVolume elsewhere in this file: integer OUT
+        // immediates are proven throughout this codebase, float ones are
+        // not.
+        int reg = allocate_register();
+        emit_asm("MOV  R%d, %f", reg, static_vol);
+
+        if (channel_is_global) {
+            emit_asm("OUT  SPU_GlobalVolume, R%d ; global volume", reg);
+        } else {
+            emit_asm("OUT  SPU_SelectedChannel, %d", static_channel);
+            emit_asm("OUT  SPU_ChannelVolume, R%d ; channel volume", reg);
+        }
+        unlock_register(reg);
+
+        if (dest_reg != 0) {
+            emit_asm("MOV  R%d, BOXED_NIL ; return nil", dest_reg);
+        }
+        return true;
+    }
+
+    // ------------------------------------------------------------------
+    // DYNAMIC PATH: runtime checks the channel value for -1 vs. 0-15 and
+    // clamps. Pushed last-to-first so volume lands at [BP+2]. The channel
+    // argument is a real (non-nil) expression here -- mode 1 above already
+    // handled "no channel" -- so it is pushed as-is, no nil-defaulting.
+    // ------------------------------------------------------------------
+    emit_asm("    ;; --- Vircon32 %s() Intrinsic ---", lua_name);
+
+    int chan_reg = allocate_register();
+    generate_asm(arg_channel, chan_reg);
+    emit_asm("PUSH R%d ; Arg 2: channel (-1 = global)", chan_reg);
+    unlock_register(chan_reg);
+
+    int vol_reg = allocate_register();
+    generate_asm(arg_vol, vol_reg);
+    emit_asm("PUSH R%d ; Arg 1: volume", vol_reg);
+    unlock_register(vol_reg);
+
+    emit_asm("CALL __builtin_vircon32_volume");
+    emit_asm("IADD SP, 2 ; Clean up %s() arguments", lua_name);
+
+    if (dest_reg != 0) {
+        emit_asm("MOV  R%d, BOXED_NIL ; return nil", dest_reg);
+    }
+
+    return true;
+}
 
 // ============================================================================
 // Dispatch for the whole music.* / sfx.* surface.
@@ -1360,9 +1577,11 @@ int try_emit_sound_namespace_intrinsic (ASTNode *node, int dest_reg, const char 
     if (strcmp(func_name, "music.pause")   == 0) return emit_vircon32_channel_cmd_intrinsic(node, dest_reg, "pause");
     if (strcmp(func_name, "music.resume")  == 0) return emit_vircon32_channel_cmd_intrinsic(node, dest_reg, "resume");
     if (strcmp(func_name, "music.playing") == 0) return emit_vircon32_music_playing_intrinsic(node, dest_reg);
+    if (strcmp(func_name, "music.volume")  == 0) return emit_vircon32_volume_intrinsic(node, dest_reg, "music.volume");
 
     if (strcmp(func_name, "sfx.play")      == 0) return emit_vircon32_sfx_play_intrinsic(node, dest_reg);
     if (strcmp(func_name, "sfx.stop")      == 0) return emit_vircon32_sfx_stop_intrinsic(node, dest_reg);
+    if (strcmp(func_name, "sfx.volume")    == 0) return emit_vircon32_volume_intrinsic(node, dest_reg, "sfx.volume");
 
     // Same reasoning as the system.* guard: an unrecognized dotted call
     // otherwise skips the "Undeclared function" check and miscompiles into a

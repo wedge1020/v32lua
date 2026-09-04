@@ -324,7 +324,7 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         }
         else
         {
-            return (emit_vircon32_spr_intrinsic (node));
+            return (emit_vircon32_spr_intrinsic (node, dest_reg));
         }
     }
 

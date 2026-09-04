@@ -83,6 +83,58 @@
 ;; Lua's number representation in v32lua).
 ;;
 ;; ============================================================================
+;; Channel-Ownership Tracking Memory (for music.volume()/sfx.volume()'s
+;; no-channel "apply to every channel I've used" mode)
+;; ============================================================================
+;; Two words, VIRCON32_MUSIC_CHANNEL_MASK and VIRCON32_SFX_CHANNEL_MASK,
+;; each a 16-bit-relevant bitmask over channels 0-15: bit N set means
+;; channel N was last assigned a sound by that namespace's .play(). Written
+;; by __builtin_vircon32_play/_sfx_play below (and by the compile-time
+;; equivalent in the static-fold path, emit_vircon32_claim_channel_static()
+;; in v32lua.c) every time a channel is claimed; read by
+;; __builtin_vircon32_volume_mask when music.volume(VOL)/sfx.volume(VOL) is
+;; called with no channel argument. These are ordinary fixed RAM words, not
+;; a heap allocation -- same reasoning as VIRCON32_BTN_PREV_STATE above:
+;; their size (1 word each) is fixed at compile time, so a malloc/heap
+;; indirection would be solving a problem this doesn't have.
+;;
+;; Requires four small additions on the compiler side (v32lua.c), mirroring
+;; the VIRCON32_BTN_PREV_STATE additions above:
+;;
+;;   1. Two globals, in context.c near vircon32_sfx_cursor_base:
+;;          int vircon32_music_channel_mask_base = -1;
+;;          int vircon32_sfx_channel_mask_base   = -1;
+;;
+;;   2. Reserve one word each, in main.c, in the same
+;;      "if (runtime_req.needs_vircon32)" block that reserves
+;;      VIRCON32_BTN_PREV_STATE/VIRCON32_SFX_CURSOR, BEFORE
+;;      register_all_globals_prepass() runs:
+;;          vircon32_music_channel_mask_base = next_ram_address;
+;;          next_ram_address                 = next_ram_address + 1;
+;;          vircon32_sfx_channel_mask_base    = next_ram_address;
+;;          next_ram_address                  = next_ram_address + 1;
+;;
+;;   3. Emit their %defines -- in emit_variable_map() (emit.c), right after
+;;      VIRCON32_SFX_CURSOR:
+;;          fprintf (out(), "%%define  VIRCON32_MUSIC_CHANNEL_MASK 0x%.8X\n",
+;;                   vircon32_music_channel_mask_base);
+;;          fprintf (out(), "%%define  VIRCON32_SFX_CHANNEL_MASK   0x%.8X\n",
+;;                   vircon32_sfx_channel_mask_base);
+;;
+;;   4. Zero-initialize both at startup -- in generate_global_setup()
+;;      (generator.c), right after the VIRCON32_SFX_CURSOR init. UNLIKE the
+;;      btnp prev-state table's zero-init (a correctness nicety), this one
+;;      matters: a stale nonzero mask would make music.volume()/
+;;      sfx.volume()'s no-channel mode apply volume to channels nothing
+;;      has actually played on yet.
+;;          emit_asm ("MOV R1, 0 ; no channels claimed by either namespace yet\n");
+;;          emit_asm ("MOV [VIRCON32_MUSIC_CHANNEL_MASK], R1\n");
+;;          emit_asm ("MOV [VIRCON32_SFX_CHANNEL_MASK], R1\n");
+;;
+;; See the full compiler-side patch notes (PATCH_music_sfx_volume.md) for
+;; the complete drop-in function bodies these four points live inside.
+;;
+;; ============================================================================
 ;; __builtin_vircon32_spr: Sprite drawing -- dispatches, at RUNTIME, to the
 ;; cheapest GPU draw command the actual scale/angle values allow
 ;; ============================================================================
@@ -718,6 +770,28 @@ _vircon32_play_chan_ready:
     CFI   R2
     OUT   SPU_ChannelAssignedSound, R2
 
+    ;; --- 3b. Track channel ownership: claim R1 for music, release it from
+    ;; sfx if sfx had it. See emit_vircon32_claim_channel_static() in
+    ;; v32lua.c (intrinsics_vircon32_sound.c) for the mirror-image
+    ;; compile-time version of this, used by the static-fold path this
+    ;; routine's dynamic path complements. R1 (channel) must survive this;
+    ;; R2 held the sound value, already OUT'd above and not needed again
+    ;; until step 4 re-fetches it from the stack, so R2/R3 are free scratch
+    ;; here. VIRCON32_MUSIC_CHANNEL_MASK/VIRCON32_SFX_CHANNEL_MASK are new
+    ;; compiler-reserved RAM words -- see the header comment block at the
+    ;; top of this file for the v32lua.c-side additions they require.
+    MOV   R2, 1
+    SHL   R2, R1                        ; R2 = 1 << channel
+    MOV   R3, [VIRCON32_MUSIC_CHANNEL_MASK]
+    OR    R3, R2
+    MOV   [VIRCON32_MUSIC_CHANNEL_MASK], R3
+
+    MOV   R3, R2
+    NOT   R3                            ; R3 = ~(1 << channel)
+    MOV   R2, [VIRCON32_SFX_CHANNEL_MASK]
+    AND   R2, R3
+    MOV   [VIRCON32_SFX_CHANNEL_MASK], R2
+
     ;; --- 4. Channel volume: nil -> 1.0 (true float port, no cast) ---
     MOV   R2, [BP+5]
     MOV   R3, R2
@@ -935,6 +1009,23 @@ _vircon32_sfx_channel_ready:
     CFI   R2
     OUT   SPU_ChannelAssignedSound, R2
 
+    ;; --- 3b. Track channel ownership: claim R1 for sfx, release it from
+    ;; music if music had it. Mirror image of the block in
+    ;; __builtin_vircon32_play above -- see the notes there. R1 (channel)
+    ;; must survive this; R2/R3 are free scratch (R2's sound value was
+    ;; already OUT'd above, and gets re-fetched from the stack at step 4).
+    MOV   R2, 1
+    SHL   R2, R1                        ; R2 = 1 << channel
+    MOV   R3, [VIRCON32_SFX_CHANNEL_MASK]
+    OR    R3, R2
+    MOV   [VIRCON32_SFX_CHANNEL_MASK], R3
+
+    MOV   R3, R2
+    NOT   R3                            ; R3 = ~(1 << channel)
+    MOV   R2, [VIRCON32_MUSIC_CHANNEL_MASK]
+    AND   R2, R3
+    MOV   [VIRCON32_MUSIC_CHANNEL_MASK], R2
+
     ;; --- 4. Volume: nil -> 1.0 (true float port, no cast) ---
     MOV   R2, [BP+4]
     MOV   R3, R2
@@ -995,6 +1086,164 @@ _vircon32_sfx_stop_loop:
     IGT   R2, 15
     JF    R2, _vircon32_sfx_stop_loop
 
+    MOV   R0, BOXED_NIL
+
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; ============================================================================
+;; __builtin_vircon32_volume: set one channel's volume, or the true global
+;; volume when the channel is -1
+;; ============================================================================
+;; Stack layout relative to BP:
+;; [BP+2]: volume  (Lua float, or BOXED_NIL -> 1.0 default)
+;; [BP+3]: channel (Lua float; -1 -> SPU_GlobalVolume, else clamped 0-15)
+;;
+;; Returns: R0 = BOXED_NIL
+;;
+;; Backs music.volume(VOL, CHANNEL)/sfx.volume(VOL, CHANNEL) when CHANNEL
+;; was written explicitly at the call site (as opposed to omitted, which
+;; goes to __builtin_vircon32_volume_mask instead -- see that routine).
+;; The compiler-side emitter (emit_vircon32_volume_intrinsic in v32lua.c,
+;; file intrinsics_vircon32_sound.c) only reaches THIS routine when the
+;; volume and/or the channel value isn't known at compile time; an
+;; all-literal call folds to a straight-line OUT sequence instead.
+;;
+;; CHANNEL is guaranteed by the emitter to be a real (non-nil) expression
+;; here -- "no channel argument at all" is a different call site entirely.
+;; The BOXED_NIL check on volume is kept anyway as a cheap defensive
+;; default, same as every other optional numeric argument in this file.
+;;
+;; SPU_ChannelVolume (per-channel, clamped 0-8 by the console) and
+;; SPU_GlobalVolume (clamped 0-2) are both genuine float ports -- the Lua
+;; volume value is used directly, no CFI. The channel argument, when it
+;; isn't -1, takes the same clamp-to-0-15 treatment as every other
+;; per-channel routine in this file (see __builtin_vircon32_play/_chancmd/
+;; _sfx_play above).
+;;
+;; Register use follows the other __builtin_vircon32_* routines: R1-R3 used
+;; freely without saving, since the emitter frees its registers before the
+;; CALL. R1 holds the resolved volume and is never itself compared -- only
+;; the disposable copies in R2/R3 are, since IEQ/ILT/IGT are destructive.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_vircon32_volume:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; --- 1. Resolve the volume: nil -> 1.0 ---
+    MOV   R1, [BP+2]
+    MOV   R2, R1
+    IEQ   R2, BOXED_NIL
+    JF    R2, _vircon32_volume_val_ready
+    MOV   R1, 1.0
+
+_vircon32_volume_val_ready:
+    ;; --- 2. Channel == -1 -> global volume; otherwise clamp and select ---
+    MOV   R2, [BP+3]
+    CFI   R2                      ; Lua float -> hardware integer
+    MOV   R3, R2
+    IEQ   R3, -1
+    JT    R3, _vircon32_volume_global
+
+    MOV   R3, R2
+    ILT   R3, 0
+    JT    R3, _vircon32_volume_chan_low
+    MOV   R3, R2
+    IGT   R3, 15
+    JF    R3, _vircon32_volume_chan_ready
+    MOV   R2, 15                  ; clamp high
+    JMP   _vircon32_volume_chan_ready
+
+_vircon32_volume_chan_low:
+    MOV   R2, 0                   ; clamp low
+
+_vircon32_volume_chan_ready:
+    OUT   SPU_SelectedChannel, R2
+    OUT   SPU_ChannelVolume, R1
+    JMP   _vircon32_volume_done
+
+_vircon32_volume_global:
+    OUT   SPU_GlobalVolume, R1
+
+_vircon32_volume_done:
+    MOV   R0, BOXED_NIL
+
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; ============================================================================
+;; __builtin_vircon32_volume_mask: apply a volume to every channel a
+;; namespace's channel-ownership mask currently marks as claimed
+;; ============================================================================
+;; Stack layout relative to BP:
+;; [BP+2]: volume    (Lua float, or BOXED_NIL -> 1.0 default)
+;; [BP+3]: mask_addr (raw hardware integer -- the RAM address of either
+;;                    VIRCON32_MUSIC_CHANNEL_MASK or VIRCON32_SFX_CHANNEL_MASK,
+;;                    pushed by the compiler as a literal, NOT a Lua value)
+;;
+;; Returns: R0 = BOXED_NIL
+;;
+;; Backs music.volume(VOL)/sfx.volume(VOL) called with NO channel argument
+;; at all. The mask is a 16-bit-relevant bitmask, bit N set meaning channel
+;; N was last assigned a sound by THIS namespace's .play() (see
+;; emit_vircon32_claim_channel_static() in v32lua.c, and the matching
+;; inline claim/release block in __builtin_vircon32_play/_sfx_play above,
+;; for how the mask gets populated). Every set bit's channel gets its
+;; SPU_ChannelVolume written; an empty mask (nothing has played on this
+;; namespace yet) makes this a no-op, which is the correct behaviour --
+;; there is nothing to apply the volume to.
+;;
+;; This intentionally does NOT touch SPU_GlobalVolume. Reaching the true
+;; global port is music.volume(VOL, -1)/sfx.volume(VOL, -1), handled by
+;; __builtin_vircon32_volume above instead.
+;;
+;; Register use: R1 = resolved volume (kept live, never compared directly).
+;; R2 = mask address, then free once the mask value is loaded into R3
+;; (kept live for the whole loop). R4 = channel counter 0-15 (kept live).
+;; R5/R6/R7 are throwaway per-iteration scratch.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_vircon32_volume_mask:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; --- 1. Resolve the volume: nil -> 1.0 ---
+    MOV   R1, [BP+2]
+    MOV   R2, R1
+    IEQ   R2, BOXED_NIL
+    JF    R2, _vircon32_volmask_val_ready
+    MOV   R1, 1.0
+
+_vircon32_volmask_val_ready:
+    ;; --- 2. Load this namespace's channel-ownership mask ---
+    MOV   R2, [BP+3]              ; mask RAM address (raw hardware int)
+    MOV   R3, [R2]                ; mask value: bit N set = channel N is ours
+
+    ;; --- 3. For each set bit 0-15, select that channel and set its volume ---
+    MOV   R4, 0                   ; channel counter
+
+_vircon32_volmask_loop:
+    MOV   R5, R4
+    IGE   R5, 16
+    JT    R5, _vircon32_volmask_done
+
+    MOV   R6, 1
+    SHL   R6, R4                  ; R6 = 1 << channel
+    MOV   R7, R3
+    AND   R7, R6
+    JF    R7, _vircon32_volmask_next   ; bit clear -> not ours, skip
+
+    OUT   SPU_SelectedChannel, R4
+    OUT   SPU_ChannelVolume, R1
+
+_vircon32_volmask_next:
+    IADD  R4, 1
+    JMP   _vircon32_volmask_loop
+
+_vircon32_volmask_done:
     MOV   R0, BOXED_NIL
 
     MOV   SP, BP

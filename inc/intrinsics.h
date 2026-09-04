@@ -23,6 +23,11 @@ typedef struct {
 extern const IOPortMap  ioports[];
 extern const char      *valid_ioports_categories[];
 
+extern int              vircon32_sfx_cursor_base;
+extern int              vircon32_btn_prev_state_base;
+extern int              vircon32_music_channel_mask_base;
+extern int              vircon32_sfx_channel_mask_base;
+
 // Returns 1 if the node was an intrinsic and assembly was emitted; 0 otherwise.
 //
 int   try_emit_action_intrinsic    (const char *, int);
@@ -100,22 +105,21 @@ void  emit_system_halt_intrinsic ();
 // Forward declarations
 //
 //
-bool  emit_vircon32_spr_intrinsic         (ASTNode *);
-bool  emit_vircon32_btn_intrinsic         (ASTNode *, int);
-bool  emit_vircon32_btnp_intrinsic        (ASTNode *, int);
-bool  emit_vircon32_play_intrinsic        (ASTNode *, int);
-bool  emit_vircon32_channel_cmd_intrinsic (ASTNode *, int, const char *);
+bool  emit_vircon32_spr_intrinsic           (ASTNode *, int);
+bool  emit_vircon32_btn_intrinsic           (ASTNode *, int);
+bool  emit_vircon32_btnp_intrinsic          (ASTNode *, int);
+bool  emit_vircon32_play_intrinsic          (ASTNode *, int);
+bool  emit_vircon32_channel_cmd_intrinsic   (ASTNode *, int, const char *);
 bool  emit_vircon32_sfx_play_intrinsic      (ASTNode *, int);
 bool  emit_vircon32_sfx_stop_intrinsic      (ASTNode *, int);
 bool  emit_vircon32_music_playing_intrinsic (ASTNode *, int);
+bool  emit_vircon32_volume_intrinsic        (ASTNode *, int, const char *);
 int   try_emit_sound_namespace_intrinsic    (ASTNode *, int, const char *);
 
 const char *resolve_intrinsic_alias         (const char *);
 bool        is_intrinsic_alias              (const char *);
 bool        is_intrinsic_alias_assignment   (ASTNode *);
 void        register_intrinsic_aliases_prepass (ASTNode *);
-
-extern int  vircon32_sfx_cursor_base;
 
 //////////////////////////////////////////////////////////////////////////////    
 //

@@ -635,6 +635,9 @@ void generate_global_setup (ASTNode *node)
 
         emit_asm ("MOV R1, 1 ; sfx.play() round-robin starts at channel 1\n");
         emit_asm ("MOV [VIRCON32_SFX_CURSOR], R1\n");
+        emit_asm ("MOV R1, 0 ; no channels claimed by either namespace yet\n");
+        emit_asm ("MOV [VIRCON32_MUSIC_CHANNEL_MASK], R1\n");
+        emit_asm ("MOV [VIRCON32_SFX_CHANNEL_MASK], R1\n");
     }
 
     // NEW: Explicitly nil-initialize every plain (non-function) global.

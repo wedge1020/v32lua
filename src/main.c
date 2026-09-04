@@ -230,10 +230,22 @@ int  main (int  argc, char** argv)
 
     if (runtime_req.needs_vircon32)
     {
-        vircon32_btn_prev_state_base  = next_ram_address;
-        next_ram_address              = next_ram_address + 44;
-        vircon32_sfx_cursor_base      = next_ram_address;
-        next_ram_address              = next_ram_address + 1;
+        vircon32_btn_prev_state_base      = next_ram_address;
+        next_ram_address                  = next_ram_address + 44;
+        vircon32_sfx_cursor_base          = next_ram_address;
+        next_ram_address                  = next_ram_address + 1;
+
+        // One word each: a 16-bit-relevant bitmask (bit N set = channel N
+        // was last assigned a sound by this namespace's .play()). Read and
+        // written by __builtin_vircon32_play/_sfx_play (claim on assign)
+        // and by music.volume()/sfx.volume()'s no-channel "all my tracked
+        // channels" mode. See emit_vircon32_claim_channel_static() and
+        // __builtin_vircon32_volume_mask (in vircon32.s) for the two sides
+        // of this.
+        vircon32_music_channel_mask_base  = next_ram_address;
+        next_ram_address                  = next_ram_address + 1;
+        vircon32_sfx_channel_mask_base    = next_ram_address;
+        next_ram_address                  = next_ram_address + 1;
     }
     
     // Perform full symbol pre-pass before code generation
