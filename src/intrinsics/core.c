@@ -369,6 +369,14 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         }
     }
 
+    // memcard.* -- native Vircon32 persistent memory card
+    if (runtime_req.needs_vircon32 == true)
+    {
+        if (strncmp(func_name, "memcard.", 8) == 0) {
+            return try_emit_memcard_namespace_intrinsic (node, dest_reg, func_name);
+        }
+    }
+
     // add()
     if (strcmp (func_name, "add") == 0) {
         if (runtime_req.needs_pico8 == true)
@@ -870,13 +878,40 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     return 0; // Not an intrinsic
 }
 
-// Returns 1 if hardware intrinsic was emitted, 0 if dynamic table fallback is required.
-int try_emit_table_set_intrinsic(ASTNode *table_expr, ASTNode *key_expr, ASTNode *val_node) {
+int  try_emit_table_set_intrinsic (ASTNode *table_expr, ASTNode *key_expr, ASTNode *val_node) {
     char base_path[256] = {0};
 
+    if (!resolve_static_path(table_expr, base_path)) {
+        return 0;
+    }
+
+    // memcard[position] = value -- bracket sugar for memcard.save(value,
+    // position). Checked here, before the NODE_STRING requirement below,
+    // since position is a number/expression, not a string key like every
+    // other path this function handles. Restricted to a non-string key so
+    // this never intercepts memcard.save(...)/.load(...)/.title(...)
+    // themselves, which also parse as base_path == "memcard" but with a
+    // NODE_STRING key ("save"/"load"/"title") -- those still fall through
+    // to try_emit_call_intrinsic()'s dispatch untouched.
+    if (strcmp(base_path, "memcard") == 0 &&
+        (key_expr == NULL || key_expr->type != NODE_STRING)) {
+        if (runtime_req.needs_pico8 || runtime_req.needs_tic80) {
+            compiler_error(ERR_SEMANTIC, yylineno,
+                "'memcard[...]' is the native Vircon32 memory card API and is not "
+                "available under the pico8/tic80 API modes");
+            return 1;
+        }
+        // Always "handled" past this point, success or failure -- a
+        // compiler_error() inside emit_vircon32_memcard_write() has
+        // already flagged the build; falling through to 0 here would let
+        // the generic dynamic-table-assignment path also emit code for
+        // the same statement, which is not what we want after an error.
+        emit_vircon32_memcard_write(val_node, key_expr, 0, yylineno);
+        return 1;
+    }
+
     // FIX: Add NULL checks for key_expr and val_node
-    if (!resolve_static_path(table_expr, base_path) || 
-        key_expr == NULL || key_expr->type != NODE_STRING || val_node == NULL) {
+    if (key_expr == NULL || key_expr->type != NODE_STRING || val_node == NULL) {
         return 0;
     }
 
@@ -991,11 +1026,34 @@ int try_emit_table_set_intrinsic(ASTNode *table_expr, ASTNode *key_expr, ASTNode
     return 0;
 }
 
-int try_emit_table_get_intrinsic(ASTNode *table_expr, ASTNode *key_expr, int dest_reg) {
+int  try_emit_table_get_intrinsic (ASTNode *table_expr, ASTNode *key_expr, int dest_reg)
+{
     char base_path[256];
 
-    if (!resolve_static_path(table_expr, base_path) ||
-        key_expr == NULL || key_expr->type != NODE_STRING) {
+    if (!resolve_static_path(table_expr, base_path)) {
+        return 0;
+    }
+
+    // memcard[position] -- bracket sugar for memcard.load(position).
+    // Checked before the NODE_STRING requirement below, for the same
+    // reason as the matching branch in try_emit_table_set_intrinsic: a
+    // non-string key here means an actual bracket index, so this can
+    // never collide with memcard.load/.save/.title, which use a
+    // NODE_STRING key and fall through untouched to try_emit_call_
+    // intrinsic()'s dispatch.
+    if (strcmp(base_path, "memcard") == 0 &&
+        (key_expr == NULL || key_expr->type != NODE_STRING)) {
+        if (runtime_req.needs_pico8 || runtime_req.needs_tic80) {
+            compiler_error(ERR_SEMANTIC, yylineno,
+                "'memcard[...]' is the native Vircon32 memory card API and is not "
+                "available under the pico8/tic80 API modes");
+            return 1;
+        }
+        emit_vircon32_memcard_read(key_expr, dest_reg, yylineno);
+        return 1;
+    }
+
+    if (key_expr == NULL || key_expr->type != NODE_STRING) {
         return 0;
     }
 

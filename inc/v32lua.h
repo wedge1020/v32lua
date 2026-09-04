@@ -61,6 +61,40 @@
 #define  BOXED_CLOSURE_FLAG  0x00200000
 #define  CLOSURE_ADDR_MASK   0x001FFFFF
 
+// Vircon32 hardware memory card. Word-addressed, exactly like the rest of
+// this VM's memory (an address unit is one 4-byte word, not one byte --
+// see the note on [Rd+N] addressing next to __builtin_vircon32_btnp in
+// vircon32.s). A fixed physical range entirely outside the compiler-
+// managed RAM pool -- next_ram_address never touches it -- same category
+// as V32_CART_PAGE above, not a reservation like VIRCON32_SFX_CURSOR.
+//
+// Layout: the title block is VIRCON32_MEMCARD_TITLE_WORDS words
+// (0x30000000..0x30000013), but memcard.title() itself may only write the
+// first VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS of those (16) -- the last 4
+// are reserved for compiler-managed metadata, not free-form title text.
+// Word VIRCON32_MEMCARD_CURSOR_ADDR (the very last title word, position
+// -1) holds the persistent on-card auto-append cursor used by
+// memcard.save(value) with NO position argument -- see
+// __builtin_vircon32_memcard_append in vircon32.s. It lives ON THE CARD
+// ITSELF, not in Vircon32 RAM, so it survives a reboot: repeated
+// no-position saves keep appending rather than overwriting position 0
+// every run. The remaining 3 reserved words (positions -4..-2) are
+// currently unused -- reserved so a future feature has somewhere to grow
+// without colliding with hand-picked title/data positions a program
+// might already be using.
+//
+// Everything from VIRCON32_MEMCARD_DATA_BASE onward is free for
+// memcard.save()/memcard.load()/memcard[pos] -- position 0 is the first
+// data word; positions -1..-20 reach back into the title/metadata region
+// (reachable, but you have to consciously go negative to get there).
+// VIRCON32_MEMCARD_END is the last valid word address, inclusive.
+#define  VIRCON32_MEMCARD_BASE                0x30000000
+#define  VIRCON32_MEMCARD_TITLE_WORDS         20
+#define  VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS 16
+#define  VIRCON32_MEMCARD_DATA_BASE           (VIRCON32_MEMCARD_BASE + VIRCON32_MEMCARD_TITLE_WORDS)
+#define  VIRCON32_MEMCARD_CURSOR_ADDR         (VIRCON32_MEMCARD_DATA_BASE - 1)
+#define  VIRCON32_MEMCARD_END                 0x3003FFFF
+
 // GPU Commands
 #define  GPUCommand_DrawRegion           0x11
 #define  GPUCommand_DrawRegionZoomed     0x12

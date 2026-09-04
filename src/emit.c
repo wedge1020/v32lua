@@ -584,6 +584,16 @@ int   emit_variable_map (void)
         fprintf (out(), "%%define  VIRCON32_SFX_CURSOR      0x%.8X\n", vircon32_sfx_cursor_base);
         fprintf (out(), "%%define  VIRCON32_MUSIC_CHANNEL_MASK 0x%.8X\n", vircon32_music_channel_mask_base);
         fprintf (out(), "%%define  VIRCON32_SFX_CHANNEL_MASK   0x%.8X\n", vircon32_sfx_channel_mask_base);
+
+        // Fixed hardware address range for the memory card -- word-addressed
+        // like the rest of this VM's memory, entirely outside the compiler-
+        // managed RAM pool (next_ram_address never touches it), same
+        // category as V32_CART_PAGE. See memcard.load()/save()/title() and
+        // the header comment on VIRCON32_MEMCARD_BASE in v32lua.h.
+        fprintf (out(), "%%define  VIRCON32_MEMCARD_BASE       0x%.8X\n", VIRCON32_MEMCARD_BASE);
+        fprintf (out(), "%%define  VIRCON32_MEMCARD_DATA_BASE  0x%.8X\n", VIRCON32_MEMCARD_DATA_BASE);
+        fprintf (out(), "%%define  VIRCON32_MEMCARD_CURSOR_ADDR 0x%.8X\n", VIRCON32_MEMCARD_CURSOR_ADDR);
+        fprintf (out(), "%%define  VIRCON32_MEMCARD_END        0x%.8X\n", VIRCON32_MEMCARD_END);
     }
 
     SymbolNode *curr = global_scope ? global_scope->symbols : NULL;

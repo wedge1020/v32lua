@@ -102,8 +102,8 @@ void  emit_system_wait_intrinsic ();
 void  emit_system_halt_intrinsic ();
 
 //////////////////////////////////////////////////////////////////////////////    
-// Forward declarations
 //
+// Vircon32 native fantasy console API
 //
 bool  emit_vircon32_spr_intrinsic           (ASTNode *, int);
 bool  emit_vircon32_btn_intrinsic           (ASTNode *, int);
@@ -115,6 +115,21 @@ bool  emit_vircon32_sfx_stop_intrinsic      (ASTNode *, int);
 bool  emit_vircon32_music_playing_intrinsic (ASTNode *, int);
 bool  emit_vircon32_volume_intrinsic        (ASTNode *, int, const char *);
 int   try_emit_sound_namespace_intrinsic    (ASTNode *, int, const char *);
+
+//////////////////////////////////////////////////////////////////////////////    
+//
+// memcard.load()/save()/title(), and the memcard[position] bracket sugar.
+// emit_vircon32_memcard_write/_read/_clamp_addr are NOT static -- shared
+// by both the dotted-call emitters below AND the bracket-index hookup in
+// try_emit_table_get/set_intrinsic, which live in a different source file.
+//
+void  emit_vircon32_memcard_clamp_addr      (int addr_reg);
+bool  emit_vircon32_memcard_write           (ASTNode *val_node, ASTNode *pos_node, int dest_reg, int line_number);
+bool  emit_vircon32_memcard_read            (ASTNode *pos_node, int dest_reg, int line_number);
+bool  emit_vircon32_memcard_save_intrinsic  (ASTNode *, int);
+bool  emit_vircon32_memcard_load_intrinsic  (ASTNode *, int);
+bool  emit_vircon32_memcard_title_intrinsic (ASTNode *, int);
+int   try_emit_memcard_namespace_intrinsic  (ASTNode *, int, const char *);
 
 const char *resolve_intrinsic_alias         (const char *);
 bool        is_intrinsic_alias              (const char *);
