@@ -49,12 +49,6 @@
 //    agree and neither depends on the numeric opcode layout.
 // ============================================================================
 
-// Defined alongside the play()/stop() emitters further down this file.
-// A static function may be declared before it is defined within the same
-// translation unit, which is what lets this routine sit at its original
-// position while sharing that helper.
-static bool spu_static_number (ASTNode *node, double *out_value);
-
 typedef struct {
     const char *name;      // spelling accepted in Lua source
     int         index;     // numeric form accepted in Lua source
@@ -345,7 +339,7 @@ static const Vircon32SPUChannelCmd vircon32_spu_channel_cmds[] = {
 
 // A numeric literal, including a negated one ("-1" parses as OP_UNM around
 // a NODE_NUMBER, not as a negative NODE_NUMBER).
-static bool spu_static_number (ASTNode *node, double *out_value)
+bool spu_static_number (ASTNode *node, double *out_value)
 {
     if (node == NULL) {
         return false;
