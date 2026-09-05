@@ -14,11 +14,11 @@ typedef struct {
 
 // In compiler source (e.g., builtins.c)
 static const BuiltinFunctionInfo builtin_return_counts[] = {
-    {"math.modf",  2},
-    {"math.frexp", 2},
-    {"math.ldexp", 1},
-    // Add other multi-return functions here
-    {NULL, 1}  // Default: single return value
+    { "math.modf",   2 },
+    { "math.frexp",  2 },
+    { "math.ldexp",  1 },
+    { "system.date", 4 },
+    { NULL,          1 }  // Default: single return value
 };
 
 extern int  w_mainwait;

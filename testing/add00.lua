@@ -1,6 +1,6 @@
 --#api pico8
 --
-function main()
+function _update()
 	ioports.gpu.clear("black")
 
 	-- Test 1: Basic append

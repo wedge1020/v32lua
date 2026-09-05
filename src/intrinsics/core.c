@@ -5,9 +5,7 @@
 // ============================================================================
 const IOPortMap ioports[] = {
     { "ioports.tim.date",      "TIM_CurrentDate",          IOPORT_READ,                 IOPORT_TYPE_INTEGER },
-    { "system.date",           "TIM_CurrentDate",          IOPORT_READ,                 IOPORT_TYPE_INTEGER },
     { "ioports.tim.time",      "TIM_CurrentTime",          IOPORT_READ,                 IOPORT_TYPE_INTEGER },
-    { "system.time",           "TIM_CurrentTime",          IOPORT_READ,                 IOPORT_TYPE_INTEGER },
     { "ioports.tim.frames",    "TIM_FrameCounter",         IOPORT_READ,                 IOPORT_TYPE_INTEGER },
     { "system.frames",         "TIM_FrameCounter",         IOPORT_READ,                 IOPORT_TYPE_INTEGER },
     { "ioports.tim.cycles",    "TIM_CycleCounter",         IOPORT_READ,                 IOPORT_TYPE_INTEGER },
@@ -273,6 +271,17 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         if (emit_printf_intrinsic(node, dest_reg)) {
             return 1;
         }
+    }
+
+    // system.date()
+    if (strcmp (func_name, "system.date") == 0) {
+        int  ret_count  = emit_system_date_intrinsic (node, dest_reg);
+        if (ret_count  > 0)
+        {
+            node -> as.call.return_count   = ret_count;
+            return ret_count;
+        }
+        return 0;
     }
 
     // system.halt

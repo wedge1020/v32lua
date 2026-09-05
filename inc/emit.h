@@ -2,17 +2,18 @@
 #define __EMIT_H
 
 // Declare all embedded symbols
-extern const char runtime_memory_start[];
-extern const char runtime_exec_start[];
-extern const char runtime_table_start[];
-extern const char runtime_math_start[];
-extern const char runtime_string_start[];
-extern const char runtime_print_start[];
-extern const char runtime_iters_start[];
-extern const char runtime_vircon32_start[];
-extern const char runtime_pico8_start[];
-extern const char runtime_tic80_start[];
-extern const char runtime_constant_start[];
+extern const char  runtime_memory_start[];
+extern const char  runtime_datetime_start[];
+extern const char  runtime_exec_start[];
+extern const char  runtime_table_start[];
+extern const char  runtime_math_start[];
+extern const char  runtime_string_start[];
+extern const char  runtime_print_start[];
+extern const char  runtime_iters_start[];
+extern const char  runtime_vircon32_start[];
+extern const char  runtime_pico8_start[];
+extern const char  runtime_tic80_start[];
+extern const char  runtime_constant_start[];
 
 void  emit_cart_xml (const char *, int);
 void  emit_interpolated_asm (const char *);

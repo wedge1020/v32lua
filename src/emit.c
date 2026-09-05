@@ -731,13 +731,13 @@ void  emit_runtime_library (void)
     // Always needed - core routines
     //
     emit_embedded_asm (runtime_memory_start);
+    emit_embedded_asm (runtime_datetime_start);
+    emit_embedded_asm (runtime_exec_start);
 
     ////////////////////////////////////////////////////////////////////////////////////
     //
     // Conditional modules
     //
-    if (runtime_req.needs_exec)
-        emit_embedded_asm (runtime_exec_start);
     if (runtime_req.needs_tables)
         emit_embedded_asm (runtime_table_start);
     if (runtime_req.needs_math)

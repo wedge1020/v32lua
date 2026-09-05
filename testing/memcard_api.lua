@@ -67,10 +67,10 @@ FAIL_COUNT = 0
 function check(name, actual, expected)
     if actual == expected then
         PASS_COUNT = PASS_COUNT + 1
-        print("PASS  " .. name)
+        print(0, 0, "PASS  " .. name)
     else
         FAIL_COUNT = FAIL_COUNT + 1
-        print("FAIL  " .. name .. "  expected=" .. tostring(expected) .. " actual=" .. tostring(actual))
+        print(0, 0, "FAIL  " .. name .. "  expected=" .. tostring(expected) .. " actual=" .. tostring(actual))
     end
 end
 
@@ -213,12 +213,12 @@ function main()
     -- ------------------------------------------------------------------
     -- Summary
     -- ------------------------------------------------------------------
-    print("")
-    print("PASS: " .. PASS_COUNT .. "  FAIL: " .. FAIL_COUNT)
+    print(0, 0, "")
+    print(0, 0, "PASS: " .. PASS_COUNT .. "  FAIL: " .. FAIL_COUNT)
     if FAIL_COUNT == 0 then
-        print("ALL TESTS PASSED")
+        print(0, 0, "ALL TESTS PASSED")
     else
-        print("SOME TESTS FAILED")
+        print(0, 0, "SOME TESTS FAILED")
     end
 
     __rawasm__("__debug_final:")

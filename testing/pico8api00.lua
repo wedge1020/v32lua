@@ -59,7 +59,7 @@ function init()
 	player.yflip                = false
 end --]]
 
-function game_loop()
+function _update()
 
 	--
 	-- attempt some low quality animation

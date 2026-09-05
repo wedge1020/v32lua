@@ -28,6 +28,24 @@
     runtime_memory_end:
 #endif
 
+/* --- Date and Time (always included) --- */
+#ifdef __APPLE__
+    .global _runtime_datetime_start
+    _runtime_datetime_start:
+#else
+    .global runtime_datetime_start
+    runtime_datetime_start:
+#endif
+    .incbin "runtime/datetime.s"
+    .byte 0
+#ifdef __APPLE__
+    .global _runtime_datetime_end
+    _runtime_datetime_end:
+#else
+    .global runtime_datetime_end
+    runtime_datetime_end:
+#endif
+
 /* --- Exec --- */
 #ifdef __APPLE__
     .global _runtime_exec_start

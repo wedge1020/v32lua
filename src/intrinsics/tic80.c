@@ -1065,16 +1065,22 @@ bool emit_tic80_time_intrinsic(ASTNode *node, int dest_reg) {
         curr = curr->next;
     }
 
-    // Get current time in seconds from hardware
+    // TIM_CurrentTime is the timer's real-time-of-day clock (seconds
+    // elapsed WITHIN the current day, 0-86399 per spec Part 7 sec 1.2.2)
+    // -- it is NOT an elapsed-since-start counter, so it can't stand in
+    // for TIC-80's time(), which must return milliseconds since the
+    // cart began execution. TIM_FrameCounter is the correct source: it
+    // counts frames elapsed since the last console power-on/reset at a
+    // fixed 60 Hz, so multiplying by (1000.0 / 60.0) gives milliseconds
+    // since program start -- what TIC-80's time() actually returns.
     if (dest_reg != 0) {
-        emit_asm("    IN R%d, TIM_CurrentTime ; Get seconds since system start\n", dest_reg);
+        emit_asm("    IN R%d, TIM_FrameCounter ; Get frames elapsed since program start\n", dest_reg);
         emit_asm("    CIF R%d ; Convert hardware integer to Lua float\n", dest_reg);
-        emit_asm("    FMUL R%d, 1000.0 ; Convert seconds to milliseconds\n", dest_reg);
+        emit_asm("    FMUL R%d, 16.666667 ; Convert frames to milliseconds (1000/60)\n", dest_reg);
     } else {
-        // If no destination register, still need to compute but discard result
-        emit_asm("    IN R0, TIM_CurrentTime ; Get seconds since system start\n");
+        emit_asm("    IN R0, TIM_FrameCounter ; Get frames elapsed since program start\n");
         emit_asm("    CIF R0 ; Convert hardware integer to Lua float\n");
-        emit_asm("    FMUL R0, 1000.0 ; Convert seconds to milliseconds\n");
+        emit_asm("    FMUL R0, 16.666667 ; Convert frames to milliseconds (1000/60)\n");
     }
 
     return true;
