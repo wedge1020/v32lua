@@ -889,8 +889,8 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     // the string.* guard above.
     if (strncmp(func_name, "table.", 6) == 0)
     {
-        compiler_error(ERR_SEMANTIC, node->line_number,
-            "Unknown table function '%s'", func_name);
+        //compiler_error(ERR_SEMANTIC, node->line_number,
+        //               "Unknown table function '%s'", func_name);
         return 0;
     }
 
@@ -1112,6 +1112,13 @@ int  try_emit_table_get_intrinsic (ASTNode *table_expr, ASTNode *key_expr, int d
         else if (strcmp (key, "log")    == 0) label = "__mathfn_log";
         else if (strcmp (key, "atan2")  == 0) label = "__mathfn_atan2";
         else if (strcmp (key, "cos")    == 0) label = "__builtin_cos";
+        else if (strcmp (key, "sqrt")   == 0) label = "__builtin_sqrt";
+        else if (strcmp (key, "max")    == 0) label = "__builtin_max";
+        else if (strcmp (key, "min")    == 0) label = "__builtin_min";
+        else if (strcmp (key, "rad")    == 0) label = "__builtin_rad";
+        else if (strcmp (key, "random") == 0) label = "__builtin_random";
+        else if (strcmp (key, "floor")  == 0) label = "__builtin_floor";
+        else if (strcmp (key, "abs")    == 0) label = "__builtin_abs";
 
         if (label != NULL) {
             runtime_req.needs_math = true;

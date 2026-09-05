@@ -197,6 +197,33 @@ __builtin_sqrt:
     RET
 
 ;; ===========================================================================
+;; Built-in: math.floor(x) -- standalone callable, for use as a value
+;; (the CALL-form math.floor() intrinsic inlines FLR directly and has no
+;;  label of its own -- this wrapper exists solely so math.floor can be
+;;  boxed and passed around like __builtin_sqrt/__builtin_cos already are)
+;; ===========================================================================
+__builtin_floor:
+    PUSH  BP
+    MOV   BP, SP
+    MOV   R0, [BP+2]
+    FLR   R0
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; ===========================================================================
+;; Built-in: math.abs(x) -- standalone callable, for use as a value
+;; ===========================================================================
+__builtin_abs:
+    PUSH  BP
+    MOV   BP, SP
+    MOV   R0, [BP+2]
+    AND   R0, 0x7FFFFFFF   ; clear IEEE-754 sign bit
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; ===========================================================================
 ;; Built-in: math.cos(x)
 ;;
 ;; Computes cosine using the identity: cos(x) = sin(x + PI/2)
@@ -1142,25 +1169,6 @@ _log_done:
     POP   BP
     RET
 
-;__mathfn_log:
-;    PUSH  BP
-;    MOV   BP, SP
-;    MOV   R0, [BP+2]
-;    LOG   R0
-;    MOV   SP, BP
-;    POP   BP
-;    RET
-
-;__mathfn_atan2:
-;    PUSH  BP
-;    MOV   BP, SP
-;    MOV   R0, [BP+2]   ; y
-;    MOV   R1, [BP+3]   ; x
-;    ATAN2 R0, R1
-;    MOV   SP, BP
-;    POP   BP
-;    RET
-
 __mathfn_atan2:
     PUSH  BP
     MOV   BP, SP
@@ -1181,10 +1189,4 @@ __mathfn_atan2:
     MOV   SP, BP
     POP   BP
     RET
-
-;__atan2_zero_zero:
-;    MOV   R0, 0.0             ; Return 0 for atan2(0, 0)
-;    MOV   SP, BP
-;    POP   BP
-;    RET
 
