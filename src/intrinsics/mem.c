@@ -400,14 +400,14 @@ bool emit_vircon32_memcard_load_table_intrinsic (ASTNode *node, int dest_reg)
 //
 // Writes STR's characters into the memcard's title region, one word per
 // character -- matching this VM's own internal string representation, NOT
-// a packed byte string. Only the first VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS
-// (16) of the 20-word title block are available for this -- the last 4
-// are reserved (word -1 is the auto-append cursor; see
-// VIRCON32_MEMCARD_CURSOR_ADDR in v32lua.h). Truncated to 16 characters if
-// longer; padded with 0-words if shorter, and the reserved words are never
-// touched. Always a CALL: STR's length isn't known at compile time unless
-// it's a literal, and even then sharing the runtime copy loop is simpler
-// than unrolling it per call site.
+// a packed byte string. The full VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS (20)
+// title block is available for this -- metadata (including the auto-append
+// cursor, VIRCON32_MEMCARD_CURSOR_ADDR in v32lua.h) now lives in its own
+// separate region right after the title, not carved out of it. Truncated to
+// 20 characters if longer; padded with 0-words if shorter. Always a CALL:
+// STR's length isn't known at compile time unless it's a literal, and even
+// then sharing the runtime copy loop is simpler than unrolling it per call
+// site.
 // ============================================================================
 bool emit_vircon32_memcard_title_intrinsic (ASTNode *node, int dest_reg)
 {

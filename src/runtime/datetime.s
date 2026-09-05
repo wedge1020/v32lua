@@ -320,3 +320,113 @@ __builtin_format_date_string:
     POP  BP
     RET
 
+;; ---------------------------------------------------------------------------
+;; Built-in: Unpack a Vircon32 TIM_CurrentTime value into (hour, minute, second)
+;;
+;; Incoming Stack: [BP+2] = RAW elapsed-seconds-within-day value, exactly as
+;;                 read from TIM_CurrentTime via `IN` (0-86399, per spec
+;;                 Part 7 section 1.2.2). Do NOT CIF it before pushing.
+;;
+;; Returns (as genuine Lua numbers, already CIF-converted):
+;;   R0 = hour   (0-23)
+;;   R2 = minute (0-59)
+;;   R3 = second (0-59)
+;;
+;; Registers: R0-R9 scratch (R14/BP, R15/SP preserved).
+;; ---------------------------------------------------------------------------
+__builtin_unpack_time:
+    PUSH BP
+    MOV  BP, SP
+
+    MOV  R0, [BP+2]           ; R0 = raw elapsed seconds within day
+    MOV  R1, R0
+    IDIV R1, 3600             ; R1 = hours
+    MOV  R2, R0
+    IMOD R2, 3600             ; R2 = remainder within the hour (0-3599)
+    MOV  R3, R2               ; R3 = copy of remainder, for minutes
+    IDIV R3, 60               ; R3 = minutes
+    IMOD R2, 60                ; R2 = seconds (remainder % 60)
+
+    CIF  R1                    ; hour
+    CIF  R3                    ; minute
+    CIF  R2                    ; second
+
+    ;; --- Place into the standard multi-return registers (R0/R2/R3) ---
+    MOV  R0, R1                 ; return value 1: hour
+    MOV  R4, R2                 ; R4 = seconds, saved before R2 gets overwritten
+    MOV  R2, R3                 ; return value 2: minute
+    MOV  R3, R4                 ; return value 3: second
+
+    MOV  SP, BP
+    POP  BP
+    RET
+
+;; ---------------------------------------------------------------------------
+;; Built-in: Format (hour, minute, second) as an "HH:MM:SS" string.
+;;
+;; Incoming Stack: [BP+4] = hour   (raw int, 0-23)
+;;                 [BP+3] = minute (raw int, 0-59)
+;;                 [BP+2] = second (raw int, 0-59)
+;; Returns: R0 = boxed RAM string ("HH:MM:SS", BOXED_RAMSTRING-tagged)
+;; ---------------------------------------------------------------------------
+__builtin_format_time_string:
+    PUSH BP
+    MOV  BP, SP
+
+    ;; --- Allocate the buffer: "HH:MM:SS" = 8 chars + null = 9 words ---
+    MOV  R0, 9
+    PUSH R0
+    CALL __malloc
+    IADD SP, 1
+
+    MOV  R4, R0
+    IEQ  R4, 0
+    JT   R4, __oom_handler
+
+    PUSH R0                     ; spill STRING BASE pointer across every CALL below
+
+    ;; --- Write hour, zero-padded to 2 digits ---
+    MOV  R1, [BP+4]              ; hour
+    PUSH R1
+    MOV  R3, 2
+    PUSH R3
+    PUSH R0
+    CALL __builtin_write_padded_int
+    IADD SP, 3
+
+    MOV  R5, 58                  ; ASCII ':'
+    MOV  [R0], R5
+    IADD R0, 1
+
+    ;; --- Write minute, zero-padded to 2 digits ---
+    MOV  R1, [BP+3]               ; minute
+    PUSH R1
+    MOV  R3, 2
+    PUSH R3
+    PUSH R0
+    CALL __builtin_write_padded_int
+    IADD SP, 3
+
+    MOV  R5, 58                   ; ASCII ':'
+    MOV  [R0], R5
+    IADD R0, 1
+
+    ;; --- Write second, zero-padded to 2 digits ---
+    MOV  R1, [BP+2]                ; second
+    PUSH R1
+    MOV  R3, 2
+    PUSH R3
+    PUSH R0
+    CALL __builtin_write_padded_int
+    IADD SP, 3
+
+    MOV  R5, 0                     ; null terminator
+    MOV  [R0], R5
+
+    POP  R0                        ; restore STRING BASE pointer
+    OR   R0, BOXED_RAMSTRING
+
+    MOV  SP, BP
+    POP  BP
+    RET
+

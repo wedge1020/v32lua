@@ -13,7 +13,7 @@ ASM_DEBUG_FLAGS =
 .PHONY: all asm vbin v32 debug clean
 
 # Default target: Performs all steps in order
-all: prep asm vbin v32
+all: prep asm vbin vtex v32
 
 # Debug target: Sets the debug flags and builds all targets
 debug: DEBUG_FLAGS = -g
@@ -39,10 +39,10 @@ obj/$(DEMO).vbin: obj/$(DEMO).asm
 	$(ASSEMBLER) $(ASM_DEBUG_FLAGS) -o obj/$(DEMO).vbin obj/$(DEMO).asm
 
 # Process PNG sprite sheet to Vircon texture
-#vtex: textures/$(DEMO)_sprites.vtex
+vtex: assets/$(DEMO)_sprites.vtex
 
-#textures/$(DEMO)_sprites.vtex: textures/$(DEMO)_sprites.png
-#	$(TEXTURE_TOOL) textures/$(DEMO)_sprites.png -o textures/$(DEMO)_sprites.vtex
+#assets/$(DEMO)_sprites.vtex: assets/$(DEMO)_sprites.png
+	$(TEXTURE_TOOL) assets/$(DEMO)_sprites.png -o assets/$(DEMO)_sprites.vtex
 
 # Pack ROM cartridge (Depends on the binary and texture to ensure they are built first)
 v32: bin/$(DEMO).v32
@@ -52,4 +52,4 @@ bin/$(DEMO).v32: obj/$(DEMO).vbin
 
 # --- Clean Up ---
 clean:
-	rm -f bin/*.v32 obj/* textures/*.vtex *.xml
+	rm -f bin/*.v32 obj/* assets/*.vtex *.xml

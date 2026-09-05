@@ -100,6 +100,7 @@ void  emit_print_intrinsic       (ASTNode *node);
 bool  emit_printf_intrinsic      (ASTNode *node, int);
 void  emit_get_gamepad_inputs_intrinsic (int);
 int   emit_system_date_intrinsic (ASTNode *, int);
+int   emit_system_time_intrinsic (ASTNode *, int);
 void  emit_system_wait_intrinsic ();
 void  emit_system_halt_intrinsic ();
 

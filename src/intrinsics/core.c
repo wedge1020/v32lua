@@ -284,6 +284,16 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         return 0;
     }
 
+    // system.time()
+    if (strcmp (func_name, "system.time") == 0) {
+        int  ret_count = emit_system_time_intrinsic (node, dest_reg);
+        if (ret_count > 0) {
+            node -> as.call.return_count   = ret_count;
+            return ret_count;
+        }
+        return 0;
+    }
+
     // system.halt
     if (strcmp(func_name, "system.halt") == 0) {
         emit_system_halt_intrinsic();

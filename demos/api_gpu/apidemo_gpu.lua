@@ -1,4 +1,5 @@
 --#title "Vircon32 Native API Demo"
+--#texture sprites "assets/apidemo_gpu_sprites.png"
 
 ------------------------------------------------------------------------------
 -- Native Vircon32 API demo: spr(), btn(), btnp()
@@ -11,7 +12,7 @@
 -- emulation paths.
 --
 -- --#texture registers "player.png" as a cart resource and creates a global
--- Lua variable ("sprites" below) holding its numeric texture id.
+-- Lua variable ("sprites" above) holding its numeric texture id.
 ------------------------------------------------------------------------------
 
 local player_x     = 100
@@ -22,7 +23,7 @@ local facing_left  = false
 local jump_count   = 0
 
 function main()
-    ioports.gpu.texture = -1   -- select the texture registered above
+    ioports.gpu.texture = sprites   -- select the texture registered above
 
     while true do
         -----------------------------------------------------------------

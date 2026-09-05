@@ -27,8 +27,12 @@ load-bearing and every sound emitter here depends on it.
   - [Codegen: hybrid fold](#codegen-hybrid-fold)
 - [ioports.spu.cmd() — the raw escape hatch](#ioportsspucmd--the-raw-escape-hatch)
 - [Boolean IO ports](#boolean-io-ports)
+- [System: system.\*](#system-system)
+  - [system.wait() / system.halt()](#systemwait--systemhalt)
+  - [system.date() / system.time()](#systemdate--systemtime)
 - [Graphics: spr()](#graphics-spr)
   - [Runtime dispatch](#runtime-dispatch-not-compile-time-fold)
+  - [ioports.gpu.clear()](#ioportsgpuclearcolor)
 - [Input: btn() / btnp()](#input-btn--btnp)
   - [Button IDs](#button-ids)
   - [btn(): direct polling](#btn-direct-polling)
@@ -239,6 +243,50 @@ needs rewriting as `if p then 1 else 0`.
 
 ---
 
+# System: system.\*
+
+```
+system.wait()   -> nil   (WAIT for the next new-cycle signal)
+system.halt()   -> nil   (HLT -- stops the CPU)
+system.date()   -> string, year, month, day
+system.time()   -> string, hour, minute, second
+```
+
+## system.wait() / system.halt()
+
+`system.wait()` compiles straight to `WAIT` — the same instruction
+`ioports.gpu.sync()` uses, and interchangeable with it; both just wait for
+the timer's next new-cycle signal. `system.halt()` compiles to `HLT`,
+stopping the CPU outright — for a program that's completed its work and
+has nothing left to render.
+
+## system.date() / system.time()
+
+Both decode the timer chip's real-time clock (see Vircon32 System
+Specification Part 7, section 1.2 — this is an actual wall-clock/RTC, not
+a monotonic since-boot counter) and return **four** values: a formatted
+string, then the three numeric components.
+
+```lua
+local date_str, year, month, day     = system.date()   -- "2026-09-06", 2026, 9, 6
+local time_str, hour, minute, second = system.time()    -- "03:00:04", 3, 0, 4
+```
+
+`system.date()`'s string is `"YYYY-MM-DD"`; `system.time()`'s is
+`"HH:MM:SS"`. Both are always zero-padded to a fixed width (`printf`'s
+`%0*d`, not a hard cap) — `year` is padded to 4 digits but never truncated,
+so a year past 9999 (up to the hardware's `CurrentYear` max of 65535)
+still prints in full, just wider than 4 characters; month/day/hour/
+minute/second are always exactly 2 digits. Leap years use the standard
+Gregorian rule (divisible by 4, except centuries unless divisible by
+400) — the spec confirms the day-count range extends to 365 in a leap
+year but doesn't itself define the rule, so this is the one sane,
+universal reading of it. There is no `os.time()`/`os.date()` format-string
+or table-construction support — this is a fixed-shape decode of the
+hardware register, not a general date library.
+
+---
+
 # Graphics: spr()
 
 ```
@@ -307,6 +355,21 @@ An explicitly-passed `nil` for an optional argument (e.g.
 being omitted entirely — both fall back to the default. A call sitting in
 an expression context (`local unused = spr(1, 10, 10)`) correctly gets
 `nil` assigned, matching every other intrinsic in this file.
+
+## ioports.gpu.clear([color])
+
+Clears the screen: writes `GPU_ClearColor` (if a color argument is given)
+then issues `GPUCommand_ClearScreen`. `color` accepts either a packed RGBA
+integer or one of five preset name strings — `"black"`, `"white"`,
+`"blue"`, `"red"`, `"green"` — resolved at compile time when it's a string
+literal. Omit the argument to clear with whatever `GPU_ClearColor`
+currently holds.
+
+```lua
+ioports.gpu.clear("black")
+ioports.gpu.clear(0xFF202020)   -- packed RGBA, not a preset name
+ioports.gpu.clear()             -- reuses the last ClearColor set
+```
 
 ---
 
@@ -385,7 +448,7 @@ memcard.save(value)             -> value   (auto-append; see below)
 memcard.load(position)          -> value   (raw read, exactly 1 word)
 memcard.load()                  -> value   (position 0)
 memcard.load_table(position)    -> table or nil   (see Tables, below)
-memcard.title(str)              -> nil     (sets the 16-word title)
+memcard.title(str)              -> nil     (sets the 20-word title)
 
 memcard[position]                  == memcard.load(position)
 memcard[position] = value          == memcard.save(value, position)
@@ -456,7 +519,7 @@ memcard[-1]                  -- reads the auto-append cursor
 
 ## memcard.title(str) -> nil
 
-Sets the memory card's title — up to 16 characters, one word per
+Sets the memory card's title — up to 20 characters, one word per
 character, matching this VM's internal string representation. Longer
 strings are truncated; shorter strings are zero-padded. This is
 independent of any `--#title` cart hint, which names the *cartridge*, not
@@ -516,14 +579,14 @@ words as a pair count and garbage keys/values.
 ## Address layout
 
 ```
-0x30000000  +-----------------------------------+  position -20
-            |  title: 16 characters               |
+0x30000000  +-------------------------------------+  position -24
+            |  title: 20 characters               |
             |  (memcard.title() writes here)      |  position -5
             +-------------------------------------+
             |  reserved (3 words, unused)          |  position -4 .. -2
             +-------------------------------------+
             |  auto-append cursor                  |  position -1
-0x30000014  +-------------------------------------+  position 0
+0x30000018  +-------------------------------------+  position 0
             |  data region                         |
             |  (memcard.save()/.load()/[pos])     |
             |  ...                                 |
@@ -531,14 +594,18 @@ words as a pair count and garbage keys/values.
 ```
 
 `position` is always relative to the start of the data region
-(`0x30000014`). Negative positions reach backward into the title/metadata
-block — reachable, but only by consciously going negative.
+(`0x30000018`). Negative positions reach backward into the title/metadata
+block — reachable, but only by consciously going negative. Note the
+metadata region (4 words, positions -4..-1) is separate from the title
+block (20 words, positions -24..-5) — previously the metadata was carved
+out of the *last 4 words of the title itself*, capping the usable title
+at 16 characters; the full 20 is available now.
 
 | Constant | Value | Meaning |
 |---|---|---|
-| `VIRCON32_MEMCARD_BASE` | `0x30000000` | start of the card; position `-20` |
-| `VIRCON32_MEMCARD_DATA_BASE` | `0x30000014` | position `0` |
-| `VIRCON32_MEMCARD_CURSOR_ADDR` | `0x30000013` | the auto-append cursor; position `-1` |
+| `VIRCON32_MEMCARD_BASE` | `0x30000000` | start of the card; position `-24` |
+| `VIRCON32_MEMCARD_DATA_BASE` | `0x30000018` | position `0` |
+| `VIRCON32_MEMCARD_CURSOR_ADDR` | `0x30000017` | the auto-append cursor; position `-1` |
 | `VIRCON32_MEMCARD_END` | `0x3003FFFF` | last valid word, inclusive |
 
 ## Type tags (auto-append form only)

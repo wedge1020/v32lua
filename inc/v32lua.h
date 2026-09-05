@@ -68,38 +68,43 @@
 // managed RAM pool -- next_ram_address never touches it -- same category
 // as V32_CART_PAGE above, not a reservation like VIRCON32_SFX_CURSOR.
 //
-// Layout: the title block is VIRCON32_MEMCARD_TITLE_WORDS words
-// (0x30000000..0x30000013), but memcard.title() itself may only write the
-// first VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS of those (16) -- the last 4
-// are reserved for compiler-managed metadata, not free-form title text.
-// Word VIRCON32_MEMCARD_CURSOR_ADDR (the very last title word, position
-// -1) holds the persistent on-card auto-append cursor used by
+// Layout: the title block (VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS words,
+// 0x30000000..0x30000013) is now free-form title text ONLY -- memcard.title()
+// may use the entire thing, 20 characters. Compiler-managed metadata used to
+// be carved out of the LAST 4 words of that same block; it now lives in its
+// own separate VIRCON32_MEMCARD_METADATA_WORDS region immediately after the
+// title (0x30000014..0x30000017), so the title and the metadata never share
+// a word. Word VIRCON32_MEMCARD_CURSOR_ADDR (the very last metadata word,
+// position -1) holds the persistent on-card auto-append cursor used by
 // memcard.save(value) with NO position argument -- see
 // __builtin_vircon32_memcard_append in vircon32.s. It lives ON THE CARD
 // ITSELF, not in Vircon32 RAM, so it survives a reboot: repeated
 // no-position saves keep appending rather than overwriting position 0
-// every run. The remaining 3 reserved words (positions -4..-2) are
+// every run. The remaining 3 metadata words (positions -4..-2) are
 // currently unused -- reserved so a future feature has somewhere to grow
 // without colliding with hand-picked title/data positions a program
 // might already be using.
 //
 // Everything from VIRCON32_MEMCARD_DATA_BASE onward is free for
 // memcard.save()/memcard.load()/memcard[pos] -- position 0 is the first
-// data word; positions -1..-20 reach back into the title/metadata region
-// (reachable, but you have to consciously go negative to get there).
-// VIRCON32_MEMCARD_END is the last valid word address, inclusive.
+// data word; positions -1..-4 reach back into the metadata region and
+// positions -5..-24 reach back into the title (reachable, but you have to
+// consciously go negative to get there). VIRCON32_MEMCARD_END is the last
+// valid word address, inclusive.
+//
 #define  VIRCON32_MEMCARD_BASE                0x30000000
-#define  VIRCON32_MEMCARD_TITLE_WORDS         20
-#define  VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS 16
+#define  VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS 20
+#define  VIRCON32_MEMCARD_METADATA_WORDS      4
+#define  VIRCON32_MEMCARD_TITLE_WORDS         (VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS + VIRCON32_MEMCARD_METADATA_WORDS)
 #define  VIRCON32_MEMCARD_DATA_BASE           (VIRCON32_MEMCARD_BASE + VIRCON32_MEMCARD_TITLE_WORDS)
 #define  VIRCON32_MEMCARD_CURSOR_ADDR         (VIRCON32_MEMCARD_DATA_BASE - 1)
 #define  VIRCON32_MEMCARD_END                 0x3003FFFF
 
 // GPU Commands
-#define  GPUCommand_DrawRegion           0x11
-#define  GPUCommand_DrawRegionZoomed     0x12
-#define  GPUCommand_DrawRegionRotated    0x13
-#define  GPUCommand_DrawRegionRotozoomed 0x14
+#define  GPUCommand_DrawRegion                0x11
+#define  GPUCommand_DrawRegionZoomed          0x12
+#define  GPUCommand_DrawRegionRotated         0x13
+#define  GPUCommand_DrawRegionRotozoomed      0x14
 
 // Blending Modes
 #define  GPUBlendingMode_Alpha           0x20

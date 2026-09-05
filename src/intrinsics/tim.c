@@ -75,3 +75,68 @@ int emit_system_date_intrinsic(ASTNode *node, int dest_reg)
 
     return 4;
 }
+
+// ============================================================================
+// system.time() - Returns FOUR values: formatted string, hour, minute, second.
+// Mirrors system.date() exactly; the only difference is the source port
+// (TIM_CurrentTime) and the unpack/format routines it calls into.
+// ============================================================================
+int emit_system_time_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *curr = node->as.call.args_head;
+    while (curr != NULL) {
+        int reg = allocate_register();
+        generate_asm(curr, reg);
+        unlock_register(reg);
+        curr = curr->next;
+    }
+
+    emit_asm("    ;; --- Intrinsic: system.time() ---\n");
+
+    int raw_reg = allocate_register();
+    force_spill_register(raw_reg);
+    emit_asm("    IN R%d, TIM_CurrentTime\n", raw_reg);
+    emit_asm("    PUSH R%d\n", raw_reg);
+    emit_asm("    CALL __builtin_unpack_time\n");
+    emit_asm("    IADD SP, 1\n");
+    unlock_register(raw_reg);
+    // R0 = hour (float), R2 = minute (float), R3 = second (float)
+
+    emit_asm("    PUSH R0 ; spill hour (float)\n");
+    emit_asm("    PUSH R2 ; spill minute (float)\n");
+    emit_asm("    PUSH R3 ; spill second (float)\n");
+
+    emit_asm("    POP R3 ; second (float)\n");
+    emit_asm("    POP R2 ; minute (float)\n");
+    emit_asm("    POP R1 ; hour (float)\n");
+    emit_asm("    MOV R4, R1\n");
+    emit_asm("    CFI R4 ; hour as raw int\n");
+    emit_asm("    MOV R5, R2\n");
+    emit_asm("    CFI R5 ; minute as raw int\n");
+    emit_asm("    MOV R6, R3\n");
+    emit_asm("    CFI R6 ; second as raw int\n");
+
+    emit_asm("    PUSH R1 ; hour (float)\n");
+    emit_asm("    PUSH R2 ; minute (float)\n");
+    emit_asm("    PUSH R3 ; second (float)\n");
+
+    emit_asm("    PUSH R4 ; hour (int)\n");
+    emit_asm("    PUSH R5 ; minute (int)\n");
+    emit_asm("    PUSH R6 ; second (int)\n");
+    emit_asm("    CALL __builtin_format_time_string\n");
+    emit_asm("    IADD SP, 3\n");
+    // R0 = boxed time string
+
+    emit_asm("    POP R3 ; second (float)\n");
+    emit_asm("    POP R2 ; minute (float)\n");
+    emit_asm("    POP R1 ; hour (float)\n");
+
+    char extra_ret_access[128];
+    get_extra_return_slot_access(0, extra_ret_access);
+    emit_asm("    MOV %s, R3 ; return value 4: second\n", extra_ret_access);
+    emit_asm("    MOV R3, R2 ; return value 3: minute\n");
+    emit_asm("    MOV R2, R1 ; return value 2: hour\n");
+    // R0 already holds the formatted string: return value 1
+
+    return 4;
+}

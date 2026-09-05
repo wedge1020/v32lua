@@ -136,17 +136,20 @@
 ;; allocation
 ;; ============================================================================
 ;; VIRCON32_MEMCARD_BASE (0x30000000), VIRCON32_MEMCARD_DATA_BASE
-;; (0x30000014), and VIRCON32_MEMCARD_END (0x3003FFFF) are fixed physical
+;; (0x30000018), and VIRCON32_MEMCARD_END (0x3003FFFF) are fixed physical
 ;; addresses -- unlike everything else on this page, they are NOT reserved
 ;; out of next_ram_address; they live entirely outside the compiler's RAM
 ;; pool, the same category as V32_CART_PAGE. This VM is word-addressed
 ;; throughout (an address unit is one 4-byte word -- see the [Rd+N] note
 ;; on __builtin_vircon32_btnp below), so VIRCON32_MEMCARD_DATA_BASE sits
-;; exactly 20 WORDS past VIRCON32_MEMCARD_BASE: the first 20 words
+;; exactly 24 WORDS past VIRCON32_MEMCARD_BASE: the first 20 words
 ;; (0x30000000..0x30000013) are the card's title, one word per character
-;; (see __builtin_vircon32_memcard_title below), and
-;; VIRCON32_MEMCARD_DATA_BASE is where memcard.save()/load()/[pos]'s
-;; position 0 lands. Position -1..-20 reach back into the title itself.
+;; (see __builtin_vircon32_memcard_title below); the next 4 words
+;; (0x30000014..0x30000017) are reserved compiler-managed metadata,
+;; including the auto-append cursor at VIRCON32_MEMCARD_CURSOR_ADDR (the
+;; last of the 4); and VIRCON32_MEMCARD_DATA_BASE is where
+;; memcard.save()/load()/[pos]'s position 0 lands. Position -1..-4 reach
+;; back into metadata; position -5..-24 reach back into the title itself.
 ;;
 ;; Requires three %defines on the compiler side, in emit_variable_map()
 ;; (emit.c), alongside the ones above -- these need no globals and no
@@ -1280,24 +1283,32 @@ _vircon32_volmask_done:
 
 ;; ============================================================================
 ;; __builtin_vircon32_memcard_title: set the memcard's title, one word per
-;; character, into the first VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS (16) of
-;; the 20-word title block. The last 4 words (VIRCON32_MEMCARD_DATA_BASE-4
-;; .. VIRCON32_MEMCARD_DATA_BASE-1) are reserved metadata -- see the header
-;; comment block near the top of this file -- and are never touched here.
+;; character, into the full VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS (20) title
+;; block. Metadata (VIRCON32_MEMCARD_METADATA_WORDS, including the cursor at
+;; VIRCON32_MEMCARD_CURSOR_ADDR) now lives in its own separate region right
+;; after the title -- see the header comment block near the top of this
+;; file -- so it's never touched here regardless of title length.
 ;; ============================================================================
+;;
+;; NOTE: 20 is a LITERAL here, not the symbolic VIRCON32_MEMCARD_TITLE_
+;; DISPLAY_WORDS constant -- emit_variable_map() in emit.c only exports
+;; BASE/DATA_BASE/CURSOR_ADDR/END as %defines for the assembler, not word-
+;; count constants. If a future change adds an export for this one, this
+;; is a good spot to switch it over.
+;;
 ;; Stack layout relative to BP:
 ;; [BP+2]: title string (boxed, ROM or RAM)
 ;;
 ;; Returns: R0 = BOXED_NIL
 ;;
-;; Truncates to 16 characters if the string is longer; zero-pads the
-;; remainder of the 16 if shorter. One word per character, matching this
+;; Truncates to 20 characters if the string is longer; zero-pads the
+;; remainder of the 20 if shorter. One word per character, matching this
 ;; VM's own internal string representation (see __builtin_string_len) --
 ;; NOT a packed byte string.
 ;;
 ;; Register use: R1 = source pointer (from __unbox_string). R2 = dest
 ;; pointer, starts at VIRCON32_MEMCARD_BASE. R3 = characters written so
-;; far (0-16). R4/R5 are per-iteration scratch.
+;; far (0-20). R4/R5 are per-iteration scratch.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 __builtin_vircon32_memcard_title:
@@ -1313,19 +1324,13 @@ __builtin_vircon32_memcard_title:
 
 _memcard_title_copy_loop:
     MOV   R4, R3
-    IGE   R4, 16
-    JT    R4, _memcard_title_done     ; wrote all 16 -> nothing to pad either
+    IGE   R4, 20
+    JT    R4, _memcard_title_done     ; wrote all 20 -> nothing to pad either
     MOV   R4, [R1]
     IEQ   R4, 0
     JT    R4, _memcard_title_pad_loop ; hit NUL -> pad the remainder with 0
     MOV   R4, [R1]                    ; IEQ above clobbered R4 with its 0/1
                                        ; result -- reload the real character
-    ;; Character words in this VM's internal string storage are raw
-    ;; hardware-integer ASCII codes, NOT boxed Lua floats (see
-    ;; string.byte()'s own CIF on this exact read, __builtin_string_byte
-    ;; above). CIF it here so a title word reads back through
-    ;; memcard.load()/memcard[pos] as the same value string.byte() would
-    ;; report, not a raw bit pattern.
     CIF   R4
     MOV   [R2], R4
     IADD  R1, 1
@@ -1335,7 +1340,7 @@ _memcard_title_copy_loop:
 
 _memcard_title_pad_loop:
     MOV   R4, R3
-    IGE   R4, 16
+    IGE   R4, 20
     JT    R4, _memcard_title_done
     MOV   R5, 0
     MOV   [R2], R5

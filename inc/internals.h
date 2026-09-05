@@ -18,6 +18,7 @@ static const BuiltinFunctionInfo builtin_return_counts[] = {
     { "math.frexp",  2 },
     { "math.ldexp",  1 },
     { "system.date", 4 },
+    { "system.time", 4 },
     { NULL,          1 }  // Default: single return value
 };
 
