@@ -28,6 +28,13 @@ for src in `/bin/ls -1 src/*.c src/intrinsics/*.c src/node/*.c`; do
 	echo                                                     >> put/v32lua.c
 done
 
-cat src/runtime/memory.s src/runtime/exec.s src/runtime/table.s src/runtime/string.s src/runtime/print.s src/runtime/iters.s src/runtime/vircon32.s src/runtime/pico8.s src/runtime/tic80.s src/runtime/constant.s > put/runtime.s.txt
+RUNTIME_UNITS="memory datetime exec table string print iters"
+RUNTIME_UNITS="${RUNTIME_UNITS} vircon32 pico8 tic80"
+RUNTIME_UNITS="${RUNTIME_UNITS} constant"
+
+echo -n                                                      >  put/runtime.s.txt
+for unit in ${RUNTIME_UNITS}; do
+	cat src/runtime/${unit}.s                                >> put/runtime.s.txt
+done
 
 exit 0

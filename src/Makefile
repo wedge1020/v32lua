@@ -52,6 +52,7 @@ lex.yy.c: lexer.l parser.tab.h
 
 context:
 	@cp -v runtime/memory.s   runtime/memory.s.txt
+	@cp -v runtime/datetime.s runtime/datetime.s.txt
 	@cp -v runtime/exec.s     runtime/exec.s.txt
 	@cp -v runtime/table.s    runtime/table.s.txt
 	@cp -v runtime/math.s     runtime/math.s.txt
