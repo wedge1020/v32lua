@@ -185,6 +185,76 @@ static char *read_whole_file (const char *path, const char *referenced_from)
     return buf;
 }
 
+// Parses a --#tilemap CSV file: rows of comma-separated tile ids, one row
+// per line. Row count -> height, first row's value count -> width; every
+// row must match or this is a compile error (a ragged map silently reading
+// garbage past a short row is worse than refusing to build).
+//
+// Path is resolved relative to the compiler's current working directory --
+// unlike --#include, there's no reliable "which source file did this hint
+// come from" once multiple files may already be spliced into one buffer.
+// Worth revisiting if that turns out to be surprising in practice.
+//
+TilemapAsset *parse_tilemap_csv (const char *filename, const char *name)
+{
+    char *text = read_whole_file (filename, name);
+
+    TilemapAsset *asset = (TilemapAsset *) calloc (1, sizeof (TilemapAsset));
+    asset->name     = strdup (name);
+    asset->filename = strdup (filename);
+
+    int  cell_cap   = 64;
+    int *cells      = (int *) malloc (sizeof (int) * cell_cap);
+    int  width      = -1;
+    int  height     = 0;
+    int  cell_count = 0;
+
+    // Two SEPARATE save pointers -- plain strtok() keeps a single global
+    // saved position, so splitting rows on "\n" and splitting a row's
+    // values on "," cannot interleave safely with it: the inner scan
+    // clobbers the outer scan's position, and every row after the first
+    // silently disappears. strtok_r's caller-supplied save pointers keep
+    // the two tokenizations fully independent.
+    char *line_save  = NULL;
+    char *value_save = NULL;
+
+    char *line = strtok_r (text, "\n", &line_save);
+    while (line != NULL) {
+        // Trim a trailing \r (Windows-authored CSVs) and skip blank lines.
+        size_t len = strlen (line);
+        while (len > 0 && (line[len-1] == '\r' || line[len-1] == ' ')) line[--len] = '\0';
+        if (len == 0) { line = strtok_r (NULL, "\n", &line_save); continue; }
+
+        int row_count = 0;
+        char *value = strtok_r (line, ",", &value_save);
+        while (value != NULL) {
+            if (cell_count >= cell_cap) {
+                cell_cap *= 2;
+                cells = (int *) realloc (cells, sizeof (int) * cell_cap);
+            }
+            cells[cell_count++] = atoi (value);
+            row_count++;
+            value = strtok_r (NULL, ",", &value_save);
+        }
+
+        if (width == -1) {
+            width = row_count;
+        } else if (row_count != width) {
+            compiler_error (ERR_SEMANTIC, -1,
+                "--#tilemap '%s': row %d has %d values, expected %d (from row 1) in '%s'",
+                name, height + 1, row_count, width, filename);
+        }
+        height++;
+        line = strtok_r (NULL, "\n", &line_save);
+    }
+
+    free (text);
+    asset->width  = (width == -1) ? 0 : width;
+    asset->height = height;
+    asset->cells  = cells;
+    return asset;
+}
+
 // ----------------------------------------------------------------------------
 // Directive recognition
 //

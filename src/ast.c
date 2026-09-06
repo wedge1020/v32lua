@@ -165,6 +165,30 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
         cart_resource_append (&sounds_head, &sounds_tail,
                               assigned_id, param1, param2);
     }
+    else if (strcmp (action, "tilemap") == 0 && tokens == 3) {
+        for (TilemapAsset *existing = tilemaps_head; existing != NULL; existing = existing->next) {
+            if (strcmp (existing->name, param1) == 0) {
+                compiler_error (ERR_SEMANTIC, yylineno,
+                                "--#tilemap '%s' is declared more than once", param1);
+            }
+        }
+
+        TilemapAsset *asset = parse_tilemap_csv (param2, param1);
+        if (tilemaps_tail != NULL) { tilemaps_tail->next = asset; } else { tilemaps_head = asset; }
+        tilemaps_tail = asset;
+
+        // Reserve this tilemap's RAM promotion-pointer word now, through the
+        // compiler's own global allocator -- same mechanism as
+        // TIC80_MAP_BUFFER_PTR. 0 == not yet promoted; nonzero == a __malloc'd
+        // RAM pointer, written the first time tilemap.set() runs.
+        char ram_ptr_name[160];
+        snprintf (ram_ptr_name, sizeof (ram_ptr_name),
+                  "VIRCON32_TILEMAP_%s_RAM_PTR", param1);
+        register_global (ram_ptr_name);
+
+        // No node->as.cart_hint.name/.resource_id set -- NAME stays a
+        // compile-time-only token, never a Lua-visible value.
+    }
 
     return node;
 }

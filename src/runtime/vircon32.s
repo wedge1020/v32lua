@@ -1756,3 +1756,406 @@ _memcard_loadtable_return:
     POP   BP
     RET
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; __builtin_vircon32_tilemap_get
+;;
+;; Stack: [BP+2]=rom_ptr  [BP+3]=ram_ptr_addr  [BP+4]=width  [BP+5]=height
+;;        [BP+6]=x        [BP+7]=y
+;; Returns: R0 = tile value at (x,y), boxed, or BOXED_NIL if out of bounds.
+;;
+;; Reads the RAM copy if this tilemap has been promoted (ram_ptr_addr's
+;; word is nonzero), otherwise reads straight out of ROM. ram_ptr_addr's
+;; current value is never trusted after a destructive compare -- see the
+;; scratch-copy note below.
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_vircon32_tilemap_get:
+    PUSH BP
+    MOV  BP, SP
+
+    MOV  R1, [BP+6]        ; x
+    CFI  R1                ; R1 = round(x)
+
+    MOV  R2, [BP+7]        ; y
+    CFI  R2                ; R2 = round(y)
+
+    MOV  R3, [BP+4]        ; width
+    MOV  R4, [BP+5]        ; height
+
+    ;; Bounds check x
+    MOV  R5, R1
+    ILT  R5, 0
+    JT   R5, _v32_tmget_invalid
+    MOV  R5, R1
+    IGE  R5, R3
+    JT   R5, _v32_tmget_invalid
+
+    ;; Bounds check y
+    MOV  R5, R2
+    ILT  R5, 0
+    JT   R5, _v32_tmget_invalid
+    MOV  R5, R2
+    IGE  R5, R4
+    JT   R5, _v32_tmget_invalid
+
+    ;; index = y*width + x
+    MOV  R5, R3
+    IMUL R2, R5
+    IADD R1, R2            ; R1 = index
+
+    ;; Promotion check. R7 must survive the IEQ below (destructive), so
+    ;; the compare runs on a throwaway copy (R8), never on R7 itself.
+    MOV  R6, [BP+3]        ; ram_ptr_addr
+    MOV  R7, [R6]          ; current ram_ptr (0 == not promoted)
+    MOV  R8, R7
+    IEQ  R8, BOXED_NIL
+    JT   R8, _v32_tmget_from_rom
+
+    MOV  R0, R7
+    IADD R0, R1
+    MOV  R0, [R0]
+    JMP  _v32_tmget_box
+
+_v32_tmget_from_rom:
+    MOV  R0, [BP+2]        ; rom_ptr
+    IADD R0, R1
+    MOV  R0, [R0]
+
+_v32_tmget_box:
+    CIF  R0
+    JMP  _v32_tmget_done
+
+_v32_tmget_invalid:
+    MOV  R0, BOXED_NIL
+
+_v32_tmget_done:
+    MOV  SP, BP
+    POP  BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; __builtin_vircon32_tilemap_set
+;;
+;; Stack: [BP+2]=rom_ptr  [BP+3]=ram_ptr_addr  [BP+4]=width  [BP+5]=height
+;;        [BP+6]=x        [BP+7]=y             [BP+8]=v
+;; Returns: R0 = v (boxed). Out-of-bounds is a silent no-op, mirroring the
+;; TIC-80 mset() convention already established.
+;;
+;; Promotes on first call: __malloc's width*height words, copies the ROM
+;; data across, then stores the promotion pointer. R1 (index) and R9
+;; (value) are the only things still needed after the CALL, so they're the
+;; only things spilled across it -- width/height/rom_ptr/ram_ptr_addr are
+;; our OWN stack arguments and are safe across any CALL by construction,
+;; so they're just reloaded fresh afterward instead of being spilled.
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_vircon32_tilemap_set:
+    PUSH BP
+    MOV  BP, SP
+
+    MOV  R1, [BP+6]
+    CFI  R1                ; R1 = round(x)
+
+    MOV  R2, [BP+7]
+    CFI  R2                ; R2 = round(y)
+
+    MOV  R3, [BP+4]        ; width
+    MOV  R4, [BP+5]        ; height
+
+    MOV  R9, [BP+8]        ; v
+    CFI  R9                ; native tilemap values aren't clamped to 0-255
+                            ; the way the TIC-80 layer clamps sprite ids --
+                            ; region ids can run past that.
+
+    ;; Bounds check x
+    MOV  R5, R1
+    ILT  R5, 0
+    JT   R5, _v32_tmset_noop
+    MOV  R5, R1
+    IGE  R5, R3
+    JT   R5, _v32_tmset_noop
+
+    ;; Bounds check y
+    MOV  R5, R2
+    ILT  R5, 0
+    JT   R5, _v32_tmset_noop
+    MOV  R5, R2
+    IGE  R5, R4
+    JT   R5, _v32_tmset_noop
+
+    ;; index = y*width + x
+    MOV  R5, R3
+    IMUL R2, R5
+    IADD R1, R2             ; R1 = index
+
+    MOV  R6, [BP+3]         ; ram_ptr_addr
+    MOV  R7, [R6]           ; current ram_ptr (0 == not promoted)
+    MOV  R8, R7
+    IEQ  R8, BOXED_NIL
+    JF   R8, _v32_tmset_store   ; already promoted -> store directly
+
+    ;; --- Promote: malloc, copy ROM -> RAM, persist the pointer ---
+    PUSH R1                 ; spill index across the CALL
+    PUSH R9                 ; spill value across the CALL
+    MOV  R10, R3
+    IMUL R10, R4            ; total cell count = __malloc's argument
+    PUSH R10
+    CALL __malloc
+    IADD SP, 1              ; clean up __malloc's own argument
+    POP  R9                 ; restore value
+    POP  R1                 ; restore index
+    MOV  R7, R0             ; R7 = new RAM buffer
+
+    MOV  R6, [BP+3]
+    MOV  [R6], R7           ; persist the promotion pointer
+
+    ;; Recompute total cell count fresh -- R10 is not trusted post-CALL,
+    ;; but width/height (our own stack args) are.
+    MOV  R10, [BP+4]
+    MOV  R6,  [BP+5]
+    IMUL R10, R6
+
+    MOV  R11, 0             ; copy index
+    MOV  R12, [BP+2]        ; rom_ptr
+
+_v32_tmset_copy_loop:
+    MOV  R8, R11
+    ILT  R8, R10
+    JF   R8, _v32_tmset_store
+
+    MOV  R8, R12
+    IADD R8, R11
+    MOV  R8, [R8]
+
+    MOV  R6, R7
+    IADD R6, R11
+    MOV  [R6], R8
+
+    IADD R11, 1
+    JMP  _v32_tmset_copy_loop
+
+_v32_tmset_store:
+    MOV  R6, R7
+    IADD R6, R1
+    MOV  [R6], R9
+
+    CIF  R9
+    MOV  R0, R9
+    JMP  _v32_tmset_done
+
+_v32_tmset_noop:
+    MOV  R0, [BP+8]         ; return v unchanged, out-of-bounds writes nothing
+
+_v32_tmset_done:
+    MOV  SP, BP
+    POP  BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; __builtin_vircon32_tilemap_render
+;;
+;; Stack: [BP+2]=rom_ptr  [BP+3]=ram_ptr_addr  [BP+4]=width  [BP+5]=height
+;;        [BP+6]=sx  [BP+7]=sy  [BP+8]=w  [BP+9]=h
+;;        [BP+10]=x  [BP+11]=y  [BP+12]=tile_w  [BP+13]=tile_h
+;;        [BP+14]=skip_id (boxed; BOXED_NIL means "draw every cell")
+;;
+;; Locals: [BP-1]=clamped sx  [BP-2]=clamped sy  [BP-3]=row  [BP-4]=col
+;;
+;; Read-only, never promotes. Nothing survives the per-cell CALL to
+;; __builtin_vircon32_spr in a register -- loop state lives in the local
+;; slots above, everything else is reloaded fresh from its stack argument
+;; each time it's needed.
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_vircon32_tilemap_render:
+    PUSH BP
+    MOV  BP, SP
+    ISUB SP, 4
+
+    ;; ---- Clamp sx to 0 .. max(0, width-w) ----
+    MOV  R1, [BP+6]
+    CFI  R1
+    MOV  R2, [BP+8]
+    CFI  R2
+    MOV  R3, [BP+4]         ; width
+    MOV  R4, R3
+    ISUB R4, R2             ; R4 = width - w
+    MOV  R5, R4
+    ILT  R5, 0
+    JT   R5, _v32_tmrender_sxmax_zero
+    JMP  _v32_tmrender_sx_have_max
+_v32_tmrender_sxmax_zero:
+    MOV  R4, 0
+_v32_tmrender_sx_have_max:
+    MOV  R5, R1
+    ILT  R5, 0
+    JT   R5, _v32_tmrender_sx_use_zero
+    MOV  R5, R1
+    IGT  R5, R4
+    JT   R5, _v32_tmrender_sx_use_max
+    JMP  _v32_tmrender_sx_done
+_v32_tmrender_sx_use_zero:
+    MOV  R1, 0
+    JMP  _v32_tmrender_sx_done
+_v32_tmrender_sx_use_max:
+    MOV  R1, R4
+_v32_tmrender_sx_done:
+    MOV  [BP-1], R1
+
+    ;; ---- Clamp sy to 0 .. max(0, height-h) ----
+    MOV  R1, [BP+7]
+    CFI  R1
+    MOV  R2, [BP+9]
+    CFI  R2
+    MOV  R3, [BP+5]         ; height
+    MOV  R4, R3
+    ISUB R4, R2
+    MOV  R5, R4
+    ILT  R5, 0
+    JT   R5, _v32_tmrender_symax_zero
+    JMP  _v32_tmrender_sy_have_max
+_v32_tmrender_symax_zero:
+    MOV  R4, 0
+_v32_tmrender_sy_have_max:
+    MOV  R5, R1
+    ILT  R5, 0
+    JT   R5, _v32_tmrender_sy_use_zero
+    MOV  R5, R1
+    IGT  R5, R4
+    JT   R5, _v32_tmrender_sy_use_max
+    JMP  _v32_tmrender_sy_done
+_v32_tmrender_sy_use_zero:
+    MOV  R1, 0
+    JMP  _v32_tmrender_sy_done
+_v32_tmrender_sy_use_max:
+    MOV  R1, R4
+_v32_tmrender_sy_done:
+    MOV  [BP-2], R1
+
+    MOV  R1, 0
+    MOV  [BP-3], R1         ; row = 0
+
+_v32_tmrender_row_loop:
+    MOV  R1, [BP-3]
+    MOV  R2, [BP+9]         ; h
+    CFI  R2
+    MOV  R3, R1
+    IGE  R3, R2
+    JT   R3, _v32_tmrender_done
+
+    MOV  R1, 0
+    MOV  [BP-4], R1         ; col = 0
+
+_v32_tmrender_col_loop:
+    MOV  R1, [BP-4]
+    MOV  R2, [BP+8]         ; w
+    CFI  R2
+    MOV  R3, R1
+    IGE  R3, R2
+    JT   R3, _v32_tmrender_row_next
+
+    ;; map cell = (clamped_sx + col, clamped_sy + row)
+    MOV  R1, [BP-1]
+    MOV  R2, [BP-4]
+    IADD R1, R2             ; R1 = map cell x
+
+    MOV  R2, [BP-2]
+    MOV  R3, [BP-3]
+    IADD R2, R3             ; R2 = map cell y
+
+    ;; index = mapY * width + mapX
+    MOV  R3, [BP+4]         ; width
+    IMUL R2, R3
+    IADD R1, R2             ; R1 = index
+
+    ;; resolve data ptr fresh (ROM or promoted RAM copy), read-only
+    MOV  R4, [BP+3]         ; ram_ptr_addr
+    MOV  R5, [R4]
+    MOV  R6, R5
+    IEQ  R6, BOXED_NIL
+    JT   R6, _v32_tmrender_from_rom
+
+    MOV  R4, R5
+    IADD R4, R1
+    MOV  R7, [R4]           ; R7 = tile value
+    JMP  _v32_tmrender_have_tile
+
+_v32_tmrender_from_rom:
+    MOV  R4, [BP+2]         ; rom_ptr
+    IADD R4, R1
+    MOV  R7, [R4]
+
+_v32_tmrender_have_tile:
+    MOV  R4, [BP+14]        ; skip_id (boxed)
+    MOV  R5, R4
+    IEQ  R5, BOXED_NIL
+    JT   R5, _v32_tmrender_draw    ; no skip_id given -> always draw
+
+    CFI  R4
+    MOV  R5, R7
+    IEQ  R5, R4
+    JT   R5, _v32_tmrender_col_next  ; tile == skip_id -> skip
+
+_v32_tmrender_draw:
+    ;; screen position = (x + col*tile_w, y + row*tile_h)
+    MOV  R1, [BP-4]
+    MOV  R2, [BP+12]        ; tile_w
+    CFI  R2
+    IMUL R1, R2
+    MOV  R2, [BP+10]        ; x
+    CFI  R2
+    IADD R1, R2
+    CIF  R1
+    MOV  R8, R1             ; screen x, saved while y is computed
+
+    MOV  R1, [BP-3]
+    MOV  R2, [BP+13]        ; tile_h
+    CFI  R2
+    IMUL R1, R2
+    MOV  R2, [BP+11]        ; y
+    CFI  R2
+    IADD R1, R2
+    CIF  R1                 ; screen y
+
+    ;; spr(tile_value, screen_x, screen_y, 1.0, 1.0, 0, 0xFFFFFFFF, ALPHA)
+    MOV  R2, 32.000000      ; VIRCON32_BLEND_ALPHA
+    PUSH R2
+    MOV  R2, 4294967295.000000
+    PUSH R2
+    MOV  R2, 0.000000
+    PUSH R2
+    MOV  R2, 1.000000
+    PUSH R2
+    MOV  R2, 1.000000
+    PUSH R2
+    PUSH R1                 ; y
+    PUSH R8                 ; x
+    MOV  R2, R7
+    CIF  R2
+    PUSH R2                 ; region_id
+    CALL __builtin_vircon32_spr
+    IADD SP, 8
+
+_v32_tmrender_col_next:
+    MOV  R1, [BP-4]
+    IADD R1, 1
+    MOV  [BP-4], R1
+    JMP  _v32_tmrender_col_loop
+
+_v32_tmrender_row_next:
+    MOV  R1, [BP-3]
+    IADD R1, 1
+    MOV  [BP-3], R1
+    JMP  _v32_tmrender_row_loop
+
+_v32_tmrender_done:
+    MOV  SP, BP
+    POP  BP
+    RET
+

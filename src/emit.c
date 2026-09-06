@@ -785,6 +785,8 @@ void  emit_runtime_library (void)
         emit_embedded_asm (runtime_vircon32_start);
     }
 
+    emit_tilemap_rom_data (out());
+
     ////////////////////////////////////////////////////////////////////////////////////
     //
     // Always needed - epilogue

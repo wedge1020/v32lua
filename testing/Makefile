@@ -92,6 +92,7 @@ tests:
 	@$(MAKE) -C strings tests
 	@$(MAKE) -C tables tests
 	@$(MAKE) -C special tests
+	@$(MAKE) -C api tests
 
 # Clean target drops all generated assembly and binary test files
 clean:

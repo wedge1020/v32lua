@@ -28,6 +28,7 @@ void  compiler_error   (ErrorType, int, const char *, ...);
 void  compiler_warning (ErrorType, int, const char *, ...);
 int   get_builtin_return_count (const char *);
 char *derive_cart_title_from_filename (const char *);
+TilemapAsset *parse_tilemap_csv                   (const char *, const char *);
 
 // ============================================================================
 // --#include preprocessing pass

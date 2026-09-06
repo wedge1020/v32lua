@@ -20,11 +20,12 @@
 #include "table.h"
 #include "intrinsics.h"
 #include "generate.h"
+#include "tilemap.h"
 #include "internals.h"
 #include "register.h"
 #include "closures.h"
 
-#define  VERSION             "20260905-dev"
+#define  VERSION             "20260906-dev"
 #define  AUTHOR              "Matthew Haas"
 #define  URL                 "https://github.com/wedge1020/v32lua"
 
