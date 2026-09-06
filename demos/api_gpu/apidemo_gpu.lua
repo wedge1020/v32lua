@@ -97,7 +97,7 @@ function main()
             player_region = 1 + (jump_count % 2)   -- alternates region 1 / 2
         end
 
-        if btnp(6, 1) then             -- B, explicit player index (gamepad 1):
+        if btnp(6, 0) then             -- B, explicit player index (gamepad 1):
             player_region = 3           -- turn into a slime for a moment
         end
 
