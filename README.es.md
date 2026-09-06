@@ -800,7 +800,7 @@ la herramienta que pretende ser.
 
 Al comienzo del desarrollo del compilador, todo el código de optimización
 fue eliminado y trasladado a una herramienta separada,
-[`v32opt`](https://github.com/wedge1020/v32opt). Está diseñada como un
+[v32opt](https://github.com/wedge1020/v32opt). Está diseñada como un
 optimizador de ensamblador de Vircon32 de propósito general, pensado para
 usarse con el compilador de C y el compilador de Lua (junto con
 ensamblador escrito a mano). Las pruebas tempranas han mostrado mejoras

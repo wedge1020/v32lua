@@ -742,7 +742,7 @@ is intended to be.
 ## Compiler Optimization
 
 Early on in compiler development, all optimization code was removed and 
-factored into a separate tool, `[v32opt](https://github.com/wedge1020/v32opt)`.
+factored into a separate tool, [v32opt](https://github.com/wedge1020/v32opt).
 This is designed as a general purpose Vircon32 assembly optimizer, meant
 for use with the C compiler and lua compiler (along with handwritten assembly).
 Early tests have shown some mild improvements to performance, and potential
