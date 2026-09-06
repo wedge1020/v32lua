@@ -381,28 +381,32 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
 
     if (runtime_req.needs_vircon32 == true)
     {
-		// music.* / sfx.* -- native Vircon32 sound API
+        // music.* / sfx.* -- native Vircon32 sound API
         if (strncmp(func_name, "music.", 6) == 0 ||
             strncmp(func_name, "sfx.",   4) == 0) {
             return try_emit_sound_namespace_intrinsic (node, dest_reg, func_name);
         }
 
-		// memcard.* -- native Vircon32 persistent memory card
+        // memcard.* -- native Vircon32 persistent memory card
         if (strncmp(func_name, "memcard.", 8) == 0) {
             return try_emit_memcard_namespace_intrinsic (node, dest_reg, func_name);
         }
 
-		// tilemap.* -- native Vircon32 tilemap
-		if (strncmp(func_name, "tilemap.", 8) == 0) {
-			if (strcmp(func_name, "tilemap.get") == 0) {
-				return emit_vircon32_tilemap_get_intrinsic(node, dest_reg);
-			}
-			if (strcmp(func_name, "tilemap.set") == 0) {
-				return emit_vircon32_tilemap_set_intrinsic(node, dest_reg);
-			}
-			compiler_error(ERR_SEMANTIC, node->line_number, "Unknown tilemap method: %s", func_name);
-			return false;
-		}
+        // tilemap.* -- native Vircon32 tilemap
+        if (strncmp(func_name, "tilemap.", 8) == 0) {
+            if (strcmp(func_name, "tilemap.get") == 0) {
+                return emit_vircon32_tilemap_get_intrinsic(node, dest_reg);
+            }
+            if (strcmp(func_name, "tilemap.set") == 0) {
+                return emit_vircon32_tilemap_set_intrinsic(node, dest_reg);
+            }
+            if (strcmp(func_name, "tilemap.render") == 0) {
+                return emit_vircon32_tilemap_render_intrinsic(node, dest_reg);
+            }
+            compiler_error(ERR_SEMANTIC, node -> line_number,
+                           "Unknown tilemap method: %s", func_name);
+            return false;
+        }
     }
 
     // add()

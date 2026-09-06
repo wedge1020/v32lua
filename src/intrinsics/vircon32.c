@@ -325,3 +325,88 @@ bool emit_vircon32_btnp_intrinsic(ASTNode *node, int dest_reg)
 
     return true;
 }
+
+bool emit_vircon32_tilemap_render_intrinsic (ASTNode *node, int dest_reg)
+{
+    ASTNode *name_arg = node->as.call.args_head;
+    TilemapAsset *t = tilemap_resolve_name (name_arg);
+    if (t == NULL) {
+        compiler_error (ERR_SEMANTIC, node->line_number,
+            "tilemap.render() requires a --#tilemap-declared name as its "
+            "first argument");
+        return false;
+    }
+
+    ASTNode *args[9] = { NULL };
+    int arg_count = 0;
+    for (ASTNode *curr = name_arg->next; curr != NULL && arg_count < 9; curr = curr->next) {
+        args[arg_count++] = curr;
+    }
+
+    if (arg_count < 8) {
+        compiler_error (ERR_SEMANTIC, node->line_number,
+            "tilemap.render() requires at least 8 arguments: "
+            "tilemap.render(NAME, sx, sy, w, h, x, y, tile_w, tile_h [, skip_id])");
+        return false;
+    }
+
+    runtime_req.needs_vircon32 = true;
+
+    char ram_ptr_label[192];
+    snprintf (ram_ptr_label, sizeof (ram_ptr_label),
+              "var_VIRCON32_TILEMAP_%s_RAM_PTR", t->name);
+
+    emit_asm ("    ;; --- Native tilemap.render('%s') ---\n", t->name);
+
+    // "Given" means present AND not an explicit nil -- same discipline
+    // spr() needed fixing to get right; replicated here from the start.
+    bool has_skip = (arg_count >= 9 && args[8] != NULL && args[8]->type != NODE_NIL);
+
+    // Push right-to-left: skip_id, tile_h, tile_w, y, x, h, w, sy, sx,
+    // height, width, ram_ptr_addr, rom_ptr
+    if (has_skip) {
+        int reg = allocate_register();
+        generate_asm (args[8], reg);
+        emit_asm ("PUSH R%d ; skip_id\n", reg);
+        unlock_register (reg);
+    } else {
+        emit_asm ("MOV R0, BOXED_NIL ; no skip_id -- draw every cell\n");
+        emit_asm ("PUSH R0\n");
+    }
+
+    static const char *names[8] = { "sx", "sy", "w", "h", "x", "y", "tile_w", "tile_h" };
+    for (int i = 7; i >= 0; i--) {
+        int reg = allocate_register();
+        generate_asm (args[i], reg);
+        emit_asm ("PUSH R%d ; %s\n", reg, names[i]);
+        unlock_register (reg);
+    }
+
+    int reg = allocate_register();
+    emit_asm ("MOV R%d, %d\n", reg, t->height);
+    emit_asm ("PUSH R%d ; height\n", reg);
+    unlock_register (reg);
+
+    reg = allocate_register();
+    emit_asm ("MOV R%d, %d\n", reg, t->width);
+    emit_asm ("PUSH R%d ; width\n", reg);
+    unlock_register (reg);
+
+    reg = allocate_register();
+    emit_asm ("MOV R%d, %s\n", reg, ram_ptr_label);
+    emit_asm ("PUSH R%d ; ram_ptr_addr\n", reg);
+    unlock_register (reg);
+
+    reg = allocate_register();
+    emit_asm ("MOV R%d, __tilemap_%s_rom\n", reg, t->name);
+    emit_asm ("PUSH R%d ; rom_ptr\n", reg);
+    unlock_register (reg);
+
+    emit_asm ("CALL __builtin_vircon32_tilemap_render\n");
+    emit_asm ("IADD SP, 13 ; clean up tilemap.render() arguments\n");
+
+    if (dest_reg != 0) {
+        emit_asm ("MOV R%d, BOXED_NIL ; tilemap.render() returns nothing\n", dest_reg);
+    }
+    return true;
+}

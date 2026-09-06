@@ -108,16 +108,17 @@ void  emit_system_halt_intrinsic ();
 //
 // Vircon32 native fantasy console API
 //
-bool  emit_vircon32_spr_intrinsic           (ASTNode *, int);
-bool  emit_vircon32_btn_intrinsic           (ASTNode *, int);
-bool  emit_vircon32_btnp_intrinsic          (ASTNode *, int);
-bool  emit_vircon32_play_intrinsic          (ASTNode *, int);
-bool  emit_vircon32_channel_cmd_intrinsic   (ASTNode *, int, const char *);
-bool  emit_vircon32_sfx_play_intrinsic      (ASTNode *, int);
-bool  emit_vircon32_sfx_stop_intrinsic      (ASTNode *, int);
-bool  emit_vircon32_music_playing_intrinsic (ASTNode *, int);
-bool  emit_vircon32_volume_intrinsic        (ASTNode *, int, const char *);
-int   try_emit_sound_namespace_intrinsic    (ASTNode *, int, const char *);
+bool  emit_vircon32_spr_intrinsic            (ASTNode *, int);
+bool  emit_vircon32_tilemap_render_intrinsic (ASTNode *, int);
+bool  emit_vircon32_btn_intrinsic            (ASTNode *, int);
+bool  emit_vircon32_btnp_intrinsic           (ASTNode *, int);
+bool  emit_vircon32_play_intrinsic           (ASTNode *, int);
+bool  emit_vircon32_channel_cmd_intrinsic    (ASTNode *, int, const char *);
+bool  emit_vircon32_sfx_play_intrinsic       (ASTNode *, int);
+bool  emit_vircon32_sfx_stop_intrinsic       (ASTNode *, int);
+bool  emit_vircon32_music_playing_intrinsic  (ASTNode *, int);
+bool  emit_vircon32_volume_intrinsic         (ASTNode *, int, const char *);
+int   try_emit_sound_namespace_intrinsic     (ASTNode *, int, const char *);
 
 //////////////////////////////////////////////////////////////////////////////    
 //
