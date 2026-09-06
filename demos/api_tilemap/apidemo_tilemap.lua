@@ -32,24 +32,32 @@ function init()
     ioports.gpu.minY = 156
     ioports.gpu.maxX = 58
     ioports.gpu.maxY = 208
+    ioports.gpu.hotX = 6
+    ioports.gpu.hotY = 156
 
     ioports.gpu.region = 2
     ioports.gpu.minX = 218
     ioports.gpu.minY = 156
     ioports.gpu.maxX = 270
     ioports.gpu.maxY = 208
+    ioports.gpu.hotX = 218
+    ioports.gpu.hotY = 156
 
     ioports.gpu.region = 3
     ioports.gpu.minX = 186
     ioports.gpu.minY = 156
     ioports.gpu.maxX = 211
     ioports.gpu.maxY = 208
+    ioports.gpu.hotX = 186
+    ioports.gpu.hotY = 156
 
     ioports.gpu.region = 4
     ioports.gpu.minX = 6
     ioports.gpu.minY = 6
     ioports.gpu.maxX = 50
     ioports.gpu.maxY = 68
+    ioports.gpu.hotX = 6
+    ioports.gpu.hotY = 6
 
     scroll_x     = 0
     scroll_dir   = 1

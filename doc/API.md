@@ -20,6 +20,7 @@ load-bearing and every sound emitter here depends on it.
 ## Table of Contents
 
 - [Sound: music.\* / sfx.\*](#sound-music--sfx)
+  - [SPU port ordering](#spu-port-ordering)
   - [music.volume() / sfx.volume()](#musicvolumevol--channel--sfxvolumevol--channel)
   - [Why the bare names went away](#why-the-bare-names-went-away)
   - [Compile-time aliases](#compile-time-aliases)
@@ -30,14 +31,28 @@ load-bearing and every sound emitter here depends on it.
 - [System: system.\*](#system-system)
   - [system.wait() / system.halt()](#systemwait--systemhalt)
   - [system.date() / system.time()](#systemdate--systemtime)
+  - [system.frames / system.cycles](#systemframes--systemcycles)
 - [Graphics: spr()](#graphics-spr)
   - [Runtime dispatch](#runtime-dispatch-not-compile-time-fold)
   - [ioports.gpu.clear()](#ioportsgpuclearcolor)
+  - [Defining texture regions](#defining-texture-regions)
 - [Input: btn() / btnp()](#input-btn--btnp)
   - [Button IDs](#button-ids)
   - [btn(): direct polling](#btn-direct-polling)
   - [btnp(): edge detection](#btnp-edge-detection)
+  - [ioports.inp.inputs](#ioportsinpinputs----one-word-bitmask)
   - [What's intentionally not here](#whats-intentionally-not-here)
+- [Tilemap: tilemap.\*](#tilemap-tilemap)
+  - [--#tilemap and the CSV format](#tilemap-name-file-and-the-csv-format)
+  - [tilemap.get() / tilemap.set()](#tilemapget--tilemapset)
+  - [Lazy ROM-to-RAM promotion](#lazy-rom-to-ram-promotion)
+  - [tilemap.render()](#tilemaprender)
+  - [What's intentionally not here](#whats-intentionally-not-here-2)
+- [Other raw IO ports](#other-raw-io-ports)
+  - [ioports.tim.\* — raw timer](#ioportstim--raw-timer)
+  - [ioports.rng.\* — hardware RNG](#ioportsrng--hardware-rng)
+  - [ioports.car.\* — cartridge info](#ioportscar--cartridge-info)
+  - [ioports.mem.status — memory card presence](#ioportsmemstatus--memory-card-presence)
 - [Memory card: memcard.\*](#memory-card-memcard)
   - [memcard.save() / memcard.load()](#memcardsave--memcardload)
   - [memcard[position]](#memcardposition)
@@ -80,6 +95,68 @@ channel: searching would cost up to 15 `IN` + compare on the hot path
 (`sfx.play()` runs on every jump and footstep) to protect against a case
 that only arises when 15 effects overlap, where the oldest is the right one
 to lose anyway.
+
+## Vircon32 SPU: the port write order
+
+### The rule
+
+```asm
+OUT SPU_SelectedChannel, ch
+OUT SPU_Command, SPUCommand_StopSelectedChannel   ; 1
+OUT SPU_ChannelAssignedSound, snd
+OUT SPU_ChannelVolume, R                          ; float port
+OUT SPU_Command, SPUCommand_PlaySelectedChannel
+OUT SPU_ChannelLoopEnabled, 0|1                   ; 2 - AFTER the command
+OUT SPU_ChannelPosition, samples                  ; 3 - AFTER the command
+```
+
+Three console behaviours force this. All three fail **silently** — no error,
+no rejected port write, just the wrong sound.
+
+**1. A sound only assigns to a STOPPED channel.**
+**2 & 3. The play command overwrites loop AND position.**
+
+A loop flag or seek written *before* the command is discarded. Note that the
+loop flag is replaced by the SOUND's `PlayWithLoop`, which is false unless
+something set `SPU_SoundPlayWithLoop` on that sound — so channel-level
+looping only works if written after the command. Write it even when it is 0,
+since the command has just replaced it with the sound's flag.
+
+For a **Paused** channel `PlayChannel()` takes neither branch — it only sets
+`State = Playing`. That is what makes Play the correct per-channel resume,
+and why resume never disturbs position or loop.
+
+### Channel states and what resume actually means
+
+`channel_stopped 0x40`, `channel_paused 0x41`, `channel_playing 0x42`.
+`SPU_ChannelState` is **read-only** (`WriteSPUChannelState` returns false).
+
+There is no `ResumeSelectedChannel` command. `ResumeAllChannels` is literally
+a loop calling `PlayChannel()` on every paused channel, so `resume(ch)` =
+`PlaySelectedChannel` is the right per-channel equivalent.
+
+**A "resume" that restarts from the beginning means the channel was STOPPED,
+not paused.** That is the diagnostic signature of a lost loop flag: the sound
+ran to its end, the channel went Stopped, and Play rewound it.
+
+`PauseChannel()` sets `State = Paused` unconditionally — it does *not* check
+for an already-stopped channel, despite the C API docs saying pause has "no
+effect if already stopped". So pausing a finished channel leaves it Paused at
+position 0, and a later resume plays from the start. Guard with a
+`SPU_ChannelState == 0x42` check if that matters.
+
+### Port types
+
+`SPU_ChannelPosition` is an **INTEGER** port — a sample index, clamped by the
+console to `0 .. SoundLength-1`. `audio.h` declares
+`set_channel_position( int )`, and `WriteSPUChannelPosition()` reads
+`Value.AsInteger`. The IOPortMap table had `ioports.spu.chanpos` as
+`IOPORT_TYPE_FLOAT`, which wrote raw float bit patterns to it; corrected to
+`IOPORT_TYPE_INTEGER`.
+
+Genuine float ports: `SPU_ChannelVolume` (clamped 0–8), `SPU_ChannelSpeed`
+(0–128, changes pitch), `SPU_GlobalVolume` (clamped 0–2). NaN/inf writes to
+any of these are ignored rather than rejected.
 
 ## music.volume(VOL [, CHANNEL]) / sfx.volume(VOL [, CHANNEL])
 
@@ -236,7 +313,7 @@ truthiness (only `nil` and `false` are falsy), with literals folding to a
 bare 0/1 immediate. Reads branch to `BOXED_TRUE`/`BOXED_FALSE`.
 
 Affects `ioports.spu.chanloop`, `ioports.spu.soundloop`,
-`ioports.inp.status`, `ioports.car.connect`, `ioports.mem.connec`.
+`ioports.inp.status`, `ioports.car.connected`, `ioports.mem.connected`.
 
 Boolean ports return `true`/`false`, not `1.0`/`0.0`. Arithmetic on one
 needs rewriting as `if p then 1 else 0`.
@@ -284,6 +361,24 @@ year but doesn't itself define the rule, so this is the one sane,
 universal reading of it. There is no `os.time()`/`os.date()` format-string
 or table-construction support — this is a fixed-shape decode of the
 hardware register, not a general date library.
+
+## system.frames / system.cycles
+
+```lua
+local f = system.frames()   -- TIM_FrameCounter -- frames since power-on
+local c = system.cycles()   -- TIM_CycleCounter -- CPU cycles since power-on
+```
+
+Both are read-only hardware counters, monotonic since boot — unlike
+`system.date()`/`system.time()`, these are **not** wall-clock: they measure
+the console's own running time, not the real-time clock. `system.frames()`
+is the natural fit for "every N frames, do X" timing (this is exactly what
+the tilemap scroll demo uses to pace its scroll speed) since it free-runs
+regardless of what the program does, unlike a hand-rolled counter variable
+that has to be remembered and incremented every frame. Both are also
+reachable as raw ports (`ioports.tim.frames`, `ioports.tim.cycles`) — see
+[Other raw IO ports](#other-raw-io-ports) — the `system.*` names are
+identical, just under the more discoverable namespace.
 
 ---
 
@@ -371,6 +466,43 @@ ioports.gpu.clear(0xFF202020)   -- packed RGBA, not a preset name
 ioports.gpu.clear()             -- reuses the last ClearColor set
 ```
 
+## Defining texture regions
+
+`spr()`'s `region_id` doesn't refer to anything until a region has actually
+been carved out of a loaded texture. There is no compiler-side region
+authoring — this is six raw port writes, normally done once in `init()`
+(or once per texture at the top of `main()` if there's no separate
+`init()`), one region at a time:
+
+```lua
+ioports.gpu.texture = SPRITES   -- select which loaded texture this region cuts from
+ioports.gpu.region  = 1         -- select region SLOT 1 to define (this is the id spr() will use)
+ioports.gpu.minX = 6            -- top-left corner of the region, in texture pixels
+ioports.gpu.minY = 156
+ioports.gpu.maxX = 58           -- bottom-right corner, inclusive
+ioports.gpu.maxY = 208
+ioports.gpu.hotX = 6            -- see below -- NOT 0
+ioports.gpu.hotY = 156          -- see below -- NOT 0
+```
+
+**`hotX`/`hotY` must be set to the same values as `minX`/`minY`, not to
+`0`.** This was found the hard way while building `tilemap.render()`: a
+region whose hotspot is left unset (or explicitly zeroed) draws offset
+downward and rightward by roughly its own `minX`/`minY` — a region cut from
+near the top-left of the sheet looks fine, which is exactly what made this
+easy to miss at first, but a region cut from further into the sheet drifts
+by however far in it was cut from. Setting `hotX`/`hotY` to match `minX`/
+`minY` anchors the draw point at the region's own top-left corner, which is
+what every example in this document assumes `spr(id, x, y, ...)` means.
+This needs doing for **every** region a cart defines — it is not a
+one-time global setting.
+
+`GPU_RegionMinX/MinY/MaxX/MaxY/HotSpotX/HotSpotY` are the raw ports behind
+`ioports.gpu.minX` etc. — see the full port table in
+[Other raw IO ports](#other-raw-io-ports) for everything else `ioports.gpu.*`
+exposes (drawing point, scale, angle, multiply color, blending, and the
+read-only `ioports.gpu.pixels` GPU-busy counter).
+
 ---
 
 # Input: btn() / btnp()
@@ -426,6 +558,27 @@ An out-of-range `player` (an explicit value outside 0–3) is clamped to
 0–3 before being used as an index into that 44-word table, rather than
 being allowed to compute an address outside it.
 
+## ioports.inp.inputs — one-word bitmask
+
+```lua
+local mask = ioports.inp.inputs   -- current gamepad, all 11 buttons in one read
+```
+
+Reads every `INP_Gamepad*` port for whichever gamepad is currently selected
+(`ioports.inp.gamepad`) and collates them into a single 11-bit number in one
+shot, instead of eleven separate `btn()` calls. Bit layout, MSB to LSB:
+
+| Bit | 10 | 9 | 8 | 7 | 6 | 5 | 4 | 3 | 2 | 1 | 0 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Button | Left | Right | Up | Down | Start | A | B | X | Y | L | R |
+
+Each bit is `1` if that button currently reads pressed (`> 0`), same
+"currently held" semantics as `btn()` — this is a held-state snapshot, not
+an edge-triggered one; there's no bitmask equivalent of `btnp()`. Useful for
+passing a whole frame's input as one value (e.g. into a replay/input log)
+rather than for everyday per-button game logic, where `btn()`/`btnp()` read
+more clearly.
+
 ## What's intentionally NOT here
 
 - No bitfield/"any button" form (`btn()` with no arguments) the way
@@ -437,6 +590,127 @@ being allowed to compute an address outside it.
 These match the underlying Vircon32 hardware rather than PICO-8/TIC-80
 conventions; that emulation lives entirely in the `--#api pico8`/`--#api tic80`
 compatibility layers, not here.
+
+---
+
+# Tilemap: tilemap.\*
+
+```
+tilemap.get(NAME, x, y)        -> number or nil (out of bounds)
+tilemap.set(NAME, x, y, v)     -> v (out-of-bounds write is a silent no-op)
+tilemap.render(NAME, sx, sy, w, h, x, y, tile_w, tile_h [, skip_id])
+```
+
+`NAME` is always a bare `--#tilemap`-declared identifier, resolved entirely
+at compile time — never a runtime value, the same restriction (and the same
+reason) `--#sound`/`--#texture` names have: there's nothing sensible for a
+dynamically-computed name to resolve against, since the whole point is that
+the compiler knows the tilemap's width/height and ROM location by name
+before any code runs.
+
+Unlike `--#texture`/`--#sound`, a tilemap is **not** a cart-XML resource —
+no `<textures>`/`<sounds>` entry, no resource id baked into generated code.
+Its data is embedded as literal values directly in the assembled program.
+
+## --#tilemap NAME "file" and the CSV format
+
+```lua
+--#tilemap LEVEL1 "level1.csv"
+```
+
+The file is plain text: rows of comma-separated tile ids, one row per
+line. Row count becomes the tilemap's height; the first row's value count
+becomes its width, and every other row must match that count exactly or
+it's a compile error — a ragged map silently reading garbage past a short
+row is worse than refusing to build. A tile id is just a number; there's no
+required meaning, but the natural one (and the one `tilemap.render()`
+assumes) is a GPU region id, ready to hand to `spr()`.
+
+This format is deliberately plain enough that Tiled's **Export As... CSV**
+(per-layer) output can be used directly with no conversion step — no TMX/
+TSX parsing anywhere in this compiler.
+
+## tilemap.get() / tilemap.set()
+
+```lua
+local id = tilemap.get(LEVEL1, 4, 2)   -- tile at column 4, row 2
+tilemap.set(LEVEL1, 4, 2, 99)          -- overwrite it
+```
+
+Both are 0-indexed, `(x, y)` = `(column, row)`. `tilemap.get()` out of
+bounds (either axis, either direction) returns `nil`, the same as reading
+past the end of a Lua table. `tilemap.set()` out of bounds is a silent
+no-op — there's no sensible value to hand back for "you tried to write
+nowhere," so it just declines, mirroring how the TIC-80 compatibility
+layer's `mset()` already treats an out-of-range write.
+
+Values are stored and returned as plain numbers with **no clamping** —
+unlike the TIC-80 layer's `mset()`, which clamps to 0–255 because TIC-80
+sprite ids are byte-sized. A tile value here is just whatever the calling
+code wants it to mean, typically a GPU region id, which can run well past
+255.
+
+## Lazy ROM-to-RAM promotion
+
+A tilemap starts life read-only, sitting wherever the compiler placed its
+data in the program image — `tilemap.get()` before any write reads directly
+from there, at no RAM cost. The **first** `tilemap.set()` against a given
+tilemap promotes it: allocates a private RAM copy and copies every cell
+across, and only after that does the tilemap become mutable. Every read or
+write to a *different* tilemap that hasn't been promoted is unaffected —
+promotion is tracked per tilemap, not globally. A second and later
+`tilemap.set()` on an already-promoted tilemap writes straight through,
+without re-copying or disturbing earlier writes.
+
+## tilemap.render()
+
+```lua
+tilemap.render(LEVEL1, sx, sy, w, h, x, y, tile_w, tile_h)
+tilemap.render(LEVEL1, sx, sy, w, h, x, y, tile_w, tile_h, skip_id)
+```
+
+Draws a `w`-by-`h` region of cells, starting at tilemap cell `(sx, sy)`, to
+the screen starting at pixel `(x, y)`, `tile_w`/`tile_h` pixels apart per
+cell — one `spr(tile_value, screen_x, screen_y)` call per visible cell,
+read-only (never promotes). `sx`/`sy` are clamped to `0 .. max(0,
+dimension - w_or_h)`, the same clamping philosophy the TIC-80 compatibility
+layer's `map()` already uses, so a scroll position can be walked past the
+map's true edge without drawing garbage or needing the caller to clamp it
+first.
+
+`tile_w`/`tile_h` are **required**, unlike TIC-80's `map()`, which assumes
+a fixed 8×8 grid — this API has no equivalent assumption to fall back on,
+since GPU regions can be any size. They control only the pixel *spacing*
+between drawn cells; `render()` draws every region at its own native size
+regardless of `tile_w`/`tile_h`, so a region narrower or shorter than the
+pitch sits flush against one edge of its cell rather than being stretched
+to fill it.
+
+`skip_id` (optional) — a cell whose value equals `skip_id` gets no
+`spr()` call at all, useful for a sparse map where most cells are "nothing
+here." This is a coarser mechanism than TIC-80 `map()`'s colorkey
+transparency (which blends per-pixel); native regions already carry real
+alpha, so the common need is just "don't bother drawing this cell,"
+not "draw it but blend certain pixels away."
+
+**Scrolling is cell-granularity, not sub-pixel.** `sx`/`sy` are cell
+indices; there's no fractional source offset anywhere in the design, so
+walking `sx` by 1 moves the drawn content by one full `tile_w` on screen —
+the same limitation TIC-80's own `map()` has. Smooth pixel scrolling would
+need drawing one extra row/column beyond `w`/`h` and shifting the whole
+block's screen origin by a sub-tile pixel remainder; that's a real,
+separate extension, not implemented here.
+
+## What's intentionally NOT here
+
+- No sub-pixel/smooth scrolling — see above.
+- No `mget()`/`mset()`/`map()` naming — those names belong to the TIC-80
+  compatibility layer; this is a distinct, native surface, not an
+  extension of it.
+- No multi-layer support — one `--#tilemap` hint is one flat grid. Layering
+  is a caller-side concern (declare several tilemaps, render them in order).
+- No collision/query helpers beyond `tilemap.get()` itself — checking "is
+  this a wall" is just comparing the returned tile id.
 
 ---
 
@@ -661,3 +935,75 @@ that also use this same physical address range under their own layouts —
 `memcard.*` is unavailable (a compile error) under `--#api pico8`/
 `--#api tic80` to prevent a program from mixing the two and corrupting
 whichever one it isn't currently addressing.
+
+---
+
+# Other raw IO ports
+
+Every `ioports.*` port lives in one table (`core.c`'s `IOPortMap`),
+organized under six categories: `tim`, `rng`, `gpu`, `spu`, `inp`, `car`,
+`mem`. The sound (`spu`), graphics (`gpu`, partially — see
+[Defining texture regions](#defining-texture-regions)), and input (`inp`,
+partially — see [btn()/btnp()](#input-btn--btnp)) categories are covered
+above where they have a higher-level wrapper. What's left is either raw
+hardware with no wrapper at all, or a wrapper that only covers part of a
+category.
+
+An unknown category or property name is a compile error listing the valid
+categories, not a silent no-op or an undeclared-global read — see
+`validate_ioports_path()`.
+
+## ioports.tim.\* — raw timer
+
+```lua
+ioports.tim.date     -- TIM_CurrentDate,   read-only, packed integer
+ioports.tim.time     -- TIM_CurrentTime,   read-only, packed integer
+ioports.tim.frames    -- TIM_FrameCounter, read-only -- same as system.frames()
+ioports.tim.cycles    -- TIM_CycleCounter, read-only -- same as system.cycles()
+```
+
+`ioports.tim.date`/`ioports.tim.time` are the packed raw registers
+`system.date()`/`system.time()` decode into a formatted string and three
+separate numbers — reach for `system.date()`/`system.time()` unless the
+packed representation itself is what's needed (e.g. storing one word to a
+memory card instead of three separate fields).
+
+## ioports.rng.\* — hardware RNG
+
+```lua
+ioports.rng.value            -- RNG_CurrentValue, read: the current random value
+ioports.rng.seed = 12345      -- RNG_CurrentValue, write: reseed the generator
+```
+
+Same underlying hardware register for both directions — reading returns the
+current random value (and advances the generator), writing reseeds it.
+This is the console's own hardware RNG, independent of `math.random()`
+(which is a software PRNG in the runtime, seeded separately) — the two do
+not share state and will not produce the same sequence from the same seed.
+
+## ioports.car.\* — cartridge info
+
+```lua
+ioports.car.status     -- CAR_Connected,          boolean, read-only
+ioports.car.romsize    -- CAR_ProgramROMSize,     integer, read-only
+ioports.car.numvtex    -- CAR_NumberOfTextures,   integer, read-only
+ioports.car.numvsnd    -- CAR_NumberOfSounds,     integer, read-only
+```
+
+Read-only introspection of the currently-inserted cartridge itself — its
+program ROM size in words, and how many textures/sounds its cart-XML
+declared. Since a running program's own cart is always connected,
+`ioports.car.status` reading `false` is not a case normal cart code needs
+to handle; it exists for completeness of the port table rather than a
+practical branch condition; really only something transacted in the BIOS.
+
+## ioports.mem.status — memory card presence
+
+```lua
+if ioports.mem.status then
+    memcard.save(highscore)
+end
+```
+
+`MEM_Connected`, boolean, read-only — whether a memory card is actually
+present before `memcard.*` calls touch it.

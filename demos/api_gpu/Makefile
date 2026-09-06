@@ -41,7 +41,7 @@ obj/$(DEMO).vbin: obj/$(DEMO).asm
 # Process PNG sprite sheet to Vircon texture
 vtex: assets/$(DEMO)_sprites.vtex
 
-#assets/$(DEMO)_sprites.vtex: assets/$(DEMO)_sprites.png
+assets/$(DEMO)_sprites.vtex: assets/$(DEMO)_sprites.png
 	$(TEXTURE_TOOL) assets/$(DEMO)_sprites.png -o assets/$(DEMO)_sprites.vtex
 
 # Pack ROM cartridge (Depends on the binary and texture to ensure they are built first)
