@@ -1009,10 +1009,42 @@ __unbox_table_valid:
 ;; Runtime Panic Handlers for Table Errors
 ;; ---------------------------------------------------------------------------
 __runtime_error_not_table:
-    ;; Trap CPU if script attempts to index a non-table (e.g. String or
-    ;; Function in ROM)
-    HLT
-    JMP __runtime_error_not_table
+    PUSH BP
+    MOV  BP, SP
+    ISUB SP, 1
+    MOV  [BP-1], R1                ; the value that wasn't a table
+
+    MOV  R0, 0xFF000080
+    OUT  GPU_ClearColor, R0
+    OUT  GPU_Command, GPUCommand_ClearScreen
+
+    MOV  R0, 20
+    PUSH R0
+    MOV  R0, 0
+    PUSH R0
+    MOV  R0, __const_str_panic_banner
+    OR   R0, BOXED_ROMSTRING
+    PUSH R0
+    CALL __builtin_print
+
+    MOV  R0, 20
+    PUSH R0
+    MOV  R0, 20
+    PUSH R0
+    MOV  R0, __const_str_err_not_table
+    OR   R0, BOXED_ROMSTRING
+    PUSH R0
+    CALL __builtin_print
+
+    MOV  R0, 20
+    PUSH R0
+    MOV  R0, 40
+    PUSH R0
+    MOV  R0, [BP-1]
+    PUSH R0
+    CALL __builtin_print
+
+    JMP __panic_halt
 
 __runtime_error_hash_overflow:
     ;; Trap CPU if hash part exceeds 7 pairs (until dynamic rehashing
@@ -2019,13 +2051,18 @@ __table_unpack_done:
 ;; ---------------------------------------------------------------------------
 ;; Helper: Validate and unbox table pointer
 ;; Input: R0 = Tagged table pointer
-;; Output: R0 = Raw table pointer, or jump to error
-;; Clobbers: R1
+;; Output: R0 = Raw table pointer, or jump to error (R1 = original tagged
+;;         value, for __runtime_error_not_table's second print line)
+;; Clobbers: R1, R2
 ;; ---------------------------------------------------------------------------
 __unbox_table_validated:
-    MOV  R1, R0
-    AND  R1, BOXED_DATA
-    IEQ  R1, BOXED_TABLE
-    JF   R1, __runtime_error_not_table
+    MOV  R2, R0
+    AND  R2, BOXED_DATA
+    IEQ  R2, BOXED_TABLE
+    JT   R2, __unbox_table_ok
+    MOV  R1, R0                  ; every OTHER not_table call site already
+    JMP  __runtime_error_not_table ; leaves the offending value in R1
+__unbox_table_ok:
     AND  R0, BOXED_PAYLOAD
     RET
+

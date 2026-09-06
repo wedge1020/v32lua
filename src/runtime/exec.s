@@ -76,24 +76,107 @@ __exec_push_done:
 ; Runtime Panic Handler
 ; ==============================================================================
 __runtime_error_not_callable:
-    ; Clear screen to dark red to signal a hardware/runtime panic
-    MOV R0, 0xFF800000 
-    OUT GPU_ClearColor, R0
-    OUT GPU_Command, GPUCommand_ClearScreen
-    
-    ; Prepare screen coordinates for error text (e.g., X=20, Y=20)
-    MOV   R0, 20                ; X coordinate
-    PUSH  R0
-    MOV   R0, 20                ; Y coordinate
-    PUSH  R0
+    PUSH BP
+    MOV  BP, SP
+    ISUB SP, 1
+    MOV  [BP-1], R0                ; __builtin_exec leaves it here untouched
 
-    ; Print base error message
-    MOV   R0, __const_str_err_call_nil  ; Load base error string address
+    MOV  R0, 0xFF000080            ; A=FF, B=00, G=00, R=80 (see hex_to_v32_color)
+    OUT  GPU_ClearColor, R0
+    OUT  GPU_Command, GPUCommand_ClearScreen
+
+    MOV   R0, 20
     PUSH  R0
-    CALL __builtin_print        ; Call your runtime's internal print routine
+    MOV   R0, 0
+    PUSH  R0
+    MOV   R0, __const_str_panic_banner
+    OR    R0, BOXED_ROMSTRING
+    PUSH  R0
+    CALL __builtin_print
+
+    MOV   R0, 20
+    PUSH  R0
+    MOV   R0, 20
+    PUSH  R0
+    MOV   R0, __const_str_err_call_nil
+    OR    R0, BOXED_ROMSTRING
+    PUSH  R0
+    CALL __builtin_print
+
+    MOV   R0, 20
+    PUSH  R0
+    MOV   R0, 40
+    PUSH  R0
+    MOV   R0, [BP-1]
+    PUSH  R0
+    CALL __builtin_print
+
     JMP __panic_halt
-    
+
 __panic_halt:
     WAIT                        ; Yield CPU frame to prevent runaway execution
     JMP __panic_halt            ; Trap CPU in an infinite loop
+
+;; ---------------------------------------------------------------------------
+;; __panic_print_uint: allocation-free decimal printer for panic diagnostics.
+;;
+;; Panic handlers can't safely route a diagnostic number through the normal
+;; print()/tostring()/ftoa() pipeline: __builtin_ftoa_scratch_a allocates its
+;; 48-word scratch buffer lazily, on its very first call in the whole cart's
+;; run. If that first call happens to land here -- because the OOM panic IS
+;; the first thing that ever needed to print a number -- __malloc fails (the
+;; heap is, after all, exactly why we're here), which re-enters
+;; __oom_handler and loops forever instead of ever showing the value. This
+;; touches no heap at all.
+;;
+;; Incoming Stack: [BP+4] = X, [BP+3] = Y, [BP+2] = non-negative raw integer
+;; Clobbers: R0-R6
+;; ---------------------------------------------------------------------------
+__panic_print_uint:
+    PUSH BP
+    MOV  BP, SP
+    ISUB SP, 12                  ; up to 11 digits + null, built right-to-left
+
+    MOV  R1, [BP+2]
+    MOV  R2, BP
+    ISUB R2, 1
+    MOV  R3, 0
+    MOV  [R2], R3                ; null terminator
+
+    MOV  R3, R1
+    IEQ  R3, 0
+    JF   R3, __panic_uint_extract
+    ISUB R2, 1
+    MOV  R3, 48                  ; '0'
+    MOV  [R2], R3
+    JMP  __panic_uint_done
+
+__panic_uint_extract:
+    MOV  R3, R1
+    IEQ  R3, 0
+    JT   R3, __panic_uint_done
+
+    MOV  R3, R1
+    MOV  R4, 10
+    IMOD R3, R4
+    MOV  R4, 10
+    IDIV R1, R4
+    IADD R3, 48                  ; digit -> ASCII
+
+    ISUB R2, 1
+    MOV  [R2], R3
+    JMP  __panic_uint_extract
+
+__panic_uint_done:
+    MOV  R1, [BP+4]               ; X
+    MOV  R3, [BP+3]               ; Y
+
+    PUSH R2                       ; raw string pointer
+    PUSH R3                       ; Y
+    PUSH R1                       ; X
+    CALL __bios_print_text
+
+    MOV  SP, BP
+    POP  BP
+    RET
 

@@ -68,9 +68,47 @@ __malloc_done:
 ;; Out-Of-Memory Handler: Safely halts execution when memory is exhausted
 ;; ---------------------------------------------------------------------------
 __oom_handler:
-    ;; Note: If you implement an error print routine later, call it here!
-    HLT                      ; Halt Vircon32 CPU instantly to prevent data corruption
-    JMP  __oom_handler       ; Infinite loop safeguard in case CPU resumes
+    PUSH BP
+    MOV  BP, SP
+    ISUB SP, 1
+
+    MOV  R0, [HEAP_POINTER]
+    CIF  R0                        ; word address -> float (Lua number)
+    MOV  [BP-1], R0
+
+    MOV  R0, 0xFF000080
+    OUT  GPU_ClearColor, R0
+    OUT  GPU_Command, GPUCommand_ClearScreen
+
+    MOV  R0, 20
+    PUSH R0
+    MOV  R0, 0
+    PUSH R0
+    MOV  R0, __const_str_panic_banner
+    OR   R0, BOXED_ROMSTRING
+    PUSH R0
+    CALL __builtin_print
+
+    MOV  R0, 20
+    PUSH R0
+    MOV  R0, 20
+    PUSH R0
+    MOV  R0, __const_str_err_oom
+    OR   R0, BOXED_ROMSTRING
+    PUSH R0
+    CALL __builtin_print
+
+    ;; Heap-words-used diagnostic. Deliberately NOT routed through
+    ;; print()/tostring() -- see __panic_print_uint's header comment.
+    MOV   R0, 20
+    PUSH  R0                       ; X
+    MOV   R0, 40
+    PUSH  R0                       ; Y
+    MOV   R0, [HEAP_POINTER]
+    PUSH  R0                       ; value
+    CALL __panic_print_uint
+
+    JMP __panic_halt
 
 ;; ---------------------------------------------------------------------------
 ;; Built-in: Unary Minus (-x) -> Flips IEEE-754 Sign Bit 

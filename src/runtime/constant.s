@@ -28,8 +28,17 @@ __const_str_table:
 __const_str_function:
     string "function"
 
+__const_str_panic_banner:
+    string "V32LUA PANIC"
+
 __const_str_err_call_nil:
-    string "RUNTIME ERROR: ATTEMPT TO CALL NIL"
+    string "RUNTIME ERROR: ATTEMPT TO CALL A NON-FUNCTION VALUE"
+
+__const_str_err_not_table:
+    string "RUNTIME ERROR: ATTEMPT TO INDEX A NON-TABLE VALUE"
+
+__const_str_err_oom:
+    string "RUNTIME ERROR: OUT OF MEMORY -- HEAP WORDS USED:"
 
 __const_str_pause:
     string "- PAUSED -"
