@@ -93,8 +93,9 @@ modification.
 * `flex` and `bison` themselves, to regenerate the lexer/parser if you're
   building from the split source tree rather than a pre-generated release.
 * The Vircon32 toolchain (assembler and `packrom`) if you intend to go all
-  the way from `.lua` to a runnable `.v32` cartridge, plus `v32sim` if you
-  want to run or debug the result.
+  the way from `.lua` to a runnable `.v32` cartridge, plus
+  [v32sim](https://github.com/g7n-org/v32sim) if you want to run or debug
+  the results (also used for unit tests).
 
 ### Building the Compiler
 
@@ -110,8 +111,7 @@ make
 This produces the `v32lua` binary (under `bin/`), which turns a `.lua`
 source file into a Vircon32 `.asm` file plus an accompanying cartridge
 `.xml`. From there, assembling and packing follows the same steps as any
-other Vircon32 project (assemble → `packrom` → run under `v32sim` or on
-real hardware).
+other Vircon32 project (assemble → `packrom` → run under [v32sim](https://github.com/g7n-org/v32sim) or on real hardware).
 
 #### Reference Table of Makefile Targets
 
@@ -432,7 +432,7 @@ this README highlights the ideas, the API doc covers every call.
   generates a companion `.debug` file alongside the output assembly. This
   file maps relative Vircon32 assembly line offsets to original Lua source
   lines and functional entry points, enabling step-through debugging under
-  `v32sim`.
+  [v32sim](https://github.com/g7n-org/v32sim).
 
 * **Inline & Raw Assembly Bubbles**: You can write native assembly
   directly inside Lua using `__asm__("your ASM")` (which snapshots and
@@ -678,7 +678,7 @@ should only be used by the most knowledgeable and experienced of assembly
 users. It is also the basis of the compiler's own unit-test harness: a
 test file is typically a `function main() ... end` wrapper around a
 sequence of `__rawasm__` blocks with `__debugN:` labels for breakpointing
-under `v32sim`.
+under [v32sim](https://github.com/g7n-org/v32sim)
 
 ---
 

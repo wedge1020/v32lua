@@ -13,7 +13,7 @@ Files: `v32lua_sound_intrinsics.c`, `v32lua_sound_namespaces.c`,
 `runtime_vircon32_input.s`, `runtime_vircon32_memcard.s`.
 
 See also `vircon32-spu-port-ordering.md` — the SPU port write order is
-load-bearing and every sound emitter here depends on it.
+important and every sound emitter here depends on it.
 
 ---
 
@@ -52,7 +52,7 @@ load-bearing and every sound emitter here depends on it.
   - [ioports.tim.\* — raw timer](#ioportstim--raw-timer)
   - [ioports.rng.\* — hardware RNG](#ioportsrng--hardware-rng)
   - [ioports.car.\* — cartridge info](#ioportscar--cartridge-info)
-  - [ioports.mem.status — memory card presence](#ioportsmemstatus--memory-card-presence)
+  - [ioports.mem.connected — memory card presence](#ioportsmemconnected--memory-card-presence)
 - [Memory card: memcard.\*](#memory-card-memcard)
   - [memcard.save() / memcard.load()](#memcardsave--memcardload)
   - [memcard[position]](#memcardposition)
@@ -984,7 +984,7 @@ not share state and will not produce the same sequence from the same seed.
 ## ioports.car.\* — cartridge info
 
 ```lua
-ioports.car.status     -- CAR_Connected,          boolean, read-only
+ioports.car.connected  -- CAR_Connected,          boolean, read-only
 ioports.car.romsize    -- CAR_ProgramROMSize,     integer, read-only
 ioports.car.numvtex    -- CAR_NumberOfTextures,   integer, read-only
 ioports.car.numvsnd    -- CAR_NumberOfSounds,     integer, read-only
@@ -993,14 +993,14 @@ ioports.car.numvsnd    -- CAR_NumberOfSounds,     integer, read-only
 Read-only introspection of the currently-inserted cartridge itself — its
 program ROM size in words, and how many textures/sounds its cart-XML
 declared. Since a running program's own cart is always connected,
-`ioports.car.status` reading `false` is not a case normal cart code needs
+`ioports.car.connected` reading `false` is not a case normal cart code needs
 to handle; it exists for completeness of the port table rather than a
 practical branch condition; really only something transacted in the BIOS.
 
-## ioports.mem.status — memory card presence
+## ioports.mem.connected — memory card presence
 
 ```lua
-if ioports.mem.status then
+if ioports.mem.connected then
     memcard.save(highscore)
 end
 ```

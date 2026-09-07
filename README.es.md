@@ -100,7 +100,8 @@ hardware de Vircon32 con poca o ninguna modificación del código fuente.
   versión pregenerada.
 * La cadena de herramientas de Vircon32 (ensamblador y `packrom`) si
   pretendes llegar completamente desde `.lua` hasta un cartucho `.v32`
-  ejecutable, más `v32sim` si quieres ejecutar o depurar el resultado.
+  ejecutable, más [v32sim](https://github.com/g7n-org/v32sim) si quieres ejecutar
+  o depurar el resultado.
 
 ### Compilando el Compilador
 
@@ -118,7 +119,7 @@ Esto produce el binario `v32lua` (bajo `bin/`), que convierte un archivo
 fuente `.lua` en un archivo `.asm` de Vircon32 más un `.xml` de cartucho
 que lo acompaña. A partir de ahí, ensamblar y empaquetar sigue los mismos
 pasos que cualquier otro proyecto de Vircon32 (ensamblar → `packrom` →
-ejecutar bajo `v32sim` o en hardware real).
+ejecutar bajo [v32sim](https://github.com/g7n-org/v32sim) o en hardware real).
 
 #### Tabla de Referencia de Objetivos del Makefile
 
@@ -228,7 +229,7 @@ defecto cuando no hay ninguna pista `--#api` presente):
 * **API nativa de Vircon32** (por defecto) — acceso directo y de costo cero
   al hardware propio de la consola: `ioports.gpu.*`, `ioports.spu.*`,
   `ioports.inp.*`, `music.*`/`sfx.*`, `system.*` y la API nativa
-  `tilemap.*`. Documentada por completo en [doc/API.md](doc/API.md).
+  `tilemap.*`. Documentada por completo en [doc/API.es.md](doc/API.es.md).
 * **Capa de compatibilidad TIC-80** (`--#api "tic80"`) — llamadas con la
   forma de TIC-80 (`spr()`, `btn()`/`btnp()`, `map()`/`mset()`/`mget()`,
   funciones de sonido/música, y las secciones de recursos al estilo de
@@ -465,7 +466,7 @@ cada llamada.
   salida. Este archivo mapea los desplazamientos de línea relativos del
   ensamblador de Vircon32 a las líneas originales del código fuente Lua y
   a los puntos de entrada de las funciones, habilitando la depuración
-  paso a paso bajo `v32sim`.
+  paso a paso bajo [v32sim](https://github.com/g7n-org/v32sim).
 
 * **Burbujas de Ensamblador en Línea y en Bruto**: Puedes escribir
   ensamblador nativo directamente dentro de Lua usando
@@ -730,7 +731,7 @@ conocedor y experimentado. También es la base del propio arnés de
 pruebas unitarias del compilador: un archivo de prueba es típicamente un
 envoltorio `function main() ... end` alrededor de una secuencia de
 bloques `__rawasm__` con etiquetas `__debugN:` para establecer puntos de
-interrupción bajo `v32sim`.
+interrupción bajo [v32sim](https://github.com/g7n-org/v32sim).
 
 ---
 

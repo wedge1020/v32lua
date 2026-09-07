@@ -49,18 +49,18 @@ const IOPortMap ioports[] = {
     { "ioports.inp.right",     "INP_GamepadRight",         IOPORT_READ,                 IOPORT_TYPE_INTEGER },
     { "ioports.inp.up",        "INP_GamepadUp",            IOPORT_READ,                 IOPORT_TYPE_INTEGER },
     { "ioports.inp.down",      "INP_GamepadDown",          IOPORT_READ,                 IOPORT_TYPE_INTEGER },
-    { "ioports.inp.start",     "INP_GamepadButtonStart",   IOPORT_READ,                 IOPORT_TYPE_INTEGER },
+    { "ioports.inp.START",     "INP_GamepadButtonStart",   IOPORT_READ,                 IOPORT_TYPE_INTEGER },
     { "ioports.inp.A",         "INP_GamepadButtonA",       IOPORT_READ,                 IOPORT_TYPE_INTEGER },
     { "ioports.inp.B",         "INP_GamepadButtonB",       IOPORT_READ,                 IOPORT_TYPE_INTEGER },
     { "ioports.inp.X",         "INP_GamepadButtonX",       IOPORT_READ,                 IOPORT_TYPE_INTEGER },
     { "ioports.inp.Y",         "INP_GamepadButtonY",       IOPORT_READ,                 IOPORT_TYPE_INTEGER },
     { "ioports.inp.L",         "INP_GamepadButtonL",       IOPORT_READ,                 IOPORT_TYPE_INTEGER },
     { "ioports.inp.R",         "INP_GamepadButtonR",       IOPORT_READ,                 IOPORT_TYPE_INTEGER },
-    { "ioports.car.connect",   "CAR_Connected",            IOPORT_READ,                 IOPORT_TYPE_BOOLEAN },
+    { "ioports.car.connected", "CAR_Connected",            IOPORT_READ,                 IOPORT_TYPE_BOOLEAN },
     { "ioports.car.romsize",   "CAR_ProgramROMSize",       IOPORT_READ,                 IOPORT_TYPE_INTEGER },
     { "ioports.car.numvtex",   "CAR_NumberOfTextures",     IOPORT_READ,                 IOPORT_TYPE_INTEGER },
     { "ioports.car.numvsnd",   "CAR_NumberOfSounds",       IOPORT_READ,                 IOPORT_TYPE_INTEGER },
-    { "ioports.mem.connec",    "MEM_Connected",            IOPORT_READ,                 IOPORT_TYPE_BOOLEAN },
+    { "ioports.mem.connected", "MEM_Connected",            IOPORT_READ,                 IOPORT_TYPE_BOOLEAN },
     { NULL, NULL, 0, 0 } // Sentinel
 };
 
