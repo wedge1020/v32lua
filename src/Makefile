@@ -49,7 +49,7 @@ lex.yy.c: lexer.l parser.tab.h
 # Rule for Assembly files (instructs assembler to disable executable stack requirement)
 %.o: %.S
 	#$(CC) $(CFLAGS) -Wa,--noexecstack -c $< -o $@
-	$(CC) $(CFLAGS) -Wa, -c $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
 
 context:
 	@cp -v runtime/memory.s   runtime/memory.s.txt
