@@ -231,17 +231,18 @@ __builtin_vircon32_spr:
 
     ;; --- 3. Set color multiply / blending (applies to every draw variant) ---
     ;; color_mult travels across the calling convention as a Lua float, like
-    ;; every other spr() argument (its default push is literally
-    ;; "MOV R0, 4294967295.000000"). But GPU_MultiplyColor is a packed RGBA
-    ;; INTEGER port, and 4294967295.0 isn't exactly representable in a
-    ;; 32-bit float (24-bit mantissa can't hold 2^32-1) -- it rounds up to
-    ;; 4294967296.0, whose bit pattern is 0x4F800000, not 0xFFFFFFFF. OUT-ing
-    ;; that raw float bit pattern was corrupting the multiply color on every
-    ;; single spr() call (including fully-default ones), which is almost
-    ;; certainly why nothing was visible. CFI here converts the numeric
-    ;; value to its integer bit pattern first, same as blend_mode below --
-    ;; CFI on 4294967295.0 wraps to the 2's-complement bits for -1, which
-    ;; are bit-for-bit 0xFFFFFFFF, the correct "no change" multiply color.
+    ;; every other spr() argument. GPU_MultiplyColor is a packed RGBA INTEGER
+    ;; port, so the compiler-side default push is "MOV R0, -1.000000", NOT
+    ;; the numeric value 4294967295.0 -- that magnitude isn't exactly
+    ;; representable in a float32 (rounds up to 2^32) and is out of INT32
+    ;; range, so CFI's result on it is host-CPU-dependent: saturates to
+    ;; 0x7FFFFFFF on ARM64, returns the "integer indefinite" 0x80000000 on
+    ;; x86_64. Neither is 0xFFFFFFFF -- there is no wraparound semantics
+    ;; here, just two different (and both spec-valid) overflow behaviors,
+    ;; found the hard way by getting a mostly-plausible result on ARM64 and
+    ;; a broken one on x86_64. -1.0 sidesteps the overflow question
+    ;; entirely: it's exact and in-range, so CFI(-1.0) = -1, which in two's
+    ;; complement is bit-for-bit 0xFFFFFFFF, on every architecture.
     MOV   R1, [BP+8]        ; color_mult (RGBA, packed as an int)
     CFI   R1
     OUT   GPU_MultiplyColor, R1

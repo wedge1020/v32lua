@@ -142,14 +142,42 @@ bool emit_vircon32_spr_intrinsic(ASTNode *node, int dest_reg)
     }
 
     // Arg 7: color_mult (default: 0xFFFFFFFF)
-    if (has_color_mult) {
-        int reg = allocate_register();
-        generate_asm(args[6], reg);
-        emit_asm("PUSH R%d ; Arg 7: color_mult\n", reg);
-        unlock_register(reg);
-    } else {
-        emit_asm("MOV R0, 4294967295.000000 ; Default color_mult (0xFFFFFFFF)\n");
-        emit_asm("PUSH R0\n");
+    // Arg 7: color_mult (default: 0xFFFFFFFF)
+    {
+        double color_value;
+        bool is_static_color = has_color_mult && spu_static_number(args[6], &color_value);
+
+        if (!has_color_mult) {
+            // -1.0, not 4294967295.0 -- see the CFI-overflow note in runtime.s.
+            emit_asm("MOV R0, -1.000000 ; Default color_mult (0xFFFFFFFF via CFI(-1.0))\n");
+            emit_asm("PUSH R0\n");
+        } else if (is_static_color && color_value >= 2147483648.0 && color_value <= 4294967295.0) {
+            // A literal whose top bit is set (alpha byte >= 0x80 in this GPU's
+            // 0xAABBGGRR layout) -- e.g. spr(..., 0xFFFFFFFF) written directly --
+            // hits the identical CFI-overflow hazard as the old default: its
+            // positive magnitude is out of signed-int32 range. Re-emit as the
+            // NEGATIVE two's-complement double instead, so CFI's input is always
+            // in-range and its result is architecture-independent.
+            double signed_value = color_value - 4294967296.0;
+            if (signed_value < -16777216.0) {
+                // Non-0x00/0xFF alpha byte AND beyond float32's exact 24-bit
+                // integer range -- the RGB low bits may round. That's the
+                // pre-existing float-only numeric model limit, not the CFI
+                // overflow bug, but worth telling the caller about explicitly.
+                compiler_warning(ERR_SEMANTIC, node->line_number,
+                    "color_mult 0x%08X has a non-0x00/0xFF alpha byte and exceeds "
+                    "float32's exact 24-bit integer range; low bits may round",
+                    (unsigned int) color_value);
+            }
+            emit_asm("MOV R0, %f ; Literal color_mult 0x%08X (signed for CFI)\n",
+                      signed_value, (unsigned int) color_value);
+            emit_asm("PUSH R0\n");
+        } else {
+            int reg = allocate_register();
+            generate_asm(args[6], reg);
+            emit_asm("PUSH R%d ; Arg 7: color_mult\n", reg);
+            unlock_register(reg);
+        }
     }
 
     // Arg 6: angle_deg (default: 0)
