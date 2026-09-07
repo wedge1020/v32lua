@@ -1,4 +1,8 @@
 #include "v32lua.h"
+#ifdef _WIN32
+  #include <stdlib.h>
+  #define realpath(N, R) _fullpath((R), (N), _MAX_PATH)
+#endif
 
 int  w_mainwait  = -1;
 
