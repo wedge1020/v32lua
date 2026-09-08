@@ -2127,7 +2127,11 @@ _v32_tmrender_draw:
     ;; spr(tile_value, screen_x, screen_y, 1.0, 1.0, 0, 0xFFFFFFFF, ALPHA)
     MOV  R2, 32.000000      ; VIRCON32_BLEND_ALPHA
     PUSH R2
-    MOV  R2, 4294967295.000000
+    MOV  R2, -1.000000      ; 0xFFFFFFFF via CFI(-1.0) -- see the CFI-overflow
+                            ; note on __builtin_vircon32_spr above; the same
+                            ; hazard applies here since this is a hand-built
+                            ; spr() call, not one that goes through the
+                            ; compiler's color_mult emitter
     PUSH R2
     MOV  R2, 0.000000
     PUSH R2
