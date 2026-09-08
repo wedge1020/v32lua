@@ -84,7 +84,7 @@ char *process_string_literal (const char *text, int  len)
 }
 
     /* Extract section name between < and > */
-"-- <"[A-Z]+">\n" {
+"-- <"[A-Z]+">"\r?\n {
     char *start = strchr(yytext, '<') + 1;
     char *end = strchr(yytext, '>');
     if (end) *end = '\0';
@@ -92,7 +92,7 @@ char *process_string_literal (const char *text, int  len)
     return TOKEN_TIC80_SECTION_HEADER;
 }
 
-"-- </"[A-Z]+">\n" {
+"-- </"[A-Z]+">"\r?\n {
     char *start = strchr(yytext, '<') + 2;  // Skip '<' AND '/'
     char *end = strchr(yytext, '>');
     if (end) *end = '\0';
@@ -100,7 +100,7 @@ char *process_string_literal (const char *text, int  len)
     return TOKEN_TIC80_SECTION_FOOTER;
 }
 
-"-- "[0-9]+[:][0-9a-fA-F]+\n {
+"-- "[0-9]+[:][0-9a-fA-F]+\r?\n {
     yylval.string_val = strdup(yytext + 3);  // Skip "-- "
     return TOKEN_TIC80_ASSET_DATA;
 }

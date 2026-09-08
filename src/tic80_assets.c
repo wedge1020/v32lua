@@ -146,6 +146,21 @@ TIC80AssetData *parse_tic80_asset_line(const char *line) {
         free(data);
         return NULL;
     }
+
+    // Trim trailing \r and/or \n -- the lexer's \r?\n pattern still leaves
+    // the line terminator attached to yytext, so it lands here whether the
+    // source file was CRLF or LF. Left untrimmed, this fed straight into
+    // tic80_map_width = strlen(hex_data) / 2 in process_tic80_section(),
+    // which happened to come out right on LF files by dumb luck (1 stray
+    // char flips an even hex-digit count to odd, and integer division
+    // floors it back) but is wrong on CRLF files (2 stray chars leave the
+    // count even, so the division no longer cancels it out).
+    size_t hex_len = strlen(data->hex_data);
+    while (hex_len > 0 && (data->hex_data[hex_len - 1] == '\n' ||
+                           data->hex_data[hex_len - 1] == '\r')) {
+        data->hex_data[--hex_len] = '\0';
+    }
+
     data->next = NULL;
 
     return data;
@@ -190,7 +205,7 @@ void process_all_tic80_sections(void)
         // Generate VSND file from accumulated sound data
         generate_vsnd_from_tic80_sounds("tic80_sounds.vsnd");
 
-		cart_resource_append (&sounds_head, &sounds_tail,
+        cart_resource_append (&sounds_head, &sounds_tail,
                               next_sound_id++, "tic80_sounds", "tic80_sounds.vsnd");
     }
 }
