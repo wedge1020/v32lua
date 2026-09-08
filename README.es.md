@@ -8,7 +8,7 @@
 
 **Repositorio:** [github.com/wedge1020/v32lua](https://github.com/wedge1020/v32lua)
 
-**Referencia de la API:** [doc/API.md](doc/API.md) — la API nativa completa
+**Referencia de la API:** [doc/API.es.md](doc/API.es.md) — la API nativa completa
 de Vircon32 (sonido, gráficos, entrada, mapas de mosaicos, tarjeta de
 memoria y puertos de E/S en bruto).
 
@@ -262,7 +262,7 @@ Pistas soportadas:
 | `--#api "tic80"` / `--#api "pico8"` | Selecciona una capa de compatibilidad de API (ver arriba). |
 | `--#texture NOMBRE "ruta/imagen.png"` | Registra un recurso de textura y lo vincula a una constante `NOMBRE` en tiempo de compilación. |
 | `--#sound NOMBRE "ruta/sonido.vsnd"` | Registra un recurso de sonido y lo vincula a una constante `NOMBRE` en tiempo de compilación. |
-| `--#tilemap NOMBRE "ruta/mapa.csv"` | Registra un mapa de mosaicos desde un archivo CSV, incrustado directamente en la imagen ROM (ver [doc/API.md](doc/API.md#tilemap-tilemap)). |
+| `--#tilemap NOMBRE "ruta/mapa.csv"` | Registra un mapa de mosaicos desde un archivo CSV, incrustado directamente en la imagen ROM (ver [doc/API.es.md](doc/API.es.md#tilemap-tilemap)). |
 | `--#include "archivo.lua"` | Empalma textualmente otro archivo Lua en este punto, antes de que comience el análisis (ver abajo). |
 
 ```lua
@@ -425,7 +425,7 @@ hardware:
   `music.play(SOUND, channel, loop)` en una secuencia lineal de `OUT`
   cuando todos los argumentos se conocen en tiempo de compilación,
   recurriendo a una pequeña rutina en tiempo de ejecución solo cuando los
-  argumentos son dinámicos. Consulta [doc/API.md](doc/API.md) para ver la
+  argumentos son dinámicos. Consulta [doc/API.es.md](doc/API.es.md) para ver la
   superficie completa, incluyendo por qué el orden de escritura de los
   puertos SPU (detener → asignar → volumen → reproducir →
   bucle/posición) es fundamental.
@@ -450,7 +450,7 @@ hardware:
   (`-`) se mapean directamente a subrutinas optimizadas en tiempo de
   ejecución (`__builtin_strcat`, `__builtin_len`, `__builtin_unm`).
 
-Consulta [doc/API.md](doc/API.md) para la referencia completa y
+Consulta [doc/API.es.md](doc/API.es.md) para la referencia completa y
 autoritativa — este README resalta las ideas, el documento de la API cubre
 cada llamada.
 
@@ -648,7 +648,7 @@ de puertos:
 La referencia completa y autoritativa para cada intrínseco —
 `ioports.gpu.*`, `ioports.inp.*`, `ioports.spu.*`, `ioports.tim.*`,
 `ioports.rng.*`, `ioports.car.*`, `ioports.mem.*`, `music.*`/`sfx.*`,
-`tilemap.*`, `memcard.*` y `system.*` — vive en [doc/API.md](doc/API.md),
+`tilemap.*`, `memcard.*` y `system.*` — vive en [doc/API.es.md](doc/API.es.md),
 incluyendo advertencias sobre el orden de puertos, firmas de llamadas y
 ejemplos trabajados. Una breve muestra de las entradas de uso más común:
 

@@ -8,7 +8,7 @@
 
 **Dépôt :** [github.com/wedge1020/v32lua](https://github.com/wedge1020/v32lua)
 
-**Référence de l'API :** [doc/API.md](doc/API.md) — l'API native complète
+**Référence de l'API :** [doc/API.fr.md](doc/API.fr.md) — l'API native complète
 de Vircon32 (son, graphismes, entrées, tuiles/tilemaps, carte mémoire, et
 ports d'E/S bruts).
 
@@ -265,7 +265,7 @@ Indices pris en charge :
 | `--#api "tic80"` / `--#api "pico8"` | Sélectionne une couche de compatibilité d'API (voir ci-dessus). |
 | `--#texture NOM "chemin/image.png"` | Enregistre une ressource de texture et la lie à une constante `NOM` à la compilation. |
 | `--#sound NOM "chemin/son.vsnd"` | Enregistre une ressource sonore et la lie à une constante `NOM` à la compilation. |
-| `--#tilemap NOM "chemin/carte.csv"` | Enregistre une tilemap depuis un fichier CSV, intégrée directement dans l'image ROM (voir [doc/API.md](doc/API.md#tilemap-tilemap)). |
+| `--#tilemap NOM "chemin/carte.csv"` | Enregistre une tilemap depuis un fichier CSV, intégrée directement dans l'image ROM (voir [doc/API.fr.md](doc/API.fr.md#tilemap-tilemap)). |
 | `--#include "fichier.lua"` | Insère textuellement un autre fichier Lua à cet endroit, avant le début de l'analyse (voir ci-dessous). |
 
 ```lua
@@ -434,7 +434,7 @@ instructions d'E/S matérielle natives :
   `music.play(SOUND, channel, loop)` en une séquence linéaire de `OUT`
   lorsque tous les arguments sont connus à la compilation, et se replie
   sur une petite routine d'exécution seulement lorsque les arguments sont
-  dynamiques. Consultez [doc/API.md](doc/API.md) pour la surface complète,
+  dynamiques. Consultez [doc/API.fr.md](doc/API.fr.md) pour la surface complète,
   y compris pourquoi l'ordre d'écriture des ports SPU (arrêt → assignation
   → volume → lecture → boucle/position) est déterminant.
 
@@ -459,7 +459,7 @@ instructions d'E/S matérielle natives :
   d'exécution optimisées (`__builtin_strcat`, `__builtin_len`,
   `__builtin_unm`).
 
-Consultez [doc/API.md](doc/API.md) pour la référence complète et
+Consultez [doc/API.fr.md](doc/API.fr.md) pour la référence complète et
 faisant autorité — ce README met en avant les idées, le document d'API
 couvre chaque appel.
 
@@ -659,7 +659,7 @@ La référence complète et faisant autorité pour chaque intrinsèque —
 `ioports.gpu.*`, `ioports.inp.*`, `ioports.spu.*`, `ioports.tim.*`,
 `ioports.rng.*`, `ioports.car.*`, `ioports.mem.*`, `music.*`/`sfx.*`,
 `tilemap.*`, `memcard.*`, et `system.*` — se trouve dans
-[doc/API.md](doc/API.md), avec les mises en garde sur l'ordre des ports,
+[doc/API.fr.md](doc/API.fr.md), avec les mises en garde sur l'ordre des ports,
 les signatures d'appel, et des exemples détaillés. Voici un bref
 échantillon des entrées les plus couramment utilisées :
 
