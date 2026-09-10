@@ -70,6 +70,6 @@ context:
 	@cp -v runtime_embed.S    runtime_embed.S.txt
 
 clean:
-	rm -f $(TARGET) $(OBJS) parser.tab.c parser.tab.h lex.yy.c ../monolithic_source.c *.txt runtime/*.txt intrinsics/*.txt node/*.txt *.output
+	rm -f $(TARGET) $(OBJS) ../monolithic_source.c *.txt runtime/*.txt intrinsics/*.txt node/*.txt *.output
 
 .PHONY: all clean monorule
