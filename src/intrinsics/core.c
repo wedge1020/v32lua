@@ -953,19 +953,38 @@ int  try_emit_table_set_intrinsic (ASTNode *table_expr, ASTNode *key_expr, ASTNo
     char full_path[512];
     snprintf(full_path, sizeof(full_path), "%s.%s", base_path, key_expr->as.string_val.value);
 
+	// ioports.gpu.minX/minY default ioports.gpu.hotX/hotY to the same
+    // value, since a region defined without an explicit hotspot is the
+    // single most common cause of visually-wrong sprite placement. This
+    // is purely a convenience default applied at the point minX/minY is
+    // written: a later, separate assignment to hotX/hotY (the documented
+    // way to ask for a different hotspot) still emits its own OUT and
+    // simply overwrites the port afterward, since codegen is linear in
+    // source order. No effect on minX/minY's own read/write behavior.
+    const char *paired_hotspot_port                  = NULL;
+    if      (strcmp (full_path, "ioports.gpu.minX") == 0)
+		paired_hotspot_port                          = "GPU_RegionHotSpotX";
+    else if (strcmp (full_path, "ioports.gpu.minY") == 0)
+		paired_hotspot_port                          = "GPU_RegionHotSpotY";
+
     for (int i = 0; ioports[i].lua_path != NULL; i++) {
-        if (strcmp(full_path, ioports[i].lua_path) == 0) {
-            if ((ioports[i].mode & IOPORT_WRITE) != IOPORT_WRITE) {
-                compiler_error(ERR_SEMANTIC, yylineno, "%s: port cannot be written to", full_path);
+        if (strcmp(full_path, ioports[i].lua_path)  == 0) {
+            if ((ioports[i].mode & IOPORT_WRITE)    != IOPORT_WRITE) {
+                compiler_error (ERR_SEMANTIC, yylineno,
+						        "%s: port cannot be written to", full_path);
             }
 
-            bool is_raw = is_raw_integer_expression(val_node);
+            bool is_raw  = is_raw_integer_expression (val_node);
 
             // Handle immediate operands or allocate register for value
             char imm_str[64];
             if (is_raw && try_get_immediate_operand(val_node, imm_str, sizeof(imm_str))) {
                 emit_asm("    ;; --- Intrinsic: Direct Immediate Hardware Write (%s) ---\n", full_path);
                 emit_asm("OUT %s, %s\n", ioports[i].asm_port, imm_str);
+				if (paired_hotspot_port != NULL) {
+                    emit_asm("    ;; --- Intrinsic: Default hotspot from %s ---\n", full_path);
+                    emit_asm("OUT %s, %s\n", paired_hotspot_port, imm_str);
+                }
                 return 1;
             }
 
@@ -1036,6 +1055,11 @@ int  try_emit_table_set_intrinsic (ASTNode *table_expr, ASTNode *key_expr, ASTNo
                 emit_asm("    ;; --- Intrinsic: Direct Raw Hardware Write (%s) ---\n", full_path);
             }
             emit_asm("OUT %s, R%d\n", ioports[i].asm_port, out_reg);
+
+			if (paired_hotspot_port != NULL) {
+                emit_asm("    ;; --- Intrinsic: Default hotspot from %s ---\n", full_path);
+                emit_asm("OUT %s, R%d\n", paired_hotspot_port, out_reg);
+            }
 
             if (needs_cast) {
                 register_pinned[out_reg] = 0;
