@@ -36,10 +36,10 @@ all: $(TARGET)
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^ $(CLIBS)
 
-parser.c ../parser.h: parser.y
+parser.c ../inc/parser.h: parser.y
 	$(YACC) -v --output=parser.c --defines=../inc/parser.h parser.y -t
 
-lexer.c: lexer.l ../parser.h
+lexer.c: lexer.l ../inc/parser.h
 	$(LEX) --outfile=lexer.c lexer.l
 
 # Rule for standard C files
