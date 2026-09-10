@@ -205,7 +205,7 @@ typedef union YYSTYPE
     ASTNode *ast_node;
 }
 /* Line 193 of yacc.c.  */
-#line 209 "parser.tab.c"
+#line 209 "parser.c"
 	YYSTYPE;
 # define yystype YYSTYPE /* obsolescent; will be withdrawn */
 # define YYSTYPE_IS_DECLARED 1
@@ -218,7 +218,7 @@ typedef union YYSTYPE
 
 
 /* Line 216 of yacc.c.  */
-#line 222 "parser.tab.c"
+#line 222 "parser.c"
 
 #ifdef short
 # undef short
@@ -2901,7 +2901,7 @@ yyreduce:
 
 
 /* Line 1267 of yacc.c.  */
-#line 2905 "parser.tab.c"
+#line 2905 "parser.c"
       default: break;
     }
   YY_SYMBOL_PRINT ("-> $$ =", yyr1[yyn], &yyval, &yyloc);

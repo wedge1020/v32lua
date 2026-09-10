@@ -1,5 +1,6 @@
+#line 1 "lexer.c"
 
-#line 2 "lex.yy.c"
+#line 3 "lexer.c"
 
 #define  YY_INT_ALIGNED short int
 
@@ -601,7 +602,7 @@ char *yytext;
 #line 1 "lexer.l"
 #line 2 "lexer.l"
 #include "v32lua.h"
-#include "parser.tab.h"  // Generated automatically by Bison
+#include "parser.h"  // Generated automatically by Bison
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wsign-compare"
 
@@ -640,10 +641,10 @@ char *process_string_literal (const char *text, int  len)
     processed[j] = '\0'; // Ensure it is null-terminated for the C-side
     return (processed);
 }
-#line 643 "lex.yy.c"
+#line 644 "lexer.c"
 /* Add these options to disable the unused functions */
 #define YY_NO_INPUT 1
-#line 646 "lex.yy.c"
+#line 647 "lexer.c"
 
 #define INITIAL 0
 
@@ -861,7 +862,7 @@ YY_DECL
 #line 49 "lexer.l"
 
 
-#line 864 "lex.yy.c"
+#line 865 "lexer.c"
 
 	while ( /*CONSTCOND*/1 )		/* loops until end-of-file is reached */
 		{
@@ -1336,7 +1337,7 @@ YY_RULE_SETUP
 #line 203 "lexer.l"
 ECHO;
 	YY_BREAK
-#line 1339 "lex.yy.c"
+#line 1340 "lexer.c"
 case YY_STATE_EOF(INITIAL):
 	yyterminate();
 

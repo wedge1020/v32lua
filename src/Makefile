@@ -14,7 +14,7 @@ TARGET = ../bin/v32lua
 # --- Object Files ---
 
 # Core sources
-CORE_SRCS = parser.tab.o lex.yy.o main.o context.o ffi.o closures.o generator.o ast.o emit.o internals.o register.o table.o tilemap.o tic80_assets.o vtex_generator.o vsnd_generator.o runtime_embed.o
+CORE_SRCS = parser.o lexer.o main.o context.o ffi.o closures.o generator.o ast.o emit.o internals.o register.o table.o tilemap.o tic80_assets.o vtex_generator.o vsnd_generator.o runtime_embed.o
 
 # generate cases - automatically include all .c files in generate/
 NODE_DIR = node
@@ -36,10 +36,10 @@ all: $(TARGET)
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^ $(CLIBS)
 
-parser.tab.c parser.tab.h: parser.y
+parser.c parser.h: parser.y
 	$(YACC) -v --output=parser.c --defines=../inc/parser.h parser.y -t
 
-lex.yy.c: lexer.l parser.tab.h
+lexer.c: lexer.l parser.h
 	$(LEX) --outfile=lexer.c lexer.l
 
 # Rule for standard C files
