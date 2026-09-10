@@ -8,29 +8,29 @@
 
 **Repository:** [github.com/wedge1020/v32lua](https://github.com/wedge1020/v32lua)
 
-**API Reference:** [doc/API.md](doc/API.md) — the full native Vircon32 API
-(sound, graphics, input, tilemaps, memory card, and raw I/O ports).
+**API Reference:** [doc/API.md](doc/API.md) —  the full native Vircon32
+API (sound, graphics, input, tilemaps, memory card, and raw I/O ports).
 
-`v32lua` is a Lua compiler written in C that targets the **Vircon32** fantasy
-console. Instead of embedding a heavyweight bytecode interpreter, `v32lua`
-parses Lua source code and compiles it directly into native Vircon32
-assembly, and also produces the XML cartridge definition the console's
-toolchain needs to package a ROM.
+`v32lua` is  a Lua compiler  written in  C that targets  the **Vircon32**
+fantasy console. Instead of embedding a heavyweight bytecode interpreter,
+`v32lua`  parses Lua  source code  and compiles  it directly  into native
+Vircon32 assembly,  and also  produces the  XML cartridge  definition the
+console's toolchain needs to package a ROM.
 
-While it is not yet complete, one aim of development is to make `v32lua` a
-substitute (by no means a replacement) for the Vircon32 C Compiler in the
-Vircon32 development stack. Basically, pick your choice of language — C or
-Lua — and once it's compiled down to assembly, you proceed with the build
-regardless of implementation language. As a result, efforts have been made
-to mimic various behaviours of the Vircon32 C Compiler to make compiler
-substitution more transparent.
+While it is not yet complete, one  aim of development is to make `v32lua`
+a substitute (by  no means a replacement) for the  Vircon32 C Compiler in
+the Vircon32 development  stack. Basically, pick your  choice of language
+— C  or Lua —  and once it's compiled  down to assembly,  you proceed
+with  the  build regardless  of  implementation  language. As  a  result,
+efforts have  been made  to mimic  various behaviours  of the  Vircon32 C
+Compiler to make compiler substitution more transparent.
 
-Designed from the ground up with retro fantasy-console constraints in mind,
-`v32lua` features zero-cost low-level "hardware" intrinsics, custom
-[NaN-boxing](doc/NaN_boxing.md), and — beyond the native Vircon32 API — two
-API compatibility layers so that carts written for **TIC-80** and **PICO-8**
-can compile and run in the Vircon32 environment with little to no source
-modification.
+Designed from  the ground  up with  retro fantasy-console  constraints in
+mind, `v32lua` features zero-cost low-level "hardware" intrinsics, custom
+[NaN-boxing](doc/NaN_boxing.md), and  — beyond the native  Vircon32 API
+— two API compatibility layers so that carts written for **TIC-80** and
+**PICO-8** can compile and run in the Vircon32 environment with little to
+no source modification.
 
 ```
 +------------------+     +-------------------+     +------------------+
@@ -88,30 +88,34 @@ modification.
 
 ### Requirements
 
-* A C toolchain (`gcc`/`clang` + `make`) capable of building `flex`/`bison`
-  generated sources.
-* `flex` and `bison` themselves, to regenerate the lexer/parser if you're
-  building from the split source tree rather than a pre-generated release.
-* The Vircon32 toolchain (assembler and `packrom`) if you intend to go all
+* A C toolchain (`gcc`/`clang` + `make`)
+* If changes are made to the lexer/parser, the `flex` and `bison` tools are
+  needed to regenerate the lexer/parser C routines. The existing `flex` and
+  `bison` C routines are included in the repository to simplify the building
+  process, reducing some dependency on actually needing `flex`/`bison` in
+  most scenarios
+* The [Vircon32 DevTools](https://github.com/vircon32/ComputerSoftware/releases) toolchain (assembler and `packrom`) if you intend to go all
   the way from `.lua` to a runnable `.v32` cartridge, plus
   [v32sim](https://github.com/g7n-org/v32sim) if you want to run or debug
   the results (also used for unit tests).
 
 ### Building the Compiler
 
-The repository includes a root-level Makefile that manages building the
-compiler binary, running the test suite, and general project upkeep. To
-build the main compiler binary from source, run the default target from the
-repository root:
+The repository includes  a root-level Makefile that  manages building the
+compiler binary, running  the test suite, and general  project upkeep. To
+build the main  compiler binary from source, run the  default target from
+the repository root:
 
 ```bash
 make
 ```
 
-This produces the `v32lua` binary (under `bin/`), which turns a `.lua`
-source file into a Vircon32 `.asm` file plus an accompanying cartridge
-`.xml`. From there, assembling and packing follows the same steps as any
-other Vircon32 project (assemble → `packrom` → run under [v32sim](https://github.com/g7n-org/v32sim) or on the official emulator).
+This  will   compile  the  individual   source  files  and   produce  the
+`v32lua`  binary  (under  `bin/`),  which  turns  a  `.lua`  source  file
+into  a  Vircon32 `.asm`  file  plus  an accompanying  cartridge  `.xml`.
+From  there,   assembling  and   packing  follows   the  same   steps  as
+any  other  Vircon32  project  (assemble  →  `packrom`  →  run  under
+[v32sim](https://github.com/g7n-org/v32sim) or on the official emulator).
 
 #### Reference Table of Makefile Targets
 
@@ -180,8 +184,8 @@ Compile it with:
 $ v32lua -o program.asm program.lua
 ```
 
-`v32lua` emits `program.asm` and `program.xml` alongside it; hand those to
-the Vircon32 assembler and `packrom` to produce a runnable cartridge.
+`v32lua` emits  `program.asm` and `program.xml` alongside  it; hand those
+to the Vircon32 assembler and `packrom` to produce a runnable cartridge.
 
 ### Command-Line Usage
 
@@ -207,13 +211,13 @@ Available options:
 
 ## API Compatibility Layers
 
-`v32lua` supports three distinct API surfaces, selected with the
-`--#api` cartridge hint (native Vircon32 is the default when no `--#api`
-hint is present):
+`v32lua` supports three distinct API surfaces, selected with the `--#api`
+cartridge hint (native  Vircon32 is the default when no  `--#api` hint is
+present):
 
 ```lua
---#api "tic80"   -- opt into the TIC-80-compatible API surface
---#api "pico8"   -- opt into the PICO-8-compatible API surface
+--#api "tic80"   -- opt into the TIC80-compatible API surface
+--#api "pico8"   -- opt into the PICO8-compatible API surface
 ```
 
 * **Native Vircon32 API** (default) — direct, zero-cost access to the
@@ -228,17 +232,17 @@ hint is present):
 * **PICO-8 compatibility layer** (`--#api "pico8"`) — the PICO-8-shaped
   equivalent, at an earlier stage of completeness than the TIC-80 layer.
 
-Only one API surface is active per cartridge; selecting `tic80` or `pico8`
-replaces the native call surface rather than adding to it.
+Only  one API  surface  is  active per  cartridge;  selecting `tic80`  or
+`pico8` replaces the native call surface rather than adding to it.
 
 ---
 
 ## Cartridge Resource Hints
 
 `v32lua` allows you to embed Vircon32 cartridge metadata directly in your
-Lua source code using special `--#` line comments. The compiler parses
-these hints to auto-generate the project's `.xml` ROM definition and assign
-sequential hardware resource IDs.
+Lua source  code using special  `--#` line comments. The  compiler parses
+these  hints to  auto-generate the  project's `.xml`  ROM definition  and
+assign sequential hardware resource IDs.
 
 Supported hints:
 
@@ -266,18 +270,19 @@ function init()
 end
 ```
 
-When compiled, `v32lua` outputs both the compiled `.asm` assembly and a
-complete Vircon32 XML cartridge definition file linking `.vtex` and `.vsnd`
-assets. With this, and the proper processing of any PNG and WAV data, you
-can proceed to the `packrom` step. Resource IDs are assigned in source
-order and are guaranteed to match their position in the generated XML.
+When compiled, `v32lua`  outputs both the compiled `.asm`  assembly and a
+complete  Vircon32  XML cartridge  definition  file  linking `.vtex`  and
+`.vsnd` assets. With  this, and the proper processing of  any PNG and WAV
+data, you can proceed to the `packrom` step. Resource IDs are assigned in
+source order and are guaranteed to  match their position in the generated
+XML.
 
 ### Multi-File Projects (`--#include`)
 
-Because Vircon32 carts are a fixed ROM assembled entirely at build time —
-there is no runtime filesystem — `v32lua` does not support real Lua's
-dynamic `require`/`dofile`. Instead, `--#include "file.lua"` is a
-compile-time textual paste, resolved by a preprocessing pass before the
+Because Vircon32 carts  are a fixed ROM assembled entirely  at build time
+— there  is no runtime  filesystem —  `v32lua` does not  support real
+Lua's dynamic  `require`/`dofile`. Instead, `--#include "file.lua"`  is a
+compile-time textual paste,  resolved by a preprocessing  pass before the
 lexer ever sees the file, exactly like C's `#include`:
 
 ```lua
@@ -341,35 +346,39 @@ stages:
 
 ### Flexible Execution Models: `main()` vs. `game_loop()`
 
-To accommodate different game architecture styles, the compiler supports
-two distinct entry point paradigms:
+To accommodate different game  architecture styles, the compiler supports
+two distinct function entry points:
 
-* **The Auto-Ticking Harness (`game_loop`)**: If your program declares a
-  `game_loop()` function, the compiler automatically generates a
-  continuous runtime harness. The CPU calls `game_loop()`, stalls execution
-  for the current frame using the CPU's `WAIT` instruction, and loops
-  infinitely. This is ideal for standard arcade games and demos, and
-  mimics the behaviour of various other fantasy consoles.
+* **The Auto-Waiting  Function (`game_loop`)**: If your  program declares
+  a  `game_loop()`  function,  the  compiler  automatically  generates  a
+  continuous  runtime  harness.  The   CPU  calls  `game_loop()`,  stalls
+  execution for the current frame using the CPU's `WAIT` instruction, and
+  loops infinitely.  This is ideal  for standard arcade games  and demos,
+  and mimics the behaviour of various other fantasy consoles.
 
-* **Manual Control (`main`)**: If your program declares a `main()`
-  function, control is handed directly to `__function_main`. You take full
-  ownership of the frame cycle and must manually execute inline assembly
-  or hardware waits. The compiler tracks whether a `WAIT` instruction is
-  emitted inside `main()`; if it is missing, `v32lua` issues a semantic
-  warning at compile time.
+* **Manual  Control  (`main`)**:  If  your program  declares  a  `main()`
+  function, the CPU  will halt upon completion of  the `main()` function,
+  mimicking behaviour similar to C's  `main()` function. If you desire to
+  maintain execution, you must establish some  sort of game loop, and you
+  must  perform  the  needed  `WAIT` instructions  to  ensure  continuous
+  processing and smooth display of  on-screen assets. The compiler tracks
+  whether  a `WAIT`  instruction is  emitted  inside `main()`;  if it  is
+  missing, `v32lua` issues a semantic warning at compile time.
 
-* **Initialization Hook**: In both models, if an `init()` function is
-  present, it is guaranteed to execute exactly once after top-level global
-  RAM allocations and before the main loop begins.
+Additionally, as a precursor to either of the above:
 
-A program must declare at least one of `main()` or `game_loop()` — this is
-the designated entry point and its absence is a compile error.
+* **Initialization Hook**:  In both  models, if  an `init()`  function is
+  present,  it is  guaranteed  to execute  exactly  once after  top-level
+  global RAM allocations and before the main loop begins.
+
+A program must declare at least one of `main()` or `game_loop()` — this
+is the designated entry point and its absence is a compile error.
 
 ### NaN-Boxing: RAM vs. ROM Elements
 
-`v32lua` uses a 32-bit tagging architecture that packs type metadata and
-payload pointers into unified values, keeping immutable **ROM elements**
-(string literals, function pointers) distinct from dynamic **RAM heap
+`v32lua` uses a 32-bit tagging  architecture that packs type metadata and
+payload pointers into unified  values, keeping immutable **ROM elements**
+(string  literals, function  pointers) distinct  from dynamic  **RAM heap
 objects** (tables):
 
 | Data Type | Hex Mask / Tag | Architecture Description |
@@ -383,93 +392,93 @@ objects** (tables):
 
 ### Hardware Intrinsics & I/O Mapping
 
-High-performance Vircon32 games cannot afford hash-table lookups for
-hardware manipulation. `v32lua` intercepts specific table member
-expressions and function calls and compiles them directly into native
+High-performance  Vircon32 games  cannot  afford  hash-table lookups  for
+hardware   manipulation.  `v32lua`   intercepts  specific   table  member
+expressions and  function calls  and compiles  them directly  into native
 hardware I/O instructions:
 
-* **Zero-Cost Hardware Access**: Accessing namespaces like `ioports.gpu.*`,
-  `ioports.spu.*`, `ioports.tim.*`, `ioports.rng.*`, `ioports.car.*`,
-  `ioports.mem.*`, or `system.*` bypasses table lookup routines entirely.
-  They compile directly to hardware port operations (such as
-  `GPU_DrawingPointX` or `TIM_FrameCounter`).
+* **Zero-Cost    Hardware    Access**:    Accessing    namespaces    like
+  `ioports.gpu.*`,  `ioports.spu.*`,   `ioports.tim.*`,  `ioports.rng.*`,
+  `ioports.car.*`, `ioports.mem.*`,  or `system.*` bypasses  table lookup
+  routines entirely.  They compile  directly to hardware  port operations
+  (such as `GPU_DrawingPointX` or `TIM_FrameCounter`).
 
-* **`music.*` / `sfx.*`**: The native sound API compiles calls like
-  `music.play(SOUND, channel, loop)` down to a straight-line `OUT`
-  sequence when every argument is compile-time-known, falling back to a
-  small runtime routine only when arguments are dynamic. See
-  [doc/API.md](doc/API.md) for the full surface, including why the SPU
-  port write order (stop → assign → volume → play → loop/position) is
-  important.
+* **`music.*`  / `sfx.*`**:  The  native sound  API  compiles calls  like
+  `music.play(SOUND,  channel,  loop)`  down  to  a  straight-line  `OUT`
+  sequence  when  every  argument  is  compile-time-known,  falling  back
+  to  a  small runtime  routine  only  when  arguments are  dynamic.  See
+  [doc/API.md](doc/API.md)  for  the  full  surface,  including  why  the
+  SPU  port  write  order  (stop  → assign  →  volume  →  play  →
+  loop/position) is important.
 
-* **`tilemap.*`**: A native tilemap API (`tilemap.get()`, `tilemap.set()`,
-  `tilemap.render()`) backed by a `--#tilemap` cart hint. Tilemap data
-  ships read-only in ROM and is lazily promoted to a private RAM copy the
-  first time a given map is written to.
+* **`tilemap.*`**:    A    native     tilemap    API    (`tilemap.get()`,
+  `tilemap.set()`,  `tilemap.render()`)  backed  by a  `--#tilemap`  cart
+  hint. Tilemap data  ships read-only in ROM and is  lazily promoted to a
+  private RAM copy the first time a given map is written to.
 
 * **Consolidated Gamepad Polling**: Polling controller input is optimized
-  into a single variable intrinsic (`ioports.inp.inputs`). The compiler
-  polls all gamepad axes/buttons, collates the active button states into a
-  bitshifted 32-bit integer mask, and casts it to a Lua float in a single
-  register. Standalone gamepad inputs are also available
+  into a  single variable intrinsic (`ioports.inp.inputs`).  The compiler
+  polls all gamepad axes/buttons, collates  the active button states into
+  a  bitshifted 32-bit  integer mask,  and  casts it  to a  Lua float  in
+  a  single  register.  Standalone  gamepad  inputs  are  also  available
   (`ioports.inp.left`, `ioports.inp.A`, etc.) as variable intrinsics.
 
-* **Built-in Fast Paths**: Standard Lua operations like string
-  concatenation (`..`), length (`#`), and unary minus (`-`) map directly to
-  optimized runtime subroutines (`__builtin_strcat`, `__builtin_len`,
+* **Built-in   Fast  Paths**:   Standard  Lua   operations  like   string
+  concatenation (`..`), length (`#`), and  unary minus (`-`) map directly
+  to optimized runtime  subroutines (`__builtin_strcat`, `__builtin_len`,
   `__builtin_unm`).
 
-See [doc/API.md](doc/API.md) for the complete, authoritative reference —
-this README highlights the ideas, the API doc covers every call.
+See  [doc/API.md](doc/API.md) for  the complete,  authoritative reference
+— this README highlights the ideas, the API doc covers every call.
 
 ### Developer Experience & Debug Tooling
 
-* **Visual ASCII Error Reporting**: Lexical, syntax, semantic, and internal
-  compiler errors print highlighted, multi-line ASCII code snippets
-  pointing directly to the offending line in the source file.
+* **Visual  ASCII  Error  Reporting**:  Lexical,  syntax,  semantic,  and
+  internal  compiler  errors  print highlighted,  multi-line  ASCII  code
+  snippets pointing directly to the offending line in the source file.
 
-* **Source-to-Assembly Mapping (`-g`)**: Passing the `-g` debug flag
-  generates a companion `.debug` file alongside the output assembly. This
-  file maps relative Vircon32 assembly line offsets to original Lua source
-  lines and functional entry points, enabling step-through debugging under
-  [v32sim](https://github.com/g7n-org/v32sim).
+* **Source-to-Assembly  Mapping (`-g`)**:  Passing  the  `-g` debug  flag
+  generates  a companion  `.debug`  file alongside  the output  assembly.
+  This  file maps  relative Vircon32  assembly line  offsets to  original
+  Lua  source lines  and functional  entry points,  enabling step-through
+  debugging under [v32sim](https://github.com/g7n-org/v32sim).
 
-* **Inline & Raw Assembly Bubbles**: You can write native assembly
-  directly inside Lua using `__asm__("your ASM")` (which snapshots and
-  restores registers and the stack pointer) or `__rawasm__("your ASM")` for
-  unprotected execution. Both modes support string interpolation of Lua
-  variables using `{var_name}` syntax.
+* **Inline  &  Raw Assembly  Bubbles**:  You  can write  native  assembly
+  directly inside  Lua using  `__asm__("your ASM")` (which  snapshots and
+  restores registers  and the stack pointer)  or `__rawasm__("your ASM")`
+  for unprotected  execution. Both modes support  string interpolation of
+  Lua variables using `{var_name}` syntax.
 
 ---
 
 ## Supported Lua Language Features
 
-`v32lua` implements a subset of Lua, tailored specifically for game
+`v32lua`  implements a  subset  of Lua,  tailored  specifically for  game
 development on embedded hardware.
 
 ### Variables & Scoping
 
-* **Global Variables:** Automatically registered in RAM and accessed via
-  symbols (`[var_name]`, `[func_name]`). Address `0` is reserved for the
-  heap pointer and addresses `1`/`2` are reserved scratch words used by
-  the float-to-string routine; ordinary global variables begin at
-  address `3`.
+* **Global Variables:** Automatically registered  in RAM and accessed via
+  symbols (`[var_name]`, `[func_name]`). Address  `0` is reserved for the
+  heap pointer and  addresses `1`/`2` are reserved scratch  words used by
+  the float-to-string routine; ordinary global variables begin at address
+  `3`.
 
-* **Local Variables:** Declared with the `local` keyword. Scoped
-  lexically to the enclosing block (function bodies, loops, or
-  conditionals) and mapped to stack offsets (`[BP - offset]`). A `local`
-  declared at a chunk's own top level — outside any function — is
+* **Local  Variables:**   Declared  with  the  `local`   keyword.  Scoped
+  lexically  to   the  enclosing   block  (function  bodies,   loops,  or
+  conditionals) and mapped to stack  offsets (`[BP - offset]`). A `local`
+  declared at  a chunk's own  top level —  outside any function  — is
   promoted to a global instead, since its storage would otherwise live in
-  a stack frame that returns before any game code runs; this applies
+  a stack  frame that  returns before  any game  code runs;  this applies
   equally to `local`s pulled in via `--#include`.
 
-In Lua parlance, functions are "first-class citizens", and are effectively
-variables. That is borne out in `v32lua` as they both are transacted
-within the NaN-boxing scheme.
+In  Lua   parlance,  functions   are  "first-class  citizens",   and  are
+effectively variables.  That is borne  out in  `v32lua` as they  both are
+transacted within the NaN-boxing scheme.
 
 ### Multiple Assignment
 
-The compiler natively supports multiple assignment and variable swapping
+The compiler natively supports  multiple assignment and variable swapping
 without requiring explicit user temporaries:
 
 ```lua
@@ -481,8 +490,8 @@ x, y = y, x -- Synthesizes temporary register chains to safely swap values
 
 `v32lua` provides seamless syntactic sugar for table-based OOP models:
 
-* **Method Definition Desugaring:** Defining a function on a table
-  automatically generates a mangled label and links the function pointer
+* **Method  Definition  Desugaring:**  Defining  a function  on  a  table
+  automatically generates a mangled label  and links the function pointer
   property:
 
 ```lua
@@ -490,8 +499,8 @@ function Player.move(dx, dy) ... end
 -- Desugars to: Player["move"] = __function_Player_move
 ```
 
-* **Method Call Desugaring (`:` operator):** Using the colon operator
-  automatically evaluates the table expression and injects it as an
+* **Method  Call Desugaring  (`:` operator):**  Using the  colon operator
+  automatically  evaluates the  table  expression and  injects  it as  an
   implicit `self` parameter:
 
 ```lua
@@ -530,22 +539,23 @@ Player:move(5, -2)
 
 ### Functions & Multi-Value Returns
 
-Functions can return multiple values simultaneously. The calling
+Functions  can   return  multiple  values  simultaneously.   The  calling
 convention optimizes the first three returned expressions by placing them
-directly into registers `R0`, `R2`, and `R3`. Any additional return values
-(4th and beyond) are spilled directly onto the caller's stack frame.
+directly  into registers  `R0`,  `R2`, and  `R3`.  Any additional  return
+values  (4th and  beyond) are  spilled directly  onto the  caller's stack
+frame.
 
 ### String Literal Pooling
 
-All string literals declared in source code (e.g., `"GAME OVER"`) are
-collected during compilation, deduplicated, and emitted into a dedicated
-data section at the end of the ROM (`__string_0: string "GAME OVER"`),
+All string  literals declared  in source code  (e.g., `"GAME  OVER"`) are
+collected during compilation, deduplicated,  and emitted into a dedicated
+data section  at the end of  the ROM (`__string_0: string  "GAME OVER"`),
 preventing redundant ROM consumption.
 
 ### Truthy & Falsy Short-Circuit Evaluation
 
-In Lua, only `nil` and `false` evaluate to false in conditional
-expressions; every other value (including `0` and empty strings) is
+In  Lua,  only  `nil`  and  `false`  evaluate  to  false  in  conditional
+expressions;  every other  value  (including `0`  and  empty strings)  is
 **truthy**. `v32lua` implements this via two high-speed assembly emission
 primitives:
 
@@ -556,25 +566,25 @@ primitives:
 * **`emit_truthy_jump(reg, label)`**: Tests against Nil and False; if
   neither matches, execution short-circuits to the target label.
 
-When logical operators (`and`, `or`) are evaluated, the evaluated result
-is left intact in the destination register, preserving Lua's idiom of
+When logical operators (`and`, `or`)  are evaluated, the evaluated result
+is left  intact in  the destination register,  preserving Lua's  idiom of
 returning the actual operand value rather than a strict boolean.
 
 ---
 
 ## Hardware I/O & Compiler Intrinsics
 
-One of the most powerful features of `v32lua` is its **static intrinsic
-interception engine**. When the compiler encounters table accesses or
-function calls matching specific system paths (e.g., `ioports.gpu.clear()`),
-it **bypasses dynamic table lookups entirely** and emits direct Vircon32
-hardware I/O instructions (`IN`, `OUT`).
+One  of  the   most  powerful  features  of  `v32lua`   is  its  **static
+intrinsic  interception  engine**.  When the  compiler  encounters  table
+accesses  or  function  calls   matching  specific  system  paths  (e.g.,
+`ioports.gpu.clear()`),  it **bypasses  dynamic table  lookups entirely**
+and emits direct Vircon32 hardware I/O instructions (`IN`, `OUT`).
 
 ### Automatic Type Casting Across I/O Boundaries
 
-Because Lua variables are stored as NaN-boxed IEEE 754 floats while
-Vircon32 hardware ports expect 32-bit integers or booleans, `v32lua`
-automatically injects hardware conversion instructions during port reads
+Because  Lua variables  are stored  as  NaN-boxed IEEE  754 floats  while
+Vircon32  hardware ports  expect  32-bit integers  or booleans,  `v32lua`
+automatically injects hardware conversion  instructions during port reads
 and writes:
 
 * **`CFI` (Cast Float to Integer):** Emitted automatically when writing
