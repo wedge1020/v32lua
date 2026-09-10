@@ -1,6 +1,6 @@
 %{
 #include "v32lua.h"
-#include "parser.tab.h"  // Generated automatically by Bison
+#include "parser.h"  // Generated automatically by Bison
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wsign-compare"
 
