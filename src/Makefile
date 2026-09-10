@@ -40,7 +40,7 @@ parser.tab.c parser.tab.h: parser.y
 	$(YACC) -v --output=parser.c --defines=../inc/parser.h parser.y -t
 
 lex.yy.c: lexer.l parser.tab.h
-	$(LEX) lexer.l
+	$(LEX) --outfile=lexer.c lexer.l
 
 # Rule for standard C files
 %.o: %.c
