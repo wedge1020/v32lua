@@ -3,6 +3,21 @@
 // In emit.c, replace all 1024-byte buffers with 8192:
 #define EMIT_BUFFER_SIZE 8192
 
+// A colon inside a quoted string literal (e.g. the "string \"...: ...\""
+// directive) does not make the line an assembly label. Only count a colon
+// that appears before the first '"' on the line -- real labels never
+// contain a quote at all, so this is exact for both cases without needing
+// a full quote-state scanner.
+static bool line_is_asm_label (const char *code_start)
+{
+    const char *first_colon = strchr (code_start, ':');
+    if (first_colon == NULL) {
+        return false;
+    }
+    const char *first_quote = strchr (code_start, '"');
+    return (first_quote == NULL || first_colon < first_quote);
+}
+
 /**
  * Emits a line of Vircon32 assembly code.
  *
@@ -90,7 +105,7 @@ void  emit_asm (const char *format, ...) {
     // CASE B: Assembly Label (contains colon)
     // Colon immunity: we only scan the isolated code string code_start!
     // =========================================================================
-    else if (strchr(code_start, ':') != NULL) {
+    else if (line_is_asm_label (code_start)) {
         record_instruction = true;
         if (comment_ptr != NULL) {
             fprintf(out(), "%-16s %s\n", code_start, comment_ptr);
