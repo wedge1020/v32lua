@@ -26,10 +26,10 @@ to mimic various behaviours of the Vircon32 C Compiler to make compiler
 substitution more transparent.
 
 Designed from the ground up with retro fantasy-console constraints in mind,
-`v32lua` features zero-cost hardware intrinsics, custom
+`v32lua` features zero-cost low-level "hardware" intrinsics, custom
 [NaN-boxing](doc/NaN_boxing.md), and — beyond the native Vircon32 API — two
 API compatibility layers so that carts written for **TIC-80** and **PICO-8**
-can compile and run on Vircon32 hardware with little to no source
+can compile and run in the Vircon32 environment with little to no source
 modification.
 
 ```
@@ -111,7 +111,7 @@ make
 This produces the `v32lua` binary (under `bin/`), which turns a `.lua`
 source file into a Vircon32 `.asm` file plus an accompanying cartridge
 `.xml`. From there, assembling and packing follows the same steps as any
-other Vircon32 project (assemble → `packrom` → run under [v32sim](https://github.com/g7n-org/v32sim) or on real hardware).
+other Vircon32 project (assemble → `packrom` → run under [v32sim](https://github.com/g7n-org/v32sim) or on the official emulator).
 
 #### Reference Table of Makefile Targets
 
@@ -217,7 +217,7 @@ hint is present):
 ```
 
 * **Native Vircon32 API** (default) — direct, zero-cost access to the
-  console's own hardware: `ioports.gpu.*`, `ioports.spu.*`, `ioports.inp.*`,
+  console's own IOPorts: `ioports.gpu.*`, `ioports.spu.*`, `ioports.inp.*`,
   `music.*`/`sfx.*`, `system.*`, and the native `tilemap.*` API. Fully
   documented in [doc/API.md](doc/API.md).
 * **TIC-80 compatibility layer** (`--#api "tic80"`) — TIC-80-shaped calls
@@ -347,7 +347,7 @@ two distinct entry point paradigms:
 * **The Auto-Ticking Harness (`game_loop`)**: If your program declares a
   `game_loop()` function, the compiler automatically generates a
   continuous runtime harness. The CPU calls `game_loop()`, stalls execution
-  for the current frame using the hardware `WAIT` instruction, and loops
+  for the current frame using the CPU's `WAIT` instruction, and loops
   infinitely. This is ideal for standard arcade games and demos, and
   mimics the behaviour of various other fantasy consoles.
 
@@ -400,7 +400,7 @@ hardware I/O instructions:
   small runtime routine only when arguments are dynamic. See
   [doc/API.md](doc/API.md) for the full surface, including why the SPU
   port write order (stop → assign → volume → play → loop/position) is
-  load-bearing.
+  important.
 
 * **`tilemap.*`**: A native tilemap API (`tilemap.get()`, `tilemap.set()`,
   `tilemap.render()`) backed by a `--#tilemap` cart hint. Tilemap data
@@ -621,7 +621,7 @@ sample of the most commonly used entries:
 | **`ioports.inp.gamepad`** | `INP_SelectedGamepad` | Read / Write | Selects the active controller index (`0`-`3`) for input polling. |
 | **`ioports.inp.status`** | `INP_GamepadConnected` | Read Only | Returns a Lua boolean: is the selected gamepad connected. |
 | **`ioports.inp.left/right/up/down`** | `INP_Gamepad*` | Read Only | D-Pad directional state (`> 0` pressed, `< 0` released). |
-| **`ioports.inp.A/B/X/Y/L/R/start`** | `INP_GamepadButton*` | Read Only | Action/shoulder button state (`> 0` pressed, `< 0` released). |
+| **`ioports.inp.A/B/X/Y/L/R/START`** | `INP_GamepadButton*` | Read Only | Action/shoulder button state (`> 0` pressed, `< 0` released). |
 | **`ioports.inp.inputs`** | *Custom Action Subroutine* | Read Only | **Collation intrinsic:** polls all gamepad buttons/axes in one pass, collates them into a single 32-bit bitmask, and casts it to a Lua float. |
 
 #### System & Runtime Utilities

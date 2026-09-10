@@ -485,17 +485,25 @@ ioports.gpu.hotX = 6            -- see below -- NOT 0
 ioports.gpu.hotY = 156          -- see below -- NOT 0
 ```
 
-**`hotX`/`hotY` must be set to the same values as `minX`/`minY`, not to
-`0`.** This was found the hard way while building `tilemap.render()`: a
-region whose hotspot is left unset (or explicitly zeroed) draws offset
-downward and rightward by roughly its own `minX`/`minY` — a region cut from
-near the top-left of the sheet looks fine, which is exactly what made this
-easy to miss at first, but a region cut from further into the sheet drifts
-by however far in it was cut from. Setting `hotX`/`hotY` to match `minX`/
-`minY` anchors the draw point at the region's own top-left corner, which is
-what every example in this document assumes `spr(id, x, y, ...)` means.
-This needs doing for **every** region a cart defines — it is not a
-one-time global setting.
+### Region HotSpot considerations and compiler behaviours
+
+While Region HotSpots give us the ability to render regions relative to a
+set of hotspot coordinates, forgetting to set them can result in rendering
+issues, as unset hotspot coordinates may default to 0, 0. If far enough
+away from your region's defined X and Y extrema, your region may not end
+up rendering where you want it, or on the screen at all.
+
+For this reason, `v32lua` adopts an auto-setting of `ioports.gpu.hotX` and 
+`ioports.gpu.hotY`, so any neglected hot spot coordinates on region
+definition would still result in a visible region rendering:
+
+When setting a regions's minimum X and Y, the corresponding hotspot X and
+Y will be set to the exact same values. This way, a default of a "top-left"
+hotspot coordinates will occur.
+
+Should you wish to set your hotspot coordinates to something other than 
+the regions top-left, simply set them AFTER you establish the minimum X 
+and Y.
 
 `GPU_RegionMinX/MinY/MaxX/MaxY/HotSpotX/HotSpotY` are the raw ports behind
 `ioports.gpu.minX` etc. — see the full port table in
