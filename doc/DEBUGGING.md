@@ -22,7 +22,7 @@
 
 v32lua uses **NaN-boxing** to represent all Lua values as 32-bit floats, with type information encoded in the upper bits.
 
-### Type Tags & Bitmasks
+**Type Tags & Bitmasks**
 
 | Tag | Hex | Category | Type | Storage |
 |-----|-----|----------|------|---------|
@@ -57,7 +57,7 @@ AND  R1, BOXED_PAYLOAD   ; Now safe to unbox
 
 ## 2. Table Architecture
 
-### Header Layout (16 bytes)
+**Header Layout (16 bytes)**
 
 | Offset | Field | Purpose |
 |--------|-------|---------|
@@ -73,7 +73,7 @@ AND  R1, BOXED_PAYLOAD   ; Now safe to unbox
 
 When `length` exceeds `capacity`, the array reallocates (typically doubling).
 
-### Storage Model
+**Storage Model**
 
 **Array:** Contiguous 32-bit words for sequential integer keys (1-indexed). Fast O(1) access when key is unboxed float.
 
@@ -82,21 +82,21 @@ When `length` exceeds `capacity`, the array reallocates (typically doubling).
 - Word 1: NextBucketPtr
 - Words 2+: Key/Value pairs
 
-### Construction
+**Construction**
 `__builtin_table_new` allocates 4 words, zero-initializes header, tags with `BOXED_TABLE`.
 
 ---
 
 ## 3. AST Node Types & Code Generation
 
-### Node Types (from `enums.h`)
+**Node Types (from `enums.h`)**
 Control flow: `WHILE`, `FOR_NUMERIC`, `BREAK`, `IF`, `FUNCTION_DEF`, `FUNCTION_CALL`, `RETURN`, `MULTIPLE_ASSIGNMENT`
 Operators: `ADD`, `SUB`, `MUL`, `DIV`, `MOD`, `AND`, `OR`, `RELATIONAL`, `UNARY`, `CONCAT`
 Literals: `STRING`, `BOOLEAN`, `NIL`, `NUMBER`, `IDENTIFIER`
 Tables: `TABLE_CONSTRUCTOR`, `TABLE_SET`, `TABLE_GET`
 Special: `ASM`, `RAWASM`, `COMMENT_LINE`, `COMMENT_BLOCK`, `CART_HINT`, `FUNCTION_POINTER`
 
-### Code Generation Pattern
+**Code Generation Pattern**
 `generate_asm(node, dest_reg)` dispatches to type-specific handlers. The `dest_reg` parameter specifies where to place the result (0 = R0).
 
 **Two-Operand Operations:**
@@ -114,7 +114,7 @@ unlock_register(left_reg);
 unlock_register(right_reg);
 ```
 
-### Table Operations
+**Table Operations**
 **Table Set:** Try intrinsic → allocate pinned registers for table/key/value → `CALL __builtin_table_set` with 3 args on stack → clean up.
 
 **Table Get:** Try intrinsic → allocate registers for table/key → `CALL __builtin_table_get` with 2 args → `MOV R_dest, R0`.
@@ -125,35 +125,35 @@ unlock_register(right_reg);
 
 ## 4. Register Allocation & Pinning
 
-### Register Inventory
+**Register Inventory**
 14 GPRs (R0-R13). R14=BP, R15=SP - **never modify**.
 
-### Allocation States
+**Allocation States**
 - `register_inventory[]`: 0=free, 1=allocated
 - `register_pinned[]`: 0=can spill, 1=must keep in register
 - `register_use_distance[]`: Instructions until next use
 
-### Allocation Algorithm (4-phase)
+**Allocation Algorithm (4-phase)**
 1. Free register
 2. Dead register (use_distance == 0)
 3. Spill farthest-future-use register
 4. Fallback to highest-numbered
 
-### Pinning
+**Pinning**
 ```c
 int reg = allocate_pinned_register();  // allocates and pins
 unlock_pinned_register(reg);          // unpins and unlocks
 ```
 **Pin** registers that must survive across `generate_asm()` calls (table pointers, function pointers).
 
-### Spilling
+**Spilling**
 ```c
 spill_register(reg);      // Store Rn to [BP - N]
 ensure_in_register(reg);  // Load from spill slot if needed
 ```
 Spill slots are negative BP offsets: `base_spill_frame_offset - reg - 1`.
 
-### Liveness Tracking
+**Liveness Tracking**
 ```c
 mark_register_live(reg, 5);  // Used 5 instructions later
 update_register_live(reg);   // Decrement counter each instruction
@@ -165,14 +165,14 @@ update_register_live(reg);   // Decrement counter each instruction
 
 Compile-time optimizations emitting direct hardware operations.
 
-### Categories
+**Categories**
 - **I/O Ports:** Hardware register access via `IN`/`OUT`
 - **Actions:** Special operations (gamepad, etc.)
 - **Calls:** `print()`, `hex()`, `spr()`, `btn()`, `add()`, math functions
 - **GPU/SPU:** Direct GPU/SPU operations
 - **System:** `WAIT`, `HLT`
 
-### I/O Port Intrinsics
+**I/O Port Intrinsics**
 Maps Lua paths (e.g., `ioports.gpu.clearcolor`) to hardware ports (e.g., `GPU_ClearColor`).
 
 **Type Casting:**
@@ -182,7 +182,7 @@ Maps Lua paths (e.g., `ioports.gpu.clearcolor`) to hardware ports (e.g., `GPU_Cl
 | Float → Boolean | `CFB Rn` |
 | Integer/Boolean → Float | `CIF Rn` |
 
-### Example: Table Get Intrinsic
+**Example: Table Get Intrinsic**
 ```c
 int try_emit_table_get_intrinsic(ASTNode *table_expr, ASTNode *key_expr, int dest_reg) {
     // Resolve static path
@@ -209,15 +209,15 @@ int try_emit_table_get_intrinsic(ASTNode *table_expr, ASTNode *key_expr, int des
 
 ## 6. Variable Storage: Global vs Local/Stack
 
-### Symbol Table
+**Symbol Table**
 Scoped symbol table with `SymbolNode` (name, type, location, is_function, arity) and `ScopeNode` (symbols, local_offset_counter, parent).
 
-### Global Variables
+**Global Variables**
 - **Storage:** Sequential RAM addresses from `next_ram_address`
 - **Access:** `[var_name]`
 - **Auto-registration:** Unknown identifiers auto-registered as globals
 
-### Local Variables
+**Local Variables**
 - **Storage:** Stack frame relative to BP
 - **Access:** `[BP - N]` for locals (N=1,2,3...), `[BP + N]` for parameters (N=2,3...)
 - **Registration:** `register_local()` or `register_parameter()`
@@ -246,13 +246,13 @@ void get_variable_access_string(const char *name, char *buf) {
 
 Assembly subroutines in `runtime.s` implementing Lua semantics. C calling convention: args on stack, return in R0, caller cleans stack.
 
-### Memory Management
+**Memory Management**
 | Routine | Params | Returns | Purpose |
 |---------|--------|---------|---------|
 | `__malloc` | `[BP+2]` = size (words) | R0 = raw pointer | Allocate heap |
 | `__oom_handler` | none | never | OOM trap (HLT) |
 
-### Table Operations
+**Table Operations**
 | Routine | Stack Params | Returns | Purpose |
 |---------|--------------|---------|---------|
 | `__builtin_table_new` | none | R0 = tagged table | Create table |
@@ -261,7 +261,7 @@ Assembly subroutines in `runtime.s` implementing Lua semantics. C calling conven
 | `__builtin_table_len` | `[BP+2]`=table | R0 = length | Get array length |
 | `__builtin_table_insert` | `[BP+4]`=table, `[BP+3]`=index, `[BP+2]`=value | R0 = value | Insert into array |
 
-### Function Execution
+**Function Execution**
 | Routine | Stack Params | Returns | Purpose |
 |---------|--------------|---------|---------|
 | `__builtin_exec` | `[BP+2]`=function | R0 = result | Execute function |
@@ -281,7 +281,7 @@ __exec_valid:
     JMP R0                   ; Tail call
 ```
 
-### Error Handlers
+**Error Handlers**
 | Routine | Behavior |
 |---------|----------|
 | `__runtime_error_not_table` | `HLT` |
@@ -289,7 +289,7 @@ __exec_valid:
 | `__runtime_error_not_callable` | Clear screen red, `HLT` |
 | `__oom_handler` | `HLT` |
 
-### Example Uses
+**Example Uses**
 ```c
 // Table construction
 emit_asm("CALL __builtin_table_new\n");
@@ -312,35 +312,35 @@ emit_asm("IADD SP, %d\n", arg_count + 1);
 
 ## 8. Common Debugging Scenarios
 
-### Register Exhausted
+**Register Exhausted**
 **Fix:** Add `spill_register()` before complex ops, verify `unlock_register()` calls, use `mark_register_live()`.
 
-### Table Access Returns NIL
+**Table Access Returns NIL**
 **Fix:** Validate table tag before unboxing, check key type (NaN-boxed vs unboxed), verify array bounds.
 
-### Hash Overflow
+**Hash Overflow**
 **Fix:** Use array indices, limit non-sequential keys (<=7 per bucket).
 
-### Intrinsic Not Triggering
+**Intrinsic Not Triggering**
 **Fix:** Check `resolve_static_path()`, verify key is `NODE_STRING`, search `ioports[]`.
 
-### Stack Corruption
+**Stack Corruption**
 **Fix:** Count PUSH/POP, verify `IADD SP, N`, check inline ASM preserves SP/BP.
 
-### Wrong Register Value
+**Wrong Register Value**
 **Fix:** Use `mark_register_live()` + `ensure_in_register()`, add type casts.
 
-### Function Arguments Wrong
+**Function Arguments Wrong**
 **Fix:** Push args right-to-left, verify `IADD SP, N`, prevent register reuse.
 
-### NaN-Boxing Confusion
+**NaN-Boxing Confusion**
 **Fix:** Always `AND Rn, BOXED_PAYLOAD` before dereferencing, validate tags first.
 
 ---
 
 ## 9. Memory Layout Quick Reference
 
-### NaN-Boxed Format
+**NaN-Boxed Format**
 ```
 32-bit Float:
   31      22 21       0
@@ -349,7 +349,7 @@ emit_asm("IADD SP, %d\n", arg_count + 1);
   +--------+----------+
 ```
 
-### Table Layout
+**Table Layout**
 ```
 Header (16B):
 +-----------+-----------+-----------+-----------+
@@ -367,7 +367,7 @@ Hash (linked buckets):
 +-----------+-----------+-----------+-----------+
 ```
 
-### Stack Frame
+**Stack Frame**
 ```
 High Address:
 +-----------+  <- SP
@@ -386,7 +386,7 @@ High Address:
 Low Address:
 ```
 
-### Debug Commands
+**Debug Commands**
 ```assembly
 ; Unbox and dump table header
 AND  R0, BOXED_PAYLOAD

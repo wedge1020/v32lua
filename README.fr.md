@@ -55,33 +55,13 @@ source.
 ## Table des Matières
 
 - [Pour Commencer](#pour-commencer)
-  - [Prérequis](#prérequis)
-  - [Compiler le Compilateur](#compiler-le-compilateur)
-  - [Cibles du Makefile](#tableau-de-référence-des-cibles-du-makefile)
-  - [Votre Première Cartouche](#votre-première-cartouche)
-  - [Utilisation en Ligne de Commande](#utilisation-en-ligne-de-commande)
 - [Couches de Compatibilité d'API](#couches-de-compatibilité-dapi)
 - [Indices de Ressources de Cartouche (`--#...`)](#indices-de-ressources-de-cartouche)
-  - [Projets Multi-Fichiers (`--#include`)](#projets-multi-fichiers---include)
 - [Pipeline de Compilation](#pipeline-de-compilation)
 - [Fonctionnalités Clés du Langage et du Compilateur](#fonctionnalités-clés-du-langage-et-du-compilateur)
-  - [Modèles d'Exécution : `main()` vs `game_loop()`](#modèles-dexécution-flexibles-main-vs-game_loop)
-  - [NaN-Boxing : Éléments RAM vs ROM](#nan-boxing--éléments-ram-vs-rom)
-  - [Intrinsèques Matériels et Mappage E/S](#intrinsèques-matériels-et-mappage-es)
-  - [Outillage pour Développeurs](#expérience-de-développement-et-outillage-de-débogage)
 - [Fonctionnalités Lua Prises en Charge](#fonctionnalités-lua-prises-en-charge)
-  - [Variables et Portée](#variables-et-portée)
-  - [Affectation Multiple](#affectation-multiple)
-  - [Programmation Orientée Objet et Tables](#programmation-orientée-objet-et-tables)
-  - [Flux de Contrôle](#flux-de-contrôle)
-  - [Opérateurs et Expressions](#opérateurs-et-expressions)
-  - [Fonctions et Retours de Valeurs Multiples](#fonctions-et-retours-de-valeurs-multiples)
-  - [Regroupement des Littéraux de Chaîne](#regroupement-des-littéraux-de-chaîne)
-  - [Évaluation Truthy / Falsy en Court-Circuit](#évaluation-truthy--falsy-en-court-circuit)
 - [E/S Matérielle et Intrinsèques du Compilateur](#es-matérielle-et-intrinsèques-du-compilateur)
-  - [Conversion Automatique de Types aux Frontières d'E/S](#conversion-automatique-de-types-aux-frontières-des)
-  - [Tableau de Référence Complet des Intrinsèques](#tableau-de-référence-complet-des-intrinsèques)
-- [Assembleur en Ligne (`__asm__` et `__rawasm__`)](#assembleur-en-ligne-__asm__--__rawasm__)
+- [Assembleur en Ligne (`__asm__` et `__rawasm__`)](#assembleur-en-ligne-__asm__-et-__rawasm__)
 - [Référence de la Carte Mémoire](#référence-de-la-carte-mémoire)
 - [Particularités, Hypothèses et Limitations Connues du Compilateur](#particularités-et-hypothèses-du-compilateur)
 - [Optimisation du Compilateur](#optimisation-du-compilateur)
@@ -92,7 +72,7 @@ source.
 
 ## Pour Commencer
 
-### Prérequis
+**Prérequis**
 
 * Une chaîne d'outils C (`gcc`/`clang` + `make`) capable de compiler des
   sources générées par `flex`/`bison`.
@@ -104,7 +84,7 @@ source.
   [v32sim](https://github.com/g7n-org/v32sim) si vous souhaitez exécuter ou
   déboguer le résultat.
 
-### Compiler le Compilateur
+**Compiler le Compilateur**
 
 Le dépôt inclut un Makefile à la racine qui gère la compilation du binaire
 du compilateur, l'exécution de la suite de tests, et l'entretien général du
@@ -121,7 +101,7 @@ cartouche. À partir de là, l'assemblage et l'empaquetage suivent les mêmes
 étapes que n'importe quel autre projet Vircon32 (assembler → `packrom` →
 exécuter sous [v32sim](https://github.com/g7n-org/v32sim) ou sur du matériel réel).
 
-#### Tableau de Référence des Cibles du Makefile
+*Tableau de Référence des Cibles du Makefile*
 
 | Cible | Description | Actions Principales & Dépendances |
 | --- | --- | --- |
@@ -133,7 +113,7 @@ exécuter sous [v32sim](https://github.com/g7n-org/v32sim) ou sur du matériel r
 | **`asmcheck`** | Valide la correction de l'assembleur. | Nécessite que `bin/v32lua` soit présent, puis traite les validations d'assembleur via la suite `testing/`. |
 | **`monofiles`** | Génère des variantes de fichier monolithique simplifiées (utilisées pour coller l'ensemble du projet dans une conversation à fichier unique). | Exécute le flux de création `monofile` séquentiellement dans `src/` et `testing/`. |
 
-### Votre Première Cartouche
+**Votre Première Cartouche**
 
 ```lua
 --#title "v32lua Tech Demo"
@@ -192,7 +172,7 @@ $ v32lua -o program.asm program.lua
 les à l'assembleur Vircon32 puis à `packrom` pour obtenir une cartouche
 exécutable.
 
-### Utilisation en Ligne de Commande
+**Utilisation en Ligne de Commande**
 
 ```bash
 $ v32lua [options] fichier
@@ -265,7 +245,7 @@ Indices pris en charge :
 | `--#api "tic80"` / `--#api "pico8"` | Sélectionne une couche de compatibilité d'API (voir ci-dessus). |
 | `--#texture NOM "chemin/image.png"` | Enregistre une ressource de texture et la lie à une constante `NOM` à la compilation. |
 | `--#sound NOM "chemin/son.vsnd"` | Enregistre une ressource sonore et la lie à une constante `NOM` à la compilation. |
-| `--#tilemap NOM "chemin/carte.csv"` | Enregistre une tilemap depuis un fichier CSV, intégrée directement dans l'image ROM (voir [doc/API.fr.md](doc/API.fr.md#tilemap-tilemap)). |
+| `--#tilemap NOM "chemin/carte.csv"` | Enregistre une tilemap depuis un fichier CSV, intégrée directement dans l'image ROM (voir [doc/API.fr.md](doc/API.fr.md#tilemap--tilemap)). |
 | `--#include "fichier.lua"` | Insère textuellement un autre fichier Lua à cet endroit, avant le début de l'analyse (voir ci-dessous). |
 
 ```lua
@@ -289,7 +269,7 @@ toute donnée PNG et WAV, vous pouvez procéder à l'étape `packrom`. Les
 identifiants de ressources sont attribués dans l'ordre du code source et
 sont garantis de correspondre à leur position dans le XML généré.
 
-### Projets Multi-Fichiers (`--#include`)
+**Projets Multi-Fichiers (`--#include`)**
 
 Comme les cartouches Vircon32 sont une ROM fixe entièrement assemblée au
 moment de la compilation — il n'existe aucun système de fichiers à
@@ -326,7 +306,7 @@ le `#include` du C :
 
 ## Pipeline de Compilation
 
-### Flux de Compilation
+**Flux de Compilation**
 
 1. **Analyse Lexicale et Syntaxique** : Flex/Bison analyse le code source
    Lua en un Arbre de Syntaxe Abstraite (AST) typé.
@@ -342,7 +322,7 @@ le `#include` du C :
    chaînes en lecture seule, et produit la définition `.xml` de la
    cartouche.
 
-### Étapes de Compilation (`-v`)
+**Étapes de Compilation (`-v`)**
 
 Lorsque `-v` est activé, `v32lua` rapporte sa progression à travers ses
 étapes de pipeline :
@@ -368,7 +348,7 @@ Lorsque `-v` est activé, `v32lua` rapporte sa progression à travers ses
 
 ## Fonctionnalités Clés du Langage et du Compilateur
 
-### Modèles d'Exécution Flexibles : `main()` vs. `game_loop()`
+**Modèles d'Exécution Flexibles : `main()` vs. `game_loop()`**
 
 Pour s'adapter à différents styles d'architecture de jeu, le compilateur
 prend en charge deux paradigmes distincts de point d'entrée :
@@ -398,7 +378,7 @@ Un programme doit déclarer au moins l'une des deux fonctions `main()` ou
 `game_loop()` — il s'agit du point d'entrée désigné, et son absence est une
 erreur de compilation.
 
-### NaN-Boxing : Éléments RAM vs. ROM
+**NaN-Boxing : Éléments RAM vs. ROM**
 
 `v32lua` utilise une architecture d'étiquetage sur 32 bits qui compresse
 les métadonnées de type et les pointeurs de charge utile dans des valeurs
@@ -415,7 +395,7 @@ pointeurs de fonction) des **objets de tas (heap) RAM** dynamiques
 | **Table / Objet Encapsulé** | `0xFF800000` | Adresses mémoire de tas encapsulées (bit 31=1, bit 22=0). |
 | **Nombre** | Flottant IEEE 754 | Valeurs en virgule flottante natives de Vircon32, non encapsulées, pour les calculs directs. |
 
-### Intrinsèques Matériels et Mappage E/S
+**Intrinsèques Matériels et Mappage E/S**
 
 Les jeux Vircon32 à haute performance ne peuvent pas se permettre des
 recherches dans des tables de hachage pour la manipulation matérielle.
@@ -463,7 +443,7 @@ Consultez [doc/API.fr.md](doc/API.fr.md) pour la référence complète et
 faisant autorité — ce README met en avant les idées, le document d'API
 couvre chaque appel.
 
-### Expérience de Développement et Outillage de Débogage
+**Expérience de Développement et Outillage de Débogage**
 
 * **Rapport d'Erreurs Visuel en ASCII** : Les erreurs lexicales,
   syntaxiques, sémantiques et internes du compilateur affichent des
@@ -491,7 +471,7 @@ couvre chaque appel.
 `v32lua` implémente un sous-ensemble de Lua, spécifiquement adapté au
 développement de jeux sur matériel embarqué.
 
-### Variables et Portée
+**Variables et Portée**
 
 * **Variables Globales :** Enregistrées automatiquement en RAM et
   accessibles via des symboles (`[var_nom]`, `[func_nom]`). L'adresse `0`
@@ -513,7 +493,7 @@ Dans le jargon Lua, les fonctions sont des « citoyennes de première
 classe », et sont effectivement des variables. Cela se vérifie dans
 `v32lua`, puisque les deux transitent au sein du schéma de NaN-boxing.
 
-### Affectation Multiple
+**Affectation Multiple**
 
 Le compilateur prend nativement en charge l'affectation multiple et
 l'échange de variables sans nécessiter de variables temporaires
@@ -524,7 +504,7 @@ local x, y, z = 10, 20, 30
 x, y = y, x -- Synthétise des chaînes de registres temporaires pour échanger les valeurs en toute sécurité
 ```
 
-### Programmation Orientée Objet et Tables
+**Programmation Orientée Objet et Tables**
 
 `v32lua` fournit un sucre syntaxique transparent pour les modèles de POO
 basés sur des tables :
@@ -547,7 +527,7 @@ Player:move(5, -2)
 -- Se désucre en : Player.move(Player, 5, -2)
 ```
 
-### Flux de Contrôle
+**Flux de Contrôle**
 
 * **Boucles :** Les instructions `while <cond> do ... end` sont prises en
   charge avec une portée de bloc complète.
@@ -559,7 +539,7 @@ Player:move(5, -2)
 * **Conditionnelles :** Structures `if <cond> then ... elseif <cond> then
   ... else ... end` avec branchement en court-circuit.
 
-### Opérateurs et Expressions
+**Opérateurs et Expressions**
 
 * **Arithmétiques :** `+`, `-`, `*`, `/` (associés aux instructions
   matérielles en virgule flottante de Vircon32 `FADD`, `FSUB`, `FMUL`,
@@ -578,7 +558,7 @@ Player:move(5, -2)
 * **Opérateur de Longueur :** l'opérateur `#` invoque `__builtin_len` pour
   résoudre les longueurs de chaînes ou de tables.
 
-### Fonctions et Retours de Valeurs Multiples
+**Fonctions et Retours de Valeurs Multiples**
 
 Les fonctions peuvent retourner plusieurs valeurs simultanément. La
 convention d'appel optimise les trois premières expressions retournées en
@@ -586,7 +566,7 @@ les plaçant directement dans les registres `R0`, `R2`, et `R3`. Toute
 valeur de retour supplémentaire (4ème et suivantes) est déversée
 directement sur le cadre de pile de l'appelant.
 
-### Regroupement des Littéraux de Chaîne
+**Regroupement des Littéraux de Chaîne**
 
 Tous les littéraux de chaîne déclarés dans le code source (par exemple,
 `"GAME OVER"`) sont collectés lors de la compilation, dédupliqués, et
@@ -594,7 +574,7 @@ Tous les littéraux de chaîne déclarés dans le code source (par exemple,
 (`__string_0: string "GAME OVER"`), évitant une consommation redondante
 de la ROM.
 
-### Évaluation Truthy / Falsy en Court-Circuit
+**Évaluation Truthy / Falsy en Court-Circuit**
 
 En Lua, seuls `nil` et `false` s'évaluent comme faux dans les expressions
 conditionnelles ; toute autre valeur (y compris `0` et les chaînes vides)
@@ -626,7 +606,7 @@ correspondant à des chemins système spécifiques (par exemple,
 dynamiques dans les tables** et émet des instructions d'E/S matérielle
 Vircon32 directes (`IN`, `OUT`).
 
-### Conversion Automatique de Types aux Frontières d'E/S
+**Conversion Automatique de Types aux Frontières d'E/S**
 
 Étant donné que les variables Lua sont stockées sous forme de flottants
 IEEE 754 encapsulés en NaN, alors que les ports matériels de Vircon32
@@ -653,7 +633,7 @@ lectures et écritures de ports :
   puisque `0.0` est vrai (truthy) en Lua et ferait sinon lire une manette
   déconnectée ou une carte mémoire comme étant « connectée ».
 
-### Tableau de Référence Complet des Intrinsèques
+**Tableau de Référence Complet des Intrinsèques**
 
 La référence complète et faisant autorité pour chaque intrinsèque —
 `ioports.gpu.*`, `ioports.inp.*`, `ioports.spu.*`, `ioports.tim.*`,
@@ -663,7 +643,7 @@ La référence complète et faisant autorité pour chaque intrinsèque —
 les signatures d'appel, et des exemples détaillés. Voici un bref
 échantillon des entrées les plus couramment utilisées :
 
-#### Contrôle et Dessin GPU (`ioports.gpu.*`)
+*Contrôle et Dessin GPU (`ioports.gpu.*`)*
 
 | Chemin Lua / Intrinsèque | Port/Commande Vircon32 | Accès | Description et Comportement |
 | --- | --- | --- | --- |
@@ -675,7 +655,7 @@ les signatures d'appel, et des exemples détaillés. Voici un bref
 | **`ioports.gpu.draw([mode])`** | `GPU_Command` | Appel de Fonction | Exécute une commande de dessin matérielle : `"zoom"`, `"rotate"`, `"rotozoom"`, ou la valeur par défaut. |
 | **`ioports.gpu.clear([couleur])`** | `GPU_ClearColor` + `GPU_Command` | Appel de Fonction | Définit la couleur d'effacement et efface l'écran. Prend en charge des chaînes de couleurs prédéfinies (`"black"`, `"white"`, `"blue"`, `"red"`, `"green"`) ou des valeurs hexadécimales numériques. |
 
-#### Manette et Entrées (`ioports.inp.*`)
+*Manette et Entrées (`ioports.inp.*`)*
 
 | Chemin Lua / Intrinsèque | Port/Commande Vircon32 | Accès | Description et Comportement |
 | --- | --- | --- | --- |
@@ -685,7 +665,7 @@ les signatures d'appel, et des exemples détaillés. Voici un bref
 | **`ioports.inp.A/B/X/Y/L/R/start`** | `INP_GamepadButton*` | Lecture Seule | État des boutons d'action/gâchettes (`> 0` pressé, `< 0` relâché). |
 | **`ioports.inp.inputs`** | *Sous-routine d'Action Personnalisée* | Lecture Seule | **Intrinsèque de regroupement :** sonde tous les boutons/axes de la manette en une seule passe, les regroupe en un unique masque de bits sur 32 bits, et le convertit en flottant Lua. |
 
-#### Utilitaires Système et d'Exécution
+*Utilitaires Système et d'Exécution*
 
 | Chemin Lua / Intrinsèque | Instruction Vircon32 | Accès | Description et Comportement |
 | --- | --- | --- | --- |
@@ -702,7 +682,7 @@ Pour les boucles internes critiques en performance ou la manipulation
 matérielle avancée de Vircon32, `v32lua` fournit une injection directe
 d'assembleur en ligne.
 
-### Assembleur en Ligne Standard (`__asm__`)
+**Assembleur en Ligne Standard (`__asm__`)**
 
 La directive `__asm__` permet d'intégrer des chaînes d'assembleur brut de
 Vircon32 directement à l'intérieur de fonctions Lua. Fait crucial, elle
@@ -735,7 +715,7 @@ __asm__( "MOV R0, {speed}\n" ..
   accident. Tout changement de registre effectué ici est perdu en dehors
   de la « bulle » en ligne.
 
-### Assembleur Brut (`__rawasm__`)
+**Assembleur Brut (`__rawasm__`)**
 
 La directive `__rawasm__` produit la chaîne littérale directement dans le
 flux d'assembleur sans aucune sécurité appliquée. Cela peut être assez

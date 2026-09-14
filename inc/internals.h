@@ -40,9 +40,16 @@ TilemapAsset *parse_tilemap_csv                   (const char *, const char *);
 // Behavior:
 //   - Recognizes a line (after leading whitespace) of the form
 //         --#include "path/to/file.lua"
-//     or with single quotes. The path is resolved relative to the
-//     DIRECTORY OF THE FILE CONTAINING THE DIRECTIVE (so includes nest
-//     naturally regardless of where the compiler is invoked from).
+//     or with single quotes. The target is resolved by searching, in
+//     order: (1) the DIRECTORY OF THE FILE CONTAINING THE DIRECTIVE (so
+//     includes nest naturally regardless of where the compiler is invoked
+//     from), (2) the compiler's current working directory, (3) each entry
+//     of the V32LUA_INCLUDE environment variable when set (colon-
+//     separated), (4) the compile-time default V32LUA_INCLUDE_PATH
+//     (inc/config.h), where an installed standard-library port is expected
+//     to live. An absolute path is used verbatim, skipping the search.
+//     Resolution failure is a hard compiler error listing the locations
+//     searched.
 //   - Recursive: an included file may itself contain --#include lines.
 //   - Cycle detection: A including B including A is a hard compiler error,
 //     not infinite recursion.
@@ -50,14 +57,14 @@ TilemapAsset *parse_tilemap_csv                   (const char *, const char *);
 //     in once for the whole compilation, no matter how many other files
 //     include it. This matches the common case of a shared helper file
 //     pulled in from several places.
-//   - Every INCLUDED file's body is wrapped in `do ... end`. This gives its
-//     top-level `local` declarations real block scoping (register_all_
-//     globals_prepass() only promotes a bare top-level `local` to a global;
-//     a `do...end` body is walked with is_chunk_top_level = 0), while any
-//     `function` it defines still comes out as an ordinary global exactly
-//     as it would in a single file, since mark_global_as_function() doesn't
-//     care what scope it's textually inside. The entry file itself is never
-//     wrapped.
+//   - An included file's body lands at the chunk's genuine top level,
+//     exactly as if its text had been pasted into the including file by
+//     hand. (An earlier version wrapped each included body in `do ... end`
+//     for block scoping; that was actively harmful -- prepass_walk()
+//     treats a do-block as non-top-level, so a top-level `local` inside
+//     the wrapper lost its global promotion and ended up in a stack frame
+//     that dies before init()/game_loop() ever run. See the comment in
+//     src/internals.c's expand_file().)
 //
 // Known limitation: the scan is line-oriented and does not track whether a
 // line is inside a --[[ ... ]] block comment or a string literal. Keep
@@ -80,5 +87,14 @@ typedef struct {
 char *expand_includes (const char *entry_path, LineMapEntry **out_map, int *out_map_count);
 
 // Frees a line map returned by expand_includes().
+void  free_line_map (LineMapEntry *map, int count);
+
+// Translates a combined-buffer line number back to the original source
+// file/line it came from, using a map built by expand_includes(). Falls
+// back to the closest preceding run (then to fallback_file) for combined
+// lines that came from a directive line rather than any spliced file.
+void  resolve_source_location (const LineMapEntry *map, int map_count,
+                               int combined_line, const char *fallback_file,
+                               const char **out_file, int *out_line);
 
 #endif

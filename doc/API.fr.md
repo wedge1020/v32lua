@@ -20,51 +20,18 @@ SPU est important et chaque émetteur de son ici en dépend.
 ## Table des Matières
 
 - [Son : music.\* / sfx.\*](#son--music--sfx)
-  - [Ordre d'écriture des ports SPU](#spu-de-vircon32--lordre-décriture-des-ports)
-  - [music.volume() / sfx.volume()](#musicvolumevol--channel--sfxvolumevol--channel)
-  - [Pourquoi les noms nus ont disparu](#pourquoi-les-noms-nus-ont-disparu)
-  - [Alias à la compilation](#alias-à-la-compilation)
-  - [music.playing()](#musicplaying-et-pourquoi-un-drapeau-lua-est-le-mauvais-interrupteur)
-  - [Génération de code : repliement hybride](#génération-de-code--repliement-hybride)
 - [ioports.spu.cmd() — l'échappatoire brute](#ioportsspucmd--léchappatoire-brute)
 - [Ports d'E/S booléens](#ports-des-booléens)
-- [Système : system.\*](#système-system)
-  - [system.wait() / system.halt()](#systemwait--systemhalt)
-  - [system.date() / system.time()](#systemdate--systemtime)
-  - [system.frames / system.cycles](#systemframes--systemcycles)
+- [Système : system.\*](#système--system)
 - [Graphismes : spr()](#graphismes--spr)
-  - [Répartition à l'exécution](#répartition-à-lexécution-pas-de-repliement-à-la-compilation)
-  - [ioports.gpu.clear()](#ioportsgpuclearcolor)
-  - [Définir des régions de texture](#définir-des-régions-de-texture)
 - [Entrées : btn() / btnp()](#entrées--btn--btnp)
-  - [Identifiants de boutons](#identifiants-de-boutons)
-  - [btn() : sondage direct](#btn--sondage-direct)
-  - [btnp() : détection de front](#btnp--détection-de-front)
-  - [ioports.inp.inputs](#ioportsinpinputs--masque-dun-mot)
-  - [Ce qui n'est délibérément pas ici](#ce-qui-nest-délibérément-pas-ici)
 - [Tilemap : tilemap.\*](#tilemap--tilemap)
-  - [--#tilemap et le format CSV](#tilemap-nom-fichier-et-le-format-csv)
-  - [tilemap.get() / tilemap.set()](#tilemapget--tilemapset)
-  - [Promotion paresseuse de la ROM vers la RAM](#promotion-paresseuse-de-la-rom-vers-la-ram)
-  - [tilemap.render()](#tilemaprender)
-  - [Ce qui n'est délibérément pas ici](#ce-qui-nest-délibérément-pas-ici-1)
 - [Autres ports d'E/S bruts](#autres-ports-des-bruts)
-  - [ioports.tim.\* — minuterie brute](#ioportstim--minuterie-brute)
-  - [ioports.rng.\* — générateur aléatoire matériel](#ioportsrng--générateur-aléatoire-matériel)
-  - [ioports.car.\* — informations sur la cartouche](#ioportscar--informations-sur-la-cartouche)
-  - [ioports.mem.connected — présence d'une carte mémoire](#ioportsmemconnected--présence-dune-carte-mémoire)
 - [Carte mémoire : memcard.\*](#carte-mémoire--memcard)
-  - [memcard.save() / memcard.load()](#memcardsave--memcardload)
-  - [memcard[position]](#memcardposition)
-  - [memcard.title()](#memcardtitlestr---nil)
-  - [Tables : memcard.save() / memcard.load_table()](#tables--memcardsave--memcardload_table)
-  - [Disposition des adresses](#disposition-des-adresses)
-  - [Étiquettes de type (forme auto-ajoutée uniquement)](#étiquettes-de-type-forme-auto-ajoutée-uniquement)
-  - [Ce qui n'est délibérément pas ici](#ce-qui-nest-délibérément-pas-ici-2)
 
 ---
 
-# Son : music.\* / sfx.\*
+## Son : music.\* / sfx.\*
 
 ```
 music.play(SOUND [, CHANNEL [, LOOP [, VOL [, START]]]])  -> canal utilisé
@@ -98,9 +65,9 @@ se prémunir contre un cas qui ne survient que lorsque 15 effets se
 chevauchent, où le plus ancien est de toute façon le bon candidat à
 perdre.
 
-## SPU de Vircon32 : l'ordre d'écriture des ports
+**SPU de Vircon32 : l'ordre d'écriture des ports**
 
-### La règle
+*La règle*
 
 ```asm
 OUT SPU_SelectedChannel, ch
@@ -133,7 +100,7 @@ deux branches — elle se contente de définir `State = Playing`. C'est ce
 qui fait de Play la reprise correcte par canal, et pourquoi resume ne
 perturbe jamais la position ni la boucle.
 
-### États des canaux et ce que signifie réellement resume
+*États des canaux et ce que signifie réellement resume*
 
 `channel_stopped 0x40`, `channel_paused 0x41`, `channel_playing 0x42`.
 `SPU_ChannelState` est **en lecture seule** (`WriteSPUChannelState`
@@ -156,7 +123,7 @@ arrêté ». Ainsi, mettre en pause un canal terminé le laisse En Pause à la
 position 0, et une reprise ultérieure lit depuis le début. Protégez-vous
 avec une vérification `SPU_ChannelState == 0x42` si cela importe.
 
-### Types de ports
+*Types de ports*
 
 `SPU_ChannelPosition` est un port **ENTIER** — un index d'échantillon,
 borné par la console à `0 .. SoundLength-1`. `audio.h` déclare
@@ -170,7 +137,7 @@ Ports véritablement flottants : `SPU_ChannelVolume` (borné 0–8),
 (borné 0–2). Les écritures NaN/inf sur l'un de ces ports sont ignorées
 plutôt que rejetées.
 
-## music.volume(VOL [, CHANNEL]) / sfx.volume(VOL [, CHANNEL])
+**music.volume(VOL [, CHANNEL]) / sfx.volume(VOL [, CHANNEL])**
 
 Définit le volume de lecture. `VOL` est obligatoire. `CHANNEL` a **trois**
 significations distinctes selon ce qu'écrit le site d'appel :
@@ -200,7 +167,7 @@ possession — seul `.play()` le fait. Un canal en pause ou arrêté est
 toujours trouvé par le mode « canaux suivis » sans argument ; seule la
 lecture d'un canal *différent* sous l'autre espace de noms le libère.
 
-### Suivi de possession de canal
+*Suivi de possession de canal*
 
 Deux mots de RAM réservés par le compilateur, `VIRCON32_MUSIC_CHANNEL_MASK`
 et `VIRCON32_SFX_CHANNEL_MASK`, chacun un masque de bits sur les canaux
@@ -220,7 +187,7 @@ Seul `.play()` touche les masques. `.pause()`, `.resume()`, `.stop()`, et
 pause ou arrêté reste « possédé » par celui qui y a lu en dernier, et
 reste capté par le mode volume sans argument.
 
-### Génération de code
+*Génération de code*
 
 Un appel entièrement littéral (`music.volume(0.5, 0)`, `sfx.volume(0.0, -1)`)
 se replie en une séquence linéaire de `OUT` à la compilation, comme le
@@ -233,7 +200,7 @@ autre appel à valeur dynamique va vers `__builtin_vircon32_volume`, qui
 compare la valeur du canal à `-1` (global) à l'exécution et borne dans le
 cas contraire.
 
-## Pourquoi les noms nus ont disparu
+**Pourquoi les noms nus ont disparu**
 
 `play` / `pause` / `resume` / `stop` étaient les quatre identifiants les
 plus sujets aux collisions qu'un jeu pouvait vouloir pour lui-même, ce que
@@ -241,7 +208,7 @@ l'ancienne garde de contournement `resolve_symbol()` dans le répartiteur
 compensait. Ils ont disparu ; les espaces de noms les remplacent, et le
 mécanisme d'alias les restaure par choix plutôt que par défaut.
 
-## Alias à la compilation
+**Alias à la compilation**
 
 `play = music.play` enregistre un alias et n'émet rien. Les appels
 ultérieurs à `play(...)` compilent vers la séquence `OUT` en ligne
@@ -281,7 +248,7 @@ résolues dans `try_emit_table_get_intrinsic()` où `math.sin` en tant que
 valeur existe déjà. Ce serait additif ; la table d'alias reste le chemin à
 coût nul.
 
-## music.playing() et pourquoi un drapeau Lua est le mauvais interrupteur
+**music.playing() et pourquoi un drapeau Lua est le mauvais interrupteur**
 
 `SPU_ChannelState` est un port entier en lecture seule qui renvoie
 `channel_stopped` 0x40, `channel_paused` 0x41, `channel_playing` 0x42.
@@ -293,7 +260,7 @@ qu'un son se termine de lui-même : le programme croit toujours qu'il est
 en lecture, donc l'appui suivant met en pause un canal déjà arrêté au
 lieu de le reprendre. Interroger le matériel ne peut pas se dérégler.
 
-## Génération de code : repliement hybride
+**Génération de code : repliement hybride**
 
 Tous les arguments connus à la compilation → séquence linéaire de `OUT`,
 pas de CALL. Tout ce qui est dynamique → empile et fait un CALL vers la
@@ -316,7 +283,7 @@ l'assembleur en ligne n'importe où dans l'AST.
 
 ---
 
-# ioports.spu.cmd() — l'échappatoire brute
+## ioports.spu.cmd() — l'échappatoire brute
 
 Émet une commande SPU brute contre ce que `SPU_SelectedChannel` nomme
 actuellement. Aucune sélection de canal, aucune assignation de son,
@@ -333,7 +300,7 @@ Modes : `"play"` 0, `"pause"` 1, `"stop"` 2, `"pauseall"` 3, `"resume"` 4,
 
 ---
 
-# Ports d'E/S booléens
+## Ports d'E/S booléens
 
 Un booléen Lua n'est pas un flottant. `true`/`false`/`nil` sont des motifs
 de bits encapsulés en NaN ; les ports matériels échangent en entiers 0 et
@@ -350,7 +317,7 @@ L'arithmétique sur l'un d'eux doit être réécrite sous la forme
 
 ---
 
-# Système : system.\*
+## Système : system.\*
 
 ```
 system.wait()   -> nil   (WAIT jusqu'au prochain signal de nouveau cycle)
@@ -359,7 +326,7 @@ system.date()   -> chaîne, année, mois, jour
 system.time()   -> chaîne, heure, minute, seconde
 ```
 
-## system.wait() / system.halt()
+**system.wait() / system.halt()**
 
 `system.wait()` se compile directement en `WAIT` — la même instruction
 qu'utilise `ioports.gpu.sync()`, et interchangeable avec elle ; toutes
@@ -368,7 +335,7 @@ minuterie. `system.halt()` se compile en `HLT`, arrêtant le CPU purement
 et simplement — pour un programme qui a terminé son travail et n'a plus
 rien à afficher.
 
-## system.date() / system.time()
+**system.date() / system.time()**
 
 Les deux décodent l'horloge temps réel de la puce de minuterie (voir la
 Spécification Système Vircon32, Partie 7, section 1.2 — c'est une
@@ -397,7 +364,7 @@ format ni de construction de table à la `os.time()`/`os.date()` — c'est
 un décodage à forme fixe du registre matériel, pas une bibliothèque de
 dates générale.
 
-## system.frames / system.cycles
+**system.frames / system.cycles**
 
 ```lua
 local f = system.frames()   -- TIM_FrameCounter -- images depuis la mise sous tension
@@ -420,7 +387,7 @@ le plus facile à découvrir.
 
 ---
 
-# Graphismes : spr()
+## Graphismes : spr()
 
 ```
 spr(region_id, x, y [, scale_x [, scale_y [, angle_deg [, color_mult [, blend_mode]]]]])
@@ -458,7 +425,7 @@ console n'a aucune valeur significative à renvoyer d'un appel de dessin.
 Plus de 8 arguments déclenche un avertissement à la compilation ; les
 arguments en trop sont ignorés.
 
-## Répartition à l'exécution, pas de repliement à la compilation
+**Répartition à l'exécution, pas de repliement à la compilation**
 
 Contrairement à l'API son, `spr()` appelle toujours
 `__builtin_vircon32_spr` — il n'existe aucun chemin rapide en `OUT`
@@ -496,7 +463,7 @@ défaut. Un appel situé dans un contexte d'expression
 (`local unused = spr(1, 10, 10)`) se voit correctement assigner `nil`,
 comme tout autre intrinsèque de ce document.
 
-## ioports.gpu.clear([couleur])
+**ioports.gpu.clear([couleur])**
 
 Efface l'écran : écrit `GPU_ClearColor` (si un argument de couleur est
 fourni) puis émet `GPUCommand_ClearScreen`. `couleur` accepte soit un
@@ -511,7 +478,7 @@ ioports.gpu.clear(0xFF202020)   -- RGBA compressé, pas un nom prédéfini
 ioports.gpu.clear()             -- réutilise le dernier ClearColor défini
 ```
 
-## Définir des régions de texture
+**Définir des régions de texture**
 
 Le `region_id` de `spr()` ne fait référence à rien tant qu'une région n'a
 pas réellement été découpée dans une texture chargée. Il n'existe aucune
@@ -555,7 +522,7 @@ multiplication, mélange, et le compteur en lecture seule GPU-occupée
 
 ---
 
-# Entrées : btn() / btnp()
+## Entrées : btn() / btnp()
 
 ```
 btn(id [, player])   -> booléen, actuellement maintenu enfoncé
@@ -565,7 +532,7 @@ btnp(id [, player])  -> booléen, vrai uniquement sur l'image où il a été pre
 `player` sélectionne une manette 0–3 (`INP_SelectedGamepad`) ; omis ou
 `nil` utilise la manette déjà sélectionnée sans écrire le port.
 
-## Identifiants de boutons
+**Identifiants de boutons**
 
 Ordre matériel de Vircon32, pas celui de PICO-8 ni de TIC-80 :
 
@@ -589,13 +556,13 @@ niveau système d'exploitation disponible sur cette cible (voir
 `pcall`/`error`/`assert` dans la liste des fonctionnalités différées du
 compilateur).
 
-## btn() : sondage direct
+**btn() : sondage direct**
 
 `__builtin_vircon32_btn` lit le port `INP_Gamepad*` mappé pour la manette
 sélectionnée et renvoie `true` lorsque le matériel signale qu'il est
 enfoncé (`>= 1`).
 
-## btnp() : détection de front
+**btnp() : détection de front**
 
 `btnp()` a besoin d'un état que le matériel ne suit pas de lui-même : « ce
 bouton n'était-il pas enfoncé à l'image précédente, et l'est-il
@@ -611,7 +578,7 @@ Un `player` hors limites (une valeur explicite en dehors de 0–3) est
 borné à 0–3 avant d'être utilisé comme index dans cette table de 44 mots,
 plutôt que de laisser calculer une adresse en dehors de celle-ci.
 
-## ioports.inp.inputs — masque d'un mot
+**ioports.inp.inputs — masque d'un mot**
 
 ```lua
 local mask = ioports.inp.inputs   -- manette actuelle, les 11 boutons en une seule lecture
@@ -634,7 +601,7 @@ l'entrée d'une image entière en une seule valeur (par exemple dans un
 journal de replay/entrée) plutôt que pour la logique de jeu courante
 bouton par bouton, où `btn()`/`btnp()` se lisent plus clairement.
 
-## Ce qui n'est délibérément PAS ici
+**Ce qui n'est délibérément PAS ici**
 
 - Aucune forme de champ de bits/« n'importe quel bouton » (`btn()` sans
   argument) à la manière de PICO-8 — chaque appel nomme un bouton
@@ -651,7 +618,7 @@ couches de compatibilité `--#api pico8`/`--#api tic80`, pas ici.
 
 ---
 
-# Tilemap : tilemap.\*
+## Tilemap : tilemap.\*
 
 ```
 tilemap.get(NAME, x, y)        -> nombre ou nil (hors limites)
@@ -673,7 +640,7 @@ d'identifiant de ressource intégré dans le code généré. Ses données sont
 incrustées sous forme de valeurs littérales directement dans le programme
 assemblé.
 
-## --#tilemap NOM "fichier" et le format CSV
+**--#tilemap NOM "fichier" et le format CSV**
 
 ```lua
 --#tilemap LEVEL1 "level1.csv"
@@ -695,7 +662,7 @@ As... CSV** (par calque) de Tiled puisse être utilisée directement sans
 étape de conversion — aucune analyse TMX/TSX nulle part dans ce
 compilateur.
 
-## tilemap.get() / tilemap.set()
+**tilemap.get() / tilemap.set()**
 
 ```lua
 local id = tilemap.get(LEVEL1, 4, 2)   -- tuile en colonne 4, ligne 2
@@ -717,7 +684,7 @@ octet. Une valeur de tuile ici est simplement ce que le code appelant
 veut qu'elle signifie, typiquement un identifiant de région GPU, qui peut
 largement dépasser 255.
 
-## Promotion paresseuse de la ROM vers la RAM
+**Promotion paresseuse de la ROM vers la RAM**
 
 Une tilemap commence sa vie en lecture seule, se trouvant là où le
 compilateur a placé ses données dans l'image du programme —
@@ -730,7 +697,7 @@ affectée — la promotion est suivie par tilemap, pas globalement. Un
 deuxième `tilemap.set()` ultérieur sur une tilemap déjà promue écrit
 directement, sans recopier ni perturber les écritures antérieures.
 
-## tilemap.render()
+**tilemap.render()**
 
 ```lua
 tilemap.render(LEVEL1, sx, sy, w, h, x, y, tile_w, tile_h)
@@ -776,7 +743,7 @@ au-delà de `w`/`h` et de décaler l'origine écran de tout le bloc d'un
 reste de pixel de sous-tuile ; c'est une extension réelle et distincte,
 non implémentée ici.
 
-## Ce qui n'est délibérément PAS ici
+**Ce qui n'est délibérément PAS ici**
 
 - Aucun défilement fluide/au sous-pixel — voir ci-dessus.
 - Aucune dénomination `mget()`/`mset()`/`map()` — ces noms appartiennent
@@ -791,12 +758,12 @@ non implémentée ici.
 
 ---
 
-# Autres ports d'E/S bruts
+## Autres ports d'E/S bruts
 
 Chaque port `ioports.*` vit dans une seule table (`IOPortMap` de
 `core.c`), organisée en six catégories : `tim`, `rng`, `gpu`, `spu`,
 `inp`, `car`, `mem`. Les catégories son (`spu`), graphismes (`gpu`,
-partiellement — voir [Définir des régions de texture](#définir-des-régions-de-texture)),
+partiellement — voir **Définir des régions de texture**),
 et entrées (`inp`, partiellement — voir [btn()/btnp()](#entrées--btn--btnp))
 sont couvertes plus haut là où elles disposent d'un enrobage de plus haut
 niveau. Ce qui reste est soit du matériel brut sans aucun enrobage, soit
@@ -806,7 +773,7 @@ Une catégorie ou un nom de propriété inconnu est une erreur de
 compilation listant les catégories valides, pas un no-op silencieux ni
 une lecture de globale non déclarée — voir `validate_ioports_path()`.
 
-## ioports.tim.\* — minuterie brute
+**ioports.tim.\* — minuterie brute**
 
 ```lua
 ioports.tim.date     -- TIM_CurrentDate,   lecture seule, entier compressé
@@ -822,7 +789,7 @@ c'est la représentation compressée elle-même qui est nécessaire (par
 exemple, stocker un mot dans une carte mémoire plutôt que trois champs
 séparés).
 
-## ioports.rng.\* — générateur aléatoire matériel
+**ioports.rng.\* — générateur aléatoire matériel**
 
 ```lua
 ioports.rng.value            -- RNG_CurrentValue, lecture : la valeur aléatoire actuelle
@@ -837,7 +804,7 @@ générateur pseudo-aléatoire logiciel dans le moteur d'exécution, semé
 séparément) — les deux ne partagent pas d'état et ne produiront pas la
 même séquence à partir de la même graine.
 
-## ioports.car.\* — informations sur la cartouche
+**ioports.car.\* — informations sur la cartouche**
 
 ```lua
 ioports.car.connected  -- CAR_Connected,          booléen, lecture seule
@@ -855,7 +822,7 @@ existe pour la complétude de la table de ports plutôt que comme une
 condition de branchement pratique ; en réalité, seulement quelque chose
 transigé dans le BIOS.
 
-## ioports.mem.connected — présence d'une carte mémoire
+**ioports.mem.connected — présence d'une carte mémoire**
 
 ```lua
 if ioports.mem.connected then
@@ -868,7 +835,7 @@ est réellement présente avant que les appels `memcard.*` ne la touchent.
 
 ---
 
-# Carte mémoire : memcard.\*
+## Carte mémoire : memcard.\*
 
 ```
 memcard.save(value, position)   -> value   (écriture brute, exactement 1 mot)
@@ -895,7 +862,7 @@ par mots entiers de 4 octets, pas par octets individuels. Cela correspond
 par caractère (voir `string.len()`) — plutôt qu'une représentation
 compressée par octet.
 
-## memcard.save() / memcard.load()
+**memcard.save() / memcard.load()**
 
 Il existe deux formes distinctes, choisies selon qu'une `position` est
 donnée ou non :
@@ -903,7 +870,7 @@ donnée ou non :
 **Avec une `position` explicite** — la primitive de bas niveau. Écrit (ou
 lit) exactement un mot brut à `position`, sans aucune forme de
 comptabilité. `position 0` est le premier mot de la région de données ;
-voir [Disposition des adresses](#disposition-des-adresses) ci-dessous
+voir **Disposition des adresses** ci-dessous
 pour la plage complète, y compris comment les positions négatives
 atteignent le titre. Vous êtes entièrement responsable de savoir ce que
 vous mettez où — écrire deux fois la même position l'écrase simplement.
@@ -920,7 +887,7 @@ que des sauvegardes répétées sans position continuent d'étendre un
 journal à travers de nombreuses sessions de jeu au lieu d'écraser le mot 0
 à chaque exécution. Cette forme est consciente du type : sauvegarder une
 véritable chaîne Lua écrit son contenu complet (étiqueté et préfixé par
-sa longueur, voir [Étiquettes de type](#étiquettes-de-type-forme-auto-ajoutée-uniquement)),
+sa longueur, voir **Étiquettes de type**),
 pas seulement un pointeur brut.
 
 ```lua
@@ -935,10 +902,10 @@ Le curseur lui-même — « combien de mots ont été auto-ajoutés jusqu'ici »
 `memcard.load()` sans `position` lit toujours le mot 0 — elle ne suit
 **pas** le curseur d'auto-ajout comme le fait `memcard.save()`. Relire une
 entrée écrite par la forme auto-ajoutée signifie lire vous-même son mot
-d'étiquette à une position connue (voir [Étiquettes de type](#étiquettes-de-type-forme-auto-ajoutée-uniquement)),
+d'étiquette à une position connue (voir **Étiquettes de type**),
 ou simplement savoir ce que vous y avez écrit.
 
-## memcard[position]
+**memcard[position]**
 
 `memcard[position]` et `memcard[position] = value` sont des raccourcis
 pour la forme à position explicite de `load`/`save` ci-dessus — jamais
@@ -951,7 +918,7 @@ local hi = memcard[0]        -- 1234
 memcard[-1]                  -- lit le curseur d'auto-ajout
 ```
 
-## memcard.title(str) -> nil
+**memcard.title(str) -> nil**
 
 Définit le titre de la carte mémoire — jusqu'à 20 caractères, un mot par
 caractère, correspondant à la représentation interne des chaînes de cette
@@ -965,7 +932,7 @@ en circulation, chacune avec son propre titre.
 memcard.title("My Save File")
 ```
 
-## Tables : memcard.save() / memcard.load_table()
+**Tables : memcard.save() / memcard.load_table()**
 
 `memcard.save(a_table)` — la forme auto-ajoutée sans position
 **uniquement** — écrit un **volcage brut** du contenu de la table : un
@@ -1007,7 +974,7 @@ récursivement — donc elle n'a de sens que dans la même exécution qui l'a
 écrite ; la recharger dans une session future (ou après que la cible du
 pointeur ait bougé ou été collectée) est indéfini. C'est la même limite
 de sécurité que trace déjà le reste de `memcard.*` (voir
-[Note de sécurité](#note-de-sécurité)) — un volcage de table ne la
+*Note de sécurité*) — un volcage de table ne la
 franchit pas, il l'applique simplement par entrée plutôt qu'une seule
 fois.
 
@@ -1021,7 +988,7 @@ d'étiquette avant de faire confiance à quoi que ce soit après lui ; lire
 plutôt que de mal interpréter des mots non liés comme un nombre de
 paires et des clés/valeurs aléatoires.
 
-## Disposition des adresses
+**Disposition des adresses**
 
 ```
 0x30000000  +-------------------------------------+  position -24
@@ -1054,7 +1021,7 @@ complets sont disponibles maintenant.
 | `VIRCON32_MEMCARD_CURSOR_ADDR` | `0x30000017` | le curseur d'auto-ajout ; position `-1` |
 | `VIRCON32_MEMCARD_END` | `0x3003FFFF` | dernier mot valide, inclus |
 
-## Étiquettes de type (forme auto-ajoutée uniquement)
+**Étiquettes de type (forme auto-ajoutée uniquement)**
 
 `memcard.save(value)` sans position écrit l'une de trois formes au
 curseur, puis avance le curseur du nombre de mots que cette forme a
@@ -1076,9 +1043,9 @@ La forme à `position` explicite (`memcard.save(value, position)` /
 exactement un mot brut, quel que soit le type de valeur. Cela inclut les
 tables : une table sauvegardée avec une position explicite est un unique
 mot de pointeur brut, pas un volcage — voir
-[Tables](#tables--memcardsave--memcardload_table) ci-dessus.
+**Tables** ci-dessus.
 
-### Note de sécurité
+*Note de sécurité*
 
 Un nombre, booléen, ou nil survit au cycle aller-retour correctement pour
 toujours — ce motif de bits signifie la même chose à n'importe quelle
@@ -1100,7 +1067,7 @@ en aux nombres/booléens/nil (ou aux véritables chaînes/tables de ceux-ci,
 via la forme auto-ajoutée) pour tout ce qui est destiné à survivre à un
 véritable cycle de sauvegarde/rechargement.
 
-## Ce qui n'est délibérément PAS ici
+**Ce qui n'est délibérément PAS ici**
 
 - Aucune sérialisation de table *récursive* — un volcage de table copie
   uniquement ses paires clé/valeur directes ; une table imbriquée à

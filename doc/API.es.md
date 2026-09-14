@@ -22,51 +22,18 @@ puertos SPU es importante y todos los emisores de sonido aquí dependen de
 ## Tabla de Contenidos
 
 - [Sonido: music.\* / sfx.\*](#sonido-music--sfx)
-  - [Orden de escritura de puertos SPU](#vircon32-spu-el-orden-de-escritura-de-puertos)
-  - [music.volume() / sfx.volume()](#musicvolumevol--channel--sfxvolumevol--channel)
-  - [Por qué desaparecieron los nombres simples](#por-qué-desaparecieron-los-nombres-simples)
-  - [Alias en tiempo de compilación](#alias-en-tiempo-de-compilación)
-  - [music.playing()](#musicplaying-y-por-qué-una-bandera-de-lua-es-el-interruptor-equivocado)
-  - [Generación de código: plegado híbrido](#generación-de-código-plegado-híbrido)
 - [ioports.spu.cmd() — la vía de escape en bruto](#ioportsspucmd--la-vía-de-escape-en-bruto)
 - [Puertos de E/S booleanos](#puertos-de-es-booleanos)
 - [Sistema: system.\*](#sistema-system)
-  - [system.wait() / system.halt()](#systemwait--systemhalt)
-  - [system.date() / system.time()](#systemdate--systemtime)
-  - [system.frames / system.cycles](#systemframes--systemcycles)
 - [Gráficos: spr()](#gráficos-spr)
-  - [Despacho en tiempo de ejecución](#despacho-en-tiempo-de-ejecución-no-plegado-en-tiempo-de-compilación)
-  - [ioports.gpu.clear()](#ioportsgpuclearcolor)
-  - [Definiendo regiones de textura](#definiendo-regiones-de-textura)
 - [Entrada: btn() / btnp()](#entrada-btn--btnp)
-  - [IDs de botones](#ids-de-botones)
-  - [btn(): sondeo directo](#btn-sondeo-directo)
-  - [btnp(): detección de flanco](#btnp-detección-de-flanco)
-  - [ioports.inp.inputs](#ioportsinpinputs--máscara-de-una-palabra)
-  - [Lo que deliberadamente no está aquí](#lo-que-deliberadamente-no-está-aquí)
 - [Mapa de mosaicos: tilemap.\*](#mapa-de-mosaicos-tilemap)
-  - [--#tilemap y el formato CSV](#tilemap-nombre-archivo-y-el-formato-csv)
-  - [tilemap.get() / tilemap.set()](#tilemapget--tilemapset)
-  - [Promoción perezosa de ROM a RAM](#promoción-perezosa-de-rom-a-ram)
-  - [tilemap.render()](#tilemaprender)
-  - [Lo que deliberadamente no está aquí](#lo-que-deliberadamente-no-está-aquí-1)
 - [Otros puertos de E/S en bruto](#otros-puertos-de-es-en-bruto)
-  - [ioports.tim.\* — temporizador en bruto](#ioportstim--temporizador-en-bruto)
-  - [ioports.rng.\* — RNG por hardware](#ioportsrng--rng-por-hardware)
-  - [ioports.car.\* — información del cartucho](#ioportscar--información-del-cartucho)
-  - [ioports.mem.connected — presencia de tarjeta de memoria](#ioportsmemconnected--presencia-de-tarjeta-de-memoria)
 - [Tarjeta de memoria: memcard.\*](#tarjeta-de-memoria-memcard)
-  - [memcard.save() / memcard.load()](#memcardsave--memcardload)
-  - [memcard[position]](#memcardposition)
-  - [memcard.title()](#memcardtitlestr---nil)
-  - [Tablas: memcard.save() / memcard.load_table()](#tablas-memcardsave--memcardload_table)
-  - [Diseño de direcciones](#diseño-de-direcciones)
-  - [Etiquetas de tipo (solo la forma de auto-anexado)](#etiquetas-de-tipo-solo-la-forma-de-auto-anexado)
-  - [Lo que deliberadamente no está aquí](#lo-que-deliberadamente-no-está-aquí-2)
 
 ---
 
-# Sonido: music.\* / sfx.\*
+## Sonido: music.\* / sfx.\*
 
 ```
 music.play(SOUND [, CHANNEL [, LOOP [, VOL [, START]]]])  -> canal usado
@@ -99,9 +66,9 @@ buscar costaría hasta 15 `IN` + comparaciones en la ruta caliente
 un caso que solo surge cuando se solapan 15 efectos, donde el más antiguo
 es de todos modos el correcto para perder.
 
-## Vircon32 SPU: el orden de escritura de puertos
+**Vircon32 SPU: el orden de escritura de puertos**
 
-### La regla
+*La regla*
 
 ```asm
 OUT SPU_SelectedChannel, ch
@@ -132,7 +99,7 @@ dos ramas — solo establece `State = Playing`. Eso es lo que hace que Play
 sea el resume correcto por canal, y por qué resume nunca perturba la
 posición o el bucle.
 
-### Estados de canal y qué significa realmente resume
+*Estados de canal y qué significa realmente resume*
 
 `channel_stopped 0x40`, `channel_paused 0x41`, `channel_playing 0x42`.
 `SPU_ChannelState` es **de solo lectura** (`WriteSPUChannelState` devuelve
@@ -155,7 +122,7 @@ pausar un canal terminado lo deja En Pausa en la posición 0, y un resume
 posterior reproduce desde el inicio. Protégete con una comprobación
 `SPU_ChannelState == 0x42` si eso importa.
 
-### Tipos de puerto
+*Tipos de puerto*
 
 `SPU_ChannelPosition` es un puerto **ENTERO** — un índice de muestra,
 acotado por la consola a `0 .. SoundLength-1`. `audio.h` declara
@@ -169,7 +136,7 @@ Puertos genuinamente flotantes: `SPU_ChannelVolume` (acotado 0–8),
 0–2). Las escrituras de NaN/inf en cualquiera de estos se ignoran en lugar
 de rechazarse.
 
-## music.volume(VOL [, CHANNEL]) / sfx.volume(VOL [, CHANNEL])
+**music.volume(VOL [, CHANNEL]) / sfx.volume(VOL [, CHANNEL])**
 
 Establece el volumen de reproducción. `VOL` es obligatorio. `CHANNEL`
 tiene **tres** significados distintos según lo que escriba el sitio de
@@ -200,7 +167,7 @@ solo `.play()` hace eso. Un canal en pausa o detenido sigue siendo
 encontrado por el modo "canales rastreados" sin argumentos; solo reproducir
 un canal *diferente* bajo el otro espacio de nombres lo libera.
 
-### Seguimiento de propiedad de canal
+*Seguimiento de propiedad de canal*
 
 Dos palabras de RAM reservadas por el compilador, `VIRCON32_MUSIC_CHANNEL_MASK`
 y `VIRCON32_SFX_CHANNEL_MASK`, cada una una máscara de bits sobre los
@@ -220,7 +187,7 @@ Solo `.play()` toca las máscaras. `.pause()`, `.resume()`, `.stop()`, y
 en pausa o detenido sigue siendo "propiedad" de quien reprodujo por última
 vez en él, y sigue siendo captado por el modo de volumen sin argumentos.
 
-### Generación de código
+*Generación de código*
 
 Una llamada totalmente literal (`music.volume(0.5, 0)`, `sfx.volume(0.0, -1)`)
 se pliega en una secuencia lineal de `OUT` en tiempo de compilación, igual
@@ -233,7 +200,7 @@ activado. Cualquier otra llamada con valor en tiempo de ejecución va a
 `__builtin_vircon32_volume`, que comprueba el valor del canal contra `-1`
 (global) en tiempo de ejecución y acota en caso contrario.
 
-## Por qué desaparecieron los nombres simples
+**Por qué desaparecieron los nombres simples**
 
 `play` / `pause` / `resume` / `stop` eran los cuatro identificadores más
 propensos a colisión que un juego podría querer para sí mismo, que es lo
@@ -241,7 +208,7 @@ que la antigua salvaguarda de desvío `resolve_symbol()` en el despachador
 solucionaba. Han desaparecido; los espacios de nombres los reemplazan, y el
 mecanismo de alias los restaura por elección en lugar de por defecto.
 
-## Alias en tiempo de compilación
+**Alias en tiempo de compilación**
 
 `play = music.play` registra un alias y no emite nada. Las llamadas
 posteriores a `play(...)` compilan a la secuencia `OUT` en línea idéntica —
@@ -279,7 +246,7 @@ reales empaquetadas con `BOXED_FUNCTION`, resueltas en
 `try_emit_table_get_intrinsic()` donde `math.sin` como valor ya existe. Eso
 sería aditivo; la tabla de alias permanece como la ruta de costo cero.
 
-## music.playing() y por qué una bandera de Lua es el interruptor equivocado
+**music.playing() y por qué una bandera de Lua es el interruptor equivocado**
 
 `SPU_ChannelState` es un puerto entero de solo lectura que devuelve
 `channel_stopped` 0x40, `channel_paused` 0x41, `channel_playing` 0x42.
@@ -292,7 +259,7 @@ programa todavía cree que se está reproduciendo, así que la siguiente
 pulsación pausa un canal ya detenido en lugar de reanudarlo. Preguntarle al
 hardware no puede desincronizarse.
 
-## Generación de código: plegado híbrido
+**Generación de código: plegado híbrido**
 
 Todos los argumentos conocidos en tiempo de compilación → secuencia lineal
 de `OUT`, sin CALL. Cualquier cosa dinámica → empuja y hace CALL a la
@@ -316,7 +283,7 @@ cualquier parte del AST.
 
 ---
 
-# ioports.spu.cmd() — la vía de escape en bruto
+## ioports.spu.cmd() — la vía de escape en bruto
 
 Emite un comando SPU en bruto contra lo que sea que `SPU_SelectedChannel`
 nombre actualmente. Sin selección de canal, sin asignación de sonido, sin
@@ -333,7 +300,7 @@ Modos: `"play"` 0, `"pause"` 1, `"stop"` 2, `"pauseall"` 3, `"resume"` 4,
 
 ---
 
-# Puertos de E/S booleanos
+## Puertos de E/S booleanos
 
 Un booleano de Lua no es un flotante. `true`/`false`/`nil` son patrones de
 bits empaquetados en NaN; los puertos de hardware trafican en enteros 0 y
@@ -350,7 +317,7 @@ aritmética sobre uno de ellos necesita reescribirse como
 
 ---
 
-# Sistema: system.\*
+## Sistema: system.\*
 
 ```
 system.wait()   -> nil   (WAIT hasta la siguiente señal de nuevo ciclo)
@@ -359,7 +326,7 @@ system.date()   -> cadena, año, mes, día
 system.time()   -> cadena, hora, minuto, segundo
 ```
 
-## system.wait() / system.halt()
+**system.wait() / system.halt()**
 
 `system.wait()` compila directamente a `WAIT` — la misma instrucción que
 usa `ioports.gpu.sync()`, e intercambiable con ella; ambas simplemente
@@ -367,7 +334,7 @@ esperan la siguiente señal de nuevo ciclo del temporizador. `system.halt()`
 compila a `HLT`, deteniendo la CPU por completo — para un programa que ha
 completado su trabajo y no le queda nada por renderizar.
 
-## system.date() / system.time()
+**system.date() / system.time()**
 
 Ambas decodifican el reloj de tiempo real del chip temporizador (ver la
 Especificación del Sistema Vircon32, Parte 7, sección 1.2 — esto es un
@@ -395,7 +362,7 @@ ella. No hay soporte de cadena de formato ni construcción de tablas al
 estilo `os.time()`/`os.date()` — esto es una decodificación de forma fija
 del registro de hardware, no una biblioteca de fechas general.
 
-## system.frames / system.cycles
+**system.frames / system.cycles**
 
 ```lua
 local f = system.frames()   -- TIM_FrameCounter -- cuadros desde el encendido
@@ -418,7 +385,7 @@ nombres más fácil de descubrir.
 
 ---
 
-# Gráficos: spr()
+## Gráficos: spr()
 
 ```
 spr(region_id, x, y [, scale_x [, scale_y [, angle_deg [, color_mult [, blend_mode]]]]])
@@ -455,7 +422,7 @@ tiene ningún valor significativo que devolver de una llamada de dibujo.
 Más de 8 argumentos es una advertencia en tiempo de compilación; los
 extras se ignoran.
 
-## Despacho en tiempo de ejecución, no plegado en tiempo de compilación
+**Despacho en tiempo de ejecución, no plegado en tiempo de compilación**
 
 A diferencia de la API de sonido, `spr()` siempre llama a
 `__builtin_vircon32_spr` — no hay una ruta rápida de `OUT` lineal para una
@@ -492,7 +459,7 @@ llamada situada en un contexto de expresión (`local unused = spr(1, 10, 10)`)
 recibe correctamente `nil` asignado, igual que cualquier otro intrínseco
 en este archivo.
 
-## ioports.gpu.clear([color])
+**ioports.gpu.clear([color])**
 
 Limpia la pantalla: escribe `GPU_ClearColor` (si se da un argumento de
 color) y luego emite `GPUCommand_ClearScreen`. `color` acepta ya sea un
@@ -507,7 +474,7 @@ ioports.gpu.clear(0xFF202020)   -- RGBA empaquetado, no un nombre preestablecido
 ioports.gpu.clear()             -- reutiliza el último ClearColor establecido
 ```
 
-## Definiendo regiones de textura
+**Definiendo regiones de textura**
 
 El `region_id` de `spr()` no se refiere a nada hasta que se haya recortado
 realmente una región de una textura cargada. No hay autoría de regiones
@@ -551,7 +518,7 @@ GPU-ocupada `ioports.gpu.pixels`).
 
 ---
 
-# Entrada: btn() / btnp()
+## Entrada: btn() / btnp()
 
 ```
 btn(id [, player])   -> booleano, actualmente mantenido presionado
@@ -561,7 +528,7 @@ btnp(id [, player])  -> booleano, verdadero solo en el cuadro en que se presion�
 `player` selecciona un mando 0–3 (`INP_SelectedGamepad`); omitido o `nil`
 usa el mando que ya esté seleccionado sin escribir el puerto.
 
-## IDs de botones
+**IDs de botones**
 
 Orden de hardware de Vircon32, no el de PICO-8 ni el de TIC-80:
 
@@ -584,13 +551,13 @@ lugar de dar un error — no hay una ruta de error a nivel de sistema
 operativo disponible en este objetivo (ver `pcall`/`error`/`assert` en la
 lista de características diferidas del compilador).
 
-## btn(): sondeo directo
+**btn(): sondeo directo**
 
 `__builtin_vircon32_btn` lee el puerto `INP_Gamepad*` mapeado para el
 mando seleccionado y devuelve `true` cuando el hardware reporta que está
 presionado (`>= 1`).
 
-## btnp(): detección de flanco
+**btnp(): detección de flanco**
 
 `btnp()` necesita un estado que el hardware no rastrea por sí mismo: "¿no
 estaba este botón presionado en el cuadro anterior, y está presionado
@@ -606,7 +573,7 @@ Un `player` fuera de rango (un valor explícito fuera de 0–3) se acota a
 0–3 antes de usarse como índice en esa tabla de 44 palabras, en lugar de
 permitir que compute una dirección fuera de ella.
 
-## ioports.inp.inputs — máscara de una palabra
+**ioports.inp.inputs — máscara de una palabra**
 
 ```lua
 local mask = ioports.inp.inputs   -- mando actual, los 11 botones en una sola lectura
@@ -629,7 +596,7 @@ un cuadro completo como un solo valor (por ejemplo, en un registro de
 repetición/entrada) en lugar de para la lógica de juego cotidiana por
 botón, donde `btn()`/`btnp()` se leen con más claridad.
 
-## Lo que deliberadamente NO está aquí
+**Lo que deliberadamente NO está aquí**
 
 - Ninguna forma de campo de bits/"cualquier botón" (`btn()` sin
   argumentos) al estilo de PICO-8 — cada llamada nombra un botón
@@ -645,7 +612,7 @@ capas de compatibilidad `--#api pico8`/`--#api tic80`, no aquí.
 
 ---
 
-# Mapa de mosaicos: tilemap.\*
+## Mapa de mosaicos: tilemap.\*
 
 ```
 tilemap.get(NAME, x, y)        -> número o nil (fuera de límites)
@@ -666,7 +633,7 @@ recurso de cart-XML — sin entrada `<textures>`/`<sounds>`, sin id de
 recurso horneado en el código generado. Sus datos se incrustan como
 valores literales directamente en el programa ensamblado.
 
-## --#tilemap NOMBRE "archivo" y el formato CSV
+**--#tilemap NOMBRE "archivo" y el formato CSV**
 
 ```lua
 --#tilemap LEVEL1 "level1.csv"
@@ -687,7 +654,7 @@ salida de **Export As... CSV** (por capa) de Tiled pueda usarse
 directamente sin ningún paso de conversión — no hay análisis de TMX/TSX
 en ninguna parte de este compilador.
 
-## tilemap.get() / tilemap.set()
+**tilemap.get() / tilemap.set()**
 
 ```lua
 local id = tilemap.get(LEVEL1, 4, 2)   -- mosaico en columna 4, fila 2
@@ -709,7 +676,7 @@ de mosaico aquí es simplemente lo que el código que llama quiera que
 signifique, típicamente un id de región de GPU, que puede superar
 ampliamente los 255.
 
-## Promoción perezosa de ROM a RAM
+**Promoción perezosa de ROM a RAM**
 
 Un mapa de mosaicos comienza su vida de solo lectura, sentado donde sea
 que el compilador colocara sus datos en la imagen del programa —
@@ -723,7 +690,7 @@ mosaicos, no globalmente. Un segundo `tilemap.set()` posterior en un mapa
 de mosaicos ya promovido escribe directamente, sin volver a copiar ni
 perturbar escrituras anteriores.
 
-## tilemap.render()
+**tilemap.render()**
 
 ```lua
 tilemap.render(LEVEL1, sx, sy, w, h, x, y, tile_w, tile_h)
@@ -767,7 +734,7 @@ y desplazar el origen de pantalla de todo el bloque por un resto de
 píxel de sub-mosaico; esa es una extensión real y separada, no
 implementada aquí.
 
-## Lo que deliberadamente NO está aquí
+**Lo que deliberadamente NO está aquí**
 
 - Sin desplazamiento suave/de sub-píxel — ver arriba.
 - Sin nomenclatura `mget()`/`mset()`/`map()` — esos nombres pertenecen a
@@ -782,12 +749,12 @@ implementada aquí.
 
 ---
 
-# Otros puertos de E/S en bruto
+## Otros puertos de E/S en bruto
 
 Cada puerto `ioports.*` vive en una sola tabla (`IOPortMap` de `core.c`),
 organizada bajo seis categorías: `tim`, `rng`, `gpu`, `spu`, `inp`, `car`,
 `mem`. Las categorías de sonido (`spu`), gráficos (`gpu`, parcialmente —
-ver [Definiendo regiones de textura](#definiendo-regiones-de-textura)), y
+ver **Definiendo regiones de textura**), y
 entrada (`inp`, parcialmente — ver [btn()/btnp()](#entrada-btn--btnp))
 se cubren arriba donde tienen un envoltorio de más alto nivel. Lo que
 queda es o bien hardware en bruto sin ningún envoltorio, o un envoltorio
@@ -797,7 +764,7 @@ Una categoría o nombre de propiedad desconocido es un error de
 compilación que lista las categorías válidas, no un no-op silencioso ni
 una lectura de global no declarada — ver `validate_ioports_path()`.
 
-## ioports.tim.\* — temporizador en bruto
+**ioports.tim.\* — temporizador en bruto**
 
 ```lua
 ioports.tim.date     -- TIM_CurrentDate,   solo lectura, entero empaquetado
@@ -813,7 +780,7 @@ formateada y tres números separados — recurre a `system.date()`/
 lo que se necesita (por ejemplo, almacenar una palabra en una tarjeta de
 memoria en lugar de tres campos separados).
 
-## ioports.rng.\* — RNG por hardware
+**ioports.rng.\* — RNG por hardware**
 
 ```lua
 ioports.rng.value            -- RNG_CurrentValue, lectura: el valor aleatorio actual
@@ -827,7 +794,7 @@ de `math.random()` (que es un PRNG por software en el tiempo de
 ejecución, sembrado por separado) — los dos no comparten estado y no
 producirán la misma secuencia a partir de la misma semilla.
 
-## ioports.car.\* — información del cartucho
+**ioports.car.\* — información del cartucho**
 
 ```lua
 ioports.car.connected  -- CAR_Connected,          booleano, solo lectura
@@ -844,7 +811,7 @@ no es un caso que el código de cartucho normal necesite manejar; existe
 por completitud de la tabla de puertos más que como una condición de
 ramificación práctica; realmente solo algo transaccionado en el BIOS.
 
-## ioports.mem.connected — presencia de tarjeta de memoria
+**ioports.mem.connected — presencia de tarjeta de memoria**
 
 ```lua
 if ioports.mem.connected then
@@ -857,7 +824,7 @@ realmente presente antes de que las llamadas de `memcard.*` la toquen.
 
 ---
 
-# Tarjeta de memoria: memcard.\*
+## Tarjeta de memoria: memcard.\*
 
 ```
 memcard.save(value, position)   -> value   (escritura en bruto, exactamente 1 palabra)
@@ -884,14 +851,14 @@ coincide con cómo esta VM ya almacena las cadenas de Lua internamente —
 una palabra por carácter (ver `string.len()`) — en lugar de una
 representación empaquetada por byte.
 
-## memcard.save() / memcard.load()
+**memcard.save() / memcard.load()**
 
 Hay dos formas distintas, elegidas según si se da una `position`:
 
 **Con una `position` explícita** — la primitiva de bajo nivel. Escribe (o
 lee) exactamente una palabra en bruto en `position`, sin ningún tipo de
 contabilidad. `position 0` es la primera palabra de la región de datos;
-ver [Diseño de direcciones](#diseño-de-direcciones) abajo para el rango
+ver **Diseño de direcciones** abajo para el rango
 completo, incluyendo cómo las posiciones negativas alcanzan el título.
 Eres plenamente responsable de saber qué pones dónde — escribir la misma
 posición dos veces simplemente la sobrescribe.
@@ -908,7 +875,7 @@ los guardados repetidos sin posición siguen extendiendo un registro a
 través de muchas sesiones de juego en lugar de sobrescribir la palabra 0
 en cada ejecución. Esta forma es consciente del tipo: guardar una cadena
 de Lua real escribe su contenido completo (etiquetado y con prefijo de
-longitud, ver [Etiquetas de tipo](#etiquetas-de-tipo-solo-la-forma-de-auto-anexado)),
+longitud, ver **Etiquetas de tipo**),
 no solo un puntero en bruto.
 
 ```lua
@@ -924,10 +891,10 @@ se puede leer en cualquier momento como `memcard.load(-1)` /
 cursor de auto-anexado de la forma en que lo hace `memcard.save()`. Leer
 de vuelta una entrada escrita por la forma de auto-anexado significa leer
 tú mismo su palabra de etiqueta en una posición conocida (ver
-[Etiquetas de tipo](#etiquetas-de-tipo-solo-la-forma-de-auto-anexado)), o
+**Etiquetas de tipo**), o
 simplemente saber qué escribiste ahí.
 
-## memcard[position]
+**memcard[position]**
 
 `memcard[position]` y `memcard[position] = value` son abreviaturas de la
 forma de posición explícita de `load`/`save` de arriba — nunca de la
@@ -940,7 +907,7 @@ local hi = memcard[0]        -- 1234
 memcard[-1]                  -- lee el cursor de auto-anexado
 ```
 
-## memcard.title(str) -> nil
+**memcard.title(str) -> nil**
 
 Establece el título de la tarjeta de memoria — hasta 20 caracteres, una
 palabra por carácter, coincidiendo con la representación interna de
@@ -954,7 +921,7 @@ con su propio título.
 memcard.title("My Save File")
 ```
 
-## Tablas: memcard.save() / memcard.load_table()
+**Tablas: memcard.save() / memcard.load_table()**
 
 `memcard.save(a_table)` — **solamente** la forma de auto-anexado sin
 posición — escribe un **volcado en bruto** del contenido de la tabla: un
@@ -994,7 +961,7 @@ es significativo dentro de la misma ejecución que lo escribió; volverlo a
 cargar en una sesión futura (o después de que el objetivo del puntero se
 haya movido o sido recolectado) es indefinido. Este es el mismo límite de
 seguridad que el resto de `memcard.*` ya traza (ver
-[Nota de seguridad](#nota-de-seguridad)) — un volcado de tabla no lo
+*Nota de seguridad*) — un volcado de tabla no lo
 cruza, simplemente lo aplica por entrada en lugar de una sola vez.
 
 **`memcard.load_table(position)`** reconstruye una tabla nueva a partir de
@@ -1006,7 +973,7 @@ nada después de ella; leer en una posición que no contiene un volcado de
 tabla devuelve `nil` en lugar de leer mal palabras no relacionadas como un
 conteo de pares y claves/valores basura.
 
-## Diseño de direcciones
+**Diseño de direcciones**
 
 ```
 0x30000000  +-------------------------------------+  posición -24
@@ -1039,7 +1006,7 @@ caracteres; los 20 completos están disponibles ahora.
 | `VIRCON32_MEMCARD_CURSOR_ADDR` | `0x30000017` | el cursor de auto-anexado; posición `-1` |
 | `VIRCON32_MEMCARD_END` | `0x3003FFFF` | última palabra válida, inclusive |
 
-## Etiquetas de tipo (solo la forma de auto-anexado)
+**Etiquetas de tipo (solo la forma de auto-anexado)**
 
 `memcard.save(value)` sin posición escribe una de tres formas en el
 cursor, y luego avanza el cursor por la cantidad de palabras que esa
@@ -1061,9 +1028,9 @@ La forma de `position` explícita (`memcard.save(value, position)` /
 exactamente una palabra en bruto, sin importar el tipo de valor. Esto
 incluye tablas: una tabla guardada con una posición explícita es una
 única palabra de puntero en bruto, no un volcado — ver
-[Tablas](#tablas-memcardsave--memcardload_table) arriba.
+**Tablas** arriba.
 
-### Nota de seguridad
+*Nota de seguridad*
 
 Un número, booleano, o nil sobrevive el ciclo de ida y vuelta
 correctamente para siempre — ese patrón de bits significa lo mismo en
@@ -1085,7 +1052,7 @@ números/booleanos/nil (o cadenas/tablas reales de tales, mediante la
 forma de auto-anexado) para cualquier cosa destinada a sobrevivir un
 ciclo real de guardado/recarga.
 
-## Lo que deliberadamente NO está aquí
+**Lo que deliberadamente NO está aquí**
 
 - Sin serialización de tablas *recursiva* — un volcado de tabla copia
   solo sus pares clave/valor directos; una tabla anidada dentro de una es

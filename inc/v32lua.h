@@ -10,6 +10,7 @@
 #include <ctype.h>
 #include <math.h>
 
+#include "config.h"
 #include "enums.h"
 #include "vtex_generator.h"
 #include "vsnd_generator.h"
@@ -25,7 +26,7 @@
 #include "register.h"
 #include "closures.h"
 
-#define  VERSION             "202609010-dev"
+#define  VERSION             "20260914-dev"
 #define  AUTHOR              "Matthew Haas"
 #define  URL                 "https://github.com/wedge1020/v32lua"
 

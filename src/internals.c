@@ -308,6 +308,102 @@ static char *match_include_directive (const char *line)
 }
 
 // ----------------------------------------------------------------------------
+// Include search path
+// ----------------------------------------------------------------------------
+
+// Returns true when a file exists and can be opened for reading. Used only
+// to probe --#include candidates; the winner is then opened for real by
+// read_whole_file() inside expand_file().
+static bool include_file_exists (const char *path)
+{
+    FILE *f = fopen (path, "rb");
+    if (f == NULL) {
+        return false;
+    }
+    fclose (f);
+    return true;
+}
+
+// Resolves one --#include target to an existing file.
+//
+// Search order (first hit wins):
+//   1. The directory of the file containing the directive -- the original
+//      behavior, kept first so includes nested inside includes keep
+//      resolving relative to their own file no matter what else is on the
+//      search path.
+//   2. The compiler's current working directory ("the present directory").
+//   3. Each entry of the V32LUA_INCLUDE environment variable, when set --
+//      a colon-separated list, letting a project point at its own library
+//      copy without installing anything.
+//   4. The compile-time default V32LUA_INCLUDE_PATH (see inc/config.h),
+//      where an installed v32lua standard-library port is expected to live.
+//
+// An ABSOLUTE include path skips the search and is returned verbatim, so
+// the preexisting behavior (and read_whole_file()'s own error message)
+// is unchanged for it.
+//
+// Returns a malloc'd path. If no candidate exists, calls compiler_error()
+// (which exits) naming every location searched -- falling back to only the
+// first candidate would make a missing include look like a plain "file not
+// found" with no hint that the search path exists at all.
+static char *resolve_include_path (const char *base_dir, const char *inc_path,
+                                   const char *referenced_from)
+{
+    // Candidate 1: next to the including file (or verbatim when absolute --
+    // join_path() already returns absolute paths untouched).
+    char *candidate = join_path (base_dir, inc_path);
+    if (inc_path[0] == '/' || include_file_exists (candidate)) {
+        return candidate;
+    }
+    free (candidate);
+
+    // Candidate 2: the current working directory. A bare relative path
+    // already means "relative to the CWD" to fopen(), so it can be probed
+    // as-is; canonicalize() later normalizes it for dedup/cycle checks.
+    if (include_file_exists (inc_path)) {
+        return strdup (inc_path);
+    }
+
+    // Candidate 3: each entry of V32LUA_INCLUDE (colon-separated). strtok_r
+    // skips empty entries, so a stray "::" or a trailing ':' is harmless.
+    const char *env_paths = getenv (V32LUA_INCLUDE_ENV_VAR);
+    if (env_paths != NULL && env_paths[0] != '\0') {
+        char *env_copy = strdup (env_paths);
+        char *save     = NULL;
+
+        char *entry = strtok_r (env_copy, ":", &save);
+        while (entry != NULL) {
+            candidate = join_path (entry, inc_path);
+            if (include_file_exists (candidate)) {
+                free (env_copy);
+                return candidate;
+            }
+            free (candidate);
+            entry = strtok_r (NULL, ":", &save);
+        }
+
+        free (env_copy);
+    }
+
+    // Candidate 4: the compile-time default include directory.
+    candidate = join_path (V32LUA_INCLUDE_PATH, inc_path);
+    if (include_file_exists (candidate)) {
+        return candidate;
+    }
+    free (candidate);
+
+    compiler_error (ERR_INTERNAL, -1,
+        "--#include: could not find '%s' (referenced from '%s'). Searched: "
+        "the including file's directory, the current directory, the "
+        V32LUA_INCLUDE_ENV_VAR " environment variable, and \""
+        V32LUA_INCLUDE_PATH "\"",
+        inc_path,
+        (referenced_from != NULL) ? referenced_from : "the main program");
+
+    return NULL;    // unreachable -- compiler_error() exits
+}
+
+// ----------------------------------------------------------------------------
 // Core recursive expansion
 // ----------------------------------------------------------------------------
 static void expand_file (const char *path, const char *referenced_from, int is_included,
@@ -386,7 +482,7 @@ static void expand_file (const char *path, const char *referenced_from, int is_i
             // Close off the run of plain lines emitted so far from this file.
             lmb_push (lm, run_start_combined, *combined_line, path, run_start_source);
 
-            char *child_path = join_path (base_dir, inc_path);
+            char *child_path = resolve_include_path (base_dir, inc_path, path);
             expand_file (child_path, path, /*is_included=*/1, out, lm, combined_line, stack, done);
             free (child_path);
             free (inc_path);

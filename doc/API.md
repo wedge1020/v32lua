@@ -20,51 +20,18 @@ important and every sound emitter here depends on it.
 ## Table of Contents
 
 - [Sound: music.\* / sfx.\*](#sound-music--sfx)
-  - [SPU port ordering](#spu-port-ordering)
-  - [music.volume() / sfx.volume()](#musicvolumevol--channel--sfxvolumevol--channel)
-  - [Why the bare names went away](#why-the-bare-names-went-away)
-  - [Compile-time aliases](#compile-time-aliases)
-  - [music.playing()](#musicplaying-and-why-a-lua-flag-is-the-wrong-toggle)
-  - [Codegen: hybrid fold](#codegen-hybrid-fold)
 - [ioports.spu.cmd() — the raw escape hatch](#ioportsspucmd--the-raw-escape-hatch)
 - [Boolean IO ports](#boolean-io-ports)
 - [System: system.\*](#system-system)
-  - [system.wait() / system.halt()](#systemwait--systemhalt)
-  - [system.date() / system.time()](#systemdate--systemtime)
-  - [system.frames / system.cycles](#systemframes--systemcycles)
 - [Graphics: spr()](#graphics-spr)
-  - [Runtime dispatch](#runtime-dispatch-not-compile-time-fold)
-  - [ioports.gpu.clear()](#ioportsgpuclearcolor)
-  - [Defining texture regions](#defining-texture-regions)
 - [Input: btn() / btnp()](#input-btn--btnp)
-  - [Button IDs](#button-ids)
-  - [btn(): direct polling](#btn-direct-polling)
-  - [btnp(): edge detection](#btnp-edge-detection)
-  - [ioports.inp.inputs](#ioportsinpinputs----one-word-bitmask)
-  - [What's intentionally not here](#whats-intentionally-not-here)
 - [Tilemap: tilemap.\*](#tilemap-tilemap)
-  - [--#tilemap and the CSV format](#tilemap-name-file-and-the-csv-format)
-  - [tilemap.get() / tilemap.set()](#tilemapget--tilemapset)
-  - [Lazy ROM-to-RAM promotion](#lazy-rom-to-ram-promotion)
-  - [tilemap.render()](#tilemaprender)
-  - [What's intentionally not here](#whats-intentionally-not-here-2)
-- [Other raw IO ports](#other-raw-io-ports)
-  - [ioports.tim.\* — raw timer](#ioportstim--raw-timer)
-  - [ioports.rng.\* — hardware RNG](#ioportsrng--hardware-rng)
-  - [ioports.car.\* — cartridge info](#ioportscar--cartridge-info)
-  - [ioports.mem.connected — memory card presence](#ioportsmemconnected--memory-card-presence)
 - [Memory card: memcard.\*](#memory-card-memcard)
-  - [memcard.save() / memcard.load()](#memcardsave--memcardload)
-  - [memcard[position]](#memcardposition)
-  - [memcard.title()](#memcardtitlestr---nil)
-  - [Tables: memcard.save() / memcard.load_table()](#tables-memcardsave--memcardload_table)
-  - [Address layout](#address-layout)
-  - [Type tags (auto-append form only)](#type-tags-auto-append-form-only)
-  - [What's intentionally not here](#whats-intentionally-not-here-1)
+- [Other raw IO ports](#other-raw-io-ports)
 
 ---
 
-# Sound: music.\* / sfx.\*
+## Sound: music.\* / sfx.\*
 
 ```
 music.play(SOUND [, CHANNEL [, LOOP [, VOL [, START]]]])  -> channel used
@@ -96,9 +63,9 @@ channel: searching would cost up to 15 `IN` + compare on the hot path
 that only arises when 15 effects overlap, where the oldest is the right one
 to lose anyway.
 
-## Vircon32 SPU: the port write order
+**Vircon32 SPU: the port write order**
 
-### The rule
+*The rule*
 
 ```asm
 OUT SPU_SelectedChannel, ch
@@ -126,7 +93,7 @@ For a **Paused** channel `PlayChannel()` takes neither branch — it only sets
 `State = Playing`. That is what makes Play the correct per-channel resume,
 and why resume never disturbs position or loop.
 
-### Channel states and what resume actually means
+*Channel states and what resume actually means*
 
 `channel_stopped 0x40`, `channel_paused 0x41`, `channel_playing 0x42`.
 `SPU_ChannelState` is **read-only** (`WriteSPUChannelState` returns false).
@@ -145,7 +112,7 @@ effect if already stopped". So pausing a finished channel leaves it Paused at
 position 0, and a later resume plays from the start. Guard with a
 `SPU_ChannelState == 0x42` check if that matters.
 
-### Port types
+*Port types*
 
 `SPU_ChannelPosition` is an **INTEGER** port — a sample index, clamped by the
 console to `0 .. SoundLength-1`. `audio.h` declares
@@ -158,7 +125,7 @@ Genuine float ports: `SPU_ChannelVolume` (clamped 0–8), `SPU_ChannelSpeed`
 (0–128, changes pitch), `SPU_GlobalVolume` (clamped 0–2). NaN/inf writes to
 any of these are ignored rather than rejected.
 
-## music.volume(VOL [, CHANNEL]) / sfx.volume(VOL [, CHANNEL])
+**music.volume(VOL [, CHANNEL]) / sfx.volume(VOL [, CHANNEL])**
 
 Sets playback volume. `VOL` is required. `CHANNEL` has **three** distinct
 meanings depending on what the call site writes:
@@ -187,7 +154,7 @@ Explicit channel numbers (`N` or `-1`) never change ownership — only
 no-argument "tracked channels" mode; only playing a *different* channel
 under the other namespace releases it.
 
-### Channel-ownership tracking
+*Channel-ownership tracking*
 
 Two compiler-reserved RAM words, `VIRCON32_MUSIC_CHANNEL_MASK` and
 `VIRCON32_SFX_CHANNEL_MASK`, each a bitmask over channels 0–15: bit *N* set
@@ -205,7 +172,7 @@ Only `.play()` touches the masks. `.pause()`, `.resume()`, `.stop()`, and
 stopped is still "owned" by whoever last played on it, and still gets
 picked up by the no-argument volume mode.
 
-### Codegen
+*Codegen*
 
 An all-literal call (`music.volume(0.5, 0)`, `sfx.volume(0.0, -1)`) folds
 to a straight-line `OUT` sequence at compile time, same as the rest of this
@@ -216,7 +183,7 @@ namespace's mask and writes `SPU_ChannelVolume` for each set one. Any other
 runtime-valued call goes to `__builtin_vircon32_volume`, which checks the
 channel value against `-1` (global) at runtime and clamps otherwise.
 
-## Why the bare names went away
+**Why the bare names went away**
 
 `play` / `pause` / `resume` / `stop` were the four most collision-prone
 identifiers a game could want for itself, which is what the old
@@ -224,7 +191,7 @@ identifiers a game could want for itself, which is what the old
 They are gone; the namespaces replace them, and the alias mechanism restores
 them by choice rather than by default.
 
-## Compile-time aliases
+**Compile-time aliases**
 
 `play = music.play` records an alias and emits nothing. Later `play(...)`
 calls compile to the identical inline OUT sequence — no runtime value, no
@@ -257,7 +224,7 @@ If first-class sound-function values are ever wanted, the precedent is
 `math.sin`-as-a-value already is. That would be additive; the alias table
 stays as the zero-cost path.
 
-## music.playing() and why a Lua flag is the wrong toggle
+**music.playing() and why a Lua flag is the wrong toggle**
 
 `SPU_ChannelState` is a read-only integer port returning `channel_stopped`
 0x40, `channel_paused` 0x41, `channel_playing` 0x42. `music.playing(ch)`
@@ -268,7 +235,7 @@ its own: the program still believes it is playing, so the next press pauses
 an already-stopped channel instead of resuming it. Asking the hardware
 cannot drift.
 
-## Codegen: hybrid fold
+**Codegen: hybrid fold**
 
 All arguments compile-time-known → straight-line `OUT` sequence, no CALL.
 Anything dynamic → push and CALL the runtime routine, which does
@@ -289,7 +256,7 @@ anywhere in the AST.
 
 ---
 
-# ioports.spu.cmd() — the raw escape hatch
+## ioports.spu.cmd() — the raw escape hatch
 
 Issues one raw SPU command against whatever `SPU_SelectedChannel` currently
 names. No channel selection, no sound assignment, no defaulting — pair it
@@ -305,7 +272,7 @@ Modes: `"play"` 0, `"pause"` 1, `"stop"` 2, `"pauseall"` 3, `"resume"` 4,
 
 ---
 
-# Boolean IO ports
+## Boolean IO ports
 
 A Lua boolean is not a float. `true`/`false`/`nil` are NaN-boxed bit
 patterns; the hardware ports trade in integers 0 and 1. Writes decode Lua
@@ -320,7 +287,7 @@ needs rewriting as `if p then 1 else 0`.
 
 ---
 
-# System: system.\*
+## System: system.\*
 
 ```
 system.wait()   -> nil   (WAIT for the next new-cycle signal)
@@ -329,7 +296,7 @@ system.date()   -> string, year, month, day
 system.time()   -> string, hour, minute, second
 ```
 
-## system.wait() / system.halt()
+**system.wait() / system.halt()**
 
 `system.wait()` compiles straight to `WAIT` — the same instruction
 `ioports.gpu.sync()` uses, and interchangeable with it; both just wait for
@@ -337,7 +304,7 @@ the timer's next new-cycle signal. `system.halt()` compiles to `HLT`,
 stopping the CPU outright — for a program that's completed its work and
 has nothing left to render.
 
-## system.date() / system.time()
+**system.date() / system.time()**
 
 Both decode the timer chip's real-time clock (see Vircon32 System
 Specification Part 7, section 1.2 — this is an actual wall-clock/RTC, not
@@ -362,7 +329,7 @@ universal reading of it. There is no `os.time()`/`os.date()` format-string
 or table-construction support — this is a fixed-shape decode of the
 hardware register, not a general date library.
 
-## system.frames / system.cycles
+**system.frames / system.cycles**
 
 ```lua
 local f = system.frames()   -- TIM_FrameCounter -- frames since power-on
@@ -382,7 +349,7 @@ identical, just under the more discoverable namespace.
 
 ---
 
-# Graphics: spr()
+## Graphics: spr()
 
 ```
 spr(region_id, x, y [, scale_x [, scale_y [, angle_deg [, color_mult [, blend_mode]]]]])
@@ -417,7 +384,7 @@ Blend modes:
 meaningful value to hand back from a draw call. More than 8 arguments is a
 compile-time warning; the extras are ignored.
 
-## Runtime dispatch, not compile-time fold
+**Runtime dispatch, not compile-time fold**
 
 Unlike the sound API, `spr()` always calls `__builtin_vircon32_spr` — there
 is no straight-line-`OUT` fast path for a fully-literal call. The routine
@@ -451,7 +418,7 @@ being omitted entirely — both fall back to the default. A call sitting in
 an expression context (`local unused = spr(1, 10, 10)`) correctly gets
 `nil` assigned, matching every other intrinsic in this file.
 
-## ioports.gpu.clear([color])
+**ioports.gpu.clear([color])**
 
 Clears the screen: writes `GPU_ClearColor` (if a color argument is given)
 then issues `GPUCommand_ClearScreen`. `color` accepts either a packed RGBA
@@ -466,7 +433,7 @@ ioports.gpu.clear(0xFF202020)   -- packed RGBA, not a preset name
 ioports.gpu.clear()             -- reuses the last ClearColor set
 ```
 
-## Defining texture regions
+**Defining texture regions**
 
 `spr()`'s `region_id` doesn't refer to anything until a region has actually
 been carved out of a loaded texture. There is no compiler-side region
@@ -485,7 +452,7 @@ ioports.gpu.hotX = 6            -- see below -- NOT 0
 ioports.gpu.hotY = 156          -- see below -- NOT 0
 ```
 
-### Region HotSpot considerations and compiler behaviours
+*Region HotSpot considerations and compiler behaviours*
 
 While Region HotSpots give us the ability to render regions relative to a
 set of hotspot coordinates, forgetting to set them can result in rendering
@@ -513,7 +480,7 @@ read-only `ioports.gpu.pixels` GPU-busy counter).
 
 ---
 
-# Input: btn() / btnp()
+## Input: btn() / btnp()
 
 ```
 btn(id [, player])   -> boolean, currently held down
@@ -523,7 +490,7 @@ btnp(id [, player])  -> boolean, true only on the frame it was first pressed
 `player` selects a gamepad 0–3 (`INP_SelectedGamepad`); omitted or `nil`
 uses whichever gamepad is already selected without writing the port.
 
-## Button IDs
+**Button IDs**
 
 Vircon32 hardware order, not PICO-8's or TIC-80's:
 
@@ -545,13 +512,13 @@ An `id` outside 0–10, or an unmapped combination, returns `false` rather
 than erroring — there's no OS-level error path available on this target
 (see `pcall`/`error`/`assert` in the compiler's deferred-features list).
 
-## btn(): direct polling
+**btn(): direct polling**
 
 `__builtin_vircon32_btn` reads the mapped `INP_Gamepad*` port for the
 selected gamepad and returns `true` when the hardware reports it pressed
 (`>= 1`).
 
-## btnp(): edge detection
+**btnp(): edge detection**
 
 `btnp()` needs state the hardware doesn't track on its own: "was this
 button not pressed last frame, and is it pressed now." That state lives in
@@ -566,7 +533,7 @@ An out-of-range `player` (an explicit value outside 0–3) is clamped to
 0–3 before being used as an index into that 44-word table, rather than
 being allowed to compute an address outside it.
 
-## ioports.inp.inputs — one-word bitmask
+**ioports.inp.inputs — one-word bitmask**
 
 ```lua
 local mask = ioports.inp.inputs   -- current gamepad, all 11 buttons in one read
@@ -587,7 +554,7 @@ passing a whole frame's input as one value (e.g. into a replay/input log)
 rather than for everyday per-button game logic, where `btn()`/`btnp()` read
 more clearly.
 
-## What's intentionally NOT here
+**What's intentionally NOT here**
 
 - No bitfield/"any button" form (`btn()` with no arguments) the way
   PICO-8's does — every call names a specific button.
@@ -601,7 +568,7 @@ compatibility layers, not here.
 
 ---
 
-# Tilemap: tilemap.\*
+## Tilemap: tilemap.\*
 
 ```
 tilemap.get(NAME, x, y)        -> number or nil (out of bounds)
@@ -620,7 +587,7 @@ Unlike `--#texture`/`--#sound`, a tilemap is **not** a cart-XML resource —
 no `<textures>`/`<sounds>` entry, no resource id baked into generated code.
 Its data is embedded as literal values directly in the assembled program.
 
-## --#tilemap NAME "file" and the CSV format
+**--#tilemap NAME "file" and the CSV format**
 
 ```lua
 --#tilemap LEVEL1 "level1.csv"
@@ -638,7 +605,7 @@ This format is deliberately plain enough that Tiled's **Export As... CSV**
 (per-layer) output can be used directly with no conversion step — no TMX/
 TSX parsing anywhere in this compiler.
 
-## tilemap.get() / tilemap.set()
+**tilemap.get() / tilemap.set()**
 
 ```lua
 local id = tilemap.get(LEVEL1, 4, 2)   -- tile at column 4, row 2
@@ -658,7 +625,7 @@ sprite ids are byte-sized. A tile value here is just whatever the calling
 code wants it to mean, typically a GPU region id, which can run well past
 255.
 
-## Lazy ROM-to-RAM promotion
+**Lazy ROM-to-RAM promotion**
 
 A tilemap starts life read-only, sitting wherever the compiler placed its
 data in the program image — `tilemap.get()` before any write reads directly
@@ -670,7 +637,7 @@ promotion is tracked per tilemap, not globally. A second and later
 `tilemap.set()` on an already-promoted tilemap writes straight through,
 without re-copying or disturbing earlier writes.
 
-## tilemap.render()
+**tilemap.render()**
 
 ```lua
 tilemap.render(LEVEL1, sx, sy, w, h, x, y, tile_w, tile_h)
@@ -709,7 +676,7 @@ need drawing one extra row/column beyond `w`/`h` and shifting the whole
 block's screen origin by a sub-tile pixel remainder; that's a real,
 separate extension, not implemented here.
 
-## What's intentionally NOT here
+**What's intentionally NOT here**
 
 - No sub-pixel/smooth scrolling — see above.
 - No `mget()`/`mset()`/`map()` naming — those names belong to the TIC-80
@@ -722,7 +689,7 @@ separate extension, not implemented here.
 
 ---
 
-# Memory card: memcard.\*
+## Memory card: memcard.\*
 
 ```
 memcard.save(value, position)   -> value   (raw write, exactly 1 word)
@@ -747,14 +714,14 @@ words, not individual bytes. This matches how this VM already stores Lua
 strings internally — one word per character (see `string.len()`) — rather
 than a byte-packed representation.
 
-## memcard.save() / memcard.load()
+**memcard.save() / memcard.load()**
 
 There are two distinct forms, chosen by whether a `position` is given:
 
 **With an explicit `position`** — the low-level primitive. Writes (or
 reads) exactly one raw word at `position`, with no bookkeeping of any
 kind. `position 0` is the first word of the data region; see
-[Address layout](#address-layout) below for the full range, including how
+**Address layout** below for the full range, including how
 negative positions reach into the title. You are fully responsible for
 knowing what you put where — writing the same position twice simply
 overwrites it.
@@ -770,7 +737,7 @@ a persistent cursor stored *on the card itself* (not in RAM), so repeated
 no-position saves keep extending a log across many play sessions instead
 of overwriting word 0 every run. This form is type-aware: saving a real
 Lua string writes its full contents (tagged and length-prefixed, see
-[Type tags](#type-tags-auto-append-form-only)), not just a raw pointer.
+**Type tags**), not just a raw pointer.
 
 ```lua
 memcard.save("high score run")   -- appended at the current cursor
@@ -784,10 +751,10 @@ separate counting function.
 `memcard.load()` with no `position` always reads word 0 — it does **not**
 follow the auto-append cursor the way `memcard.save()` does. Reading back
 an entry written by the auto-append form means reading its tag word
-yourself at a known position (see [Type tags](#type-tags-auto-append-form-only)),
+yourself at a known position (see **Type tags**),
 or simply knowing what you wrote there.
 
-## memcard[position]
+**memcard[position]**
 
 `memcard[position]` and `memcard[position] = value` are shorthand for the
 explicit-position form of `load`/`save` above — never the auto-append
@@ -799,7 +766,7 @@ local hi = memcard[0]        -- 1234
 memcard[-1]                  -- reads the auto-append cursor
 ```
 
-## memcard.title(str) -> nil
+**memcard.title(str) -> nil**
 
 Sets the memory card's title — up to 20 characters, one word per
 character, matching this VM's internal string representation. Longer
@@ -812,7 +779,7 @@ each with its own title.
 memcard.title("My Save File")
 ```
 
-## Tables: memcard.save() / memcard.load_table()
+**Tables: memcard.save() / memcard.load_table()**
 
 `memcard.save(a_table)` — the no-position auto-append form **only** —
 writes a **raw dump** of the table's contents: a straight walk of its
@@ -847,7 +814,7 @@ function is written as its raw pointer — **not** recursively unpacked —
 so it's only meaningful within the same run that wrote it; reloading it in
 a future session (or after the pointer's target has moved/been collected)
 is undefined. This is the same safety boundary the rest of `memcard.*`
-already draws (see [Safety note](#safety-note)) — a table dump doesn't
+already draws (see *Safety note*) — a table dump doesn't
 cross it, it just applies it per-entry instead of once.
 
 **`memcard.load_table(position)`** rebuilds a fresh table from a dump
@@ -858,7 +825,7 @@ word before trusting anything after it; reading at a position that
 doesn't hold a table dump returns `nil` rather than misreading unrelated
 words as a pair count and garbage keys/values.
 
-## Address layout
+**Address layout**
 
 ```
 0x30000000  +-------------------------------------+  position -24
@@ -890,7 +857,7 @@ at 16 characters; the full 20 is available now.
 | `VIRCON32_MEMCARD_CURSOR_ADDR` | `0x30000017` | the auto-append cursor; position `-1` |
 | `VIRCON32_MEMCARD_END` | `0x3003FFFF` | last valid word, inclusive |
 
-## Type tags (auto-append form only)
+**Type tags (auto-append form only)**
 
 `memcard.save(value)` with no position writes one of three shapes at the
 cursor, then advances the cursor by however many words that shape used:
@@ -909,9 +876,9 @@ The explicit-`position` form (`memcard.save(value, position)` /
 `memcard[position] = value`) never writes a tag — it is always exactly one
 raw word, regardless of value type. This includes tables: a table saved
 with an explicit position is a single raw pointer word, not a dump — see
-[Tables](#tables-memcardsave--memcardload_table) above.
+**Tables** above.
 
-### Safety note
+*Safety note*
 
 A number, boolean, or nil round-trips correctly forever — that bit pattern
 means the same thing on any run. A real Lua string or table saved through
@@ -928,7 +895,7 @@ layout is not guaranteed to match between runs. Stick to numbers/booleans/
 nil (or real strings/tables of such, via the auto-append form) for
 anything meant to survive an actual save/reload cycle.
 
-## What's intentionally NOT here
+**What's intentionally NOT here**
 
 - No *recursive* table serialization — a table dump copies its direct
   key/value pairs only; a nested table inside one is a raw pointer, one
@@ -946,12 +913,12 @@ whichever one it isn't currently addressing.
 
 ---
 
-# Other raw IO ports
+## Other raw IO ports
 
 Every `ioports.*` port lives in one table (`core.c`'s `IOPortMap`),
 organized under six categories: `tim`, `rng`, `gpu`, `spu`, `inp`, `car`,
 `mem`. The sound (`spu`), graphics (`gpu`, partially — see
-[Defining texture regions](#defining-texture-regions)), and input (`inp`,
+**Defining texture regions**), and input (`inp`,
 partially — see [btn()/btnp()](#input-btn--btnp)) categories are covered
 above where they have a higher-level wrapper. What's left is either raw
 hardware with no wrapper at all, or a wrapper that only covers part of a
@@ -961,7 +928,7 @@ An unknown category or property name is a compile error listing the valid
 categories, not a silent no-op or an undeclared-global read — see
 `validate_ioports_path()`.
 
-## ioports.tim.\* — raw timer
+**ioports.tim.\* — raw timer**
 
 ```lua
 ioports.tim.date     -- TIM_CurrentDate,   read-only, packed integer
@@ -976,7 +943,7 @@ separate numbers — reach for `system.date()`/`system.time()` unless the
 packed representation itself is what's needed (e.g. storing one word to a
 memory card instead of three separate fields).
 
-## ioports.rng.\* — hardware RNG
+**ioports.rng.\* — hardware RNG**
 
 ```lua
 ioports.rng.value            -- RNG_CurrentValue, read: the current random value
@@ -989,7 +956,7 @@ This is the console's own hardware RNG, independent of `math.random()`
 (which is a software PRNG in the runtime, seeded separately) — the two do
 not share state and will not produce the same sequence from the same seed.
 
-## ioports.car.\* — cartridge info
+**ioports.car.\* — cartridge info**
 
 ```lua
 ioports.car.connected  -- CAR_Connected,          boolean, read-only
@@ -1005,7 +972,7 @@ declared. Since a running program's own cart is always connected,
 to handle; it exists for completeness of the port table rather than a
 practical branch condition; really only something transacted in the BIOS.
 
-## ioports.mem.connected — memory card presence
+**ioports.mem.connected — memory card presence**
 
 ```lua
 if ioports.mem.connected then
