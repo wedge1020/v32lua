@@ -184,10 +184,14 @@ end
 -- over correctly; the Lua-natural itoa(value, base) spelling is
 -- accepted too.
 --
--- CAVEAT (both functions): v32lua numbers are 32-bit floats, exact
--- for integers only up to 2^24 (16777216). Values near the int32
--- limits lose low-order digits -- an inherent limit of the console's
--- number model, not of this algorithm.
+-- CAVEAT: v32lua numbers are 32-bit floats with 24 mantissa bits, so
+-- a few int32 values cannot be EXPRESSED as input in the first place
+-- (0xFFFFFFFF as a positive literal reads as 2^32 before itoa ever
+-- runs; pass such values as negatives, e.g. -1, which convert exactly
+-- below). itoa itself is exact for every int32 input that arrives
+-- exactly: its digit loop works on 16-bit halves, never on a quantity
+-- float32 cannot hold. ftoa inherits the float32 precision of the
+-- value it is handed, the same as the C original.
 
 function itoa(value, result_text, base)
     -- also accept the Lua-natural spelling itoa(value, base)
@@ -205,10 +209,12 @@ function itoa(value, result_text, base)
     -- for base 10 numbers, prepend the sign if needed
     local is_negative = false
     if base == 10 and value < 0 then
-        -- special treatment for -2147483648: in C it cannot be negated
-        -- inside an int32, and its magnitude breaks down under v32lua's
-        -- float32 digit extraction in exactly the same way -- so write it
-        -- directly, exactly like the C original does
+        -- special treatment for -2147483648, kept from the C original:
+        -- C has to write this one directly because its magnitude cannot
+        -- be negated inside an int32. v32lua floats CAN hold it, and the
+        -- halves arithmetic below would convert it exactly -- but the
+        -- special case preserves the C version's structure and skips
+        -- the loop for this single value.
         if value == -2147483648 then
             return "-2147483648"
         end
@@ -218,21 +224,47 @@ function itoa(value, result_text, base)
     end
 
     -- for every other base the C original treats the value as an
-    -- unsigned 32-bit integer, splitting it into two half-complements
-    -- only because C int32 cannot hold the magnitude. Floats can --
-    -- 2^31 is exactly representable -- so plain addition gives the
-    -- same unsigned reading without the bit-workaround.
+    -- unsigned 32-bit integer, using a two-part split only because C
+    -- int32 cannot hold the magnitude. Floats can -- 2^31 is exactly
+    -- representable -- so a plain value + 2^32 would seem to give the
+    -- same unsigned reading, BUT the result rounds to a multiple of
+    -- 256 near 2^32 (float32 has only 24 mantissa bits), silently
+    -- corrupting the low digits: itoa(-1, nil, 16) would print
+    -- "100000000" instead of "FFFFFFFF". So the unsigned reading is
+    -- built as two's-complement arithmetic on 16-bit halves instead --
+    -- every quantity below stays under 2^24 and therefore exact.
+    local hi, lo
+
     if base ~= 10 and value < 0 then
-        value = value + 4294967296
+        local m    = -value
+        local m_hi = m // 65536
+        local m_lo = m % 65536
+
+        if m_lo == 0 then
+            hi = 65536 - m_hi
+            lo = 0
+        else
+            hi = 65536 - m_hi - 1
+            lo = 65536 - m_lo
+        end
+    else
+        hi = value // 65536
+        lo = value % 65536
     end
 
-    -- keep adding digits starting from the right
+    -- keep adding digits starting from the right. This is long
+    -- division in the requested base on the 2-limb number hi*65536+lo;
+    -- 'mid' stays under 2^21 and every other quantity under 2^24, so
+    -- every operation is exact for any int32 input in any base --
+    -- the float32 analog of the C original's careful int32 split.
     local result = ""
     repeat
-        local digit = value % base
+        local mid = (hi % base) * 65536 + lo
+        local digit = mid % base
+        lo = mid // base
+        hi = hi // base
         result = string.sub(hex_characters, digit + 1, digit + 1) .. result
-        value = value // base
-    until value <= 0
+    until hi <= 0 and lo <= 0
 
     -- now prepend the sign, if one was needed
     if is_negative then

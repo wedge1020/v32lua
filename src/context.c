@@ -246,9 +246,74 @@ void  mark_global_as_function (ASTNode *def_node)
     const char *name          = def_node -> as.function_def.name;
     ASTNode    *params        = def_node -> as.function_def.params;
     ASTNode    *ptmp          = NULL;
-    SymbolNode *sym           = register_global (name);
     int         count         = 0;
     int         has_variadic  = 0;
+
+    //////////////////////////////////////////////////////////////////////////
+    //
+    // NAME CONFLICT GUARD. A function and a plain variable (table, number,
+    // ...) cannot share a name: they would collapse into ONE SymbolNode,
+    // and every later read of that name takes node_identifier()'s
+    // is_function path -- loading and boxing the code LABEL -- while the
+    // variable's table/assignment stores still write through
+    // get_variable_access_string()'s [func_NAME] form. The mixed symbol
+    // then feeds a boxed function value to the table runtime routines,
+    // which panic-loops. (Classic trigger: `local menu = {...}` followed
+    // by `local function menu() ... end` -- legal shadowing in real Lua,
+    // but this compiler maps all top-level names to one flat global
+    // namespace, so the two cannot coexist.)
+    //
+    // The same guard catches a genuine duplicate `function NAME() ... end`
+    // (two defs would emit the __function_NAME: label twice and trip the
+    // assembler) and any attempt to redefine an FFI-registered C function
+    // (which would keep is_c_native set and emit a direct C-ABI CALL at
+    // every Lua call site).
+    //
+    // HOW THIS STAYS FALSE-POSITIVE-FREE:
+    //   * Only a PRE-EXISTING symbol conflicts. register_global() CREATES
+    //     the symbol (calloc'd, is_function == 0) when the name is new, so
+    //     the check must resolve FIRST, then register -- checking the
+    //     symbol register_global() hands back would flag every first-time
+    //     function.
+    //   * mark_global_as_function() runs twice per def -- once in the
+    //     prepass, once again at codegen in node_function_def() -- always
+    //     with the SAME def_node pointer, so comparing def_node pointers
+    //     distinguishes a re-mark from a true redefinition.
+    //   * The checks only run while current_scope IS global_scope. In the
+    //     prepass (where every def, nested or not, is first marked) that
+    //     always holds. At codegen a nested `function inner() ... end` is
+    //     re-marked from inside its enclosing function's scope, where a
+    //     perfectly legal same-named param/local may be registered -- that
+    //     shadowing is a separate pre-existing flattening quirk, not a
+    //     global-slot collision, and must not error here.
+    //
+    SymbolNode *existing      = resolve_symbol (name);
+
+    if (existing             != NULL &&
+        current_scope         == global_scope)
+    {
+        if (existing -> is_function == 0)
+        {
+            compiler_error (ERR_SEMANTIC, def_node -> line_number,
+                            "Duplicate name: '%s' is already used as a variable "
+                            "(e.g. a table); it cannot also be a function name. "
+                            "Rename one of them",
+                            name);
+        }
+        else if (existing -> is_c_native)
+        {
+            compiler_error (ERR_SEMANTIC, def_node -> line_number,
+                            "Cannot redefine C/FFI function '%s' with a Lua "
+                            "function", name);
+        }
+        else if (existing -> def_node != def_node)
+        {
+            compiler_error (ERR_SEMANTIC, def_node -> line_number,
+                            "Function '%s' is defined more than once", name);
+        }
+    }
+
+    SymbolNode *sym           = register_global (name);
 
     sym -> is_function        = 1;
     sym -> def_node           = def_node;   // lets node_identifier() find the
@@ -568,10 +633,41 @@ static void  prepass_walk (ASTNode *node, int is_chunk_top_level)
                 // level; inside a function or a nested block it stays a real
                 // stack local. See the header comment above.
                 if (!node->as.mult_assign.is_local || is_chunk_top_level) {
+                    // The parser desugars every plain `function NAME() end`
+                    // into a FUNCTION_DEF chained with a "NAME = <function
+                    // pointer to NAME>" assignment (see parser.y). That
+                    // desugared pointer node has func_def == NULL, unlike a
+                    // user-written anonymous `function() end` expression,
+                    // which carries its def along. Detect it so registering
+                    // NAME below doesn't flag the compiler's own desugaring
+                    // as a name conflict.
+                    ASTNode *val = node->as.mult_assign.values_head;
+                    bool     is_function_desugar =
+                        (val            != NULL &&
+                         val -> next    == NULL &&
+                         val -> type    == NODE_FUNCTION_POINTER &&
+                         val -> as.func_ptr.func_def == NULL);
+
                     ASTNode *tgt = node->as.mult_assign.targets_head;
                     while (tgt != NULL) {
                         if (tgt->type == NODE_IDENTIFIER) {
-                            register_global(tgt->as.id.name);
+                            SymbolNode *sym = register_global(tgt->as.id.name);
+
+                            // Reverse of the guard in
+                            // mark_global_as_function(): the name is
+                            // already a FUNCTION and this statement wants
+                            // it as a VARIABLE. Same single-SymbolNode
+                            // corruption, opposite order (e.g.
+                            // `function menu() end` followed later by
+                            // `local menu = {...}`).
+                            if (sym->is_function && !is_function_desugar) {
+                                compiler_error(
+                                    ERR_SEMANTIC, node->line_number,
+                                    "Duplicate name: '%s' is already used as "
+                                    "a function; it cannot also be used as a "
+                                    "variable. Rename one of them",
+                                    tgt->as.id.name);
+                            }
                         }
                         tgt = tgt->next;
                     }

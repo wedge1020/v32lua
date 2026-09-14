@@ -447,6 +447,12 @@ __relcmp_error:
 ;; ===========================================================================
 ;; Runtime Built-in: __builtin_string_len
 ;; ABI: Arg 1 at [BP+2] (Stack Parameter), Caller cleans up.
+;;      Arg 1 MUST be the BOXED string value -- this routine unboxes it
+;;      itself. Callers that pre-unboxed their string and passed the RAW
+;;      pointer caused a SECOND unbox here: harmless for ROM strings
+;;      (OR-ing the cart page bit back on is idempotent) but a RAM/heap
+;;      address got misread as a ROM address, yielding a garbage length
+;;      and silently wrong results for any string built at runtime.
 ;; Returns: R0 = Length of string as a Lua Float.
 ;; ===========================================================================
 __builtin_string_len:
@@ -1328,7 +1334,8 @@ __string_byte_validate:
     PUSH  R1                  ; preserve string pointer across the CALL below
     PUSH  R2                  ; preserve start index across the CALL below
     PUSH  R3                  ; preserve end index across the CALL below
-    PUSH  R1                  ; Arg 1 for __builtin_string_len
+    MOV   R0, [BP+2]          ; Arg 1: the BOXED string (NOT the pre-unboxed
+    PUSH  R0                  ; pointer in R1 -- see string_len's header)
     CALL  __builtin_string_len
     IADD  SP, 1               ; Clean up the length-call's own argument
     MOV   R4, R0              ; R4 = length as float
@@ -2226,7 +2233,8 @@ __builtin_string_sub:
     MOV   R1, R0               ; R1 = unboxed string pointer (persist)
 
     PUSH  R1
-    PUSH  R1                   ; Arg 1 for __builtin_string_len
+    MOV   R0, [BP+2]           ; Arg 1: the BOXED string (NOT the pre-unboxed
+    PUSH  R0                   ; pointer in R1 -- see string_len's header)
     CALL  __builtin_string_len
     IADD  SP, 1
     MOV   R4, R0
@@ -2379,7 +2387,8 @@ __builtin_string_upper:
     MOV   R1, R0                ; R1 = source string pointer (persist)
 
     PUSH  R1
-    PUSH  R1
+    MOV   R0, [BP+2]           ; Arg 1: the BOXED string (NOT the pre-unboxed
+    PUSH  R0                   ; pointer in R1 -- see string_len's header)
     CALL  __builtin_string_len
     IADD  SP, 1
     MOV   R4, R0
@@ -2462,7 +2471,8 @@ __builtin_string_lower:
     MOV   R1, R0
 
     PUSH  R1
-    PUSH  R1
+    MOV   R0, [BP+2]           ; Arg 1: the BOXED string (NOT the pre-unboxed
+    PUSH  R0                   ; pointer in R1 -- see string_len's header)
     CALL  __builtin_string_len
     IADD  SP, 1
     MOV   R4, R0
@@ -2540,7 +2550,8 @@ __builtin_string_rep:
     MOV   R1, R0                ; R1 = source string pointer (persist)
 
     PUSH  R1
-    PUSH  R1
+    MOV   R0, [BP+2]           ; Arg 1: the BOXED string (NOT the pre-unboxed
+    PUSH  R0                   ; pointer in R1 -- see string_len's header)
     CALL  __builtin_string_len
     IADD  SP, 1
     MOV   R4, R0
@@ -2666,7 +2677,8 @@ __builtin_string_reverse:
     MOV   R1, R0                ; R1 = source string pointer (persist)
 
     PUSH  R1
-    PUSH  R1
+    MOV   R0, [BP+2]           ; Arg 1: the BOXED string (NOT the pre-unboxed
+    PUSH  R0                   ; pointer in R1 -- see string_len's header)
     CALL  __builtin_string_len
     IADD  SP, 1
     MOV   R4, R0
@@ -2853,13 +2865,15 @@ __builtin_string_gsub:
     CALL  __unbox_string
     MOV   R9, R0                 ; R9 = repl pointer (persist)
 
-    PUSH  R7
+    MOV   R0, [BP+2]           ; Arg 1: the BOXED string s (NOT the
+    PUSH  R0                   ; pre-unboxed R7 -- see string_len's header)
     CALL  __builtin_string_len
     IADD  SP, 1
     MOV   R3, R0
     CFI   R3                     ; R3 = len(s)
 
-    PUSH  R8
+    MOV   R0, [BP+3]           ; Arg 1: the BOXED pattern (NOT R8)
+    PUSH  R0
     CALL  __builtin_string_len
     IADD  SP, 1
     MOV   R4, R0
@@ -2869,7 +2883,8 @@ __builtin_string_gsub:
     IEQ   R1, 0
     JT    R1, __string_gsub_no_match_copy
 
-    PUSH  R9
+    MOV   R0, [BP+4]           ; Arg 1: the BOXED repl (NOT R9)
+    PUSH  R0
     CALL  __builtin_string_len
     IADD  SP, 1
     MOV   R5, R0
@@ -3012,7 +3027,8 @@ __string_gsub_no_match_copy:
     CALL  __unbox_string
     MOV   R7, R0
 
-    PUSH  R7
+    MOV   R0, [BP+2]           ; Arg 1: the BOXED string (NOT the
+    PUSH  R0                   ; pre-unboxed R7 -- see string_len's header)
     CALL  __builtin_string_len
     IADD  SP, 1
     MOV   R3, R0

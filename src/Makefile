@@ -51,6 +51,11 @@ lexer.c: lexer.l ../inc/parser.h
 	#$(CC) $(CFLAGS) -Wa,--noexecstack -c $< -o $@
 	$(CC) $(CFLAGS) -c $< -o $@
 
+# runtime_embed.S .incbin's every runtime unit, so those sources are real
+# prerequisites -- without this, editing runtime/*.s alone leaves a stale
+# runtime_embed.o in place and the change silently never reaches the build.
+runtime_embed.o: runtime_embed.S $(wildcard runtime/*.s)
+
 context:
 	@cp -v runtime/memory.s   runtime/memory.s.txt
 	@cp -v runtime/datetime.s runtime/datetime.s.txt
