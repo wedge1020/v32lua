@@ -1,0 +1,328 @@
+.TH V32LUA 1 "September 2026" "v32lua 20260915-dev" "User Commands"
+.SH NAME
+v32lua \- compile a subset of Lua to Vircon32 assembly and cartridge XML
+.SH SYNOPSIS
+.B v32lua
+.RB [ \-o
+.IR output.asm ]
+.RB [ \-g ]
+.RB [ \-v ]
+.RB [ \-d ]
+.RB [ \-w ]
+.I input.lua
+.br
+.B v32lua
+.B \-\-version
+.br
+.B v32lua
+.B \-\-help
+.SH DESCRIPTION
+.B v32lua
+compiles a purpose-built subset of Lua \(em global and local variables,
+functions as first-class values, multiple assignment, the usual
+statement/expression language, and a set of Vircon32-specific hardware
+intrinsics \(em directly to
+.B Vircon32
+assembly. There is no bytecode virtual machine and no interpreter
+involved at any point: Lua source is lowered straight to native
+instructions for the target console's CPU, in the same spirit as
+.BR v32c++ (1)
+lowering a C++ subset to plain Vircon32 C.
+.PP
+A compile produces two files: an assembly file
+(see
+.BR \-o ,
+below) and, alongside it, a cartridge XML definition (the same base
+name with a
+.I .xml
+extension) that records the cart's title, version, and any texture,
+sound, and tilemap resources declared with
+.B \-\-#
+hints in the source (see
+.B CARTRIDGE HINTS
+below). Both are inputs to the ordinary Vircon32 build chain \(em
+assembler, then
+.BR packrom (1)
+\(em which
+.B v32lua
+does not itself invoke.
+.PP
+.B v32lua
+produces no output at all on success unless a verbosity flag is given
+(see
+.BR \-v ,
+below) \(em this matches the Vircon32 C compiler's and
+.BR v32c++ (1)'s
+own behavior. A non-zero exit status, and a message on standard
+error, indicate a genuine problem: a lexical, syntax, semantic, or
+internal compiler error. Lexical, syntax, semantic, and internal
+errors are reported with the offending source line reproduced
+inline, pointing at the failure.
+.SH OPTIONS
+.TP
+.BI \-o " output.asm"
+Write the generated assembly to
+.IR output.asm ,
+instead of the default. If
+.B \-o
+is not given at all, the output filename is derived from the input's
+own name: its extension is replaced with
+.IR .asm ,
+so
+.I game/main.lua
+becomes
+.IR game/main.asm .
+The companion
+.I .xml
+cartridge file is always named from this same output path (its own
+extension replaced with
+.IR .xml ),
+not from the input filename, so
+.B \-o
+also controls where the XML lands.
+.TP
+.B \-g
+Generate a companion
+.I output.asm.debug
+file mapping relative assembly line offsets back to the original Lua
+source line and enclosing function name for each line of generated
+code. Intended for step-through debugging of a compiled cart under
+.BR v32sim (1),
+not for anything read by the assembler or
+.BR packrom (1)
+itself.
+.TP
+.BR \-v ", " \-\-verbose
+Report progress through the compiler's internal pipeline stages
+(lexer, preprocessor, parser, semantic analysis, code generation) as
+each one begins. No
+.B \-v
+at all (the default) produces no output on success.
+.TP
+.BR \-d ", " \-\-debug
+Print additional internal/operational debug information as the
+compiler runs. Unrelated to
+.BR \-g ;
+this is compiler-development output, not a source-to-assembly map for
+the resulting cart.
+.TP
+.B \-w
+Suppress all compiler warnings (for example, a missing
+.B WAIT
+inside a
+.B main()
+entry point, or a mismatched cart-resource ordering). Errors are
+unaffected and still halt compilation.
+.TP
+.B \-\-version
+Print version, author, and project URL information, and exit
+immediately without processing any input.
+.TP
+.BR \-\-help ", " \-h
+Print a brief usage summary and exit.
+.SH EXIT STATUS
+.TP
+.B 0
+The input was compiled successfully.
+.TP
+.B 1
+No input file was given; an unrecognized or duplicate argument was
+given; or a lexical, syntax, semantic, or internal compiler error
+occurred while compiling. Details are printed to standard error, and,
+for a source-position error, the offending line is reproduced inline.
+.SH EXAMPLES
+Compile a single file, writing
+.I program.asm
+and
+.IR program.xml :
+.PP
+.RS
+.nf
+v32lua \-o program.asm program.lua
+.fi
+.RE
+.PP
+Compile with the default output name (extension swapped for
+.IR .asm ),
+watching each pipeline stage run:
+.PP
+.RS
+.nf
+v32lua \-v game.lua
+.fi
+.RE
+.PP
+Compile with a source-to-assembly debug map, for stepping through the
+cart in
+.BR v32sim (1):
+.PP
+.RS
+.nf
+v32lua \-g \-o build/game.asm src/game.lua
+.fi
+.RE
+.SH ENTRY POINTS
+A program must declare at least one of
+.B main()
+or
+.BR game_loop() ;
+its absence is a compile error.
+.TP
+.B game_loop()
+If present, the compiler generates a continuous runtime harness: the
+console calls
+.BR game_loop() ,
+issues a
+.B WAIT
+for the current frame, and repeats indefinitely. This is the usual
+entry point for arcade-style games, analogous to
+.B TIC()
+in TIC-80.
+.TP
+.B main()
+If present instead, the console halts once
+.B main()
+returns, mimicking a hosted C
+.BR main() .
+Continuous execution and frame pacing (including any
+.B WAIT
+instructions) are then the program's own responsibility; the compiler
+warns at compile time if it does not find a
+.B WAIT
+emitted inside
+.BR main() .
+.TP
+.B init()
+If present, alongside either of the above, it runs exactly once,
+after top-level global RAM allocation and before the main loop
+begins.
+.SH LANGUAGE NOTES
+This section is a brief summary, not a complete reference \(em see the
+project's own README, and
+.I doc/API.md
+for the full hardware intrinsic surface, for the current, authoritative
+picture, including known gaps under active development.
+.PP
+Supported: global and local variables, with a top-level
+.B local
+promoted to a global slot rather than a doomed stack local (its
+storage would otherwise live in a frame that returns before any game
+code runs \(em this applies equally to top-level locals pulled in via
+.BR \-\-#include );
+functions as first-class NaN-boxed values; multiple assignment and
+variable swapping without user temporaries;
+.B __asm__
+(register/stack-preserving) and
+.B __rawasm__
+(unprotected) inline assembly, both supporting
+.I {var_name}
+string interpolation of Lua variables; a native, zero-cost hardware
+intrinsic surface
+.RI ( ioports.gpu.* ", " ioports.spu.* ", " ioports.inp.* ", "
+.IR music.*/sfx.* ", " tilemap.* ", " system.* );
+a TIC-80- and an (earlier-stage) PICO-8-compatible API layer, selected
+per-cartridge with a
+.B \-\-#api
+hint; and a
+.B \-\-#include
+textual preprocessor for multi-file projects, resolved before parsing
+begins.
+.PP
+Explicit, permanent deviations from standard Lua, made to suit
+Vircon32's freestanding environment: IEEE-754 float32 only, with no
+Lua 5.3+ integer/float dual-number type \(em integers above 2^24 are
+not exactly representable;
+.B print()
+requires screen
+.B x
+and
+.B y
+as its first two arguments; a bare
+.B return
+statement is a syntax error (give it a value); and all program
+execution must occur inside a function reachable from
+.BR main() / game_loop() .
+.PP
+Not yet implemented:
+.BR pcall / error / assert ;
+.BR string.match / gmatch ", " setmetatable ;
+the two-argument, explicit-base form of
+.BR tonumber() " (an explicit numeric base);"
+and a diagnostic for reading, from inside a function, a
+.B local
+declared in a block lexically outside any function at chunk level
+(for example inside a bare
+.B do...end
+at chunk level) \(em such a read currently compiles silently to an
+uninitialized global rather than the value the block appeared to
+scope.
+.SH CARTRIDGE HINTS
+Cartridge metadata and resources are declared with
+.B \-\-#
+line comments, parsed by the preprocessor stage and used to generate
+the companion XML file:
+.BR \-\-#version ", " \-\-#title ", " \-\-#api ", " \-\-#texture ,
+.BR \-\-#sound ", " \-\-#tilemap ", and " \-\-#include .
+A
+.B \-\-#texture
+or
+.B \-\-#sound
+hint both registers the resource in the XML and binds its name to a
+compile-time constant usable directly from Lua; resource IDs are
+assigned in source order and are guaranteed to match their position
+in the generated XML.
+.B \-\-#include \(dqfile.lua\(dq
+textually splices another file in before parsing, resolved relative
+to the including file, with include-once deduplication and cycle
+detection; it performs no scoping transformation of any kind; a
+.B local
+at the included file's own top level is promoted to a global exactly
+as in a monolithic file.
+.SH FILES
+.TP
+.I *.lua
+Input source, in the Lua subset this tool accepts.
+.TP
+.I *.asm
+Generated Vircon32 assembly, ready to be handed to the Vircon32
+assembler directly.
+.TP
+.I *.xml
+Generated cartridge definition, named from the assembly output path
+(not the input path), referencing any
+.I .vtex
+and
+.I .vsnd
+assets registered via cartridge hints. Required by
+.BR packrom (1)
+alongside the assembled ROM.
+.TP
+.I *.asm.debug
+Optional, with
+.BR \-g :
+a line-oriented map from generated assembly line offsets back to
+original Lua source lines and enclosing function names, for use by a
+debugger such as
+.BR v32sim (1).
+.PP
+Texture and sound source assets
+.RI ( .png ", " .wav ", and similarly " .vsnd )
+referenced by cartridge hints are read directly by
+.B v32lua
+at compile time and are not themselves an output of this tool.
+.SH SEE ALSO
+.BR v32c++ (1),
+the Vircon32 C compiler and assembler documentation,
+.BR v32opt (1)
+(a separate, general-purpose Vircon32 assembly optimizer meant to sit
+between this tool and the assembler).
+.PP
+Project repository:
+.I https://github.com/wedge1020/v32lua
+.SH BUGS
+Report issues, including anything this tool compiles incorrectly or
+any Lua feature you'd like to see prioritized, via the project
+repository above. This is genuinely early, actively developed
+software.
+.SH AUTHOR
+Matthew Haas
