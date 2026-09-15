@@ -1,0 +1,110 @@
+--#title "v32lua memcard library unit test"
+--@ Vircon32 Lua memcard unit test -- lib/memcard.lua
+--@ INACTIVE: v32sim does not yet have functional memcard support
+--@ (the memory-card ports read back garbage there), so this file
+--@ is named with a .inactive suffix to keep the automated suite
+--@ green. To activate it once v32sim grows memcard emulation (or
+--@ when running on real hardware / the full emulator): rename to
+--@ 14_memcard.lua and it will be picked up by the Makefile's
+--@ wildcard like every other test.
+--@
+--@ Exercises the full memory-card half of the C standard library
+--@ as translated into lib/memcard.lua: card_is_connected, the raw
+--@ word-block functions card_read_data/card_write_data (with their
+--@ 0-BASED table indexing convention), the relocated signature
+--@ block (card_write_signature/card_read_signature/
+--@ card_signature_matches, first SIGNATURE_WORDS positions of the
+--@ data region), and card_is_empty. The signature convention is
+--@ v32lua-specific: it lives at data positions 0..19 rather than
+--@ the hardware title block, so real save data must start at
+--@ position 20 or later -- the block writes below stay clear of
+--@ the signature area for exactly that reason.
+
+--#include "../../lib/memcard.lua"
+
+function main()
+    ioports.gpu.clear("black")
+
+    -- === Test 1: constants and connection state ===
+    number_sig_words_const = SIGNATURE_WORDS           -- 20
+    boolean_card_connected = card_is_connected()       -- true with a card in
+
+    -- === Test 2: card_write_data / card_read_data round trip, ===
+    -- === 0-based indexing, offset clear of the signature block ===
+    local source = {}
+    source[0] = 10
+    source[1] = 20
+    source[2] = 30
+    source[3] = 40
+
+    card_write_data(source, 100, 4)
+
+    local dest = {}
+    card_read_data(dest, 100, 4)
+    number_read_word0 = dest[0]   -- 10 (index 0, not Lua's usual 1)
+    number_read_word1 = dest[1]   -- 20
+    number_read_word2 = dest[2]   -- 30
+    number_read_word3 = dest[3]   -- 40
+
+    -- === Test 3: a single overwritten word reads back overwritten ===
+    memcard.save(999, 102)
+    number_overwrite_check = memcard.load(102)   -- 999
+
+    -- === Test 4: signature write/read round trip ===
+    local sig = {}
+    for i = 0, SIGNATURE_WORDS - 1 do
+        sig[i] = 1000 + i
+    end
+
+    card_write_signature(sig)
+
+    local sig_back = {}
+    card_read_signature(sig_back)
+    number_sig_first  = sig_back[0]    -- 1000
+    number_sig_last   = sig_back[19]   -- 1019
+
+    -- === Test 5: card_signature_matches -- identical and tampered ===
+    boolean_sig_matches = card_signature_matches(sig)   -- true
+
+    local wrong = {}
+    for i = 0, SIGNATURE_WORDS - 1 do
+        wrong[i] = 1000 + i
+    end
+    wrong[7] = 0   -- one word differs
+    boolean_sig_mismatch = card_signature_matches(wrong) -- false
+
+    -- === Test 6: card_is_empty flips with the signature block ===
+    boolean_card_not_empty = card_is_empty()   -- false: signature present
+
+    local blank = {}
+    for i = 0, SIGNATURE_WORDS - 1 do
+        blank[i] = 0
+    end
+    card_write_signature(blank)
+    boolean_card_empty = card_is_empty()       -- true: all zeroes again
+
+    print(10, 0,   "--- memcard unit test (INACTIVE) ---")
+    print(10, 20,  "signature words: " .. number_sig_words_const)
+    print(10, 40,  "round trip word2: " .. number_read_word2)
+    print(10, 60,  "sig matches: " .. tostring(boolean_sig_matches))
+    print(10, 80,  "card empty (blanked): " .. tostring(boolean_card_empty))
+end
+
+--[[
+=== EXPECTED OUTPUT ===
+
+number_sig_words_const: 20.0000
+boolean_card_connected: true
+number_read_word0: 10.0000
+number_read_word1: 20.0000
+number_read_word2: 30.0000
+number_read_word3: 40.0000
+number_overwrite_check: 999.0000
+number_sig_first: 1000.0000
+number_sig_last: 1019.0000
+boolean_sig_matches: true
+boolean_sig_mismatch: false
+boolean_card_not_empty: false
+boolean_card_empty: true
+
+--]]
