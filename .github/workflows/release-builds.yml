@@ -15,6 +15,12 @@ on:
 permissions:
   contents: write
 
+# =========================================================================
+# CHANGE THIS SINGLE VARIABLE TO DEPLOY THIS WORKFLOW TO ANOTHER REPOSITORY
+# =========================================================================
+env:
+  PROJECT_NAME: v32lua
+
 jobs:
   build:
     name: Build (${{ matrix.os }}-${{ matrix.arch }})
@@ -71,13 +77,12 @@ jobs:
         with:
           msystem: UCRT64
           update: true
-          # Fixed: Packages are listed clearly on single lines without broken comments
           install: >-
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-clang
+            mingw-w64-ucrt-x86_64-lld
             mingw-w64-ucrt-x86_64-make
             zip
-
       - name: Setup Linux ARM Cross-Compilers
         if: matrix.os == 'linux'
         shell: bash
@@ -87,27 +92,23 @@ jobs:
           elif [ "${{ matrix.arch }}" = "armv7-rpi" ]; then
             sudo apt-get update && sudo apt-get install -y gcc-arm-linux-gnueabihf
           fi
-
       # --- BUILD EXECUTABLES & STRIP SYMBOLS ---
       - name: Compile and Strip (Windows)
         if: matrix.os == 'windows'
         run: |
           if [ "${{ matrix.arch }}" = "arm64" ]; then
-            # Added -fuse-ld=lld to force Clang to use the LLVM cross-linker instead of native MSYS2 GNU ld
             mingw32-make CC="clang -target aarch64-w64-windows-gnu -fuse-ld=lld"
             strip bin/*
           else
             mingw32-make CC="gcc"
             strip bin/*
           fi
-
       - name: Compile and Strip (macOS)
         if: matrix.os == 'macos'
         shell: bash
         run: |
           make CC="clang -arch ${{ matrix.arch }}"
           strip bin/*
-
       - name: Compile and Strip (Linux)
         if: matrix.os == 'linux'
         shell: bash
@@ -122,20 +123,22 @@ jobs:
             make CC="gcc"
             strip bin/*
           fi
-
-      # --- UNIFIED PACKAGING BLOCK (ALL OS RUNNERS) ---
+      # --- MODULAR PACKAGING BLOCK (ALL OS RUNNERS) ---
       - name: Parse Version and Create Zip Archive
         run: |
-          VERSION=$(grep -i "define.*VERSION" inc/v32lua.h | head -n 1 | awk -F'"' '{print $2}')
+          # Dynamically builds path: inc/${PROJECT_NAME}.h
+          HEADER_FILE="inc/${{ env.PROJECT_NAME }}.h"
+          
+          VERSION=$(grep -i "VERSION" "$HEADER_FILE" | head -n 1 | awk -F'"' '{print $2}')
           if [ -z "$VERSION" ]; then
-             VERSION=$(grep -i "define.*VERSION" inc/v32lua.h | head -n 1 | awk '{print $3}')
+             VERSION=$(grep -i "VERSION" "$HEADER_FILE" | head -n 1 | awk '{print $3}')
           fi
           
           if [ "${{ github.event.inputs.build_type }}" = "test" ]; then
-            ZIP_NAME="v32lua-${VERSION}-test-${{ matrix.os }}-${{ matrix.arch }}.zip"
+            ZIP_NAME="${{ env.PROJECT_NAME }}-${VERSION}-test-${{ matrix.os }}-${{ matrix.arch }}.zip"
             echo "RETENTION_DAYS=2" >> $GITHUB_ENV
           else
-            ZIP_NAME="v32lua-${VERSION}-${{ matrix.os }}-${{ matrix.arch }}.zip"
+            ZIP_NAME="${{ env.PROJECT_NAME }}-${VERSION}-${{ matrix.os }}-${{ matrix.arch }}.zip"
             echo "RETENTION_DAYS=0" >> $GITHUB_ENV
           fi
           
@@ -148,12 +151,12 @@ jobs:
           cd ..
           
           echo "FINAL_ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
-
       # --- STAGE ZIP INTERNALLY ---
       - name: Upload Compressed Target Release Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: v32lua-package-${{ matrix.os }}-${{ matrix.arch }}
+          # Modified to avoid naming collisions across jobs
+          name: ${{ env.PROJECT_NAME }}-package-${{ matrix.os }}-${{ matrix.arch }}
           path: ${{ env.FINAL_ZIP_NAME }}
           retention-days: ${{ fromJson(env.RETENTION_DAYS) }}
           
@@ -184,13 +187,11 @@ jobs:
           VERSION_TAG=$(cat artifacts/version_tag.txt | head -n 1)
           echo "VERSION_TAG=$VERSION_TAG" >> $GITHUB_ENV
           rm artifacts/version_tag.txt
-
       - name: Generate Draft Release on GitHub
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.VERSION_TAG }}
-          name: "Release ${{ env.VERSION_TAG }}"
+          name: "${{ env.PROJECT_NAME }} Release ${{ env.VERSION_TAG }}"
           draft: true
           prerelease: false
           files: artifacts/*.zip
-
