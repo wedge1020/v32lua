@@ -1,0 +1,211 @@
+name: Generate Global Binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Purpose of this build run'
+        type: choice
+        required: true
+        default: 'test'
+        options:
+          - 'test'
+          - 'release'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }}-${{ matrix.arch }})
+    runs-on: ${{ matrix.os-runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows Targets
+          - os: windows
+            arch: x86_64
+            os-runner: windows-latest
+          - os: windows
+            arch: arm64
+            os-runner: windows-latest
+          
+          # macOS Targets
+          - os: macos
+            arch: x86_64
+            os-runner: macos-latest
+          - os: macos
+            arch: arm64
+            os-runner: macos-latest
+
+          # Linux Core Targets
+          - os: linux
+            arch: x86_64
+            os-runner: ubuntu-latest
+          - os: linux
+            arch: arm64
+            os-runner: ubuntu-latest
+
+          # Linux Raspberry Pi Targets
+          - os: linux
+            arch: armv7-rpi
+            os-runner: ubuntu-latest
+          - os: linux
+            arch: armv8-rpi
+            os-runner: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # --- ENVIRONMENT TOOLCHAIN SETUP ---
+      - name: Setup Windows Environment
+        if: matrix.os == 'windows'
+        run: |
+          choco install make llvm
+          echo "C:\ProgramData\chocolatey\bin" >> $GITHUB_PATH
+          echo "C:\Program Files\LLVM\bin" >> $GITHUB_PATH
+
+      - name: Setup Linux ARM Cross-Compilers
+        if: matrix.os == 'linux'
+        run: |
+          if [ "${{ matrix.arch }}" = "arm64" ] || [ "${{ matrix.arch }}" = "armv8-rpi" ]; then
+            sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+          elif [ "${{ matrix.arch }}" = "armv7-rpi" ]; then
+            sudo apt-get update && sudo apt-get install -y gcc-arm-linux-gnueabihf
+          fi
+
+      # --- BUILD EXECUTABLES & STRIP SYMBOLS ---
+      - name: Compile and Strip (Windows)
+        if: matrix.os == 'windows'
+        run: |
+          if ("${{ matrix.arch }}" -eq "arm64") {
+            make CC="clang -target aarch64-pc-windows-msvc"
+          } else {
+            make CC="clang -target x86_64-pc-windows-msvc"
+          }
+          llvm-strip bin/*
+
+      - name: Compile and Strip (macOS)
+        if: matrix.os == 'macos'
+        run: |
+          make CC="clang -arch ${{ matrix.arch }}"
+          strip bin/*
+
+      - name: Compile and Strip (Linux)
+        if: matrix.os == 'linux'
+        shell: bash
+        run: |
+          if [ "${{ matrix.arch }}" = "arm64" ] || [ "${{ matrix.arch }}" = "armv8-rpi" ]; then
+            make CC="aarch64-linux-gnu-gcc"
+            aarch64-linux-gnu-strip bin/*
+          elif [ "${{ matrix.arch }}" = "armv7-rpi" ]; then
+            make CC="arm-linux-gnueabihf-gcc"
+            arm-linux-gnueabihf-strip bin/*
+          else
+            make CC="gcc"
+            strip bin/*
+          fi
+
+      # --- COPY README, EXTRACT VERSION & PACKAGING ---
+      - name: Parse Version and Create Zip (Bash for Unix Runners)
+        if: matrix.os != 'windows'
+        shell: bash
+        run: |
+          VERSION=$(grep -i "VERSION" inc/v32lua.h | head -n 1 | awk -F'"' '{print $2}')
+          if [ -z "$VERSION" ]; then
+             VERSION=$(grep -i "VERSION" inc/v32lua.h | head -n 1 | awk '{print $3}')
+          fi
+          
+          if [ "${{ github.event.inputs.build_type }}" = "test" ]; then
+            ZIP_NAME="v32lua-${VERSION}-test-${{ matrix.os }}-${{ matrix.arch }}.zip"
+            echo "RETENTION_DAYS=2" >> $GITHUB_ENV
+          else
+            ZIP_NAME="v32lua-${VERSION}-${{ matrix.os }}-${{ matrix.arch }}.zip"
+            echo "RETENTION_DAYS=0" >> $GITHUB_ENV
+          fi
+          
+          echo "VERSION_TAG=v$VERSION" >> $GITHUB_ENV
+          echo "Packaging: $ZIP_NAME"
+          
+          cp README.md bin/
+          cd bin
+          zip -r "../$ZIP_NAME" ./*
+          cd ..
+          
+          echo "FINAL_ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+
+      - name: Parse Version and Create Zip (PowerShell for Windows Runner)
+        if: matrix.os == 'windows'
+        shell: pwsh
+        run: |
+          $header = Get-Content inc/v32lua.h -Raw
+          if ($header -match 'VERSION\s+"([^"]+)"' -or $header -match 'VERSION\s+(\S+)') {
+              $VERSION = $Matches
+          } else {
+              $VERSION = "unknown-version"
+          }
+          
+          if ("${{ github.event.inputs.build_type }}" -eq "test") {
+              $ZIP_NAME = "v32lua-${VERSION}-test-windows-${{ matrix.arch }}.zip"
+              echo "RETENTION_DAYS=2" >> $env:GITHUB_ENV
+          } else {
+              $ZIP_NAME = "v32lua-${VERSION}-windows-${{ matrix.arch }}.zip"
+              echo "RETENTION_DAYS=0" >> $env:GITHUB_ENV
+          }
+          
+          echo "VERSION_TAG=v$VERSION" >> $env:GITHUB_ENV
+          Write-Host "Packaging: $ZIP_NAME"
+          
+          Copy-Item "README.md" -Destination "bin/"
+          Compress-Archive -Path bin\* -DestinationPath "$ZIP_NAME" -Force
+          
+          echo "FINAL_ZIP_NAME=$ZIP_NAME" >> $env:GITHUB_ENV
+
+      # --- STAGE ZIP INTERNALLY ---
+      - name: Upload Compressed Target Release Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: v32lua-package-${{ matrix.os }}-${{ matrix.arch }}
+          path: ${{ env.FINAL_ZIP_NAME }}
+          retention-days: ${{ fromJson(env.RETENTION_DAYS) }}
+          
+      - name: Save Version Tag for Release Job
+        shell: bash
+        run: echo "${{ env.VERSION_TAG }}" > version_tag.txt
+
+      - name: Upload Version Tag
+        uses: actions/upload-artifact@v4
+        with:
+          name: version-tag-${{ matrix.os }}-${{ matrix.arch }}
+          path: version_tag.txt
+          retention-days: ${{ fromJson(env.RETENTION_DAYS) }}
+
+  release:
+    name: Create Draft Release
+    needs: build
+    if: github.event.inputs.build_type == 'release'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all zip packages from build jobs
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Determine Version Tag
+        run: |
+          VERSION_TAG=$(cat artifacts/version_tag.txt | head -n 1)
+          echo "VERSION_TAG=$VERSION_TAG" >> $GITHUB_ENV
+          rm artifacts/version_tag.txt
+
+      - name: Generate Draft Release on GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.VERSION_TAG }}
+          name: "Release ${{ env.VERSION_TAG }}"
+          draft: true
+          prerelease: false
+          files: artifacts/*.zip
+
