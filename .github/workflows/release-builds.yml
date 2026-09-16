@@ -19,6 +19,11 @@ jobs:
   build:
     name: Build (${{ matrix.os }}-${{ matrix.arch }})
     runs-on: ${{ matrix.os-runner }}
+    
+    defaults:
+      run:
+        shell: ${{ matrix.os == 'windows' && 'msys2 {0}' || 'bash' }}
+
     strategy:
       fail-fast: false
       matrix:
@@ -60,15 +65,22 @@ jobs:
         uses: actions/checkout@v4
 
       # --- ENVIRONMENT TOOLCHAIN SETUP ---
-      - name: Setup Windows Environment
+      - name: Setup MSYS2 Toolchain (Windows)
         if: matrix.os == 'windows'
-        run: |
-          choco install make llvm
-          echo "C:\ProgramData\chocolatey\bin" >> $GITHUB_PATH
-          echo "C:\Program Files\LLVM\bin" >> $GITHUB_PATH
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          # Fixed: Packages are listed clearly on single lines without broken comments
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-clang
+            mingw-w64-ucrt-x86_64-make
+            zip
 
       - name: Setup Linux ARM Cross-Compilers
         if: matrix.os == 'linux'
+        shell: bash
         run: |
           if [ "${{ matrix.arch }}" = "arm64" ] || [ "${{ matrix.arch }}" = "armv8-rpi" ]; then
             sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
@@ -80,15 +92,18 @@ jobs:
       - name: Compile and Strip (Windows)
         if: matrix.os == 'windows'
         run: |
-          if ("${{ matrix.arch }}" -eq "arm64") {
-            make CC="clang -target aarch64-pc-windows-msvc"
-          } else {
-            make CC="clang -target x86_64-pc-windows-msvc"
-          }
-          llvm-strip bin/*
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            # Added -fuse-ld=lld to force Clang to use the LLVM cross-linker instead of native MSYS2 GNU ld
+            mingw32-make CC="clang -target aarch64-w64-windows-gnu -fuse-ld=lld"
+            strip bin/*
+          else
+            mingw32-make CC="gcc"
+            strip bin/*
+          fi
 
       - name: Compile and Strip (macOS)
         if: matrix.os == 'macos'
+        shell: bash
         run: |
           make CC="clang -arch ${{ matrix.arch }}"
           strip bin/*
@@ -108,21 +123,19 @@ jobs:
             strip bin/*
           fi
 
-      # --- COPY README, EXTRACT VERSION & PACKAGING ---
-      - name: Parse Version and Create Zip (Bash for Unix Runners)
-        if: matrix.os != 'windows'
-        shell: bash
+      # --- UNIFIED PACKAGING BLOCK (ALL OS RUNNERS) ---
+      - name: Parse Version and Create Zip Archive
         run: |
-          VERSION=$(grep -i "VERSION" inc/v32lua.h | head -n 1 | awk -F'"' '{print $2}')
+          VERSION=$(grep -i "VERSION" inc/v32cxx.h | head -n 1 | awk -F'"' '{print $2}')
           if [ -z "$VERSION" ]; then
-             VERSION=$(grep -i "VERSION" inc/v32lua.h | head -n 1 | awk '{print $3}')
+             VERSION=$(grep -i "VERSION" inc/v32cxx.h | head -n 1 | awk '{print $3}')
           fi
           
           if [ "${{ github.event.inputs.build_type }}" = "test" ]; then
-            ZIP_NAME="v32lua-${VERSION}-test-${{ matrix.os }}-${{ matrix.arch }}.zip"
+            ZIP_NAME="v32cxx-${VERSION}-test-${{ matrix.os }}-${{ matrix.arch }}.zip"
             echo "RETENTION_DAYS=2" >> $GITHUB_ENV
           else
-            ZIP_NAME="v32lua-${VERSION}-${{ matrix.os }}-${{ matrix.arch }}.zip"
+            ZIP_NAME="v32cxx-${VERSION}-${{ matrix.os }}-${{ matrix.arch }}.zip"
             echo "RETENTION_DAYS=0" >> $GITHUB_ENV
           fi
           
@@ -136,43 +149,15 @@ jobs:
           
           echo "FINAL_ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
 
-      - name: Parse Version and Create Zip (PowerShell for Windows Runner)
-        if: matrix.os == 'windows'
-        shell: pwsh
-        run: |
-          $header = Get-Content inc/v32lua.h -Raw
-          if ($header -match 'VERSION\s+"([^"]+)"' -or $header -match 'VERSION\s+(\S+)') {
-              $VERSION = $Matches
-          } else {
-              $VERSION = "unknown-version"
-          }
-          
-          if ("${{ github.event.inputs.build_type }}" -eq "test") {
-              $ZIP_NAME = "v32lua-${VERSION}-test-windows-${{ matrix.arch }}.zip"
-              echo "RETENTION_DAYS=2" >> $env:GITHUB_ENV
-          } else {
-              $ZIP_NAME = "v32lua-${VERSION}-windows-${{ matrix.arch }}.zip"
-              echo "RETENTION_DAYS=0" >> $env:GITHUB_ENV
-          }
-          
-          echo "VERSION_TAG=v$VERSION" >> $env:GITHUB_ENV
-          Write-Host "Packaging: $ZIP_NAME"
-          
-          Copy-Item "README.md" -Destination "bin/"
-          Compress-Archive -Path bin\* -DestinationPath "$ZIP_NAME" -Force
-          
-          echo "FINAL_ZIP_NAME=$ZIP_NAME" >> $env:GITHUB_ENV
-
       # --- STAGE ZIP INTERNALLY ---
       - name: Upload Compressed Target Release Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: v32lua-package-${{ matrix.os }}-${{ matrix.arch }}
+          name: v32cxx-package-${{ matrix.os }}-${{ matrix.arch }}
           path: ${{ env.FINAL_ZIP_NAME }}
           retention-days: ${{ fromJson(env.RETENTION_DAYS) }}
           
       - name: Save Version Tag for Release Job
-        shell: bash
         run: echo "${{ env.VERSION_TAG }}" > version_tag.txt
 
       - name: Upload Version Tag
