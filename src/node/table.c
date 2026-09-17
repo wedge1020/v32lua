@@ -112,6 +112,8 @@ void  node_table_constructor (ASTNode *node, int dest_reg)
                 mark_register_live(val_reg, 2);
                 mark_register_live(key_reg, 2);
 
+                emit_asm("PUSH R%d ; spill destination register (protect across possible nested CALL in value expr)", dest_reg);
+
                 generate_asm(field, val_reg);
                 ensure_in_register(val_reg);
 
@@ -125,6 +127,7 @@ void  node_table_constructor (ASTNode *node, int dest_reg)
                 ensure_in_register(key_reg);
 
                 emit_asm("POP  R%d ; reload spilled value", val_reg);
+                emit_asm("POP  R%d ; reload spilled destination register", dest_reg);
 
                 emit_asm("PUSH R%d ; table pointer", dest_reg);
                 emit_asm("PUSH R%d ; key", key_reg);
@@ -146,6 +149,8 @@ void  node_table_constructor (ASTNode *node, int dest_reg)
                 mark_register_live(val_reg, 2);
                 mark_register_live(key_reg, 2);
 
+                emit_asm("PUSH R%d ; spill table pointer (protect across possible nested CALL in value expr)", table_reg);
+
                 generate_asm(field->as.table_set.value, val_reg);
                 ensure_in_register(val_reg);
                 emit_asm("PUSH R%d ; spill value (protect across possible nested CALLs in key expr)", val_reg);
@@ -154,6 +159,7 @@ void  node_table_constructor (ASTNode *node, int dest_reg)
                 ensure_in_register(key_reg);
 
                 emit_asm("POP  R%d ; reload spilled value", val_reg);
+                emit_asm("POP  R%d ; reload spilled table pointer", table_reg);
 
                 emit_asm("PUSH R%d ; table pointer", table_reg);
                 emit_asm("PUSH R%d ; key", key_reg);
