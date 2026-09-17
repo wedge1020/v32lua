@@ -146,84 +146,76 @@ bool emit_pico8_btn_intrinsic(ASTNode *node, int dest_reg)
 }
 
 /**
- * Emits assembly for the Pico-8 add() intrinsic.
+ * Emits assembly for the PICO-8 add() intrinsic.
  *
  * Syntax:
- *   add(t)                -> error (need at least 2 args)
- *   add(t, v)             -> append v to end of table t
- *   add(t, v, i)          -> insert v at position i in table t
+ *   add(t, v)      -> append v to the end of table t
+ *   add(t, v, i)   -> insert v before position i, shifting existing
+ *                      elements up (real PICO-8 semantics)
  *
- * Returns the value that was added (Pico-8 behavior).
+ * Returns the value that was added (PICO-8 behavior).
  *
- * @param node     The AST node representing the function call.
- * @param dest_reg The destination register for the result (0 = discard).
- * @return          true if successfully emitted, false on error.
+ * add(t, v, i) is table.insert(t, i, v) with value/position swapped --
+ * this now emits exactly what emit_table_insert_intrinsic() emits
+ * (same push order, same __builtin_table_insert CALL) instead of going
+ * through the separate __builtin_pico8_add routine, which only
+ * overwrote the target slot rather than shifting -- a real behavioral
+ * gap vs PICO-8 whenever an explicit index was passed.
+ * __builtin_pico8_add is now dead code; safe to delete from the
+ * runtime once this is verified in v32sim.
  */
 bool emit_pico8_add_intrinsic(ASTNode *node, int dest_reg)
 {
-    emit_asm("    ;; --- PICO-8 add() Intrinsic ---\n");
+    emit_asm("    ;; --- PICO-8 add() Intrinsic (delegates to table.insert) ---\n");
 
-    // --- Collect up to 3 arguments (table, value, index) ---
-    int arg_count = 0;
-    ASTNode *curr = node->as.call.args_head;
-    ASTNode *args[3] = { NULL, NULL, NULL };
-    while (curr != NULL && arg_count < 3) {
-        args[arg_count++] = curr;
-        curr = curr->next;
-    }
-
-    // --- Need at least 2 arguments: table and value ---
-    if (arg_count < 2) {
-        // TODO: Emit error or handle gracefully
+    ASTNode *arg = node->as.call.args_head;
+    if (!arg || !arg->next) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+            "PICO-8 add() expects at least two arguments: add(t, v [, i])");
         return false;
     }
+    ASTNode *t_node   = arg;
+    ASTNode *val_node = arg->next;
+    ASTNode *pos_node = val_node->next;   // optional index i
 
-    // --- Push arguments right-to-left (standard ABI) ---
-    // Order on stack: index (or nil), value, table
-    // This matches __builtin_add expected stack: [BP+4]=table, [BP+3]=value, [BP+2]=index
+    // Same spill-then-reload pattern as emit_table_insert_intrinsic(): any
+    // of these sub-expressions may contain a nested CALL, and
+    // __builtin_table_insert's callee-saves don't help until we're
+    // actually inside it.
+    int t_reg = allocate_register();
+    generate_asm(t_node, t_reg);
+    ensure_in_register(t_reg);
+    emit_asm("    PUSH R%d ; spill table pointer\n", t_reg);
 
-    // Arg 2: Index (optional, default = nil which means append)
-    if (arg_count >= 3) {
-        int reg = allocate_register();
-        register_pinned[reg] = 1;
-        generate_asm(args[2], reg);
-        emit_asm("PUSH R%d ; Arg 3: index\n", reg);
-        register_pinned[reg] = 0;
-        unlock_register(reg);
+    int pos_reg = allocate_register();
+    if (pos_node != NULL) {
+        generate_asm(pos_node, pos_reg);
+        ensure_in_register(pos_reg);
     } else {
-        // Default: push NIL to trigger append behavior
-        emit_asm("MOV R0, BOXED_NIL ; Default index (nil = append)\n");
-        emit_asm("PUSH R0 ; Arg 3: index (default nil)\n");
+        emit_asm("    MOV R%d, BOXED_NIL\n", pos_reg);  // default: append
     }
+    emit_asm("    PUSH R%d ; spill position\n", pos_reg);
 
-    // Arg 1: Value (required)
     int val_reg = allocate_register();
-    register_pinned[val_reg] = 1;
-    generate_asm(args[1], val_reg);
-    emit_asm("PUSH R%d ; Arg 2: value\n", val_reg);
-    register_pinned[val_reg] = 0;
-    unlock_register(val_reg);
+    generate_asm(val_node, val_reg);
+    ensure_in_register(val_reg);
 
-    // Arg 0: Table (required)
-    int tab_reg = allocate_register();
-    register_pinned[tab_reg] = 1;
-    generate_asm(args[0], tab_reg);
-    emit_asm("PUSH R%d ; Arg 1: table\n", tab_reg);
-    register_pinned[tab_reg] = 0;
-    unlock_register(tab_reg);
+    emit_asm("    POP  R%d ; reload position\n", pos_reg);
+    emit_asm("    POP  R%d ; reload table pointer\n", t_reg);
 
-    // --- Call runtime subroutine ---
-    emit_asm("CALL __builtin_pico8_add\n");
+    emit_asm("    PUSH R%d ; Table Pointer\n", t_reg);
+    emit_asm("    PUSH R%d ; Position\n", pos_reg);
+    emit_asm("    PUSH R%d ; Value\n", val_reg);
+    emit_asm("    CALL __builtin_table_insert\n");
+    emit_asm("    IADD SP, 3\n");
 
-    // --- Clean up stack (3 arguments) ---
-    emit_asm("IADD SP, 3 ; Clean up add() arguments\n");
-
-    // --- Transfer return value if needed ---
-    // __builtin_add returns the inserted value in R0 (Pico-8 add() behavior)
     if (dest_reg != 0) {
-        emit_asm("MOV R%d, R0 ; Transfer return value (the inserted value)\n", dest_reg);
+        emit_asm("    MOV R%d, R0 ; PICO-8 add() returns the inserted value\n", dest_reg);
     }
 
+    unlock_register(t_reg);
+    unlock_register(pos_reg);
+    unlock_register(val_reg);
     return true;
 }
 
@@ -385,58 +377,17 @@ bool emit_pico8_cls_intrinsic(ASTNode *node) {
     emit_asm("    ;; --- PICO-8 cls() Intrinsic ---\n");
 
     ASTNode *arg = node->as.call.args_head;
-
-    if (arg == NULL) {
-        // Default: clear to black (palette index 0)
-        //    emit_asm("MOV R1, 0x%.8X ; cls() with palette index 0\n",
-           //          pico8_palette[0]);
-    }
-    else if (arg->type == NODE_NUMBER) {
-        double val = arg->as.number.val;
-        int int_val = (int)val;
-
-        if (int_val >= 0 && int_val < 16) {
-           //     emit_asm("MOV R1, 0x%.8X ; Palette index %d\n",
-               //          pico8_palette[int_val], int_val);
-        } else {
-            // Treat as direct color value
-            emit_asm("MOV R1, ");
-            generate_asm(arg, 1);
-            emit_asm("\n");
-        }
-    }
-    else if (arg->type == NODE_STRING) {
-        // Parse hex string like "0xFFFFCCCC" or "#RRGGBB"
-        const char *color_str = arg->as.string_val.value;
-        unsigned int color = 0xFF000000; // Default black if parse fails
-
-        if (color_str[0] == '0' && (color_str[1] == 'x' || color_str[1] == 'X')) {
-            if (sscanf(color_str + 2, "%x", &color) == 1) {
-                // Ensure alpha channel is set for 6-digit hex (0xRRGGBB)
-                if (strlen(color_str) == 8) { // "0xRRGGBB" is 8 chars
-                    color |= 0xFF; // Make opaque
-                }
-            }
-        }
-        // Handle CSS-style hex (#RRGGBB)
-        else if (color_str[0] == '#' && strlen(color_str) == 7) {
-            if (sscanf(color_str + 1, "%x", &color) == 1) {
-                color |= 0xFF; // Make opaque
-            }
-        }
-
-        emit_asm("MOV R1, 0x%.8X ; Hex color from string\n", color);
-    }
-    else {
-        // Dynamic expression - evaluate at runtime
-        int reg = allocate_register();
+    int reg = allocate_register();
+    if (arg != NULL) {
         generate_asm(arg, reg);
-        emit_asm("MOV R1, R%d ; Color from expression\n", reg);
-        unlock_register(reg);
+    } else {
+        emit_asm("MOV R%d, 0.000000 ; Default cls() color: 0 (black)\n", reg);
     }
+    emit_asm("PUSH R%d ; Arg 1: color\n", reg);
+    unlock_register(reg);
 
-    emit_asm("OUT GPU_ClearColor, R1\n");
-    emit_asm("OUT GPU_Command, GPUCommand_ClearScreen\n");
+    emit_asm("CALL __builtin_pico8_cls\n");
+    emit_asm("IADD SP, 1 ; Clean up cls() arguments\n");
 
     return true;
 }
