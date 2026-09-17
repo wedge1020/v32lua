@@ -69,8 +69,9 @@ __builtin_random:
 
     ;; Special case: [BP+3] == 0 means no second argument
     ;; (stack initialized to 0 by ISUB SP, N in caller)
-    IEQ   R5, 0
-    JT    R5, _random_1arg      ; Zero = no second argument
+	MOV   R6, R5
+    IEQ   R6, 0
+    JT    R6, _random_1arg      ; Zero = no second argument
 
     ;; We have 2 arguments
     MOV   R1, R5               ; R1 = arg2 (n)

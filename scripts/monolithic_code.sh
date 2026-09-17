@@ -30,7 +30,7 @@ done
 
 RUNTIME_UNITS="memory datetime exec table string print iters"
 RUNTIME_UNITS="${RUNTIME_UNITS} vircon32 pico8 tic80"
-RUNTIME_UNITS="${RUNTIME_UNITS} constant"
+RUNTIME_UNITS="${RUNTIME_UNITS} math constant"
 
 echo -n                                                      >  put/runtime.s.txt
 for unit in ${RUNTIME_UNITS}; do
