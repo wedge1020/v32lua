@@ -659,3 +659,167 @@ bool emit_pico8_foreach_intrinsic(ASTNode *node, int dest_reg)
     unlock_register(f_reg);
     return true;
 }
+
+// ============================================================================
+// PICO-8 sfx(n [, channel[, offset[, length]]])
+// ============================================================================
+// offset/length (sub-clip playback into a longer SFX) have no equivalent on
+// the native sfx.play() and are silently unsupported -- flagged with one
+// compiler_warning() rather than emitted as if they did something.
+//
+// n < 0 is PICO-8's "stop" form (sfx(-1 [, channel])); forwarded straight to
+// sfx.stop()'s own emitter, which already knows single-channel vs. all-sfx-
+// channels.
+//
+// A literal n folds entirely at compile time (no CALL): the placeholder
+// tone id is just an immediate, computed right here and handed to
+// emit_vircon32_sfx_play_intrinsic() as a synthetic NODE_NUMBER argument, so
+// it takes that emitter's own static-fold path exactly as if the cart had
+// written the resolved sound id itself.
+//
+// A dynamic n (celeste.lua's `psfx` wrapper -- sfx(num), where num is a
+// parameter, not a literal) can't be folded, since the mapping itself needs
+// a runtime AND -- __builtin_pico8_sfx (runtime.s) does the same mapping in
+// assembly and then does exactly what __builtin_vircon32_sfx_play does.
+bool emit_pico8_sfx_intrinsic (ASTNode *node, int dest_reg)
+{
+    ASTNode *args[4] = { NULL };
+    int      arg_count = 0;
+    for (ASTNode *curr = node->as.call.args_head; curr != NULL && arg_count < 4; curr = curr->next) {
+        args[arg_count++] = curr;
+    }
+
+    if (arg_count < 1) {
+        compiler_error (ERR_SEMANTIC, node->line_number,
+                         "sfx() requires at least 1 argument: sfx(n [, channel[, offset[, length]]])");
+        return false;
+    }
+
+    if (args[2] != NULL || args[3] != NULL) {
+        compiler_warning (ERR_SEMANTIC, node->line_number,
+                           "sfx(): offset/length arguments have no Vircon32 equivalent and are ignored");
+    }
+
+    register_pico8_tone_bank ();
+    runtime_req.needs_vircon32 = true;
+
+    double n_val;
+    if (spu_static_number (args[0], &n_val)) {
+
+        if (n_val < 0) {
+            // sfx(-1 [, channel]): stop form.
+            ASTNode *stop_node = make_node (NODE_FUNCTION_CALL);
+            stop_node->line_number       = node->line_number;
+            stop_node->as.call.args_head = args[1];
+            return emit_vircon32_sfx_stop_intrinsic (stop_node, dest_reg);
+        }
+
+        int tone_id = pico8_tone_base_id + (((int) n_val) & (PICO8_TONE_COUNT - 1));
+
+        ASTNode *sound_lit = make_node (NODE_NUMBER);
+        sound_lit->as.number.val = (double) tone_id;
+        sound_lit->next          = args[1];   // channel, or NULL -> auto
+
+        ASTNode *call_node = make_node (NODE_FUNCTION_CALL);
+        call_node->line_number       = node->line_number;
+        call_node->as.call.args_head = sound_lit;
+        return emit_vircon32_sfx_play_intrinsic (call_node, dest_reg);
+    }
+
+    // Dynamic index: resolve the tone mapping at runtime.
+    emit_asm("    ;; --- PICO-8 sfx() Intrinsic (dynamic index) ---\n");
+
+    emit_asm("MOV  R0, %d ; tone bank base id\n", pico8_tone_base_id);
+    emit_asm("PUSH R0 ; Arg 3: tone bank base id\n");
+
+    if (args[1] != NULL) {
+        int reg = allocate_register();
+        generate_asm (args[1], reg);
+        emit_asm ("PUSH R%d ; Arg 2: channel\n", reg);
+        unlock_register (reg);
+    } else {
+        emit_asm ("MOV  R0, BOXED_NIL\n");
+        emit_asm ("PUSH R0 ; Arg 2: channel omitted -> auto\n");
+    }
+
+    int n_reg = allocate_register();
+    generate_asm (args[0], n_reg);
+    emit_asm ("PUSH R%d ; Arg 1: pico8 sfx index (signed; <0 means stop)\n", n_reg);
+    unlock_register (n_reg);
+
+    emit_asm ("CALL __builtin_pico8_sfx\n");
+    emit_asm ("IADD SP, 3 ; Clean up sfx() arguments\n");
+
+    if (dest_reg != 0) {
+        emit_asm ("MOV  R%d, R0\n", dest_reg);
+    }
+
+    return true;
+}
+
+// ============================================================================
+// PICO-8 music(n [, fade_len[, channel_mask]])
+// ============================================================================
+// fade_len (crossfade time) and channel_mask (which of PICO-8's 4 pattern
+// channels the track claims) both describe multi-channel PATTERN playback
+// that has no equivalent once a "track" is just one placeholder tone; both
+// are accepted and silently ignored rather than warned about, since nearly
+// every real PICO-8 music() call passes them (celeste.lua's do, on every
+// call site) and a warning on each would just be noise for a parameter that
+// was never going to have a Vircon32 equivalent.
+//
+// Every music() call site actually seen in celeste.lua uses a literal track
+// number, so only the static-fold path is implemented; a dynamic track
+// number is a compile error naming the limitation rather than a silent
+// wrong-tone result. (A dynamic choice of cue can still be made through
+// sfx()/psfx(), which does support it.)
+bool emit_pico8_music_intrinsic (ASTNode *node, int dest_reg)
+{
+    ASTNode *args[3] = { NULL };
+    int      arg_count = 0;
+    for (ASTNode *curr = node->as.call.args_head; curr != NULL && arg_count < 3; curr = curr->next) {
+        args[arg_count++] = curr;
+    }
+
+    if (arg_count < 1) {
+        compiler_error (ERR_SEMANTIC, node->line_number,
+                         "music() requires at least 1 argument: music(n [, fade_len[, channel_mask]])");
+        return false;
+    }
+
+    register_pico8_tone_bank ();
+    runtime_req.needs_vircon32 = true;
+
+    double n_val;
+    if (!spu_static_number (args[0], &n_val)) {
+        compiler_error (ERR_SEMANTIC, node->line_number,
+                         "music(): the track number must be a compile-time constant");
+        return false;
+    }
+
+    if (n_val < 0) {
+        // music(-1 [, fade_len]): stop. Fade is not supported; stop now.
+        // An explicit literal channel 0 (not an omitted/NULL arg) so this
+        // takes emit_vircon32_channel_cmd_intrinsic()'s single-channel
+        // path -- an omitted channel means "every channel" there, which
+        // would also cut any sfx() still playing.
+        ASTNode *chan0 = make_node (NODE_NUMBER);
+        chan0->as.number.val = 0.0;
+
+        ASTNode *stop_node = make_node (NODE_FUNCTION_CALL);
+        stop_node->line_number       = node->line_number;
+        stop_node->as.call.args_head = chan0;
+        return emit_vircon32_channel_cmd_intrinsic (stop_node, dest_reg, "stop");
+    }
+
+    int tone_id = pico8_tone_base_id + (((int) n_val) & (PICO8_TONE_COUNT - 1));
+
+    ASTNode *sound_lit = make_node (NODE_NUMBER);
+    sound_lit->as.number.val = (double) tone_id;
+    sound_lit->next          = make_node_boolean (true);   // patterns loop
+
+    ASTNode *call_node = make_node (NODE_FUNCTION_CALL);
+    call_node->line_number       = node->line_number;
+    call_node->as.call.args_head = sound_lit;
+    return emit_vircon32_play_intrinsic (call_node, dest_reg);
+}

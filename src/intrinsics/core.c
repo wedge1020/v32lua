@@ -341,7 +341,9 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     //
     //////////////////////////////////////////////////////////////////////////
 
-    if (runtime_req.needs_vircon32 == true)
+    if ((runtime_req.needs_vircon32 == true)  &&
+        (runtime_req.needs_pico8    == false) &&
+        (runtime_req.needs_tic80    == false))
     {
         //try_emit_call_vircon32_instinsic (node, dest_reg);
 
@@ -428,21 +430,49 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         //
         //////////////////////////////////////////////////////////////////////////
 
-        if (strcmp (func_name, "flr")   == 0) return emit_math_floor_intrinsic(node, dest_reg);
-        if (strcmp (func_name, "ceil")  == 0) return emit_math_ceil_intrinsic(node, dest_reg);
-        if (strcmp (func_name, "abs")   == 0) return emit_math_abs_intrinsic(node, dest_reg);
-        if (strcmp (func_name, "min")   == 0) return emit_math_min_intrinsic(node, dest_reg);
-        if (strcmp (func_name, "max")   == 0) return emit_math_max_intrinsic(node, dest_reg);
-        if (strcmp (func_name, "srand") == 0) return emit_math_randomseed_intrinsic(node, dest_reg);
-        if (strcmp (func_name, "rnd")   == 0) return emit_pico8_rnd_intrinsic(node, dest_reg);
+        if (strcmp (func_name, "flr")   == 0)
+        {
+            return (emit_math_floor_intrinsic (node, dest_reg));
+        }
+
+        if (strcmp (func_name, "ceil")  == 0)
+        {
+            return (emit_math_ceil_intrinsic (node, dest_reg));
+        }
+
+        if (strcmp (func_name, "abs")   == 0)
+        {
+            return (emit_math_abs_intrinsic (node, dest_reg));
+        }
+
+        if (strcmp (func_name, "min")   == 0)
+        {
+            return (emit_math_min_intrinsic (node, dest_reg));
+        }
+
+        if (strcmp (func_name, "max")   == 0)
+        {
+            return (emit_math_max_intrinsic (node, dest_reg));
+        }
+
+        if (strcmp (func_name, "srand") == 0)
+        {
+            return (emit_math_randomseed_intrinsic (node, dest_reg));
+        }
+    
+        if (strcmp (func_name, "rnd")   == 0)
+        {
+            return (emit_pico8_rnd_intrinsic (node, dest_reg));
+        }
+
         if (strcmp (func_name, "sgn")   == 0)
         {
-            return (emit_pico8_sgn_intrinsic(node, dest_reg));
+            return (emit_pico8_sgn_intrinsic (node, dest_reg));
         }
 
         if (strcmp (func_name, "mid")   == 0)
         {
-            return (emit_pico8_mid_intrinsic(node, dest_reg));
+            return (emit_pico8_mid_intrinsic (node, dest_reg));
         }
 
         // add()
@@ -479,6 +509,18 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         if (strcmp (func_name, "foreach") == 0)
         {
             return (emit_pico8_foreach_intrinsic (node, dest_reg));
+        }
+
+        // music()
+        if (strcmp (func_name, "music") == 0)
+        {
+            return (emit_pico8_music_intrinsic (node, dest_reg));
+        }
+
+        // sfx()
+        if (strcmp (func_name, "sfx") == 0)
+        {
+            return (emit_pico8_sfx_intrinsic (node, dest_reg));
         }
     }
 

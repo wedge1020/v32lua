@@ -64,6 +64,8 @@ bool  emit_pico8_rnd_intrinsic     (ASTNode *, int);
 bool  emit_pico8_sgn_intrinsic     (ASTNode *, int);
 bool  emit_pico8_mid_intrinsic     (ASTNode *, int);
 bool  emit_pico8_foreach_intrinsic (ASTNode *, int);
+bool  emit_pico8_sfx_intrinsic     (ASTNode *, int);
+bool  emit_pico8_music_intrinsic   (ASTNode *, int);
 
 //////////////////////////////////////////////////////////////////////////////
 //
