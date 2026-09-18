@@ -528,6 +528,12 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         {
             return (emit_pico8_count_intrinsic (node, dest_reg));
         }
+
+        // del()
+        if (strcmp (func_name, "del") == 0)
+        {
+            return (emit_pico8_del_intrinsic (node, dest_reg));
+        }
     }
 
     //////////////////////////////////////////////////////////////////////////

@@ -877,3 +877,49 @@ bool emit_pico8_count_intrinsic (ASTNode *node, int dest_reg)
 
     return true;
 }
+
+// ============================================================================
+// PICO-8 del(t, v) -> remove first occurrence of v from sequence part of t
+// ============================================================================
+// Removes and returns the first element equal to v (1..#t scan, then
+// table_remove semantics for the shift-down). Equality is bitwise on the
+// boxed word -- exact for the pointer/boolean/nil values celeste passes;
+// string CONTENT is not compared (see __builtin_pico8_del header comment).
+bool emit_pico8_del_intrinsic (ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+    if (!arg || !arg->next || arg->next->next) {
+        compiler_error (ERR_SEMANTIC, node->line_number,
+            "PICO-8 del() expects exactly two arguments: del(t, v)");
+        return false;
+    }
+    ASTNode *t_node = arg;
+    ASTNode *v_node = arg->next;
+
+    // Same spill-then-reload pattern as add()/table.insert: evaluating v
+    // may contain a nested CALL that clobbers t's register.
+    int t_reg = allocate_register ();
+    generate_asm (t_node, t_reg);
+    ensure_in_register (t_reg);
+    emit_asm ("    PUSH R%d ; spill table pointer\n", t_reg);
+
+    int v_reg = allocate_register ();
+    generate_asm (v_node, v_reg);
+    ensure_in_register (v_reg);
+
+    emit_asm ("    POP  R%d ; reload table pointer\n", t_reg);
+
+    // ABI: [BP+3] = t, [BP+2] = v
+    emit_asm ("    PUSH R%d ; Arg 1: table\n", t_reg);
+    emit_asm ("    PUSH R%d ; Arg 2: value\n", v_reg);
+    emit_asm ("    CALL __builtin_pico8_del\n");
+    emit_asm ("    IADD SP, 2 ; Clean up del() arguments\n");
+
+    if (dest_reg != 0) {
+        emit_asm ("    MOV R%d, R0 ; removed value (or nil)\n", dest_reg);
+    }
+
+    unlock_register (t_reg);
+    unlock_register (v_reg);
+    return true;
+}

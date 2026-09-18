@@ -1450,3 +1450,122 @@ _pico8_count_done:
     POP   BP
     RET
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; __builtin_pico8_del: PICO-8 del(t, v)
+;;
+;; Stack layout relative to BP:
+;; [BP+3]: t (boxed table pointer)
+;; [BP+2]: v (boxed value to remove)
+;;
+;; Returns: R0 = the removed value, or BOXED_NIL if not found
+;;
+;; Finds the first sequence index i in 1..#t whose element is equal to
+;; v, then removes it via __builtin_table_remove(t, i), which performs
+;; the shift-down (array path or hash path, whichever backs the table).
+;; Composing those two routines instead of walking raw memory is the
+;; point: the same logical sequence can live in the array part, the
+;; hash buckets, or both, and table_remove already copes with each.
+;;
+;; Equality is a BITWISE word compare (IEQ) on the boxed values --
+;; exact for pointers, booleans, nil, and same-representation numbers.
+;; It does NOT compare string CONTENTS; del(t, "a") will not match a
+;; RAM string with equal text stored at a different address. celeste's
+;; call sites (del(objects, obj), del(dead_particles, p)) only ever
+;; pass table pointers, which compare exactly.
+;;
+;; CODING RULES OBEYED HERE:
+;;   - R2 is the DEDICATED compare scratch: every destructive test
+;;     (IEQ/ILT) targets R2 after a copy, never a live source.
+;;   - No [Rx+Ry] addressing (none is needed -- no raw memory walks).
+;;   - State that must survive the nested table_get/table_remove CALLs
+;;     lives ONLY in R1-R7 (both callees save exactly R1-R7; R8+ is
+;;     not safe across a CALL).
+;;
+;; Register Usage: R1-R7 (all callee-saved by this routine too)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+__builtin_pico8_del:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; --- Callee-Save ---
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
+    PUSH  R7
+
+    MOV   R1, [BP+3]              ; R1 = tagged table pointer (kept tagged:
+                                  ;        it is re-pushed for each sub-CALL)
+    MOV   R6, [BP+2]              ; R6 = v (boxed), survives all sub-CALLs
+
+    ;; --- 1. Validate + unbox header just to read Word 1 ---
+    MOV   R2, R1                  ; scratch copy for tag test
+    AND   R2, BOXED_DATA
+    IEQ   R2, BOXED_TABLE
+    JF    R2, __runtime_error_not_table
+    MOV   R2, R1                  ; scratch copy for unbox
+    AND   R2, BOXED_PAYLOAD
+    MOV   R4, [R2+1]              ; R4 = tracked length (Word 1), raw int
+
+    MOV   R3, 1                   ; R3 = i (raw int), 1-based scan index
+
+_pico8_del_scan_loop:
+    MOV   R2, R3                  ; scratch: i > length?  (R3 survives)
+    IGT   R2, R4
+    JT    R2, _pico8_del_not_found
+
+    ;; --- 2. element = table_get(t, i) ---
+    MOV   R5, R3
+    CIF   R5                      ; R5 = i as float word (table_get key form)
+    PUSH  R5
+    PUSH  R1                      ; ABI: [BP+3]=table, [BP+2]=key
+    CALL  __builtin_table_get
+    IADD  SP, 2
+    MOV   R7, R0                  ; R7 = element (boxed); get saves R1-R7,
+                                  ;      so R1/R3/R4/R5/R6 all intact here
+
+    ;; --- 3. element == v ? (full == semantics, string content included) ---
+    PUSH  R6                      ; v  ([BP+2])
+    PUSH  R7                      ; element ([BP+3])
+    CALL  __builtin_eq            ; R0 = raw 1 (equal) or 0 (not equal)
+    IADD  SP, 2
+    MOV   R2, R0                  ; raw boolean to scratch
+    IEQ   R2, 1                   ; still destructive, still on R2
+    JF    R2, _pico8_del_next
+
+    ;; --- 3. element == v ? (bitwise, on scratch) ---
+    ;MOV   R2, R7                  ; scratch copy -- R7 survives for the
+    ;IEQ   R2, R6                  ;        return value if it matches
+    ;JF    R2, _pico8_del_next
+
+    ;; --- 4. Found: table_remove(t, i), propagate its return value ---
+    PUSH  R5                      ; position (same float word as above)
+    PUSH  R1
+    CALL  __builtin_table_remove  ; R0 = removed value
+    IADD  SP, 2
+    JMP   _pico8_del_done         ; skip callee-restore-local epilogue math
+
+_pico8_del_next:
+    IADD  R3, 1
+    JMP   _pico8_del_scan_loop
+
+_pico8_del_not_found:
+    MOV   R0, BOXED_NIL
+
+_pico8_del_done:
+    ;; --- Callee-Restore ---
+    POP   R7
+    POP   R6
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+
+    MOV   SP, BP
+    POP   BP
+    RET
+
