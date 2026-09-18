@@ -474,6 +474,12 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         {
             return (emit_pico8_map_intrinsic (node));
         }
+
+        // foreach()
+        if (strcmp (func_name, "foreach") == 0)
+        {
+            return (emit_pico8_foreach_intrinsic (node, dest_reg));
+        }
     }
 
     //////////////////////////////////////////////////////////////////////////

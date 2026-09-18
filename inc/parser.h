@@ -1,14 +1,14 @@
-/* A Bison parser, made by GNU Bison 2.3.  */
+/* A Bison parser, made by GNU Bison 3.8.2.  */
 
-/* Skeleton interface for Bison's Yacc-like parsers in C
+/* Bison interface for Yacc-like parsers in C
 
-   Copyright (C) 1984, 1989, 1990, 2000, 2001, 2002, 2003, 2004, 2005, 2006
-   Free Software Foundation, Inc.
+   Copyright (C) 1984, 1989-1990, 2000-2015, 2018-2021 Free Software Foundation,
+   Inc.
 
-   This program is free software; you can redistribute it and/or modify
+   This program is free software: you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; either version 2, or (at your option)
-   any later version.
+   the Free Software Foundation, either version 3 of the License, or
+   (at your option) any later version.
 
    This program is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -16,9 +16,7 @@
    GNU General Public License for more details.
 
    You should have received a copy of the GNU General Public License
-   along with this program; if not, write to the Free Software
-   Foundation, Inc., 51 Franklin Street, Fifth Floor,
-   Boston, MA 02110-1301, USA.  */
+   along with this program.  If not, see <https://www.gnu.org/licenses/>.  */
 
 /* As a special exception, you may create a larger work that contains
    part or all of the Bison parser skeleton and distribute that work
@@ -33,120 +31,100 @@
    This special exception was added by the Free Software Foundation in
    version 2.2 of Bison.  */
 
-/* Tokens.  */
+/* DO NOT RELY ON FEATURES THAT ARE NOT DOCUMENTED in the manual,
+   especially those whose name start with YY_ or yy_.  They are
+   private implementation details that can be changed or removed.  */
+
+#ifndef YY_YY_INC_PARSER_H_INCLUDED
+# define YY_YY_INC_PARSER_H_INCLUDED
+/* Debug traces.  */
+#ifndef YYDEBUG
+# define YYDEBUG 1
+#endif
+#if YYDEBUG
+extern int yydebug;
+#endif
+
+/* Token kinds.  */
 #ifndef YYTOKENTYPE
 # define YYTOKENTYPE
-   /* Put the tokens into the symbol table, so that GDB and other debuggers
-      know about them.  */
-   enum yytokentype {
-     TOKEN_NUMBER = 258,
-     TOKEN_IDENTIFIER = 259,
-     TOKEN_STRING = 260,
-     TOKEN_COMMENT_LINE = 261,
-     TOKEN_COMMENT_BLOCK = 262,
-     TOKEN_TIC80_SECTION_HEADER = 263,
-     TOKEN_TIC80_ASSET_DATA = 264,
-     TOKEN_TIC80_SECTION_FOOTER = 265,
-     TOKEN_CART_HINT = 266,
-     TOKEN_WHILE = 267,
-     TOKEN_FOR = 268,
-     TOKEN_BREAK = 269,
-     TOKEN_IF = 270,
-     TOKEN_ELSEIF = 271,
-     TOKEN_THEN = 272,
-     TOKEN_ELSE = 273,
-     TOKEN_END = 274,
-     TOKEN_FUNCTION = 275,
-     TOKEN_ASM = 276,
-     TOKEN_RAWASM = 277,
-     TOKEN_RETURN = 278,
-     TOKEN_AND = 279,
-     TOKEN_OR = 280,
-     TOKEN_EQ = 281,
-     TOKEN_NEQ = 282,
-     TOKEN_LE = 283,
-     TOKEN_GE = 284,
-     TOKEN_LT = 285,
-     TOKEN_GT = 286,
-     TOKEN_CONCAT = 287,
-     TOKEN_LOCAL = 288,
-     TOKEN_IN = 289,
-     TOKEN_DO = 290,
-     TOKEN_NOT = 291,
-     TOKEN_LEN = 292,
-     UNARY_MINUS = 293,
-     TOKEN_TRUE = 294,
-     TOKEN_FALSE = 295,
-     TOKEN_NIL = 296,
-     TOKEN_FLOORDIV = 297,
-     TOKEN_DOTS = 298,
-     TOKEN_REPEAT = 299,
-     TOKEN_UNTIL = 300
-   };
+  enum yytokentype
+  {
+    YYEMPTY = -2,
+    YYEOF = 0,                     /* "end of file"  */
+    YYerror = 256,                 /* error  */
+    YYUNDEF = 257,                 /* "invalid token"  */
+    TOKEN_NUMBER = 258,            /* TOKEN_NUMBER  */
+    TOKEN_IDENTIFIER = 259,        /* TOKEN_IDENTIFIER  */
+    TOKEN_STRING = 260,            /* TOKEN_STRING  */
+    TOKEN_COMMENT_LINE = 261,      /* TOKEN_COMMENT_LINE  */
+    TOKEN_COMMENT_BLOCK = 262,     /* TOKEN_COMMENT_BLOCK  */
+    TOKEN_TIC80_SECTION_HEADER = 263, /* TOKEN_TIC80_SECTION_HEADER  */
+    TOKEN_TIC80_ASSET_DATA = 264,  /* TOKEN_TIC80_ASSET_DATA  */
+    TOKEN_TIC80_SECTION_FOOTER = 265, /* TOKEN_TIC80_SECTION_FOOTER  */
+    TOKEN_CART_HINT = 266,         /* TOKEN_CART_HINT  */
+    TOKEN_COMPOUND_ASSIGN = 267,   /* TOKEN_COMPOUND_ASSIGN  */
+    TOKEN_WHILE = 268,             /* TOKEN_WHILE  */
+    TOKEN_FOR = 269,               /* TOKEN_FOR  */
+    TOKEN_BREAK = 270,             /* TOKEN_BREAK  */
+    TOKEN_IF = 271,                /* TOKEN_IF  */
+    TOKEN_ELSEIF = 272,            /* TOKEN_ELSEIF  */
+    TOKEN_THEN = 273,              /* TOKEN_THEN  */
+    TOKEN_ELSE = 274,              /* TOKEN_ELSE  */
+    TOKEN_END = 275,               /* TOKEN_END  */
+    TOKEN_FUNCTION = 276,          /* TOKEN_FUNCTION  */
+    TOKEN_ASM = 277,               /* TOKEN_ASM  */
+    TOKEN_RAWASM = 278,            /* TOKEN_RAWASM  */
+    TOKEN_RETURN = 279,            /* TOKEN_RETURN  */
+    TOKEN_AND = 280,               /* TOKEN_AND  */
+    TOKEN_OR = 281,                /* TOKEN_OR  */
+    TOKEN_EQ = 282,                /* TOKEN_EQ  */
+    TOKEN_NEQ = 283,               /* TOKEN_NEQ  */
+    TOKEN_LE = 284,                /* TOKEN_LE  */
+    TOKEN_GE = 285,                /* TOKEN_GE  */
+    TOKEN_LT = 286,                /* TOKEN_LT  */
+    TOKEN_GT = 287,                /* TOKEN_GT  */
+    TOKEN_CONCAT = 288,            /* TOKEN_CONCAT  */
+    TOKEN_LOCAL = 289,             /* TOKEN_LOCAL  */
+    TOKEN_IN = 290,                /* TOKEN_IN  */
+    TOKEN_DO = 291,                /* TOKEN_DO  */
+    TOKEN_NOT = 292,               /* TOKEN_NOT  */
+    TOKEN_LEN = 293,               /* TOKEN_LEN  */
+    UNARY_MINUS = 294,             /* UNARY_MINUS  */
+    TOKEN_TRUE = 295,              /* TOKEN_TRUE  */
+    TOKEN_FALSE = 296,             /* TOKEN_FALSE  */
+    TOKEN_NIL = 297,               /* TOKEN_NIL  */
+    TOKEN_FLOORDIV = 298,          /* TOKEN_FLOORDIV  */
+    TOKEN_DOTS = 299,              /* TOKEN_DOTS  */
+    TOKEN_REPEAT = 300,            /* TOKEN_REPEAT  */
+    TOKEN_UNTIL = 301              /* TOKEN_UNTIL  */
+  };
+  typedef enum yytokentype yytoken_kind_t;
 #endif
-/* Tokens.  */
-#define TOKEN_NUMBER 258
-#define TOKEN_IDENTIFIER 259
-#define TOKEN_STRING 260
-#define TOKEN_COMMENT_LINE 261
-#define TOKEN_COMMENT_BLOCK 262
-#define TOKEN_TIC80_SECTION_HEADER 263
-#define TOKEN_TIC80_ASSET_DATA 264
-#define TOKEN_TIC80_SECTION_FOOTER 265
-#define TOKEN_CART_HINT 266
-#define TOKEN_WHILE 267
-#define TOKEN_FOR 268
-#define TOKEN_BREAK 269
-#define TOKEN_IF 270
-#define TOKEN_ELSEIF 271
-#define TOKEN_THEN 272
-#define TOKEN_ELSE 273
-#define TOKEN_END 274
-#define TOKEN_FUNCTION 275
-#define TOKEN_ASM 276
-#define TOKEN_RAWASM 277
-#define TOKEN_RETURN 278
-#define TOKEN_AND 279
-#define TOKEN_OR 280
-#define TOKEN_EQ 281
-#define TOKEN_NEQ 282
-#define TOKEN_LE 283
-#define TOKEN_GE 284
-#define TOKEN_LT 285
-#define TOKEN_GT 286
-#define TOKEN_CONCAT 287
-#define TOKEN_LOCAL 288
-#define TOKEN_IN 289
-#define TOKEN_DO 290
-#define TOKEN_NOT 291
-#define TOKEN_LEN 292
-#define UNARY_MINUS 293
-#define TOKEN_TRUE 294
-#define TOKEN_FALSE 295
-#define TOKEN_NIL 296
-#define TOKEN_FLOORDIV 297
-#define TOKEN_DOTS 298
-#define TOKEN_REPEAT 299
-#define TOKEN_UNTIL 300
 
-
-
-
+/* Value type.  */
 #if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED
-typedef union YYSTYPE
-#line 18 "parser.y"
+union YYSTYPE
 {
+#line 18 "src/parser.y"
+
     double   number_val;
     char    *string_val;
     ASTNode *ast_node;
-}
-/* Line 1529 of yacc.c.  */
-#line 145 "../inc/parser.h"
-	YYSTYPE;
-# define yystype YYSTYPE /* obsolescent; will be withdrawn */
-# define YYSTYPE_IS_DECLARED 1
+
+#line 116 "inc/parser.h"
+
+};
+typedef union YYSTYPE YYSTYPE;
 # define YYSTYPE_IS_TRIVIAL 1
+# define YYSTYPE_IS_DECLARED 1
 #endif
+
 
 extern YYSTYPE yylval;
 
+
+int yyparse (void);
+
+
+#endif /* !YY_YY_INC_PARSER_H_INCLUDED  */

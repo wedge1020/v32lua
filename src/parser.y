@@ -36,6 +36,7 @@ char *mangle_method_name (const char *table_name, const char *method_name);
 %token <string_val> TOKEN_TIC80_SECTION_HEADER TOKEN_TIC80_ASSET_DATA
 %token <string_val> TOKEN_TIC80_SECTION_FOOTER
 %token <string_val> TOKEN_CART_HINT
+%token <number_val> TOKEN_COMPOUND_ASSIGN  /* PICO-8-only += -= *= /= %= (see lexer.l) */
 
 %token TOKEN_WHILE TOKEN_FOR TOKEN_BREAK TOKEN_IF TOKEN_ELSEIF TOKEN_THEN TOKEN_ELSE TOKEN_END 
 %token TOKEN_FUNCTION TOKEN_ASM TOKEN_RAWASM TOKEN_RETURN TOKEN_AND TOKEN_OR
@@ -200,6 +201,74 @@ statement:
         $$->as.mult_assign.values_head = $4;
         $$->as.mult_assign.is_local = 1;
     }
+    | var_list TOKEN_COMPOUND_ASSIGN expr {
+        // PICO-8-only += -= *= /= %=. Gating already happened in the
+        // lexer (compound_assign_token() in lexer.l) the moment the
+        // operator token itself was recognized, so nothing to check here.
+        //
+        // var_list is reused rather than introducing a separate
+        // single-target nonterminal: var_list's first three productions
+        // (bare identifier, '.field', '[index]') are exactly the three
+        // PICO-8 compound-assignment target shapes, and a parallel
+        // nonterminal with the identical production shapes would create a
+        // reduce-reduce conflict (after shifting TOKEN_IDENTIFIER, the
+        // parser would have two different single-token rules it could
+        // reduce into, with no lookahead able to distinguish them). Reusing
+        // var_list means there's only one reduction, and the choice of
+        // which statement rule continues from it (this one, the plain '='
+        // rule, or the ',' multi-target continuation) is an ordinary
+        // lookahead-driven shift decision, not a reduce-reduce choice.
+        // The tradeoff is that var_list also accepts a comma-separated
+        // multi-target list, which real PICO-8 compound assignment does
+        // not support -- rejected below instead, with a clear message
+        // rather than a parse failure.
+        if ($1->next != NULL) {
+            compiler_error(ERR_SYNTAX, yylineno,
+                "compound assignment (+=, -=, *=, /=, %%=) only supports a single target");
+        }
+
+        NodeType op = (NodeType)(int) $2;
+
+        if ($1->type == NODE_IDENTIFIER) {
+            // lhs = lhs OP rhs, via the exact same plain-assignment path
+            // 'var_list = expr_list' above already uses -- $1 becomes
+            // the (single) write target, and a second, independent
+            // make_node_ident() with the same name is the read reference
+            // embedded in the RHS. Safe to duplicate: an identifier read
+            // has no side effects, so evaluating the name twice is free.
+            ASTNode *read_ref = make_node_ident($1->as.id.name);
+            ASTNode *new_val  = make_node_binary(op, read_ref, $3);
+
+            $$ = make_node(NODE_MULTIPLE_ASSIGNMENT);
+            $$->as.mult_assign.targets_head = $1;
+            $$->as.mult_assign.values_head  = new_val;
+            $$->as.mult_assign.is_local     = 0;
+        } else {
+            // NODE_TABLE_GET shape, from var_list's '.'/'[' productions:
+            // t.field OP= rhs  desugars to  t.field = t.field OP rhs,
+            // via the same make_node_table_set() the plain
+            // 'prefix_expr . TOKEN_IDENTIFIER = expr' statement
+            // rule uses.
+            //
+            // KNOWN LIMITATION: table_expr (and, for the '[' form, the key
+            // expression) is evaluated once by the read side and once by
+            // the write side below -- fine for the common case (a plain
+            // variable or a chain of plain field accesses, which is every
+            // occurrence in celeste.lua), but if table_expr itself has a
+            // side effect (e.g. get_obj().x += 1), that side effect runs
+            // TWICE. Deliberately out of scope for now: fixing it for the
+            // general case needs a dedicated AST node + codegen that
+            // evaluates the table pointer once and reuses it for both the
+            // read and the write, rather than this parse-time desugar.
+            ASTNode *table_expr = $1->as.table_get.table_expr;
+            ASTNode *key        = $1->as.table_get.key;
+
+            ASTNode *read_ref = make_node_table_get(table_expr, key);
+            ASTNode *new_val  = make_node_binary(op, read_ref, $3);
+
+            $$ = make_node_table_set(table_expr, key, new_val);
+        }
+    }
     | prefix_expr '[' expr ']' '=' expr
     { 
         // $1 = table, $3 = key, $6 = value being assigned
@@ -253,6 +322,89 @@ statement:
         $$ -> as.if_stmt.condition     = $2;
         $$ -> as.if_stmt.if_body       = $4;
         $$ -> as.if_stmt.else_body     = $5;
+    }
+    | if_start expr statement {
+        // PICO-8's then-less, end-less single-statement if: `if (cond) stmt`.
+        // Not standard Lua. Gated on runtime_req.needs_pico8, which is
+        // already set by the time this reduces IF --#api pico8 appears
+        // before this line in the source (the same single-pass ordering
+        // constraint the compound-assignment tokens rely on in lexer.l).
+        //
+        // No ambiguity with the TOKEN_THEN rule above: after 'if_start
+        // expr', the parser needs exactly one token of lookahead to
+        // choose between shifting TOKEN_THEN (the rule above) and
+        // reducing into 'statement' here -- TOKEN_THEN can never itself
+        // start a statement, so the two never compete for the same
+        // lookahead token.
+        //
+        // Scope: a single statement, ending wherever that statement's own
+        // grammar naturally ends (Lua statements are self-delimiting; no
+        // newline-tracking is needed or done). No 'elseif'/'else' in this
+        // form, matching real PICO-8. Chaining multiple statements on one
+        // line (if PICO-8 even allows that) is NOT supported here.
+        if (!runtime_req.needs_pico8) {
+            compiler_error(ERR_SYNTAX, yylineno,
+                "then-less if is a PICO-8 extension; add --#api pico8 to use it");
+        }
+        $$                             = $1;
+        $$ -> as.if_stmt.condition     = $2;
+        $$ -> as.if_stmt.if_body       = $3;
+        $$ -> as.if_stmt.else_body     = NULL;
+    }
+    | if_start expr TOKEN_RETURN {
+        // Bare `if (cond) return`, e.g. celeste.lua's actual line 118.
+        //
+        // Deliberately NOT routed through 'last_statement'/'return_stmt'
+        // (an earlier version of this rule was 'if_start expr
+        // last_statement', covering both bare and value-returning forms).
+        // bison -Wcounterexamples caught two real ambiguities that
+        // introduced: (1) return_stmt's OPTIONAL expr_list means
+        // `if (x) return foo()` can't tell whether `foo()` is the
+        // returned value or an unrelated statement immediately
+        // following a bare return -- 'return' is only unambiguous in
+        // its normal position because it's always immediately followed
+        // by end/else/elseif/until/EOF, none of which can start an
+        // expr_list, and this shorthand breaks that by allowing
+        // arbitrary code to follow; (2) last_statement's OWN optional
+        // trailing ';' (TOKEN_BREAK ';' / return_stmt ';') collided with
+        // the outer stat_list: statement ';' rule over which of the two
+        // gets to consume a trailing semicolon. Consuming the bare
+        // TOKEN_RETURN terminal directly here, with no expr_list and no
+        // semicolon-swallowing of its own, sidesteps both: nothing else
+        // in the grammar has 'if_start expr TOKEN_RETURN' as a prefix,
+        // so there's exactly one handle to reduce, and any trailing ';'
+        // is left entirely to the ordinary stat_list: statement ';'
+        // handling every other statement already goes through.
+        //
+        // Scope note: `if (x) return <value>` (a shorthand return WITH a
+        // value) is consequently NOT supported -- write it with
+        // then/end. Not a loss for celeste.lua: every then-less if in it
+        // is a bare `return` with nothing after it.
+        if (!runtime_req.needs_pico8) {
+            compiler_error(ERR_SYNTAX, yylineno,
+                "then-less if is a PICO-8 extension; add --#api pico8 to use it");
+        }
+        ASTNode *ret_node = make_node(NODE_RETURN);
+        ret_node->as.return_stmt.expressions_head = NULL;
+        ret_node->as.return_stmt.parent_func_arg_count = 0;
+
+        $$                             = $1;
+        $$ -> as.if_stmt.condition     = $2;
+        $$ -> as.if_stmt.if_body       = ret_node;
+        $$ -> as.if_stmt.else_body     = NULL;
+    }
+    | if_start expr TOKEN_BREAK {
+        // Bare `if (cond) break`. Same reasoning as the TOKEN_RETURN
+        // alternative above -- consumed as a raw terminal, not through
+        // 'last_statement', so there's no optional-semicolon collision.
+        if (!runtime_req.needs_pico8) {
+            compiler_error(ERR_SYNTAX, yylineno,
+                "then-less if is a PICO-8 extension; add --#api pico8 to use it");
+        }
+        $$                             = $1;
+        $$ -> as.if_stmt.condition     = $2;
+        $$ -> as.if_stmt.if_body       = make_node(NODE_BREAK);
+        $$ -> as.if_stmt.else_body     = NULL;
     }
     | TOKEN_DO statement_list TOKEN_END {
         // Bare scoping block: no condition, no loop tracking -- just gives

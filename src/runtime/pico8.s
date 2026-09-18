@@ -50,13 +50,13 @@ __pico8_palette:
 
 ;; Static map data (populated by compiler if PICO-8 cartridge has map)
 __pico8_map_static_width:
-	integer 128
+    integer 128
 
 __pico8_map_static_height:
-	integer 64
+    integer 64
 
 __pico8_map_static_data:
-	integer 0
+    integer 0
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -1085,6 +1085,86 @@ _pico8_add_return:
     POP  R5
     POP  R4
     POP  R3
+    POP  R2
+    POP  R1
+
+    MOV  SP, BP
+    POP  BP
+    RET
+
+;; ---------------------------------------------------------------------------
+;; PICO-8 foreach(t, f): calls f(v) for every value in t's sequence part
+;; (1..#t), in order. Discards f's return value; never stops early.
+;;
+;; Incoming Stack (pushed t, f in that order):
+;;   [BP+3] = t (boxed table pointer)
+;;   [BP+2] = f (boxed function)
+;; Returns: R0 = BOXED_NIL (foreach() returns nothing in PICO-8)
+;;
+;; Loop state (n, i, f) lives in stack slots, not registers -- the same
+;; defensive choice __builtin_table_sort makes for its comparator call,
+;; since f is arbitrary user Lua code that can clobber any register
+;; with no obligation to preserve it.
+;; ---------------------------------------------------------------------------
+__builtin_pico8_foreach:
+    PUSH BP
+    MOV  BP, SP
+    ISUB SP, 3   ; [BP-1]=n  [BP-2]=i  [BP-3]=f (boxed)
+
+    PUSH R1
+    PUSH R2
+
+    ;; --- Validate table ---
+    MOV  R1, [BP+3]
+    MOV  R2, R1
+    AND  R2, BOXED_DATA
+    IEQ  R2, BOXED_TABLE
+    JF   R2, __runtime_error_not_table
+
+    MOV  R1, [BP+2]
+    MOV  [BP-3], R1          ; save callback function
+
+    ;; --- n = #t ---
+    MOV  R1, [BP+3]
+    PUSH R1
+    CALL __builtin_len
+    IADD SP, 1
+    MOV  R1, R0
+    CFI  R1
+    MOV  [BP-1], R1          ; n
+
+    MOV  R1, 1
+    MOV  [BP-2], R1           ; i = 1
+
+__foreach_loop:
+    MOV  R1, [BP-2]
+    MOV  R2, [BP-1]
+    IGT  R1, R2
+    JT   R1, __foreach_done   ; i > n?
+
+    ;; --- v = t[i] ---
+    MOV  R1, [BP-2]
+    CIF  R1
+    MOV  R2, [BP+3]
+    PUSH R2
+    PUSH R1
+    CALL __builtin_table_get
+    IADD SP, 2
+
+    ;; --- f(v) -- single argument, result discarded ---
+    PUSH R0                   ; param 1 = v
+    MOV  R0, [BP-3]
+    CALL __builtin_exec
+    IADD SP, 1
+
+    MOV  R1, [BP-2]
+    IADD R1, 1
+    MOV  [BP-2], R1           ; i = i + 1
+    JMP  __foreach_loop
+
+__foreach_done:
+    MOV  R0, BOXED_NIL
+
     POP  R2
     POP  R1
 

@@ -603,3 +603,59 @@ bool emit_pico8_mid_intrinsic(ASTNode *node, int dest_reg)
     return true;
 }
 
+/**
+ * Emits assembly for the PICO-8 foreach(t, f) intrinsic.
+ *
+ * Calls f(v) for every value in table t's sequence part (1..#t), in
+ * order -- exactly `for v in all(t) do f(v) end`. Return values from f
+ * are discarded, and iteration never stops early (unlike old Lua 5.1's
+ * table.foreach(), which stopped on a non-nil return -- real PICO-8's
+ * foreach() does not).
+ *
+ * KNOWN LIMITATION: f is called dynamically (not known at compile
+ * time), so the compiler can't push an argument count for it the way
+ * a normal call site does when its target is statically known to be
+ * variadic. A variadic callback (function f(...) ... end) will misread
+ * its argument count here. Same limitation table.sort()'s comparator
+ * argument already has -- not new to foreach.
+ */
+bool emit_pico8_foreach_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg_t = node->as.call.args_head;
+    if (!arg_t || !arg_t->next || arg_t->next->next != NULL) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+            "PICO-8 foreach() expects exactly two arguments: foreach(t, f)");
+        return false;
+    }
+    ASTNode *arg_f = arg_t->next;
+
+    emit_asm("    ;; --- PICO-8 foreach(t, f) Intrinsic ---\n");
+
+    // Same spill-then-reload pattern as emit_table_sort_intrinsic()/
+    // emit_table_insert_intrinsic(): evaluating arg_f could itself
+    // contain a nested CALL, so t is spilled to the stack immediately
+    // after being evaluated rather than trusted to survive in-register.
+    int t_reg = allocate_register();
+    generate_asm(arg_t, t_reg);
+    ensure_in_register(t_reg);
+    emit_asm("    PUSH R%d ; spill table pointer\n", t_reg);
+
+    int f_reg = allocate_register();
+    generate_asm(arg_f, f_reg);
+    ensure_in_register(f_reg);
+
+    emit_asm("    POP  R%d ; reload table pointer\n", t_reg);
+
+    emit_asm("    PUSH R%d ; Table Pointer\n", t_reg);
+    emit_asm("    PUSH R%d ; Callback function\n", f_reg);
+    emit_asm("    CALL __builtin_pico8_foreach\n");
+    emit_asm("    IADD SP, 2\n");
+
+    if (dest_reg != 0) {
+        emit_asm("    MOV R%d, BOXED_NIL ; foreach() returns nothing\n", dest_reg);
+    }
+
+    unlock_register(t_reg);
+    unlock_register(f_reg);
+    return true;
+}

@@ -50,19 +50,20 @@ bool  emit_type_intrinsic (ASTNode *, int);
 
 //////////////////////////////////////////////////////////////////////////////
 //
-// pico-8 api intrinsics
+// PICO8 API layer intrinsics
 //
-bool  emit_pico8_spr_intrinsic   (ASTNode *);
-bool  emit_pico8_btn_intrinsic   (ASTNode *, int);
-bool  emit_pico8_btnp_intrinsic  (ASTNode *, int);
-bool  emit_pico8_add_intrinsic   (ASTNode *, int);
-bool  emit_pico8_cls_intrinsic   (ASTNode *);
-bool  emit_pico8_mget_intrinsic  (ASTNode *, int);
-bool  emit_pico8_mset_intrinsic  (ASTNode *, int);
-bool  emit_pico8_map_intrinsic   (ASTNode *);
-bool  emit_pico8_rnd_intrinsic   (ASTNode *, int);
-bool  emit_pico8_sgn_intrinsic   (ASTNode *, int);
-bool  emit_pico8_mid_intrinsic   (ASTNode *, int);
+bool  emit_pico8_spr_intrinsic     (ASTNode *);
+bool  emit_pico8_btn_intrinsic     (ASTNode *, int);
+bool  emit_pico8_btnp_intrinsic    (ASTNode *, int);
+bool  emit_pico8_add_intrinsic     (ASTNode *, int);
+bool  emit_pico8_cls_intrinsic     (ASTNode *);
+bool  emit_pico8_mget_intrinsic    (ASTNode *, int);
+bool  emit_pico8_mset_intrinsic    (ASTNode *, int);
+bool  emit_pico8_map_intrinsic     (ASTNode *);
+bool  emit_pico8_rnd_intrinsic     (ASTNode *, int);
+bool  emit_pico8_sgn_intrinsic     (ASTNode *, int);
+bool  emit_pico8_mid_intrinsic     (ASTNode *, int);
+bool  emit_pico8_foreach_intrinsic (ASTNode *, int);
 
 //////////////////////////////////////////////////////////////////////////////
 //

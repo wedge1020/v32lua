@@ -39,6 +39,32 @@ char *process_string_literal (const char *text, int  len)
     processed[j] = '\0'; // Ensure it is null-terminated for the C-side
     return (processed);
 }
+
+// PICO-8 compound assignment operators (+=, -=, *=, /=, %=). Standard Lua
+// has no compound assignment at all -- this is a PICO-8-only extension --
+// so all five share this one helper, gated on runtime_req.needs_pico8. By
+// the time any of these can be lexed, --#api pico8 (a normal TOKEN_CART_HINT
+// reduced earlier in this same single parse pass) has already set that flag,
+// PROVIDED the --#api hint appears before the first use in the source --
+// the existing convention every cart hint already follows. Outside PICO-8
+// mode this fails loudly and immediately rather than falling through to the
+// generic "syntax error" the separate '+' '=' tokens would otherwise produce.
+//
+// The operator itself is carried in yylval.number_val (reusing TOKEN_NUMBER's
+// slot in the union) as one of the NodeType enum values (NODE_ADD/NODE_SUB/
+// NODE_MUL/NODE_DIV/NODE_MOD) -- parser.y casts it back and feeds it straight
+// into the same make_node_binary() every plain '+'/'-'/'*'/'/'/'%' expr
+// already uses, so the arithmetic itself needed no new codegen.
+static int compound_assign_token (NodeType op)
+{
+    if (!runtime_req.needs_pico8) {
+        compiler_error (ERR_SYNTAX, yylineno,
+            "compound assignment operators (+=, -=, *=, /=, %%=) are a "
+            "PICO-8 extension; add --#api pico8 to use them");
+    }
+    yylval.number_val = (double) op;
+    return TOKEN_COMPOUND_ASSIGN;
+}
 %}
 
 %option noyywrap
@@ -142,6 +168,18 @@ char *process_string_literal (const char *text, int  len)
 
 "=="                    { return TOKEN_EQ;       }
 "~="                    { return TOKEN_NEQ;      }
+    /* PICO-8 alias for ~= (C-style "not equal"). Real Lua only ever has
+       ~=; this is PICO-8-specific sugar, same category as += and the
+       then-less if, so it's gated the same way -- checked here rather
+       than in parser.y since it produces the exact same TOKEN_NEQ the
+       parser already knows how to handle, so no grammar change at all. */
+"!="                    {
+                            if (!runtime_req.needs_pico8) {
+                                compiler_error (ERR_LEXICAL, yylineno,
+                                    "'!=' is a PICO-8 extension (use '~=', or add --#api pico8 to use '!=')");
+                            }
+                            return TOKEN_NEQ;
+                        }
 "<="                    { return TOKEN_LE;       }
 ">="                    { return TOKEN_GE;       }
 "<"                     { return TOKEN_LT;       }
@@ -153,6 +191,17 @@ char *process_string_literal (const char *text, int  len)
 "__asm__"               { return TOKEN_ASM;      }
 "__rawasm__"            { return TOKEN_RAWASM;   }
 "^"                     { return '^'; }
+    /* PICO-8-only compound assignment (see compound_assign_token() above).
+       Listed ahead of the plain '+' '-' '*' '/' '%' rules below, same
+       convention as "==" etc. being listed ahead of their single-char
+       prefixes -- flex's longest-match rule would pick these correctly
+       either way, but grouping the multi-char variant next to its base
+       operator matches the rest of this file. */
+"+="                    { return compound_assign_token(NODE_ADD); }
+"-="                    { return compound_assign_token(NODE_SUB); }
+"*="                    { return compound_assign_token(NODE_MUL); }
+"/="                    { return compound_assign_token(NODE_DIV); }
+"%="                    { return compound_assign_token(NODE_MOD); }
 "+"                     { return '+'; }
 "-"                     { return '-'; }
 "*"                     { return '*'; }
