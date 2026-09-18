@@ -68,6 +68,10 @@ bool  emit_pico8_sfx_intrinsic     (ASTNode *, int);
 bool  emit_pico8_music_intrinsic   (ASTNode *, int);
 bool  emit_pico8_count_intrinsic   (ASTNode *, int);
 bool  emit_pico8_del_intrinsic     (ASTNode *, int);
+bool  emit_pico8_sin_intrinsic     (ASTNode *, int);
+bool  emit_pico8_cos_intrinsic     (ASTNode *, int);
+bool  emit_pico8_tan_intrinsic     (ASTNode *, int);
+bool  emit_pico8_camera_intrinsic  (ASTNode *, int);
 
 //////////////////////////////////////////////////////////////////////////////
 //

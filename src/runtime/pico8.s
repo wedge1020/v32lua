@@ -702,6 +702,12 @@ _pico8_spr_set_scale_y:
     MOV   R7, [BP+2]        ; R7 = Base sprite 'n'
     CFI   R7                ; Convert float 'n' to integer
 
+    ;; --- camera offset (PICO-8): screen = draw_x - cam_x ---
+    MOV   R1, [BP+3]              ; base x (raw PICO-8 pixels)
+    MOV   R2, [PICO8_CAMERA_X]    ; boxed float word
+    FSUB  R1, R2                  ; R1 = x - cam_x  (two-operand)
+    FMUL  R1, PICO8_SCALE
+
     ;; --- 3. Scale + Center Base X/Y ---
     ;; Base position arrives in raw PICO-8 pixel space (0..127-ish);
     ;; scale to Vircon32 pixels and add the fixed centering offset so the
@@ -714,6 +720,12 @@ _pico8_spr_set_scale_y:
     CFI   R1
     IADD  R1, PICO8_OFFSET_X
     MOV   R8, R1            ; R8 = base X, Vircon32 screen pixels
+
+    ;; --- camera offset (PICO-8): screen = draw_y- cam_y ---
+    MOV   R1, [BP+4]              ; base y (raw PICO-8 pixels)
+    MOV   R2, [PICO8_CAMERA_Y]    ; boxed float word
+    FSUB  R1, R2                  ; R1 = y - cam_y  (two-operand)
+    FMUL  R1, PICO8_SCALE
 
     MOV   R1, [BP+4]        ; base y (raw PICO-8 pixels)
     FMUL  R1, PICO8_SCALE
@@ -1565,6 +1577,51 @@ _pico8_del_done:
     POP   R2
     POP   R1
 
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; __builtin_pico8_camera: PICO-8 camera([x, y])
+;;
+;; Stack: [BP+2] = x (boxed float or BOXED_NIL), [BP+3] = y (same)
+;; Stores the draw offset into PICO8_CAMERA_X / PICO8_CAMERA_Y.
+;; NIL (or absent) arguments are treated as 0 -- so camera() with no
+;; arguments resets the camera to (0,0), and camera(10) moves x only.
+;;
+;; The stored value is the SUBTRAHEND: primitives compute
+;;   screen = draw_pos - camera
+;; so a camera of (-2..2) (celeste's shake) wobbles drawing by +2..-2.
+;;
+;; Returns BOXED_NIL (PICO-8's previous-offset return value is not
+;; provided; celeste ignores the return of every camera() call).
+;;
+;; R2 is the dedicated destructive-compare scratch throughout.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+__builtin_pico8_camera:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; --- x ---
+    MOV   R1, [BP+2]
+    MOV   R2, R1                  ; scratch copy (destructive test next)
+    IEQ   R2, BOXED_NIL
+    JF    R2, _pico8_camera_x_set
+    MOV   R1, 0                   ; nil -> float 0.0 (all-zero word)
+_pico8_camera_x_set:
+    MOV   [PICO8_CAMERA_X], R1
+
+    ;; --- y ---
+    MOV   R1, [BP+3]
+    MOV   R2, R1
+    IEQ   R2, BOXED_NIL
+    JF    R2, _pico8_camera_y_set
+    MOV   R1, 0
+_pico8_camera_y_set:
+    MOV   [PICO8_CAMERA_Y], R1
+
+    MOV   R0, BOXED_NIL
     MOV   SP, BP
     POP   BP
     RET

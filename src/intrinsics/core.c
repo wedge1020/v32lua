@@ -475,6 +475,24 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
             return (emit_pico8_mid_intrinsic (node, dest_reg));
         }
 
+        // sin() -- PICO-8 turns-based, inverted
+        if (strcmp (func_name, "sin") == 0)
+        {
+            return (emit_pico8_sin_intrinsic (node, dest_reg));
+        }
+
+        // cos() -- PICO-8 turns-based, NOT inverted
+        if (strcmp (func_name, "cos") == 0)
+        {
+            return (emit_pico8_cos_intrinsic (node, dest_reg));
+        }
+
+        // tan() -- PICO-8 turns-based, inverted via sin/cos
+        if (strcmp (func_name, "tan") == 0)
+        {
+            return (emit_pico8_tan_intrinsic (node, dest_reg));
+        }
+
         // add()
         if (strcmp (func_name, "add")   == 0)
         {
@@ -533,6 +551,12 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         if (strcmp (func_name, "del") == 0)
         {
             return (emit_pico8_del_intrinsic (node, dest_reg));
+        }
+
+        // camera()
+        if (strcmp (func_name, "camera") == 0)
+        {
+            return (emit_pico8_camera_intrinsic (node, dest_reg));
         }
     }
 

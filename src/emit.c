@@ -593,6 +593,14 @@ int   emit_variable_map (void)
         fprintf (out(), "%%define  TIC80_FLAG_BUFFER_WORDS  0x00000080\n");
     }
 
+    if (runtime_req.needs_pico8)
+    {
+        pico8_camera_x_base = next_ram_address;   // +0: camera x (boxed float)
+        next_ram_address    = next_ram_address + 2; // +1: camera y (boxed float)
+        fprintf (out(), "%%define  PICO8_CAMERA_X           0x%.8X\n", pico8_camera_x_base);
+        fprintf (out(), "%%define  PICO8_CAMERA_Y           0x%.8X\n", (pico8_camera_x_base + 1));
+    }
+
     if (runtime_req.needs_vircon32)
     {
         fprintf (out(), "%%define  VIRCON32_BTN_PREV_STATE  0x%.8X\n", vircon32_btn_prev_state_base);

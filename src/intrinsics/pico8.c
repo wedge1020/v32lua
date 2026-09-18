@@ -923,3 +923,191 @@ bool emit_pico8_del_intrinsic (ASTNode *node, int dest_reg)
     unlock_register (v_reg);
     return true;
 }
+
+// ============================================================================
+// PICO-8 sin(x) -- x in TURNS (1.0 = full circle), result INVERTED
+// ============================================================================
+// pico8 sin(x) = -sin(x * 2*PI). Same hardware SIN instruction as
+// math.sin(x); the only difference is the turns->radians scale on input
+// and the sign flip on output, both foldable into two float ops around
+// it -- no runtime subroutine needed.
+//
+// (Inversion note: PICO-8's sin returns -sin at 0.25 turns -- sin(0.25)
+// is -1 -- because the y axis points down on screen. Celeste's bobbing
+// amplitudes etc. were authored against that convention, so the flip
+// must not be dropped.)
+bool emit_pico8_sin_intrinsic (ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+
+    if (!arg || arg->next != NULL) {
+        compiler_error (ERR_SEMANTIC, node->line_number,
+            "PICO-8 sin() expects exactly one argument: sin(x)");
+        return false;
+    }
+
+    emit_asm ("    ;; --- Intrinsic: PICO-8 sin(x) [turns, inverted] ---\n");
+
+    int arg_reg = allocate_register ();
+    generate_asm (arg, arg_reg);
+
+    // 1. turns -> radians: x = x * 2*PI   (FMUL is two-operand: Rx *= Ry)
+    int tmp_reg = allocate_register ();
+    emit_asm ("    MOV  R%d, 6.283185307179586 ; 2*PI\n", tmp_reg);
+    emit_asm ("    FMUL R%d, R%d ; x = x * 2*PI (turns -> radians)\n",
+               arg_reg, tmp_reg);
+
+    // 2. hardware sine (same instruction math.sin uses)
+    emit_asm ("    SIN  R%d ; sin(radians)\n", arg_reg);
+
+    // 3. invert: result = 0 - result   (no FNEG; FSUB from a zero reg)
+    emit_asm ("    MOV  R%d, 0\n", tmp_reg);
+    emit_asm ("    FSUB R%d, R%d ; pico8 flip: 0 - sin\n", tmp_reg, arg_reg);
+
+    if (dest_reg != 0) {
+        emit_asm ("    MOV  R%d, R%d ; Transfer result to dest_reg\n",
+                   dest_reg, tmp_reg);
+    }
+
+    unlock_register (tmp_reg);
+    unlock_register (arg_reg);
+    return true;
+}
+
+// ============================================================================
+// PICO-8 cos(x) -- x in TURNS (1.0 = full circle), NOT inverted
+// ============================================================================
+// pico8 cos(x) = cos(x * 2*PI). Unlike sin(), PICO-8's cos is a plain
+// cosine: cos(0)=1, cos(0.25)=0, cos(0.5)=-1. (The sin inversion exists
+// to match the screen's down-pointing y axis; cos has no such stake.)
+// So: scale turns->radians, hardware COS, no sign flip.
+//
+// NOTE the tempting identity that is WRONG here: cos(x) is NOT
+// sin(x + 0.25) under PICO-8 semantics -- it is -sin(x + 0.25), because
+// sin itself is inverted. Going straight to COS avoids that trap.
+bool emit_pico8_cos_intrinsic (ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+
+    if (!arg || arg->next != NULL) {
+        compiler_error (ERR_SEMANTIC, node->line_number,
+            "PICO-8 cos() expects exactly one argument: cos(x)");
+        return false;
+    }
+
+    emit_asm ("    ;; --- Intrinsic: PICO-8 cos(x) [turns, not inverted] ---\n");
+
+    int arg_reg = allocate_register ();
+    generate_asm (arg, arg_reg);
+
+    // turns -> radians
+    int tmp_reg = allocate_register ();
+    emit_asm ("    MOV  R%d, 6.283185307179586 ; 2*PI\n", tmp_reg);
+    emit_asm ("    FMUL R%d, R%d ; x = x * 2*PI (turns -> radians)\n",
+               arg_reg, tmp_reg);
+
+    // hardware cosine -- no flip
+    emit_asm ("    COS  R%d ; cos(radians)\n", arg_reg);
+
+    if (dest_reg != 0) {
+        emit_asm ("    MOV  R%d, R%d ; Transfer result to dest_reg\n",
+                   dest_reg, arg_reg);
+    }
+
+    unlock_register (tmp_reg);
+    unlock_register (arg_reg);
+    return true;
+}
+
+// ============================================================================
+// PICO-8 tan(x) -- x in TURNS, inverted (inherited from sin/cos)
+// ============================================================================
+// pico8 tan(x) = pico8_sin(x) / pico8_cos(x)
+//             = (-sin_rad(2*PI*x)) / cos_rad(2*PI*x)
+//             = -tan_rad(2*PI*x).
+// The inversion is inherited, not chosen: tan is defined as sin/cos, and
+// only the sin half is flipped. Reuses the existing __builtin_tan runtime
+// routine (same one math.tan delegates to): scale turns->radians, CALL,
+// flip the sign of R0.
+//
+// celeste.lua never calls tan(); this exists for API completeness.
+bool emit_pico8_tan_intrinsic (ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+
+    if (!arg || arg->next != NULL) {
+        compiler_error (ERR_SEMANTIC, node->line_number,
+            "PICO-8 tan() expects exactly one argument: tan(x)");
+        return false;
+    }
+
+    emit_asm ("    ;; --- Intrinsic: PICO-8 tan(x) [turns, inverted] ---\n");
+
+    int arg_reg = allocate_register ();
+    generate_asm (arg, arg_reg);
+
+    // turns -> radians
+    int tmp_reg = allocate_register ();
+    emit_asm ("    MOV  R%d, 6.283185307179586 ; 2*PI\n", tmp_reg);
+    emit_asm ("    FMUL R%d, R%d ; x = x * 2*PI (turns -> radians)\n",
+               arg_reg, tmp_reg);
+
+    // delegate to the runtime routine math.tan uses ([BP+2] = radians)
+    emit_asm ("    PUSH R%d ; radians argument\n", arg_reg);
+    emit_asm ("    CALL __builtin_tan\n");
+    emit_asm ("    IADD SP, 1 ; Clean up tan() argument\n");
+
+    // flip: result = 0 - R0   (no FNEG; FSUB from a zero reg)
+    emit_asm ("    MOV  R%d, 0\n", tmp_reg);
+    emit_asm ("    FSUB R%d, R0 ; pico8 flip: 0 - tan\n", tmp_reg);
+
+    if (dest_reg != 0) {
+        emit_asm ("    MOV  R%d, R%d ; Transfer result to dest_reg\n",
+                   dest_reg, tmp_reg);
+    }
+
+    unlock_register (tmp_reg);
+    unlock_register (arg_reg);
+    return true;
+}
+
+// ============================================================================
+// PICO-8 camera([x, y]) -> set draw offset; no args resets to (0,0)
+// ============================================================================
+bool emit_pico8_camera_intrinsic (ASTNode *node, int dest_reg)
+{
+    int      arg_count = 0;
+    ASTNode *curr      = node->as.call.args_head;
+    ASTNode *args[2]   = { NULL, NULL };
+    while (curr != NULL && arg_count < 2) {
+        args[arg_count++] = curr;
+        curr = curr->next;
+    }
+
+    if (arg_count > 2) {
+        compiler_error (ERR_SEMANTIC, node->line_number,
+            "PICO-8 camera() expects at most 2 arguments: camera([x, y])");
+        return false;
+    }
+
+    // Push right-to-left: y (or NIL), then x (or NIL)
+    for (int i = 1; i >= 0; i--) {
+        if (args[i] != NULL) {
+            int reg = allocate_register ();
+            generate_asm (args[i], reg);
+            emit_asm ("    PUSH R%d ; Arg %d\n", reg, i + 1);
+            unlock_register (reg);
+        } else {
+            emit_asm ("    MOV R0, BOXED_NIL\n");
+            emit_asm ("    PUSH R0 ; Arg %d absent -> reset to 0\n", i + 1);
+        }
+    }
+
+    emit_asm ("    CALL __builtin_pico8_camera\n");
+    emit_asm ("    IADD SP, 2 ; Clean up camera() arguments\n");
+
+    if (dest_reg != 0) {
+        emit_asm ("    MOV R%d, R0\n", dest_reg);   // BOXED_NIL
+    }
+    return true;
+}
