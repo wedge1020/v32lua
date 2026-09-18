@@ -159,6 +159,16 @@ bool is_raw_integer_expression (ASTNode *node) {
     return (false);
 }
 
+/*
+int try_emit_call_vircon32_intrinsic(ASTNode *node, int dest_reg) {
+}
+
+int try_emit_call_pico8_intrinsic(ASTNode *node, int dest_reg) {
+}
+
+int try_emit_call_tic80_intrinsic(ASTNode *node, int dest_reg) {
+}
+*/
 
 int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     char func_name[256] = {0};
@@ -327,60 +337,32 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
 
     //////////////////////////////////////////////////////////////////////////
     //
-    // Fantasy console routines: spr(), btn(), btnp()
+    // Vircon32 Fantasy console API intrinsics: spr(), btn(), btnp(), ...
     //
     //////////////////////////////////////////////////////////////////////////
 
-    // spr()
-    if (strcmp(func_name, "spr") == 0) {
-        if (runtime_req.needs_pico8 == true)
-        {
-            return (emit_pico8_spr_intrinsic (node));
-        }
-        else if (runtime_req.needs_tic80 == true)
-        {
-            return (emit_tic80_spr_intrinsic (node));
-        }
-        else
+    if (runtime_req.needs_vircon32 == true)
+    {
+        //try_emit_call_vircon32_instinsic (node, dest_reg);
+
+        // spr()
+        if (strcmp (func_name, "spr") == 0)
         {
             return (emit_vircon32_spr_intrinsic (node, dest_reg));
         }
-    }
 
-    // btn()
-    if (strcmp (func_name, "btn") == 0) {
-        if (runtime_req.needs_pico8 == true)
-        {
-            return (emit_pico8_btn_intrinsic (node, dest_reg));
-        }
-        else if (runtime_req.needs_tic80 == true)
-        {
-            return (emit_tic80_btn_intrinsic (node, dest_reg));
-        }
-        else
+        // btn()
+        if (strcmp (func_name, "btn") == 0)
         {
             return (emit_vircon32_btn_intrinsic (node, dest_reg));
         }
-    }
 
-    // btnp()
-    if (strcmp (func_name, "btnp") == 0) {
-        if (runtime_req.needs_pico8 == true)
-        {
-            return (emit_pico8_btnp_intrinsic (node, dest_reg));
-        }
-        else if (runtime_req.needs_tic80 == true)
-        {
-            return (emit_tic80_btnp_intrinsic (node, dest_reg));
-        }
-        else
+        // btnp()
+        if (strcmp (func_name, "btnp") == 0)
         {
             return (emit_vircon32_btnp_intrinsic (node, dest_reg));
         }
-    }
 
-    if (runtime_req.needs_vircon32 == true)
-    {
         // music.* / sfx.* -- native Vircon32 sound API
         if (strncmp(func_name, "music.", 6) == 0 ||
             strncmp(func_name, "sfx.",   4) == 0) {
@@ -409,160 +391,230 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         }
     }
 
-    // add()
-    if (strcmp (func_name, "add") == 0) {
-        if (runtime_req.needs_pico8 == true)
+    //////////////////////////////////////////////////////////////////////////
+    //
+    // PICO-8 Fantasy console intrinsics: spr(), btn(), btnp(), ...
+    //
+    //////////////////////////////////////////////////////////////////////////
+
+    else if (runtime_req.needs_pico8 == true)
+    {
+        //try_emit_call_pico8_intrinsic (node, dest_reg);
+
+        // spr()
+        if (strcmp (func_name, "spr") == 0)
+        {
+            return (emit_pico8_spr_intrinsic (node));
+        }
+
+        // btn()
+        if (strcmp (func_name, "btn") == 0)
+        {
+            return (emit_pico8_btn_intrinsic (node, dest_reg));
+        }
+
+        // btnp()
+        if (strcmp (func_name, "btnp") == 0)
+        {
+            return (emit_pico8_btnp_intrinsic (node, dest_reg));
+        }
+
+        //////////////////////////////////////////////////////////////////////////
+        //
+        // PICO-8 bare math globals: flr/ceil/abs/min/max/rnd/srand/sgn/mid
+        // Aliases onto the existing math.* intrinsics where semantics match
+        // exactly; rnd()/sgn()/mid() get their own bodies below where
+        // PICO-8 diverges from Lua's math library.
+        //
+        //////////////////////////////////////////////////////////////////////////
+
+        if (strcmp (func_name, "flr")   == 0) return emit_math_floor_intrinsic(node, dest_reg);
+        if (strcmp (func_name, "ceil")  == 0) return emit_math_ceil_intrinsic(node, dest_reg);
+        if (strcmp (func_name, "abs")   == 0) return emit_math_abs_intrinsic(node, dest_reg);
+        if (strcmp (func_name, "min")   == 0) return emit_math_min_intrinsic(node, dest_reg);
+        if (strcmp (func_name, "max")   == 0) return emit_math_max_intrinsic(node, dest_reg);
+        if (strcmp (func_name, "srand") == 0) return emit_math_randomseed_intrinsic(node, dest_reg);
+        if (strcmp (func_name, "rnd")   == 0) return emit_pico8_rnd_intrinsic(node, dest_reg);
+        if (strcmp (func_name, "sgn")   == 0)
+        {
+            return (emit_pico8_sgn_intrinsic(node, dest_reg));
+        }
+
+        if (strcmp (func_name, "mid")   == 0)
+        {
+            return (emit_pico8_mid_intrinsic(node, dest_reg));
+        }
+
+        // add()
+        if (strcmp (func_name, "add")   == 0) {
         {
             return (emit_pico8_add_intrinsic (node, dest_reg));
         }
-    }
 
-    // TIC-80 cls()
-    if (strcmp(func_name, "cls") == 0) {
-        if (runtime_req.needs_tic80 == true)
-        {
-            return emit_tic80_cls_intrinsic(node);
-        }
-        else if (runtime_req.needs_pico8 == true)
+        // cls()
+        if (strcmp (func_name, "cls") == 0)
         {
             return (emit_pico8_cls_intrinsic (node));
         }
-    }
 
-    // TIC-80 mget()
-    if (strcmp(func_name, "mget") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_mget_intrinsic(node, dest_reg);
+        // mget()
+        if (strcmp (func_name, "mget") == 0)
+        {
+            return (emit_pico8_mget_intrinsic(node, dest_reg));
         }
-        else if (runtime_req.needs_pico8 == true) {
-            return emit_pico8_mget_intrinsic(node, dest_reg);
-        }
-    }
 
-    // TIC-80 mset()
-    if (strcmp(func_name, "mset") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_mset_intrinsic(node, dest_reg);
+        // mset()
+        if (strcmp (func_name, "mset") == 0)
+        {
+            return (emit_pico8_mset_intrinsic (node, dest_reg));
         }
-        else if (runtime_req.needs_pico8 == true) {
-            return emit_pico8_mset_intrinsic(node, dest_reg);
-        }
-    }
 
-    // TIC-80 map()
-    if (strcmp(func_name, "map") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_map_intrinsic(node);
-        }
-        else if (runtime_req.needs_pico8 == true) {
-            return emit_pico8_map_intrinsic(node);
+        // map()
+        if (strcmp (func_name, "map") == 0)
+        {
+            return (emit_pico8_map_intrinsic (node));
         }
     }
 
-    // play() -- TIC-80 form, or the native Vircon32 form
-    if (strcmp(func_name, "play") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_play_intrinsic(node, dest_reg);
-        }
-    }
+    //////////////////////////////////////////////////////////////////////////
+    //
+    // TIC80 Fantasy console intrinsics: spr(), btn(), btnp(), ...
+    //
+    //////////////////////////////////////////////////////////////////////////
 
-    // sfx()
-    if (strcmp(func_name, "sfx") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_sfx_intrinsic(node, dest_reg);
-        }
-    }
+    else if (runtime_req.needs_tic80 == true)
+    {
+        //try_emit_call_tic80_intrinsic (node, dest_reg);
 
-    // music()
-    if (strcmp(func_name, "music") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_music_intrinsic(node, dest_reg);
+        // spr()
+        if (strcmp (func_name, "spr") == 0)
+        {
+            return (emit_tic80_spr_intrinsic (node));
         }
-    }
 
-    // TIC-80 pmem()
-    if (strcmp(func_name, "pmem") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_pmem_intrinsic(node, dest_reg);
+        // btn()
+        if (strcmp (func_name, "btn") == 0)
+        {
+            return (emit_tic80_btn_intrinsic (node, dest_reg));
         }
-    }
 
-    // TIC-80 fget() - sprite flags
-    if (strcmp(func_name, "fget") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_fget_intrinsic(node, dest_reg);
+        // btnp()
+        if (strcmp (func_name, "btnp") == 0)
+        {
+            return (emit_tic80_btnp_intrinsic (node, dest_reg));
         }
-    }
 
-    // TIC-80 fset() - sprite flags
-    if (strcmp(func_name, "fset") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_fset_intrinsic(node, dest_reg);
+        // cls()
+        if (strcmp (func_name, "cls") == 0)
+        {
+            return (emit_tic80_cls_intrinsic (node));
         }
-    }
 
-    // TIC-80 sync() -- Vircon32 has no cart memory banks, so this is a
-    // deliberate no-op. Arguments are still evaluated for side effects
-    // (Lua semantics), just never used.
-    if (strcmp(func_name, "sync") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_sync_intrinsic(node, dest_reg);
+        // mget()
+        if (strcmp (func_name, "mget") == 0)
+        {
+            return (emit_tic80_mget_intrinsic(node, dest_reg));
         }
-    }
 
-    // TIC-80 pix() -- set/read a single pixel
-    if (strcmp(func_name, "pix") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_pix_intrinsic(node, dest_reg);
+        // mset()
+        if (strcmp (func_name, "mset") == 0)
+        {
+            return (emit_tic80_mset_intrinsic (node, dest_reg));
         }
-    }
 
-    // TIC-80 line()
-    if (strcmp(func_name, "line") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_line_intrinsic(node, dest_reg);
+        // map()
+        if (strcmp (func_name, "map") == 0)
+        {
+            return (emit_tic80_map_intrinsic (node));
         }
-    }
 
-    // TIC-80 rect() -- filled rectangle
-    if (strcmp(func_name, "rect") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_rect_intrinsic(node, dest_reg);
+        // play()
+        if (strcmp (func_name, "play") == 0)
+        {
+            return (emit_tic80_play_intrinsic (node, dest_reg));
         }
-    }
 
-    // TIC-80 rectb() -- rectangle border
-    if (strcmp(func_name, "rectb") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_rectb_intrinsic(node, dest_reg);
+        // sfx()
+        if (strcmp (func_name, "sfx") == 0)
+        {
+            return (emit_tic80_sfx_intrinsic (node, dest_reg));
         }
-    }
 
-    // TIC-80 circ() -- filled circle
-    if (strcmp(func_name, "circ") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_circ_intrinsic(node, dest_reg);
+        // music()
+        if (strcmp (func_name, "music") == 0)
+        {
+            return (emit_tic80_music_intrinsic (node, dest_reg));
         }
-    }
 
-    // TIC-80 circb() -- circle border only
-    if (strcmp(func_name, "circb") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_circb_intrinsic(node, dest_reg);
+        // pmem() - persistent memory
+        if (strcmp (func_name, "pmem") == 0)
+        {
+            return (emit_tic80_pmem_intrinsic (node, dest_reg));
         }
-    }
 
-    // TIC-80 time() -- returns milliseconds since cartridge began execution
-    if (strcmp(func_name, "time") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_time_intrinsic(node, dest_reg);
+        // fget() - sprite flags
+        if (strcmp (func_name, "fget") == 0)
+        {
+            return (emit_tic80_fget_intrinsic (node, dest_reg));
         }
-    }
 
-    // TIC-80 exit() -- request the cart stop after the current frame
-    if (strcmp(func_name, "exit") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_exit_intrinsic(node, dest_reg);
+        // fset() - sprite flags
+        if (strcmp (func_name, "fset") == 0)
+        {
+            return (emit_tic80_fset_intrinsic (node, dest_reg));
+        }
+
+        // sync() - adjust memory banks
+        if (strcmp (func_name, "sync") == 0)
+            return (emit_tic80_sync_intrinsic (node, dest_reg));
+        }
+
+        // pix() -- set/read a single pixel
+        if (strcmp (func_name, "pix") == 0)
+        {
+            return (emit_tic80_pix_intrinsic (node, dest_reg));
+        }
+
+        // line()
+        if (strcmp (func_name, "line") == 0)
+        {
+            return (emit_tic80_line_intrinsic (node, dest_reg));
+        }
+
+        // rect() -- filled rectangle
+        if (strcmp (func_name, "rect") == 0)
+        {
+            return (emit_tic80_rect_intrinsic (node, dest_reg));
+        }
+
+        // rectb() -- rectangle border
+        if (strcmp (func_name, "rectb") == 0)
+        {
+            return (emit_tic80_rectb_intrinsic (node, dest_reg));
+        }
+
+        // circ() -- filled circle
+        if (strcmp (func_name, "circ") == 0)
+        {
+            return (emit_tic80_circ_intrinsic (node, dest_reg));
+        }
+
+        // circb() -- circle border only
+        if (strcmp (func_name, "circb") == 0)
+        {
+            return (emit_tic80_circb_intrinsic (node, dest_reg));
+        }
+
+        // time() -- returns milliseconds since cartridge began execution
+        if (strcmp (func_name, "time") == 0)
+        {
+            return (emit_tic80_time_intrinsic (node, dest_reg));
+        }
+
+        // exit() -- request the cart stop after the current frame
+        if (strcmp (func_name, "exit") == 0)
+        {
+            return (emit_tic80_exit_intrinsic (node, dest_reg));
         }
     }
 

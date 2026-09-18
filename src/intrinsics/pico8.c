@@ -319,16 +319,24 @@ bool emit_pico8_mset_intrinsic(ASTNode *node, int dest_reg) {
 /**
  * Emits assembly for the map() intrinsic (PICO-8 compatibility).
  *
- * Syntax: map(x, y, w, h, sx, sy[, color_key])
- * color_key is optional and defaults to 16 (opaque)
+ * Real PICO-8 syntax: map(celx, cely, sx, sy, celw, celh, [layer])
+ *   celx, cely : map cell coordinates to start reading from
+ *   sx, sy     : screen position (raw PICO-8 pixel space) to draw at
+ *   celw, celh : width/height of the region to draw, in cells
+ *   layer      : optional sprite-flag bitmask filter (see runtime TODO
+ *                -- not yet applied)
+ *
+ * Previously this took (x, y, w, h, sx, sy, [color_key]) -- screen
+ * position and cell offset swapped relative to real PICO-8, and a
+ * color_key parameter real PICO-8's map() doesn't have. Fixed to match
+ * the real signature.
  */
 bool emit_pico8_map_intrinsic(ASTNode *node) {
     emit_asm("    ;; --- PICO-8 map() Intrinsic ---\n");
 
-    // Collect up to 7 arguments
     int arg_count = 0;
     ASTNode *curr = node->as.call.args_head;
-    ASTNode *args[7] = { NULL }; // Now supports 7 arguments
+    ASTNode *args[7] = { NULL };
     while (curr != NULL && arg_count < 7) {
         args[arg_count++] = curr;
         curr = curr->next;
@@ -336,35 +344,32 @@ bool emit_pico8_map_intrinsic(ASTNode *node) {
 
     if (arg_count < 6) {
         compiler_error(ERR_SEMANTIC, node->line_number,
-                      "PICO-8 map() requires at least 6 arguments: map(x, y, w, h, sx, sy)");
+                      "PICO-8 map() requires at least 6 arguments: "
+                      "map(celx, cely, sx, sy, celw, celh)");
         return false;
     }
 
-    // Push arguments right-to-left: color_key (or default), sy, sx, h, w, y, x
-    // If color_key is not provided, push 16 (opaque) as default
+    // Push right-to-left: layer (or default 0), celh, celw, sy, sx, cely, celx
     if (arg_count >= 7) {
         int reg = allocate_register();
-        generate_asm(args[6], reg);  // color_key
-        emit_asm("PUSH R%d ; Arg 7: color_key\n", reg);
+        generate_asm(args[6], reg);  // layer
+        emit_asm("PUSH R%d ; Arg 7: layer\n", reg);
         unlock_register(reg);
     } else {
-        emit_asm("MOV R0, 16.000000 ; Default color_key (opaque)\n");
-        emit_asm("PUSH R0 ; Arg 7: color_key (default)\n");
+        emit_asm("MOV R0, 0.000000 ; Default layer (draw everything)\n");
+        emit_asm("PUSH R0 ; Arg 7: layer (default)\n");
     }
 
-    // Push the 6 required arguments (sy, sx, h, w, y, x)
+    static const char *names[6] = { "celx", "cely", "sx", "sy", "celw", "celh" };
     for (int i = 5; i >= 0; i--) {
         int reg = allocate_register();
         generate_asm(args[i], reg);
-        emit_asm("PUSH R%d ; Arg %d: %s\n", reg, i+1,
-                 i == 0 ? "x" : (i == 1 ? "y" : (i == 2 ? "w" :
-                 (i == 3 ? "h" : (i == 4 ? "sx" : "sy")))));
+        emit_asm("PUSH R%d ; Arg %d: %s\n", reg, i + 1, names[i]);
         unlock_register(reg);
     }
 
-    // Call runtime subroutine
     emit_asm("CALL __builtin_pico8_map\n");
-    emit_asm("IADD SP, 7 ; Clean up map() arguments (now 7 total)\n");
+    emit_asm("IADD SP, 7 ; Clean up map() arguments\n");
 
     return true;
 }
@@ -466,3 +471,135 @@ bool emit_pico8_btnp_intrinsic(ASTNode *node, int dest_reg) {
 
     return true;
 }
+
+/**
+ * Emits assembly for the PICO-8 rnd([x]) intrinsic.
+ *
+ * PICO-8 semantics (distinct from Lua math.random(), which switches to
+ * integer-valued results once given an argument):
+ *   rnd()   -> float in [0, 1)
+ *   rnd(x)  -> float in [0, x)
+ *
+ * rnd() with no argument is identical to math.random() with no
+ * argument and is delegated straight there. rnd(x) calls
+ * __builtin_random with NO arguments (its [0,1) float form) and scales
+ * the result by x itself, rather than routing through math.random(x)'s
+ * integer path.
+ */
+bool emit_pico8_rnd_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+
+    if (arg == NULL) {
+        return emit_math_random_intrinsic(node, dest_reg);
+    }
+    if (arg->next != NULL) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+            "PICO-8 rnd() expects 0 or 1 arguments");
+        return false;
+    }
+
+    emit_asm("    ;; --- PICO-8 rnd(x) Intrinsic ---\n");
+
+    int x_reg = allocate_register();
+    register_pinned[x_reg] = 1;
+    generate_asm(arg, x_reg);
+    emit_asm("PUSH R%d ; spill x across __builtin_random CALL\n", x_reg);
+    register_pinned[x_reg] = 0;
+
+    emit_asm("CALL __builtin_random ; no args -> R0 = float in [0,1)\n");
+
+    int result_reg = (dest_reg != 0) ? dest_reg : allocate_register();
+    emit_asm("POP  R%d ; reload x\n", x_reg);
+    emit_asm("MOV  R%d, R0 ; [0,1) sample\n", result_reg);
+    emit_asm("FMUL R%d, R%d ; scale to [0, x)\n", result_reg, x_reg);
+
+    unlock_register(x_reg);
+    if (dest_reg == 0) unlock_register(result_reg);
+    return true;
+}
+
+/**
+ * Emits assembly for the PICO-8 sgn(x) intrinsic.
+ * Returns 1.0 if x >= 0, -1.0 if x < 0 (PICO-8 maps 0 -> 1, not 0).
+ */
+bool emit_pico8_sgn_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+    if (!arg || arg->next != NULL) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+            "PICO-8 sgn() expects exactly one argument");
+        return false;
+    }
+
+    emit_asm("    ;; --- PICO-8 sgn(x) Intrinsic ---\n");
+
+    int arg_reg = allocate_register();
+    generate_asm(arg, arg_reg);
+
+    int flag_reg = allocate_register();
+    emit_asm("MOV R%d, R%d ; preserve value before destructive FLT\n", flag_reg, arg_reg);
+    emit_asm("FLT R%d, 0.0 ; (x < 0) ? 1 : 0\n", flag_reg);
+
+    int result_reg = (dest_reg != 0) ? dest_reg : allocate_register();
+    int label_id = get_next_label();
+    char done_label[64];
+    snprintf(done_label, sizeof(done_label), "__pico8_sgn_done_%d", label_id);
+
+    emit_asm("MOV R%d, 1.0\n", result_reg);
+    emit_asm("JF  R%d, %s\n", flag_reg, done_label);
+    emit_asm("MOV R%d, -1.0\n", result_reg);
+    emit_asm("%s:\n", done_label);
+
+    unlock_register(arg_reg);
+    unlock_register(flag_reg);
+    if (dest_reg == 0) unlock_register(result_reg);
+    return true;
+}
+
+/**
+ * Emits assembly for the PICO-8 mid(a, b, c) intrinsic.
+ * Returns the median of the three arguments, via
+ *   mid = max(min(a,b), min(max(a,b), c))
+ * using the ISA's non-branching FMIN/FMAX directly (same instructions
+ * math.min()/math.max() use), so no branches are needed.
+ */
+bool emit_pico8_mid_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+    if (!arg || !arg->next || !arg->next->next || arg->next->next->next != NULL) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+            "PICO-8 mid() expects exactly three arguments");
+        return false;
+    }
+
+    emit_asm("    ;; --- PICO-8 mid(a, b, c) Intrinsic ---\n");
+
+    int a_reg = allocate_register();
+    int b_reg = allocate_register();
+    int c_reg = allocate_register();
+    generate_asm(arg, a_reg);
+    generate_asm(arg->next, b_reg);
+    generate_asm(arg->next->next, c_reg);
+
+    int min_ab = allocate_register();
+    int max_ab = allocate_register();
+    emit_asm("MOV  R%d, R%d\n", min_ab, a_reg);
+    emit_asm("FMIN R%d, R%d ; min(a,b)\n", min_ab, b_reg);
+    emit_asm("MOV  R%d, R%d\n", max_ab, a_reg);
+    emit_asm("FMAX R%d, R%d ; max(a,b)\n", max_ab, b_reg);
+    emit_asm("FMIN R%d, R%d ; min(max(a,b), c)\n", max_ab, c_reg);
+    emit_asm("FMAX R%d, R%d ; mid = max(min(a,b), min(max(a,b),c))\n", min_ab, max_ab);
+
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R%d\n", dest_reg, min_ab);
+    }
+
+    unlock_register(a_reg);
+    unlock_register(b_reg);
+    unlock_register(c_reg);
+    unlock_register(min_ab);
+    unlock_register(max_ab);
+    return true;
+}
+

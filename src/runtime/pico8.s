@@ -7,13 +7,24 @@
 ;; ===========================================================================
 ;; PICO-8 CONSTANTS
 ;; ===========================================================================
-
 ;; Map dimensions (PICO-8 default: 128x32 cells, but can support up to 128x64)
 %define PICO8_MAP_MAX_WIDTH     128
 %define PICO8_MAP_MAX_HEIGHT    64
 %define PICO8_MAP_MAX_CELLS     8192   ; 128*64
 %define PICO8_MAP_ACTUAL_WIDTH  128
 %define PICO8_MAP_ACTUAL_HEIGHT 128
+
+;; Display scale: 128x128 PICO-8 canvas -> 640x360 Vircon32 screen.
+;; 2.75 is chosen deliberately over a more "exact" ratio (640/128=5.0
+;; would overflow; other in-between values produced the same 1px
+;; sub-pixel seam issue seen on TIC-80's non-clean scale factors) --
+;; 128*2.75=352, a clean integer, avoids that. Centered on a 640x360
+;; screen: (640-352)/2=144 would be the naive top-left-origin center,
+;; but measured against the real GPU coordinate origin the correct
+;; offset is 464 horizontally; vertically (360-352)/2=4 does match.
+%define PICO8_SCALE             2.75
+%define PICO8_OFFSET_X          464
+%define PICO8_OFFSET_Y          4
 
 ;; Buffer size in words (64KB = 16384 words)
 %define PICO8_MAP_BUFFER_WORDS  16384
@@ -417,10 +428,22 @@ _pico8_mset_done:
 ;;
 ;; __builtin_pico8_map: Draw map region to screen
 ;;
-;; Stack: [BP+2] = x, [BP+3] = y, [BP+4] = w, [BP+5] = h,
-;;        [BP+6] = sx, [BP+7] = sy, [BP+8] = color_key (optional, default 16)
+;; Real PICO-8 signature: map(celx, cely, sx, sy, celw, celh, [layer])
+;; Stack: [BP+2]=celx, [BP+3]=cely, [BP+4]=sx, [BP+5]=sy,
+;;        [BP+6]=celw, [BP+7]=celh, [BP+8]=layer (optional, default 0)
+;;
+;; Loaded into the SAME registers this routine already used under the
+;; old argument order (R1/R2 = screen position, R5/R6 = map-cell
+;; offset, R3/R4 = dimensions), so only the "Load arguments" block
+;; below differs from before -- the clamp/lookup logic is unchanged.
 ;;
 ;; Note: PICO-8 map uses sprite IDs 0-255 (vs TIC-80's 0-511)
+;;
+;; TODO: real PICO-8's [layer] argument only draws tiles whose sprite
+;; flags match the given bitmask. Not implemented -- every tile in the
+;; requested region is drawn regardless of layer/flags. PICO-8 also has
+;; no fget()/fset() at all yet on this API surface (only TIC-80 does),
+;; which would need to exist first.
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -428,7 +451,6 @@ __builtin_pico8_map:
     PUSH  BP
     MOV   BP, SP
 
-    ;; Save callee-saved registers
     PUSH  R1
     PUSH  R2
     PUSH  R3
@@ -443,20 +465,19 @@ __builtin_pico8_map:
     PUSH  R12
     PUSH  R13
 
-    ;; Load buffer pointer
     MOV   R1, var_PICO8_MAP_BUFFER_PTR
     MOV   R12, [R1]
     IEQ   R12, 0
     JT    R12, _pico8_map_done
 
     ;; Load arguments
-    MOV   R1, [BP+2]        ; x
-    MOV   R2, [BP+3]        ; y
-    MOV   R3, [BP+4]        ; w
-    MOV   R4, [BP+5]        ; h
-    MOV   R5, [BP+6]        ; sx
-    MOV   R6, [BP+7]        ; sy
-    MOV   R13, [BP+8]       ; color_key (7th argument, or default 16)
+    MOV   R1, [BP+4]        ; sx (screen X, raw PICO-8 pixels)
+    MOV   R2, [BP+5]        ; sy (screen Y, raw PICO-8 pixels)
+    MOV   R3, [BP+6]        ; celw
+    MOV   R4, [BP+7]        ; celh
+    MOV   R5, [BP+2]        ; celx (map cell offset X)
+    MOV   R6, [BP+3]        ; cely (map cell offset Y)
+    MOV   R13, [BP+8]       ; layer (optional, default 0; unused for now)
     CFI   R1
     CFI   R2
     CFI   R3
@@ -471,7 +492,7 @@ __builtin_pico8_map:
     ILT   R4, 1
     JT    R4, _pico8_map_done
 
-    ;; Clamp sx
+    ;; Clamp celx
     MOV   R7, R5
     ILT   R7, 0
     JT    R7, _pico8_map_sx_zero
@@ -488,7 +509,7 @@ _pico8_map_sx_zero:
 _pico8_map_sx_max:
     MOV   R5, R8
 
-    ;; Clamp sy
+    ;; Clamp cely
 _pico8_map_check_sy:
     MOV   R7, R6
     ILT   R7, 0
@@ -506,76 +527,74 @@ _pico8_map_sy_zero:
 _pico8_map_sy_max:
     MOV   R6, R8
 
-    ;; Set colorkey from argument (already loaded into R13)
-    ;; For PICO-8, color_key 0-15 makes that palette color transparent
-    ;; color_key >= 16 means opaque (no transparency)
-
-    ;; Outer loop: rows (R9)
-    MOV   R9, 0
 _pico8_map_row_loop_start:
+    MOV   R9, 0
+    ; (fallthrough retained from original structure)
+
     MOV   R7, R9
     IGE   R7, R4
     JT    R7, _pico8_map_done
 
-    ;; Inner loop: columns (R10)
     MOV   R10, 0
 _pico8_map_col_loop_start:
     MOV   R7, R10
     IGE   R7, R3
     JT    R7, _pico8_map_row_loop_next
 
-    ;; Calculate map cell position
     MOV   R7, R5
-    IADD  R7, R10           ; sx + col
+    IADD  R7, R10           ; celx + col
     MOV   R8, R6
-    IADD  R8, R9            ; sy + row
+    IADD  R8, R9            ; cely + row
 
-    ;; Calculate byte index: (sy+row) * width + (sx+col)
     MOV   R11, PICO8_MAP_ACTUAL_WIDTH
-    IMUL  R8, R11           ; (sy+row) * width
-    IADD  R7, R8           ; byte index
+    IMUL  R8, R11
+    IADD  R7, R8
 
-    ;; Calculate word index and byte offset
     MOV   R8, R7
-    SHL   R8, -2           ; word index = byte_index / 4
-    AND   R7, 3            ; byte offset (0-3)
+    SHL   R8, -2
+    AND   R7, 3
 
-    ;; Load word from buffer
     MOV   R11, R12
     IADD  R11, R8
-    MOV   R11, [R11]       ; R11 = word containing byte
+    MOV   R11, [R11]
 
-    ;; Extract sprite ID byte
-    SHL   R7, 3            ; bit shift
+    SHL   R7, 3
     ISGN  R7
-    SHL   R11, R7          ; shift right to extract
-    AND   R11, 0xFF        ; R11 = sprite ID (0-255 for PICO-8)
+    SHL   R11, R7
+    AND   R11, 0xFF        ; R11 = sprite ID
 
-    ;; Calculate screen position
+    ;; Calculate RAW screen position (still PICO-8 pixel space --
+    ;; __builtin_pico8_spr applies PICO8_SCALE + centering itself).
     MOV   R7, R10
     IMUL  R7, 8
-    IADD  R7, R1           ; x + col*8
+    IADD  R7, R1           ; sx + col*8
     MOV   R8, R9
     IMUL  R8, 8
-    IADD  R8, R2           ; y + row*8
+    IADD  R8, R2           ; sy + row*8
 
-    ;; Draw sprite using __builtin_pico8_spr
-    MOV   R10, 1.0
-    PUSH  R10              ; h = 1
-    PUSH  R10              ; w = 1
-    MOV   R10, 0
-    PUSH  R10              ; rotate = 0 (PICO-8 spr doesn't support rotate)
-    PUSH  R10              ; flip = 0
-    PUSH  R10              ; scale = 1.0
-    PUSH  R13              ; colorkey (from argument)
-    PUSH  R8               ; y
-    PUSH  R7               ; x
-    PUSH  R11              ; id
+    CIF   R7                ; -> float x, for __builtin_pico8_spr
+    CIF   R8                ; -> float y, for __builtin_pico8_spr
+
+    ;; Draw this tile using __builtin_pico8_spr's REAL 7-argument
+    ;; signature (n, x, y, w, h, flip_x, flip_y). The previous version
+    ;; pushed 9 arguments -- a stale layout from before spr()'s
+    ;; signature was finalized -- and built them by clobbering R10, the
+    ;; live COLUMN LOOP COUNTER, as scratch. R0 is genuinely free here.
+    MOV   R0, BOXED_FALSE
+    PUSH  R0                ; flip_y = false
+    PUSH  R0                ; flip_x = false
+    MOV   R0, 1.0
+    PUSH  R0                ; h = 1
+    PUSH  R0                ; w = 1
+    PUSH  R8                ; y
+    PUSH  R7                ; x
+    MOV   R0, R11
+    CIF   R0                ; sprite id as float
+    PUSH  R0                ; n
 
     CALL  __builtin_pico8_spr
-    IADD  SP, 9
+    IADD  SP, 7
 
-    ;; Next column
     IADD  R10, 1
     JMP   _pico8_map_col_loop_start
 
@@ -584,7 +603,6 @@ _pico8_map_row_loop_next:
     JMP   _pico8_map_row_loop_start
 
 _pico8_map_done:
-    ;; Restore registers
     POP   R13
     POP   R12
     POP   R11
@@ -636,25 +654,44 @@ __builtin_pico8_spr:
     PUSH  BP
     MOV   BP, SP
 
+    ;; --- Callee-Save ---
+    ;; This routine is called both directly (compiler-emitted spr()
+    ;; intrinsic) and from inside __builtin_pico8_map()'s per-tile draw
+    ;; loop, which keeps live state (loop counters, base position) in
+    ;; registers across the CALL. This routine uses R1-R10 internally,
+    ;; so all of them must be preserved -- their absence here previously
+    ;; corrupted map()'s row/col counters on every tile it drew.
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
+    PUSH  R7
+    PUSH  R8
+    PUSH  R9
+    PUSH  R10
+
     ;; --- 1. Set Global Scales & Flip Flags ---
-    MOV   R1, 3.0
+    ;; Uniform PICO8_SCALE: 128 PICO-8 px * 2.75 = 352px square, centered
+    ;; via PICO8_OFFSET_X/Y below.
+    MOV   R1, PICO8_SCALE
     MOV   R2, [BP+7]        ; flip_x
-    INE   R2, BOXED_TRUE
-    JT    R2, _pico8_spr_set_scale_x
-    MOV   R1, -3.0
+    IEQ   R2, BOXED_TRUE
+    JF    R2, _pico8_spr_set_scale_x
+    FSGN  R1
 _pico8_spr_set_scale_x:
     OUT   GPU_DrawingScaleX, R1
 
-    MOV   R1, 3.0
+    MOV   R1, PICO8_SCALE
     MOV   R2, [BP+8]        ; flip_y
-    INE   R2, BOXED_TRUE
-    JT    R2, _pico8_spr_set_scale_y
-    MOV   R1, -3.0
-
+    IEQ   R2, BOXED_TRUE
+    JF    R2, _pico8_spr_set_scale_y
+    FSGN  R1
 _pico8_spr_set_scale_y:
     OUT   GPU_DrawingScaleY, R1
 
-    ;; --- 2. Prepare Loop Limits & Convert ALL Floats to Integers ---
+    ;; --- 2. Prepare Loop Limits ---
     MOV   R1, [BP+5]
     MOV   R5, R1            ; R5 = w
     CFI   R5                ; Convert float 'w' to integer limit (cols)
@@ -663,94 +700,129 @@ _pico8_spr_set_scale_y:
     CFI   R6                ; Convert float 'h' to integer limit (rows)
 
     MOV   R7, [BP+2]        ; R7 = Base sprite 'n'
-    CFI   R7                ; [FIX 1] Convert float 'n' to integer!
-    MOV   R8, [BP+3]        ; R8 = Base 'x'
-    CFI   R8                ; [FIX 1] Convert float 'x' to integer!
-    MOV   R9, [BP+4]        ; R9 = Base 'y'
-    CFI   R9                ; [FIX 1] Convert float 'y' to integer!
+    CFI   R7                ; Convert float 'n' to integer
 
-    ;; Initialize Row Counter
+    ;; --- 3. Scale + Center Base X/Y ---
+    ;; Base position arrives in raw PICO-8 pixel space (0..127-ish);
+    ;; scale to Vircon32 pixels and add the fixed centering offset so the
+    ;; 352x352 scaled canvas lands centered on the 640x360 screen.
+    ;; Round-before-truncate (FADD 0.5 -> CFI) matches the TIC-80 fix for
+    ;; sub-pixel seams from an un-rounded scale multiply.
+    MOV   R1, [BP+3]        ; base x (raw PICO-8 pixels)
+    FMUL  R1, PICO8_SCALE
+    FADD  R1, 0.5
+    CFI   R1
+    IADD  R1, PICO8_OFFSET_X
+    MOV   R8, R1            ; R8 = base X, Vircon32 screen pixels
+
+    MOV   R1, [BP+4]        ; base y (raw PICO-8 pixels)
+    FMUL  R1, PICO8_SCALE
+    FADD  R1, 0.5
+    CFI   R1
+    IADD  R1, PICO8_OFFSET_Y
+    MOV   R9, R1            ; R9 = base Y, Vircon32 screen pixels
+
+    ;; --- Pre-calculate scaled per-tile offset (8 * scale) ---
+    MOV   R1, 8.0
+    FMUL  R1, PICO8_SCALE
+    MOV   R10, R1           ; R10 = 8 * scale (Vircon32 pixels per tile)
+
     MOV   R4, 0             ; R4 = row
 
 _pico8_spr_row_loop_start:
-    MOV   R1, R4            ; preserve R4 from destructive comparison
+    MOV   R1, R4
     IGE   R1, R6
-    JT    R1, _pico8_spr_end_spr      ; If row >= h, we are done
+    JT    R1, _pico8_spr_end_spr
 
-    ;; Initialize Col Counter
     MOV   R3, 0             ; R3 = col
 
 _pico8_spr_col_loop_start:
-    MOV   R1, R3            ; preserve R3 from destructive comparison
-    IGE   R1, R5            ; (If col >= w, move to next row)
+    MOV   R1, R3
+    IGE   R1, R5
     JT    R1, _pico8_spr_row_loop_end
 
-    ;; --- 3. Calculate Target Region ID ---
-    ;; region = n + col + (row * 16)
+    ;; --- 4. Calculate Target Region ID ---
     MOV   R1, R4
     IMUL  R1, 16
     IADD  R1, R3
     IADD  R1, R7
     OUT   GPU_SelectedRegion, R1
 
-    ;; --- 4. Calculate X Coordinate ---
+    ;; --- 5. Calculate X Coordinate (with rounding) ---
     MOV   R1, [BP+7]        ; check flip_x
     IEQ   R1, BOXED_TRUE
     JT    R1, _pico8_spr_calc_flip_x
 
-    ;; Normal X = base_x + (col * 8)
     MOV   R1, R3
-    IMUL  R1, 8
+    CIF   R1
+    FMUL  R1, R10
+    FADD  R1, 0.5
+    CFI   R1
     IADD  R1, R8
     JMP   _pico8_spr_set_x
 
 _pico8_spr_calc_flip_x:
-    ;; [FIX 3] Flipped X = base_x + (w - 1 - col) * 8
     MOV   R1, R5
-    ISUB  R1, 1             ; Subtract 1 for zero-indexed grid mirroring
+    ISUB  R1, 1
     ISUB  R1, R3
-    IMUL  R1, 8
+    CIF   R1
+    FMUL  R1, R10
+    FADD  R1, 0.5
+    CFI   R1
     IADD  R1, R8
 
 _pico8_spr_set_x:
     OUT   GPU_DrawingPointX, R1
 
-    ;; --- 5. Calculate Y Coordinate ---
+    ;; --- 6. Calculate Y Coordinate (with rounding) ---
     MOV   R1, [BP+8]        ; check flip_y
     IEQ   R1, BOXED_TRUE
     JT    R1, _pico8_spr_calc_flip_y
 
-    ;; Normal Y = base_y + (row * 8)
     MOV   R1, R4
-    IMUL  R1, 8
+    CIF   R1
+    FMUL  R1, R10
+    FADD  R1, 0.5
+    CFI   R1
     IADD  R1, R9
     JMP   _pico8_spr_set_y
 
 _pico8_spr_calc_flip_y:
-    ;; [FIX 3] Flipped Y = base_y + (h - 1 - row) * 8
     MOV   R1, R6
-    ISUB  R1, 1             ; Subtract 1 for zero-indexed grid mirroring
+    ISUB  R1, 1
     ISUB  R1, R4
-    IMUL  R1, 8
+    CIF   R1
+    FMUL  R1, R10
+    FADD  R1, 0.5
+    CFI   R1
     IADD  R1, R9
 
 _pico8_spr_set_y:
     OUT   GPU_DrawingPointY, R1
 
-    ;; --- 6. Issue Draw Command ---
+    ;; --- 7. Issue Draw Command ---
     OUT   GPU_Command, GPUCommand_DrawRegionZoomed
 
-    ;; --- 7. Inner Loop Iteration ---
-    IADD  R3, 1             ; col++
+    IADD  R3, 1
     JMP   _pico8_spr_col_loop_start
 
 _pico8_spr_row_loop_end:
-    ;; --- 8. Outer Loop Iteration ---
-    IADD  R4, 1             ; row++
+    IADD  R4, 1
     JMP   _pico8_spr_row_loop_start
 
 _pico8_spr_end_spr:
-    ;; --- 9. Cleanup ---
+    ;; --- 8. Callee-Restore ---
+    POP   R10
+    POP   R9
+    POP   R8
+    POP   R7
+    POP   R6
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+
     MOV   SP, BP
     POP   BP
     RET
