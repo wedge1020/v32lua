@@ -823,3 +823,57 @@ bool emit_pico8_music_intrinsic (ASTNode *node, int dest_reg)
     call_node->as.call.args_head = sound_lit;
     return emit_vircon32_play_intrinsic (call_node, dest_reg);
 }
+
+// ============================================================================
+// PICO-8 count(t) -> number of non-nil elements in table t
+// ============================================================================
+// Deliberately NOT an alias for #t / __builtin_table_len: PICO-8's count()
+// skips nil holes inside the tracked contiguous range (celeste's got_fruit
+// depends on this: 30 slots, only the collected fruits set to true), and
+// includes sparse positive-integer keys that table_set parked in the hash
+// part. __builtin_pico8_count walks both parts; see pico8.s.txt.
+//
+// The 2-argument occurrence-counting form count(t, v) (PICO-8 0.2+) is a
+// compile error naming the limitation -- same policy as dynamic music()
+// track numbers: celeste.lua never uses it, and a boxed-word equality
+// check would silently mis-compare strings anyway.
+bool emit_pico8_count_intrinsic (ASTNode *node, int dest_reg)
+{
+    int      arg_count = 0;
+    ASTNode *curr      = node->as.call.args_head;
+    ASTNode *args[2]   = { NULL, NULL };
+    while (curr != NULL && arg_count < 2) {
+        args[arg_count++] = curr;
+        curr = curr->next;
+    }
+
+    if (arg_count < 1) {
+        compiler_error (ERR_SEMANTIC, node->line_number,
+                         "count() requires 1 argument: count(t)");
+        return false;
+    }
+
+    if (args[1] != NULL) {
+        compiler_error (ERR_SEMANTIC, node->line_number,
+                         "count(t, v) occurrence counting is not supported; "
+                         "only count(t) (element count)");
+        return false;
+    }
+
+    // Single-argument call: evaluate t straight into a register and push
+    // immediately -- no second argument can interleave a nested CALL, so
+    // no spill-then-reload dance is needed (same shape as mget()).
+    int t_reg = allocate_register ();
+    generate_asm (args[0], t_reg);
+    emit_asm ("PUSH R%d ; Arg 1: table\n", t_reg);
+    unlock_register (t_reg);
+
+    emit_asm ("CALL __builtin_pico8_count\n");
+    emit_asm ("IADD SP, 1 ; Clean up count() arguments\n");
+
+    if (dest_reg != 0) {
+        emit_asm ("MOV R%d, R0 ; count result\n", dest_reg);
+    }
+
+    return true;
+}

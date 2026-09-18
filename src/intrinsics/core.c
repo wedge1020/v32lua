@@ -522,6 +522,12 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         {
             return (emit_pico8_sfx_intrinsic (node, dest_reg));
         }
+
+        // count()
+        if (strcmp (func_name, "count") == 0)
+        {
+            return (emit_pico8_count_intrinsic (node, dest_reg));
+        }
     }
 
     //////////////////////////////////////////////////////////////////////////

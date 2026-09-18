@@ -1313,3 +1313,140 @@ _pico8_sfx_done:
     POP   BP
     RET
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; __builtin_pico8_count: PICO-8 count(t)
+;;
+;; Stack layout relative to BP:
+;; [BP+2]: t (boxed table pointer)
+;;
+;; Returns: R0 = number of non-nil elements, as a boxed float
+;;
+;; Counts BOTH table parts (this is what separates count() from #t):
+;;   - array part: elements [array_ptr .. array_ptr+length), counting
+;;     words != BOXED_NIL (holes inside the tracked contiguous range
+;;     are stored as BOXED_NIL words and skipped -- celeste's got_fruit
+;;     depends on this).
+;;   - hash part: the bucket chain rooted at Word 3, counting each
+;;     stored (key, value) pair whose value word != BOXED_NIL.
+;;
+;; CODING RULES OBEYED HERE:
+;;   - Vircon32 compares are DESTRUCTIVE: "IEQ Ra, Rb" overwrites Ra
+;;     with the boolean result. R2 is the designated compare scratch:
+;;     every destructive test loads a COPY into R2 first, so no live
+;;     value is ever the destination. R2 holds nothing that survives
+;;     past a single test.
+;;   - Addressing has NO reg+reg form ([R1+R2] is illegal; only
+;;     [R1+constant]). Both loops therefore walk with RUNNING
+;;     POINTERS (incremented in place) against a precomputed END
+;;     pointer, instead of indexing a base by a loop counter.
+;;   - Two-operand arithmetic only: IADD R4, R3 computes R4 = R4 + R3.
+;;
+;; Register Usage: R1-R7 (all callee-saved)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_pico8_count:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; --- Callee-Save ---
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
+    PUSH  R7
+
+    ;; --- 1. Validate + unbox table ---
+    MOV   R1, [BP+2]              ; R1 = tagged table pointer
+    MOV   R2, R1                  ; copy for the tag test (destructive!)
+    AND   R2, BOXED_DATA
+    IEQ   R2, BOXED_TABLE
+    JF    R2, __runtime_error_not_table
+    AND   R1, BOXED_PAYLOAD       ; R1 = raw table header
+
+    MOV   R7, 0                   ; R7 = running count (raw integer)
+
+    ;; --- 2. Array part: walk [array_ptr, array_ptr + length) ---
+    MOV   R3, [R1+2]              ; R3 = array data pointer (Word 2)
+    MOV   R2, R3                  ; test on scratch
+    IEQ   R2, 0
+    JT    R2, _pico8_count_hash   ; no array -> hash part only
+
+    MOV   R4, [R1+1]              ; R4 = tracked contiguous length (Word 1)
+    IADD  R4, R3                  ; R4 = end pointer = length + array base
+    ;; (two-operand add: R4 = R4 + R3)
+
+_pico8_count_array_loop:
+    MOV   R2, R3                  ; test on scratch -- R3 (walker) survives
+    IEQ   R2, R4
+    JT    R2, _pico8_count_hash   ; walker reached end -> done with array
+
+    MOV   R5, [R3]                ; R5 = current element (boxed word)
+    MOV   R2, R5                  ; copy for the nil test (destructive!)
+    IEQ   R2, BOXED_NIL
+    JT    R2, _pico8_count_array_next
+    IADD  R7, 1                   ; non-nil -> count it
+
+_pico8_count_array_next:
+    IADD  R3, 1                   ; advance walker (in place, no reg+reg)
+    JMP   _pico8_count_array_loop
+
+    ;; --- 3. Hash part: bucket chain walk ---
+    ;; Bucket layout: Word 0 = PairCount, Word 1 = NextBucketPtr,
+    ;; then PairCount (key, value) word pairs starting at offset 2.
+_pico8_count_hash:
+    MOV   R3, [R1+3]              ; R3 = base hash pointer (Word 3)
+    MOV   R2, R3
+    IEQ   R2, 0
+    JT    R2, _pico8_count_done
+
+_pico8_count_bucket_loop:
+    MOV   R5, [R3]                ; R5 = PairCount of current bucket
+    MOV   R4, R3
+    IADD  R4, 2                   ; R4 = pairs walker -> &Key0
+    MOV   R6, R5
+    IMUL  R6, 2                   ; R6 = byte-ish span of pairs (in words)
+    IADD  R6, R4                  ; R6 = pairs end pointer
+
+_pico8_count_pair_loop:
+    MOV   R2, R4                  ; test on scratch -- R4 (walker) survives
+    IEQ   R2, R6
+    JT    R2, _pico8_count_next_bucket
+
+    MOV   R5, [R4+1]              ; R5 = value word of this pair
+    MOV   R2, R5                  ; copy for the nil test (destructive!)
+    IEQ   R2, BOXED_NIL
+    JT    R2, _pico8_count_pair_next
+    IADD  R7, 1                   ; non-nil -> count it
+
+_pico8_count_pair_next:
+    IADD  R4, 2                   ; advance to next (key, value) pair
+    JMP   _pico8_count_pair_loop
+
+_pico8_count_next_bucket:
+    MOV   R6, [R3+1]              ; R6 = NextBucketPtr
+    MOV   R2, R6                  ; test on scratch -- R6 survives only
+    IEQ   R2, 0                   ; until the move below; fine either way
+    JT    R2, _pico8_count_done   ; end of chain
+    MOV   R3, R6                  ; step to next bucket
+    JMP   _pico8_count_bucket_loop
+
+_pico8_count_done:
+    MOV   R0, R7
+    CIF   R0                      ; count as boxed float
+
+    ;; --- Callee-Restore ---
+    POP   R7
+    POP   R6
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+
+    MOV   SP, BP
+    POP   BP
+    RET
+
