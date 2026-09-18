@@ -446,7 +446,7 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         }
 
         // add()
-        if (strcmp (func_name, "add")   == 0) {
+        if (strcmp (func_name, "add")   == 0)
         {
             return (emit_pico8_add_intrinsic (node, dest_reg));
         }
@@ -572,6 +572,7 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
 
         // sync() - adjust memory banks
         if (strcmp (func_name, "sync") == 0)
+        {
             return (emit_tic80_sync_intrinsic (node, dest_reg));
         }
 
