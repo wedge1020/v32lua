@@ -1111,3 +1111,149 @@ bool emit_pico8_camera_intrinsic (ASTNode *node, int dest_reg)
     }
     return true;
 }
+
+// ============================================================================
+// Shared argument-pusher for the PICO-8 shape primitives.
+// Evaluates args right-to-left into pinned registers and pushes them, so a
+// nested CALL inside any argument expression can't clobber an already-
+// evaluated one. NIL-pads absent trailing arguments.
+// ============================================================================
+static bool pico8_push_args (ASTNode *node, int max_args,
+                             const char *names[], int *out_arg_count)
+{
+    ASTNode *args[8] = { NULL };
+    int      arg_count = 0;
+    for (ASTNode *curr = node->as.call.args_head;
+         curr != NULL && arg_count < max_args; curr = curr->next) {
+        args[arg_count++] = curr;
+    }
+    *out_arg_count = arg_count;
+
+    for (int i = max_args - 1; i >= 0; i--) {
+        int reg = allocate_register ();
+        register_pinned[reg] = 1;
+        if (i < arg_count) {
+            generate_asm (args[i], reg);
+            emit_asm ("    PUSH R%d ; Arg %d: %s\n", reg, i + 1, names[i]);
+        } else {
+            emit_asm ("    MOV R%d, BOXED_NIL ; Default %s\n", reg, names[i]);
+            emit_asm ("    PUSH R%d\n", reg);
+        }
+        register_pinned[reg] = 0;
+        unlock_register (reg);
+    }
+    return true;
+}
+
+// ============================================================================
+// PICO-8 rectfill(x0, y0, x1, y1 [, color]) -- filled rectangle from corners
+// ============================================================================
+// Runtime: __builtin_pico8_rectfill. Corner order is normalized at runtime
+// (FMIN/FMAX); color defaults per PICO-8 to the current draw color, which
+// this API layer does not track -- absent color NIL-pads and the runtime
+// clamps to 0. celeste always passes an explicit color.
+bool emit_pico8_rectfill_intrinsic (ASTNode *node, int dest_reg)
+{
+    static const char *names[5] = { "x0", "y0", "x1", "y1", "color" };
+    int arg_count = 0;
+    pico8_push_args (node, 5, names, &arg_count);
+
+    if (arg_count < 4) {
+        compiler_error (ERR_SEMANTIC, node->line_number,
+            "PICO-8 rectfill() expects at least 4 arguments: "
+            "rectfill(x0, y0, x1, y1 [, color])");
+        return false;
+    }
+
+    emit_asm ("    CALL __builtin_pico8_rectfill\n");
+    emit_asm ("    IADD SP, 5 ; Clean up rectfill() arguments\n");
+
+    if (dest_reg != 0) {
+        emit_asm ("    MOV R%d, R0\n", dest_reg);
+    }
+    return true;
+}
+
+// ============================================================================
+// PICO-8 circfill(x, y, r [, color]) -- filled circle
+// ============================================================================
+bool emit_pico8_circfill_intrinsic (ASTNode *node, int dest_reg)
+{
+    static const char *names[4] = { "x", "y", "radius", "color" };
+    int arg_count = 0;
+    pico8_push_args (node, 4, names, &arg_count);
+
+    if (arg_count < 3) {
+        compiler_error (ERR_SEMANTIC, node->line_number,
+            "PICO-8 circfill() expects at least 3 arguments: "
+            "circfill(x, y, r [, color])");
+        return false;
+    }
+
+    emit_asm ("    CALL __builtin_pico8_circfill\n");
+    emit_asm ("    IADD SP, 4 ; Clean up circfill() arguments\n");
+
+    if (dest_reg != 0) {
+        emit_asm ("    MOV R%d, R0\n", dest_reg);
+    }
+    return true;
+}
+
+// ============================================================================
+// PICO-8 line(x0, y0, x1, y1 [, color]) -- 1px line between two points
+// ============================================================================
+bool emit_pico8_line_intrinsic (ASTNode *node, int dest_reg)
+{
+    static const char *names[5] = { "x0", "y0", "x1", "y1", "color" };
+    int arg_count = 0;
+    pico8_push_args (node, 5, names, &arg_count);
+
+    if (arg_count < 4) {
+        compiler_error (ERR_SEMANTIC, node->line_number,
+            "PICO-8 line() expects at least 4 arguments: "
+            "line(x0, y0, x1, y1 [, color])");
+        return false;
+    }
+
+    emit_asm ("    CALL __builtin_pico8_line\n");
+    emit_asm ("    IADD SP, 5 ; Clean up line() arguments\n");
+
+    if (dest_reg != 0) {
+        emit_asm ("    MOV R%d, R0\n", dest_reg);
+    }
+    return true;
+}
+
+// ============================================================================
+// PICO-8 print(str [, x [, y [, color]]])
+// ============================================================================
+// Wraps __builtin_print via __builtin_pico8_print, which converts PICO-8
+// screen coordinates (camera-adjusted, scaled, centered) to Vircon32 ones.
+// PICO-8's no-coordinate form prints at the cursor; this layer has no
+// cursor, so absent x/y NIL-pad and the runtime clamps to (0,0).
+// celeste always passes x and y.
+//
+// DISPATCH NOTE: the generic print() handler in try_emit_call_intrinsic()
+// runs BEFORE the console-API if/else chain -- add a needs_pico8 guard
+// there (or check print here first in the pico8 section), exactly like
+// the music() dispatch-order fix.
+bool emit_pico8_print_intrinsic (ASTNode *node, int dest_reg)
+{
+    static const char *names[4] = { "str", "x", "y", "color" };
+    int arg_count = 0;
+    pico8_push_args (node, 4, names, &arg_count);
+
+    if (arg_count < 1) {
+        compiler_error (ERR_SEMANTIC, node->line_number,
+            "PICO-8 print() expects at least 1 argument: print(str [, x [, y [, color]]])");
+        return false;
+    }
+
+    emit_asm ("    CALL __builtin_pico8_print\n");
+    emit_asm ("    IADD SP, 4 ; Clean up print() arguments\n");
+
+    if (dest_reg != 0) {
+        emit_asm ("    MOV R%d, R0 ; passthrough string\n", dest_reg);
+    }
+    return true;
+}

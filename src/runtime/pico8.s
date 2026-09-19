@@ -125,6 +125,40 @@ _pico8_init_loop:
     IADD  R3, 8
     JMP   _pico8_init_loop
 
+_pico8_init_swatches:
+    ;; Register the 16 solid-color palette swatches (regions 256-271)
+    ;; on texture 0. Mirrors the TIC-80 swatch bank geometry: 3x3 cells,
+    ;; 1px gaps, row at y=128..130, hotspot top-left.
+    MOV   R1, PICO8_SWATCH_REGION_BASE   ; region id (256)
+    MOV   R2, 0                          ; color index / column counter
+
+_pico8_init_swatch_loop:
+    MOV   R0, R2                  ; destructive test on a copy
+    IEQ   R0, 16
+    JT    R0, _pico8_init_swatch_done
+
+    OUT   GPU_SelectedRegion, R1
+
+    MOV   R3, R2
+    IMUL  R3, 4                   ; x = color * 4  (3px cell + 1px gap)
+    OUT   GPU_RegionMinX, R3
+    MOV   R4, 128
+    OUT   GPU_RegionMinY, R4      ; swatch row
+
+    OUT   GPU_RegionHotspotX, R3
+    OUT   GPU_RegionHotspotY, R4  ; top-left (line() relies on this)
+
+    MOV   R4, R3
+    IADD  R4, 2                   ; MaxX = MinX + 2 (3px wide)
+    OUT   GPU_RegionMaxX, R4
+    MOV   R4, 130
+    OUT   GPU_RegionMaxY, R4      ; MinY + 2 (3px tall)
+
+    IADD  R1, 1
+    IADD  R2, 1
+    JMP   _pico8_init_swatch_loop
+
+_pico8_init_swatch_done:
 _pico8_init_map:
     ;; Initialize map buffer after texture regions
     CALL  __builtin_pico8_init_map
@@ -1639,12 +1673,12 @@ __pico8_draw_swatch:
 
     MOV   R8, R3
     FMUL  R8, PICO8_SCALE
-    FDIV  R8, 8.0                 ; source cell is 8x8
+    FDIV  R8, 3.0                 ; source cell is 8x8
     OUT   GPU_DrawingScaleX, R8
 
     MOV   R8, R4
     FMUL  R8, PICO8_SCALE
-    FDIV  R8, 8.0
+    FDIV  R8, 3.0
     OUT   GPU_DrawingScaleY, R8
 
     MOV   R8, [PICO8_CAMERA_X]    ; camera: pre-scale, like spr()

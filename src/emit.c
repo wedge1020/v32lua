@@ -595,10 +595,9 @@ int   emit_variable_map (void)
 
     if (runtime_req.needs_pico8)
     {
-        pico8_camera_x_base = next_ram_address;   // +0: camera x (boxed float)
-        next_ram_address    = next_ram_address + 2; // +1: camera y (boxed float)
-        fprintf (out(), "%%define  PICO8_CAMERA_X           0x%.8X\n", pico8_camera_x_base);
-        fprintf (out(), "%%define  PICO8_CAMERA_Y           0x%.8X\n", (pico8_camera_x_base + 1));
+        fprintf (out(), "%%define  PICO8_CAMERA_X           0x%.8X\n", next_ram_address);
+        fprintf (out(), "%%define  PICO8_CAMERA_Y           0x%.8X\n", (next_ram_address + 1));
+        next_ram_address    = next_ram_address + 2; // +2: camera x, y (boxed floats)
     }
 
     if (runtime_req.needs_vircon32)

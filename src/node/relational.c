@@ -34,38 +34,38 @@ void  node_relational (ASTNode *node, int  dest_reg)
         emit_asm("CALL __builtin_relcmp\n");
         emit_asm("IADD SP, 2\n");
 
-		switch (node -> as.binary.operator)
-		{
-			case OP_LT:
-				emit_asm ("IEQ R0, -1 ; true only if Left < Right\n");
-				break;
+        switch (node -> as.binary.operator)
+        {
+            case OP_LT:
+                emit_asm ("IEQ R0, -1 ; true only if Left < Right\n");
+                break;
 
-			case OP_GT:
-				emit_asm ("IEQ R0, 1 ; true only if Left > Right\n");
-				break;
+            case OP_GT:
+                emit_asm ("IEQ R0, 1 ; true only if Left > Right\n");
+                break;
 
-			case OP_LE:
-				emit_asm ("MOV R%d, R0 ; save raw relcmp result\n", right_reg);
-				emit_asm ("IEQ R0, -1 ; is it Less?\n");
-				emit_asm ("MOV R%d, R%d ; recover raw result\n", dest_reg, right_reg);
-				emit_asm ("IEQ R%d, 0 ; is it Equal?\n", dest_reg);
-				emit_asm ("OR R0, R%d ; Less OR Equal\n", dest_reg);
-				break;
+            case OP_LE:
+                emit_asm ("MOV R%d, R0 ; save raw relcmp result\n", right_reg);
+                emit_asm ("IEQ R0, -1 ; is it Less?\n");
+                emit_asm ("MOV R%d, R%d ; recover raw result\n", dest_reg, right_reg);
+                emit_asm ("IEQ R%d, 0 ; is it Equal?\n", dest_reg);
+                emit_asm ("OR R0, R%d ; Less OR Equal\n", dest_reg);
+                break;
 
-			case OP_GE:
-				emit_asm ("MOV R%d, R0 ; save raw relcmp result\n", right_reg);
-				emit_asm ("IEQ R0, 1 ; is it Greater?\n");
-				emit_asm ("MOV R%d, R%d ; recover raw result\n", dest_reg, right_reg);
-				emit_asm ("IEQ R%d, 0 ; is it Equal?\n", dest_reg);
-				emit_asm ("OR R0, R%d ; Greater OR Equal\n", dest_reg);
-				break;
+            case OP_GE:
+                emit_asm ("MOV R%d, R0 ; save raw relcmp result\n", right_reg);
+                emit_asm ("IEQ R0, 1 ; is it Greater?\n");
+                emit_asm ("MOV R%d, R%d ; recover raw result\n", dest_reg, right_reg);
+                emit_asm ("IEQ R%d, 0 ; is it Equal?\n", dest_reg);
+                emit_asm ("OR R0, R%d ; Greater OR Equal\n", dest_reg);
+                break;
 
-			default:
-				break;
-		}
+            default:
+                break;
+        }
 
-		emit_asm ("MOV R%d, R0\n", dest_reg);
-		emit_asm ("IADD R%d, BOXED_BOOLEAN ; Box as Lua Boolean (False/True)\n", dest_reg);
+        emit_asm ("MOV R%d, R0\n", dest_reg);
+        emit_asm ("IADD R%d, BOXED_BOOLEAN ; Box as Lua Boolean (False/True)\n", dest_reg);
     }
     unlock_register (right_reg);
 }
