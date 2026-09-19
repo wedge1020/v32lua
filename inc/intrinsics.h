@@ -52,26 +52,30 @@ bool  emit_type_intrinsic (ASTNode *, int);
 //
 // PICO8 API layer intrinsics
 //
-bool  emit_pico8_spr_intrinsic     (ASTNode *);
-bool  emit_pico8_btn_intrinsic     (ASTNode *, int);
-bool  emit_pico8_btnp_intrinsic    (ASTNode *, int);
-bool  emit_pico8_add_intrinsic     (ASTNode *, int);
-bool  emit_pico8_cls_intrinsic     (ASTNode *);
-bool  emit_pico8_mget_intrinsic    (ASTNode *, int);
-bool  emit_pico8_mset_intrinsic    (ASTNode *, int);
-bool  emit_pico8_map_intrinsic     (ASTNode *);
-bool  emit_pico8_rnd_intrinsic     (ASTNode *, int);
-bool  emit_pico8_sgn_intrinsic     (ASTNode *, int);
-bool  emit_pico8_mid_intrinsic     (ASTNode *, int);
-bool  emit_pico8_foreach_intrinsic (ASTNode *, int);
-bool  emit_pico8_sfx_intrinsic     (ASTNode *, int);
-bool  emit_pico8_music_intrinsic   (ASTNode *, int);
-bool  emit_pico8_count_intrinsic   (ASTNode *, int);
-bool  emit_pico8_del_intrinsic     (ASTNode *, int);
-bool  emit_pico8_sin_intrinsic     (ASTNode *, int);
-bool  emit_pico8_cos_intrinsic     (ASTNode *, int);
-bool  emit_pico8_tan_intrinsic     (ASTNode *, int);
-bool  emit_pico8_camera_intrinsic  (ASTNode *, int);
+bool  emit_pico8_spr_intrinsic      (ASTNode *);
+bool  emit_pico8_btn_intrinsic      (ASTNode *, int);
+bool  emit_pico8_btnp_intrinsic     (ASTNode *, int);
+bool  emit_pico8_add_intrinsic      (ASTNode *, int);
+bool  emit_pico8_cls_intrinsic      (ASTNode *);
+bool  emit_pico8_mget_intrinsic     (ASTNode *, int);
+bool  emit_pico8_mset_intrinsic     (ASTNode *, int);
+bool  emit_pico8_map_intrinsic      (ASTNode *);
+bool  emit_pico8_rnd_intrinsic      (ASTNode *, int);
+bool  emit_pico8_sgn_intrinsic      (ASTNode *, int);
+bool  emit_pico8_mid_intrinsic      (ASTNode *, int);
+bool  emit_pico8_foreach_intrinsic  (ASTNode *, int);
+bool  emit_pico8_sfx_intrinsic      (ASTNode *, int);
+bool  emit_pico8_music_intrinsic    (ASTNode *, int);
+bool  emit_pico8_count_intrinsic    (ASTNode *, int);
+bool  emit_pico8_del_intrinsic      (ASTNode *, int);
+bool  emit_pico8_sin_intrinsic      (ASTNode *, int);
+bool  emit_pico8_cos_intrinsic      (ASTNode *, int);
+bool  emit_pico8_tan_intrinsic      (ASTNode *, int);
+bool  emit_pico8_camera_intrinsic   (ASTNode *, int);
+bool  emit_pico8_rectfill_intrinsic (ASTNode *, int);
+bool  emit_pico8_circfill_intrinsic (ASTNode *, int);
+bool  emit_pico8_line_intrinsic     (ASTNode *, int);
+bool  emit_pico8_print_intrinsic    (ASTNode *, int);
 
 //////////////////////////////////////////////////////////////////////////////
 //

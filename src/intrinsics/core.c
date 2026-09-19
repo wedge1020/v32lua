@@ -258,31 +258,6 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     // Non-ioports Intrinsics
     // =========================================================================
 
-    // print()
-    if (strcmp (func_name, "print")  == 0) {
-        runtime_req.needs_print       = true;
-        runtime_req.needs_strings     = true;
-
-        if (runtime_req.needs_tic80  == true)
-        {
-            return (emit_tic80_print_intrinsic (node));
-        }
-        else
-        {
-            emit_print_intrinsic (node);
-            return (1);
-        }
-    }
-
-    // printf()
-    if (strcmp(func_name, "printf") == 0) {
-        runtime_req.needs_print      = true;
-        runtime_req.needs_strings    = true;
-        if (emit_printf_intrinsic(node, dest_reg)) {
-            return 1;
-        }
-    }
-
     // system.date()
     if (strcmp (func_name, "system.date") == 0) {
         int  ret_count  = emit_system_date_intrinsic (node, dest_reg);
@@ -558,6 +533,30 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         {
             return (emit_pico8_camera_intrinsic (node, dest_reg));
         }
+
+            // rectfill()
+        if (strcmp (func_name, "rectfill") == 0)
+        {
+            return (emit_pico8_rectfill_intrinsic (node, dest_reg));
+        }
+
+        // circfill()
+        if (strcmp (func_name, "circfill") == 0)
+        {
+            return (emit_pico8_circfill_intrinsic (node, dest_reg));
+        }
+
+        // line()
+        if (strcmp (func_name, "line") == 0)
+        {
+            return (emit_pico8_line_intrinsic (node, dest_reg));
+        }
+
+        // print() -- PICO-8 coordinate/color wrapper over __builtin_print
+        if (strcmp (func_name, "print") == 0)
+        {
+            return (emit_pico8_print_intrinsic (node, dest_reg));
+        }
     }
 
     //////////////////////////////////////////////////////////////////////////
@@ -700,6 +699,31 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         if (strcmp (func_name, "exit") == 0)
         {
             return (emit_tic80_exit_intrinsic (node, dest_reg));
+        }
+    }
+
+    // print()
+    if (strcmp (func_name, "print")  == 0) {
+        runtime_req.needs_print       = true;
+        runtime_req.needs_strings     = true;
+
+        if (runtime_req.needs_tic80  == true)
+        {
+            return (emit_tic80_print_intrinsic (node));
+        }
+        else
+        {
+            emit_print_intrinsic (node);
+            return (1);
+        }
+    }
+
+    // printf()
+    if (strcmp(func_name, "printf") == 0) {
+        runtime_req.needs_print      = true;
+        runtime_req.needs_strings    = true;
+        if (emit_printf_intrinsic(node, dest_reg)) {
+            return 1;
         }
     }
 

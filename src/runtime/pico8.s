@@ -702,32 +702,26 @@ _pico8_spr_set_scale_y:
     MOV   R7, [BP+2]        ; R7 = Base sprite 'n'
     CFI   R7                ; Convert float 'n' to integer
 
-    ;; --- camera offset (PICO-8): screen = draw_x - cam_x ---
-    MOV   R1, [BP+3]              ; base x (raw PICO-8 pixels)
-    MOV   R2, [PICO8_CAMERA_X]    ; boxed float word
-    FSUB  R1, R2                  ; R1 = x - cam_x  (two-operand)
-    FMUL  R1, PICO8_SCALE
-
-    ;; --- 3. Scale + Center Base X/Y ---
+    ;; --- 3. Scale + Center Base X/Y (camera offset applied first) ---
     ;; Base position arrives in raw PICO-8 pixel space (0..127-ish);
-    ;; scale to Vircon32 pixels and add the fixed centering offset so the
-    ;; 352x352 scaled canvas lands centered on the 640x360 screen.
+    ;; subtract the PICO-8 camera (also PICO-8 pixel space, so it must
+    ;; happen BEFORE the 2.75x scale), then scale, round, and add the
+    ;; fixed centering offset so the 352x352 canvas lands centered.
     ;; Round-before-truncate (FADD 0.5 -> CFI) matches the TIC-80 fix for
     ;; sub-pixel seams from an un-rounded scale multiply.
     MOV   R1, [BP+3]        ; base x (raw PICO-8 pixels)
+    MOV   R2, [PICO8_CAMERA_X]
+    FSUB  R1, R2            ; x - cam_x   (camera is pre-scale on purpose:
+                            ;              celeste's ±2 shake = ±2 PICO-8 px)
     FMUL  R1, PICO8_SCALE
     FADD  R1, 0.5
     CFI   R1
     IADD  R1, PICO8_OFFSET_X
     MOV   R8, R1            ; R8 = base X, Vircon32 screen pixels
 
-    ;; --- camera offset (PICO-8): screen = draw_y- cam_y ---
-    MOV   R1, [BP+4]              ; base y (raw PICO-8 pixels)
-    MOV   R2, [PICO8_CAMERA_Y]    ; boxed float word
-    FSUB  R1, R2                  ; R1 = y - cam_y  (two-operand)
-    FMUL  R1, PICO8_SCALE
-
     MOV   R1, [BP+4]        ; base y (raw PICO-8 pixels)
+    MOV   R2, [PICO8_CAMERA_Y]
+    FSUB  R1, R2            ; y - cam_y
     FMUL  R1, PICO8_SCALE
     FADD  R1, 0.5
     CFI   R1
@@ -1622,6 +1616,375 @@ _pico8_camera_y_set:
     MOV   [PICO8_CAMERA_Y], R1
 
     MOV   R0, BOXED_NIL
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __pico8_draw_swatch (internal helper -- not Lua-callable)
+;; In: R1=x R2=y R3=w R4=h (PICO-8 pixels, top-left, w/h >= 1, floats),
+;;     R5=color (0-15)
+;; Destroys R1-R4. Draws a solid rect via swatch region (256+color)
+;; on texture 0, scaled by PICO8_SCALE, centered via PICO8_OFFSET_X/Y.
+;;
+;; THE CAMERA HOOK: x/y have the camera subtracted here, BEFORE the
+;; scale multiply -- same rule as __builtin_pico8_spr. Every filled
+;; primitive below routes its coordinates through this one helper, so
+;; this is the only place (besides spr/line/print) camera math exists.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+__pico8_draw_swatch:
+    MOV   R8, R5
+    IADD  R8, 256                 ; swatch region = 256 + color
+    OUT   GPU_SelectedRegion, R8
+
+    MOV   R8, R3
+    FMUL  R8, PICO8_SCALE
+    FDIV  R8, 8.0                 ; source cell is 8x8
+    OUT   GPU_DrawingScaleX, R8
+
+    MOV   R8, R4
+    FMUL  R8, PICO8_SCALE
+    FDIV  R8, 8.0
+    OUT   GPU_DrawingScaleY, R8
+
+    MOV   R8, [PICO8_CAMERA_X]    ; camera: pre-scale, like spr()
+    FSUB  R1, R8
+    FMUL  R1, PICO8_SCALE
+    FADD  R1, 0.5
+    CFI   R1
+    IADD  R1, PICO8_OFFSET_X
+    OUT   GPU_DrawingPointX, R1
+
+    MOV   R8, [PICO8_CAMERA_Y]
+    FSUB  R2, R8
+    FMUL  R2, PICO8_SCALE
+    FADD  R2, 0.5
+    CFI   R2
+    IADD  R2, PICO8_OFFSET_Y
+    OUT   GPU_DrawingPointY, R2
+
+    OUT   GPU_Command, GPUCommand_DrawRegionZoomed
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_pico8_rectfill: rectfill(x0, y0, x1, y1 [, color])
+;; Stack: [BP+2]=x0 [BP+3]=y0 [BP+4]=x1 [BP+5]=y1 [BP+6]=color
+;; Returns: R0 = color (boxed)
+;; Corner order doesn't matter (normalized via FMIN/FMAX). Camera
+;; subtracts from both corners -> pure translation, size preserved.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+__builtin_pico8_rectfill:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R6
+    PUSH  R7
+    PUSH  R8
+    PUSH  R9
+
+    MOV   R6, [PICO8_CAMERA_X]    ; cam_x, reused for both corners
+    MOV   R7, [PICO8_CAMERA_Y]
+
+    ;; left = min(x0,x1) - cam_x ; right = max(x0,x1) - cam_x
+    MOV   R1, [BP+2]              ; x0
+    MOV   R2, [BP+4]              ; x1
+    MOV   R3, R1
+    MOV   R4, R2
+    FMIN  R1, R2                  ; left
+    FMAX  R3, R4                  ; right
+    FSUB  R3, R1
+    FADD  R3, 1.0                 ; w  (camera cancels in the difference)
+    MOV   R8, R3
+
+    MOV   R1, [BP+3]              ; y0
+    MOV   R2, [BP+5]              ; y1
+    MOV   R3, R1
+    MOV   R4, R2
+    FMIN  R1, R2                  ; top
+    FMAX  R3, R4                  ; bottom
+    FSUB  R3, R1
+    FADD  R3, 1.0                 ; h
+
+    MOV   R2, R1                  ; swatch ABI: R1=x R2=y R3=w R4=h R5=col
+    MOV   R4, R3
+    MOV   R3, R8
+    MOV   R5, [BP+6]
+    CFI   R5
+    AND   R5, 15
+    CALL  __pico8_draw_swatch     ; camera applied inside, once
+
+    MOV   R0, [BP+6]
+    CIF   R0
+
+    POP   R9
+    POP   R8
+    POP   R7
+    POP   R6
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_pico8_circfill: circfill(x, y, r, color)
+;; Stack: [BP+2]=x [BP+3]=y [BP+4]=r [BP+5]=color
+;; Returns: R0 = color (boxed)
+;; Midpoint circle via horizontal spans; each span is one swatch call.
+;; Camera applies to (x,y) only -- inside __pico8_draw_swatch -- since
+;; the radius is a size, not a position.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+__builtin_pico8_circfill:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R6                 ; err
+    PUSH  R7                 ; py
+    PUSH  R8                 ; cx (int)
+    PUSH  R9                 ; cy (int)
+    PUSH  R10                ; color
+    PUSH  R11                ; px (starts at r)
+
+    MOV   R8, [BP+2]
+    CFI   R8
+    MOV   R9, [BP+3]
+    CFI   R9
+    MOV   R11, [BP+4]
+    CFI   R11
+    MOV   R10, [BP+5]
+    CFI   R10
+    AND   R10, 15
+
+    MOV   R7, 0
+    MOV   R6, 0
+
+_pico8_circfill_loop:
+    MOV   R1, R11            ; px >= py? (destructive -- copy, R11 survives)
+    IGE   R1, R7
+    JF    R1, _pico8_circfill_done
+
+    ;; span A: row cy+py, from cx-px to cx+px  (width 2*px+1)
+    MOV   R1, R8
+    ISUB  R1, R11
+    MOV   R2, R9
+    IADD  R2, R7
+    MOV   R3, R11
+    IADD  R3, R11
+    IADD  R3, 1
+    MOV   R4, 1.0
+    MOV   R5, R10
+    CALL  __pico8_draw_swatch
+
+    ;; span B: row cy+px, from cx-py to cx+py  (width 2*py+1)
+    MOV   R1, R8
+    ISUB  R1, R7
+    MOV   R2, R9
+    IADD  R2, R11
+    MOV   R3, R7
+    IADD  R3, R7
+    IADD  R3, 1
+    MOV   R4, 1.0
+    MOV   R5, R10
+    CALL  __pico8_draw_swatch
+
+    ;; span C: row cy-py, from cx-px to cx+px
+    MOV   R1, R8
+    ISUB  R1, R11
+    MOV   R2, R9
+    ISUB  R2, R7
+    MOV   R3, R11
+    IADD  R3, R11
+    IADD  R3, 1
+    MOV   R4, 1.0
+    MOV   R5, R10
+    CALL  __pico8_draw_swatch
+
+    ;; span D: row cy-px, from cx-py to cx+py
+    MOV   R1, R8
+    ISUB  R1, R7
+    MOV   R2, R9
+    ISUB  R2, R11
+    MOV   R3, R7
+    IADD  R3, R7
+    IADD  R3, 1
+    MOV   R4, 1.0
+    MOV   R5, R10
+    CALL  __pico8_draw_swatch
+
+    ;; midpoint decision variable
+    IADD  R7, 1
+    MOV   R1, R7
+    IMUL  R1, 2
+    IADD  R1, 1
+    IADD  R6, R1
+    MOV   R1, R6
+    ISUB  R1, R11             ; err - px
+    ISUB  R1, R11             ; err - px - px
+    IGE   R1, 0               ; destructive on the copy only
+    JF    R1, _pico8_circfill_loop
+    ISUB  R11, 1
+    MOV   R1, R11
+    IMUL  R1, 2
+    IADD  R6, R1
+    IADD  R6, 1
+    JMP   _pico8_circfill_loop
+
+_pico8_circfill_done:
+    MOV   R0, [BP+5]
+    CIF   R0
+
+    POP   R11
+    POP   R10
+    POP   R9
+    POP   R8
+    POP   R7
+    POP   R6
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_pico8_line: line(x0, y0, x1, y1, color)
+;; Stack: [BP+2]=x0 [BP+3]=y0 [BP+4]=x1 [BP+5]=y1 [BP+6]=color
+;; Returns: R0 = color (boxed)
+;; One rotozoomed swatch stretch: length = |P1-P0|, angle = atan2(dy,dx).
+;; Camera translation cancels in dx/dy, so length/angle are camera-free;
+;; only the anchor (x0,y0) is camera-adjusted (pre-scale, like spr()).
+;; NOTE: swatch hotspot is (0,0) top-left, so the line pivots at its
+;; corner -- a fixed ~0.5 PICO-8 px perpendicular offset. Cosmetic only.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+__builtin_pico8_line:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R6
+    PUSH  R7
+    PUSH  R8
+    PUSH  R9
+    PUSH  R10
+    PUSH  R11
+
+    MOV   R8, [BP+4]
+    MOV   R2, [BP+2]
+    FSUB  R8, R2              ; dx = x1 - x0
+    MOV   R9, [BP+5]
+    MOV   R2, [BP+3]
+    FSUB  R9, R2              ; dy = y1 - y0
+
+    ;; dx = x1-x0, dy = y1-y0
+
+    MOV   R10, R8
+    FMUL  R10, R8
+    MOV   R11, R9
+    FMUL  R11, R9
+    FADD  R10, R11
+    MOV   R11, 0.5
+    POW   R10, R11            ; R10 = length (PICO-8 px)
+
+    ATAN2 R9, R8              ; R9 = angle (radians), destructive
+
+    MOV   R1, R10
+    FMUL  R1, PICO8_SCALE
+    FDIV  R1, 8.0             ; stretch swatch along local X by length
+    OUT   GPU_DrawingScaleX, R1
+
+    MOV   R1, PICO8_SCALE
+    FDIV  R1, 8.0             ; 1 PICO-8 px thick
+    OUT   GPU_DrawingScaleY, R1
+
+    OUT   GPU_DrawingAngle, R9
+
+    ;; anchor (x0,y0) -- the ONLY camera-adjusted point
+    MOV   R1, [BP+2]
+    MOV   R2, [PICO8_CAMERA_X]
+    FSUB  R1, R2
+    FMUL  R1, PICO8_SCALE
+    FADD  R1, 0.5
+    CFI   R1
+    IADD  R1, PICO8_OFFSET_X
+    OUT   GPU_DrawingPointX, R1
+
+    MOV   R1, [BP+3]
+    MOV   R2, [PICO8_CAMERA_Y]
+    FSUB  R1, R2
+    FMUL  R1, PICO8_SCALE
+    FADD  R1, 0.5
+    CFI   R1
+    IADD  R1, PICO8_OFFSET_Y
+    OUT   GPU_DrawingPointY, R1
+
+    MOV   R1, [BP+6]
+    CFI   R1
+    AND   R1, 15
+    IADD  R1, 256
+    OUT   GPU_SelectedRegion, R1
+    OUT   GPU_Command, GPUCommand_DrawRegionRotozoomed
+
+    MOV   R0, [BP+6]
+    CIF   R0
+
+    POP   R11
+    POP   R10
+    POP   R9
+    POP   R8
+    POP   R7
+    POP   R6
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_pico8_print: print(str, x, y [, color])
+;; Stack: [BP+2]=str [BP+3]=x [BP+4]=y [BP+5]=color (optional)
+;; Returns: R0 = str (boxed), passthrough like PICO-8
+;;
+;; Converts PICO-8 screen coords -> Vircon32 screen coords (camera,
+;; PICO8_SCALE, centering), then delegates to __builtin_print.
+;;
+;; KNOWN LIMITATIONS (documented, deliberate):
+;;   - color is accepted and ignored: __builtin_print renders with the
+;;     BIOS font, which has no color parameter. Celeste's colored
+;;     prints (scores, titles) will render in the BIOS font color.
+;;     Faithful color needs a custom 4x5-pixel PICO-8 font texture
+;;     with per-color variants -- same registration pattern as the
+;;     pico8 tone bank, left as future work.
+;;   - BIOS glyphs are ~8x16 Vircon32 px vs PICO-8's 4x5 (11x14 after
+;;     2.75x scale) -- text renders slightly wide/short relative to
+;;     sprites. Same custom-font fix covers this.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+__builtin_pico8_print:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+
+    ;; x' = (x - cam_x) * SCALE + OFFSET_X   (integer, for __builtin_print)
+    MOV   R1, [BP+3]
+    MOV   R2, [PICO8_CAMERA_X]
+    FSUB  R1, R2
+    FMUL  R1, PICO8_SCALE
+    FADD  R1, 0.5
+    CFI   R1
+    IADD  R1, PICO8_OFFSET_X
+    PUSH  R1                  ; park converted x
+
+    MOV   R1, [BP+4]
+    MOV   R2, [PICO8_CAMERA_Y]
+    FSUB  R1, R2
+    FMUL  R1, PICO8_SCALE
+    FADD  R1, 0.5
+    CFI   R1
+    IADD  R1, PICO8_OFFSET_Y
+    MOV   R2, R1
+    POP   R1                  ; R1 = x', R2 = y'
+
+    ;; __builtin_print ABI: [BP+4]=x, [BP+3]=y, [BP+2]=value
+    PUSH  R2                  ; y
+    PUSH  R1                  ; x
+    MOV   R1, [BP+2]
+    PUSH  R1                  ; str
+    CALL  __builtin_print
+    IADD  SP, 3
+
+    MOV   R0, [BP+2]          ; return the string, passthrough
+
+    POP   R2
+    POP   R1
     MOV   SP, BP
     POP   BP
     RET
