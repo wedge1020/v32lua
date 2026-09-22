@@ -150,7 +150,7 @@ static char *join_path (const char *base_dir, const char *rel_path)
 // Canonicalizes a path for cycle/dedup comparison. Falls back to a plain
 // strdup if the file doesn't exist yet (shouldn't happen -- callers resolve
 // only after confirming the file opens) or realpath is unavailable.
-static char *canonicalize (const char *path)
+char *canonicalize (const char *path)
 {
     char resolved[PATH_MAX];
     if (realpath (path, resolved) != NULL) {
