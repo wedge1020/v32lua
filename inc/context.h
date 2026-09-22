@@ -16,6 +16,7 @@ typedef struct SymbolNode
     int         arity;
     int         is_c_native;
     int         is_variadic;
+    int         is_cart_resource;
     int         return_count;
     bool        is_boxed;     // slot holds a box pointer, not the value
     ASTNode    *def_node;     // for is_function symbols

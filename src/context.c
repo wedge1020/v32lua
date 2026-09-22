@@ -311,6 +311,11 @@ void  mark_global_as_function (ASTNode *def_node)
             compiler_error (ERR_SEMANTIC, def_node -> line_number,
                             "Function '%s' is defined more than once", name);
         }
+        else if (existing->is_cart_resource)
+        {
+            compiler_error (ERR_SEMANTIC, def_node -> line_number,
+                            "CART HINT '%s' is redefined elsewhere", name);
+        }
     }
 
     SymbolNode *sym           = register_global (name);
@@ -668,6 +673,13 @@ static void  prepass_walk (ASTNode *node, int is_chunk_top_level)
                                     "variable. Rename one of them",
                                     tgt->as.id.name);
                             }
+
+                            if (sym->is_cart_resource && !is_function_desugar) {
+                                compiler_error (ERR_SEMANTIC, node->line_number,
+                                    "Duplicate name: '%s' is already used as a cartridge resource "
+                                    "(--#texture/--#sound); it cannot also be used as a variable",
+                                    tgt->as.id.name);
+                            }
                         }
                         tgt = tgt->next;
                     }
@@ -696,6 +708,34 @@ static void  prepass_walk (ASTNode *node, int is_chunk_top_level)
             case NODE_FOR_GENERIC:
                 prepass_walk(node->as.for_numeric.body, 0);
                 break;
+
+            case NODE_CART_HINT:
+            {
+                if (node->as.cart_hint.resource_id != -1 &&
+                    node->as.cart_hint.name        != NULL)
+                {
+                    SymbolNode *existing = resolve_symbol (node->as.cart_hint.name);
+                    if (existing != NULL)
+                    {
+                        if (existing->is_cart_resource)
+                            compiler_error (ERR_SEMANTIC, node->line_number,
+                                "Duplicate name: cartridge resource '%s' is registered "
+                                "more than once", node->as.cart_hint.name);
+                        else if (existing->is_function)
+                            compiler_error (ERR_SEMANTIC, node->line_number,
+                                "Duplicate name: '%s' is already used as a function; it "
+                                "cannot also name a --#texture/--#sound resource. "
+                                "Rename one of them", node->as.cart_hint.name);
+                        else
+                            compiler_error (ERR_SEMANTIC, node->line_number,
+                                "Duplicate name: '%s' is already used as a variable "
+                                "(e.g. a table); it cannot also name a cartridge "
+                                "resource. Rename one of them", node->as.cart_hint.name);
+                    }
+                    register_global (node->as.cart_hint.name) -> is_cart_resource = 1;
+                }
+                break;
+            }
 
             default:
                 break;
