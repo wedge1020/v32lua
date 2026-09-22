@@ -29,6 +29,11 @@
 ;; Buffer size in words (64KB = 16384 words)
 %define PICO8_MAP_BUFFER_WORDS  16384
 
+;; Swatch bank: 16 solid-color 3x3 cells (1px gaps) on row y=128..130
+;; of texture 0, which the VTEX generator extends to 128x132. Regions
+;; 256-271 -- must match PICO8_SWATCH_REGION_BASE in pico8_assets.h.
+%define PICO8_SWATCH_REGION_BASE 256
+
 ;; PICO-8 uses the same default palette as TIC-80
 __pico8_palette:
     integer 0xFF2C1C1A  ; 0
@@ -88,6 +93,7 @@ _pico8_init_loop:
     ;; Exit when all 256 regions are initialized
     MOV   R0, R1
     IEQ   R0, 256
+    JT    R0, _pico8_init_swatches   ; exit INTO the swatch registration
     JT    R0, _pico8_init_map
 
     ;; Select current region
@@ -1914,11 +1920,11 @@ __builtin_pico8_line:
 
     MOV   R1, R10
     FMUL  R1, PICO8_SCALE
-    FDIV  R1, 8.0             ; stretch swatch along local X by length
+    FDIV  R1, 3.0             ; stretch swatch along local X by length
     OUT   GPU_DrawingScaleX, R1
 
     MOV   R1, PICO8_SCALE
-    FDIV  R1, 8.0             ; 1 PICO-8 px thick
+    FDIV  R1, 3.0             ; 1 PICO-8 px thick
     OUT   GPU_DrawingScaleY, R1
 
     OUT   GPU_DrawingAngle, R9
