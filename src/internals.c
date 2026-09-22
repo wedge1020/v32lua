@@ -150,7 +150,7 @@ static char *join_path (const char *base_dir, const char *rel_path)
 // Canonicalizes a path for cycle/dedup comparison. Falls back to a plain
 // strdup if the file doesn't exist yet (shouldn't happen -- callers resolve
 // only after confirming the file opens) or realpath is unavailable.
-char *canonicalize (const char *path)
+static char *canonicalize_path (const char *path)
 {
     char resolved[PATH_MAX];
     if (realpath (path, resolved) != NULL) {
@@ -359,7 +359,7 @@ static char *resolve_include_path (const char *base_dir, const char *inc_path,
 
     // Candidate 2: the current working directory. A bare relative path
     // already means "relative to the CWD" to fopen(), so it can be probed
-    // as-is; canonicalize() later normalizes it for dedup/cycle checks.
+    // as-is; canonicalize_path() later normalizes it for dedup/cycle checks.
     if (include_file_exists (inc_path)) {
         return strdup (inc_path);
     }
@@ -410,7 +410,7 @@ static void expand_file (const char *path, const char *referenced_from, int is_i
                           StrBuf *out, LineMapBuilder *lm, int *combined_line,
                           IncludeStackNode **stack, DoneListNode **done)
 {
-    char *resolved = canonicalize (path);
+    char *resolved = canonicalize_path (path);
 
     for (IncludeStackNode *s = *stack; s != NULL; s = s->next) {
         if (strcmp (s->resolved_path, resolved) == 0) {
