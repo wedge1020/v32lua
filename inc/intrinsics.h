@@ -11,6 +11,7 @@
 #define IOPORT_TYPE_FLOAT   2
 #define IOPORT_TYPE_BOOLEAN 4
 
+extern unsigned int pico8_palette[16];
 extern unsigned int tic80_palette[16];
 
 typedef struct {

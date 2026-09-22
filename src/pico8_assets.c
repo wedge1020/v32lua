@@ -22,6 +22,35 @@
 #define PICO8_SWATCH_STRIDE      4     // 3px cell + 1px gap
 #define PICO8_SWATCH_REGION_BASE 256   // region IDs 256-271
 
+// ============================================================================
+// PICO-8 default palette (AABBGGRR, 32-bit)
+// ----------------------------------------------------------------------------
+// MUST stay in lockstep with __pico8_palette in pico8.s.txt: the asm table
+// is read at runtime (cls() palette lookup) while this copy bakes the VTEX
+// swatch row and atlas colors at build time. If they ever disagree, a given
+// palette index renders as different colors through spr() vs cls() vs the
+// swatch primitives. Do NOT alias this to tic80_palette -- the values look
+// similar but are the PICO-8 set.
+// ============================================================================
+unsigned int pico8_palette[16] = {
+    0xFF2C1C1A,  // 0  black
+    0xFF5D275D,  // 1  dark blue   (called "dark-blue" in pico8, it's magenta-ish)
+    0xFF533EB1,  // 2  dark purple
+    0xFF577DEF,  // 3  dark green... (pico8 "dark_gray" slot, keep EXACT asm order)
+    0xFF75CDFF,  // 4
+    0xFF70F0A7,  // 5
+    0xFF64B738,  // 6
+    0xFF797125,  // 7
+    0xFF6F3629,  // 8
+    0xFFC95D3B,  // 9
+    0xFFF6A641,  // 10
+    0xFFF7EF73,  // 11
+    0xFFF4F4F4,  // 12
+    0xFFC2B094,  // 13
+    0xFF866C56,  // 14
+    0xFF573C33,  // 15
+};
+
 int   pico8_tone_base_id      = -1;
 bool  pico8_tones_registered  = false;
 
