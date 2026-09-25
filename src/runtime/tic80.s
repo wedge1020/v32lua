@@ -2011,7 +2011,8 @@ __builtin_tic80_print:
     PUSH  R2
     PUSH  R3
 
-    IN    R3, GPU_MultiplyColor          ; saved multiply
+    IN    R3, GPU_MultiplyColor          ; saved multiply (kept on the stack:
+    PUSH  R3                             ; __builtin_print clobbers R3)
 
     MOV   R1, [BP+2]
     FLR   R1
@@ -2041,6 +2042,7 @@ __builtin_tic80_print:
     CALL  __builtin_print
     IADD  SP, 3
 
+    POP   R3
     OUT   GPU_MultiplyColor, R3
 
     MOV   R1, [BP+5]

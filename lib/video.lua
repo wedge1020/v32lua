@@ -24,12 +24,12 @@ end
 
 -- Applies to the currently selected region.
 function define_region(minX, minY, maxX, maxY, hotX, hotY)
-    ioports.gpu.minX  = minX
-    ioports.gpu.minY  = minY
-    ioports.gpu.maxX  = maxX
-    ioports.gpu.maxY  = maxY
-    ioports.gpu.hotX  = hotX
-    ioports.gpu.hotY  = hotY
+    ioports.gpu.minX = minX
+    ioports.gpu.minY = minY
+    ioports.gpu.maxX = maxX
+    ioports.gpu.maxY = maxY
+    ioports.gpu.hotX = hotX
+    ioports.gpu.hotY = hotY
 end
 
 -- Applies to the currently selected region; sets the hotspot at its
@@ -37,21 +37,21 @@ end
 -- minY->hotY auto-pairing, same as video.h's version relies on the
 -- console writing GPU_RegionHotSpotX/Y right alongside MinX/MinY.
 function define_region_topleft(minX, minY, maxX, maxY)
-    ioports.gpu.minX  = minX
-    ioports.gpu.minY  = minY
-    ioports.gpu.maxX  = maxX
-    ioports.gpu.maxY  = maxY
+    ioports.gpu.minX = minX
+    ioports.gpu.minY = minY
+    ioports.gpu.maxX = maxX
+    ioports.gpu.maxY = maxY
 end
 
 -- Applies to the currently selected region; sets the hotspot at its
 -- center.
 function define_region_center(minX, minY, maxX, maxY)
-    ioports.gpu.minX  = minX
-    ioports.gpu.minY  = minY
-    ioports.gpu.maxX  = maxX
-    ioports.gpu.maxY  = maxY
-    ioports.gpu.hotX  = (minX + maxX) // 2
-    ioports.gpu.hotY  = (minY + maxY) // 2
+    ioports.gpu.minX = minX
+    ioports.gpu.minY = minY
+    ioports.gpu.maxX = maxX
+    ioports.gpu.maxY = maxY
+    ioports.gpu.hotX = (minX + maxX) // 2
+    ioports.gpu.hotY = (minY + maxY) // 2
 end
 
 -- Defines a set of regions with consecutive ids starting at firstId,

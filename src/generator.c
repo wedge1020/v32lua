@@ -984,6 +984,25 @@ void generate_program (ASTNode *head)
         }
         if (has_main)
         {
+            // Start _draw() on a frame boundary. The GPU draws straight into
+            // the displayed frame, so a _draw() that is still running when a
+            // frame ends shows up half-drawn (background without sprites):
+            // flicker in heavy rooms. At 30 fps the tick has two frames
+            // anyway, so _update gets the first and _draw the second; at
+            // 60 fps only wait if _update ran past its frame.
+            if (has_update && pico8_frame_step >= 2)
+            {
+                emit_asm ("WAIT ; _draw() gets a frame of its own\n");
+            }
+            else if (has_update)
+            {
+                emit_asm ("IN   R0, TIM_FrameCounter\n");
+                emit_asm ("MOV  R1, [PICO8_TICK_FRAME]\n");
+                emit_asm ("IEQ  R0, R1\n");
+                emit_asm ("JT   R0, __pico8_draw_now\n");
+                emit_asm ("WAIT ; _update60() overran: start _draw() on a fresh frame\n");
+                emit_asm ("__pico8_draw_now:\n");
+            }
             emit_asm ("CALL __function__draw   ; Execute _draw()\n");
             emit_asm ("CALL __builtin_pico8_present ; mask off-canvas drawing (PICO-8 clips to 128x128)\n");
         }
