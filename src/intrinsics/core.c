@@ -381,7 +381,7 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         // spr()
         if (strcmp (func_name, "spr") == 0)
         {
-            return (emit_pico8_spr_intrinsic (node));
+            return (emit_pico8_spr_intrinsic (node, dest_reg));
         }
 
         // btn()
@@ -477,7 +477,7 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         // cls()
         if (strcmp (func_name, "cls") == 0)
         {
-            return (emit_pico8_cls_intrinsic (node));
+            return (emit_pico8_cls_intrinsic (node, dest_reg));
         }
 
         // mget()
@@ -495,7 +495,7 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         // map()
         if (strcmp (func_name, "map") == 0)
         {
-            return (emit_pico8_map_intrinsic (node));
+            return (emit_pico8_map_intrinsic (node, dest_reg));
         }
 
         // foreach()
@@ -555,7 +555,35 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         // print() -- PICO-8 coordinate/color wrapper over __builtin_print
         if (strcmp (func_name, "print") == 0)
         {
+            runtime_req.needs_print   = true;
+            runtime_req.needs_strings = true;
             return (emit_pico8_print_intrinsic (node, dest_reg));
+        }
+
+        if (strcmp (func_name, "rect")  == 0) return (emit_pico8_rect_intrinsic  (node, dest_reg));
+        if (strcmp (func_name, "pset")  == 0) return (emit_pico8_pset_intrinsic  (node, dest_reg));
+        if (strcmp (func_name, "circ")  == 0) return (emit_pico8_circ_intrinsic  (node, dest_reg));
+        if (strcmp (func_name, "color") == 0) return (emit_pico8_color_intrinsic (node, dest_reg));
+        if (strcmp (func_name, "fget")  == 0) return (emit_pico8_fget_intrinsic  (node, dest_reg));
+        if (strcmp (func_name, "fset")  == 0) return (emit_pico8_fset_intrinsic  (node, dest_reg));
+        if (strcmp (func_name, "pal")   == 0) return (emit_pico8_pal_intrinsic   (node, dest_reg, "pal"));
+        if (strcmp (func_name, "palt")  == 0) return (emit_pico8_pal_intrinsic   (node, dest_reg, "palt"));
+
+        // sub(s, i [, j]) -- PICO-8's bare name for string.sub
+        if (strcmp (func_name, "sub") == 0)
+        {
+            runtime_req.needs_strings = true;
+            return (emit_string_sub_intrinsic (node, dest_reg));
+        }
+
+        // all(t) is only meaningful as a for-in iterator; node_for_generic
+        // lowers `for v in all(t)` itself, so reaching here means all() was
+        // used as a plain value.
+        if (strcmp (func_name, "all") == 0)
+        {
+            compiler_error (ERR_SEMANTIC, node->line_number,
+                "all() is only supported directly in a for-in loop: for v in all(t) do ... end");
+            return false;
         }
     }
 
@@ -709,7 +737,7 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
 
         if (runtime_req.needs_tic80  == true)
         {
-            return (emit_tic80_print_intrinsic (node));
+            return (emit_tic80_print_intrinsic (node, dest_reg));
         }
         else
         {

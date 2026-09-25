@@ -95,12 +95,15 @@ __next_advance_pair:
     JMP  __next_scan_pair
 
 __next_next_bucket:
+    ;; (IEQ is destructive: the old code tested R3 in place and then
+    ;; "stepped" to R3 -- i.e. to address 0 or 1 -- so pairs() over any
+    ;; table with more than one hash bucket (> 7 keys) never terminated.)
     MOV  R3, [R6+1]              ; R3 = NextBucketPtr
-    IEQ  R3, 0
-    JT   R3, __next_done_nil     ; End of chain, nothing left
+    MOV  R5, R3
+    IEQ  R5, 0
+    JT   R5, __next_done_nil     ; End of chain, nothing left
     MOV  R6, R3
     JMP  __next_scan_bucket
-
 __next_done_nil:
     MOV  R0, BOXED_NIL
 

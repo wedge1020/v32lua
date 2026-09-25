@@ -93,6 +93,7 @@ int  main (int  argc, char** argv)
             g_debug_mode = true;
         } else if (strcmp(argv[i], "-w") == 0) {
             o_dowarnings = 0; // disable display of compiler warnings
+            g_suppress_warnings = true;
         } else if (strcmp(argv[i], "--verbose") == 0 || strcmp(argv[i], "-v") == 0) {
             verbose = 1;
         } else if (strcmp(argv[i], "--debug") == 0 || strcmp(argv[i], "-d") == 0) {
@@ -154,6 +155,19 @@ int  main (int  argc, char** argv)
     {
         char *expanded_source = expand_includes (input_filename, &g_line_map, &g_line_map_count);
 
+        // A .p8 cartridge compiles directly: only its __lua__ section is
+        // lexed (every other line blanked so line numbers still match the
+        // .p8, header replaced by "--#api pico8"), and __gfx__/__gff__/
+        // __map__ are parsed as the cart's assets. See pico8_assets.c.
+        if (pico8_is_cart_text (expanded_source)) {
+            char *lua_only = pico8_split_cart (expanded_source);
+            if (lua_only == NULL) {
+                compiler_error (ERR_INTERNAL, -1, "Out of memory splitting .p8 cartridge");
+            }
+            free (expanded_source);
+            expanded_source = lua_only;
+        }
+
         yyin = tmpfile ();
         if (yyin == NULL) {
             compiler_error (ERR_INTERNAL, -1,
@@ -206,6 +220,37 @@ int  main (int  argc, char** argv)
         }
     }
 
+    if (runtime_req.needs_pico8)
+    {
+        // Texture 0 ALWAYS exists for a PICO-8 cart: it holds the sprite
+        // atlas (from __gfx__, or blank) AND the swatch row that cls()'s
+        // siblings rectfill()/circfill()/line()/rect()/pset() draw with.
+        // Previously no texture was ever generated or registered, so every
+        // spr()/map()/shape primitive drew from a texture that did not exist.
+        // Palette index 0 is transparent in the atlas (PICO-8's default palt).
+        char base_path[256];
+        strncpy (base_path, output_filename, sizeof (base_path) - 1);
+        base_path[sizeof (base_path) - 1] = '\0';
+        char *last_dot = strrchr (base_path, '.');
+        char *last_slash = strrchr (base_path, '/');
+        if (last_dot && (!last_slash || last_dot > last_slash)) *last_dot = '\0';
+
+        char sheet_path[300], vtex_path[310];
+        snprintf (sheet_path, sizeof (sheet_path), "%s_pico8", base_path);
+        snprintf (vtex_path, sizeof (vtex_path), "%s.vtex", sheet_path);
+        generate_vtex_from_pico8 (vtex_path, pico8_gfx_pixel, 0);
+
+        if (textures_head != NULL) {
+            // hint nodes already baked their ids at parse time
+            compiler_error (ERR_SEMANTIC, -1,
+                "PICO-8 carts cannot declare --#texture resources: texture 0 "
+                "is reserved for the PICO-8 sprite sheet");
+        }
+        cart_resource_append (&textures_head, &textures_tail,
+                              0, "pico8_spritesheet", sheet_path);
+        next_texture_id++;
+    }
+
     // --- Stage 4: Semantic Analyzer ---
     log_stage(4, "analyzer", verbose);
     init_global_scope();
@@ -222,13 +267,15 @@ int  main (int  argc, char** argv)
         register_global ("TIC80_EXIT_FLAG");
     }
 
-    if (runtime_req.needs_pico8)
-    {
-        // TIC-80 map buffer pointer - must be registered before prepass
-        register_global ("PICO8_MAP_BUFFER_PTR");
-    }
 
-    if (runtime_req.needs_vircon32)
+    // ALWAYS allocated (47 words), regardless of runtime_req.needs_vircon32.
+    // That flag is not final here: "--#api pico8/tic80" clears it, and the
+    // sound/memcard/tilemap intrinsics set it again DURING codegen -- long
+    // after this allocation. PICO-8 sfx()/music() did exactly that, and every
+    // one of these bases stayed -1, emitting "%define VIRCON32_SFX_CURSOR
+    // 0xFFFFFFFF" (a hardware error on first use), while __builtin_pico8_sfx
+    // in a cart that never called sfx() referenced an undefined symbol and
+    // failed to assemble at all.
     {
         vircon32_btn_prev_state_base      = next_ram_address;
         next_ram_address                  = next_ram_address + 44;

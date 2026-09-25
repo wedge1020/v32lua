@@ -675,8 +675,13 @@ void compiler_error (ErrorType type, int line_num, const char* format, ...)
     exit (1);
 }
 
+// Set by -w: suppresses every compiler_warning().
+bool g_suppress_warnings = false;
+
 void compiler_warning (ErrorType type, int line_num, const char* format, ...)
 {
+    if (g_suppress_warnings) return;
+
     // 1. Print the Error Type Prefix
     fprintf (stderr, "\n");
     switch (type)

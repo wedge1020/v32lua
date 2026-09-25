@@ -64,6 +64,7 @@ void  set_output_stream(FILE* stream);
 void  close_output_stream(void);
 void  trim_spaces (char *);
 int   resolve_static_path (ASTNode *, char *);
+extern bool g_emitting_hoisted_functions;
 int   check_needs_stack (ASTNode *);
 void  generate_block (ASTNode *);
 void  generate_asm (ASTNode *, int);

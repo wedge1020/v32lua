@@ -9,7 +9,16 @@ void  node_function_def (ASTNode *node)
 
     mark_global_as_function (node);
 
-    bool is_nested_def = (context_stack_head != NULL);
+    // The body is emitted exactly where this node is generated. Only the
+    // hoisting pass (generate_functions(), for plain top-level `function f`
+    // statements) emits it outside any running code; EVERYWHERE else --
+    // inside another function, or inside a file-scope block/expression that
+    // runs as part of __global_scope_initialization (`do local x; function
+    // f() end end`, `t = { f = function() end }`) -- execution would fall
+    // straight into the body, so it must be jumped over. The old test
+    // (context stack non-empty) missed the file-scope cases: tomb_of_the_tic
+    // ran ui() during global init, celeste ran player.init with this = junk.
+    bool is_nested_def = (context_stack_head != NULL) || !g_emitting_hoisted_functions;
     if (is_nested_def) {
         emit_asm("JMP __%s_skip\n", func_name);
     }
@@ -477,6 +486,28 @@ void  node_function_call (ASTNode *node, int  dest_reg)
 
     int expected_arity = get_expected_arity(node->as.call.target);
 
+    // s:sub(i) etc. dispatch at run time to a __strmeth_* wrapper (see
+    // __builtin_string_method_lookup), which, like any Lua function here,
+    // has no argument count -- so NIL-pad calls to those method names up to
+    // the wrapper's full arity. Harmless for a user table's own method of
+    // the same name: extra trailing NILs are simply ignored.
+    if (expected_arity < 0 && node->as.call.is_method_call &&
+        node->as.call.target != NULL && node->as.call.target->type == NODE_TABLE_GET) {
+        ASTNode *k = node->as.call.target->as.table_get.key;
+        if (k != NULL && k->type == NODE_STRING) {
+            static const struct { const char *name; int arity; } strmeth[] = {
+                { "len", 1 }, { "upper", 1 }, { "lower", 1 }, { "reverse", 1 },
+                { "rep", 2 }, { "find", 2 }, { "sub", 3 }, { "byte", 3 }, { "gsub", 3 },
+            };
+            for (size_t m = 0; m < sizeof (strmeth) / sizeof (strmeth[0]); m++) {
+                if (strcmp (k->as.string_val.value, strmeth[m].name) == 0) {
+                    expected_arity = strmeth[m].arity;   // includes self
+                    break;
+                }
+            }
+        }
+    }
+
     // --- Detect a trailing table.unpack(...) call -- the only expression ---
     // --- form that can expand into more than one argument slot, matching ---
     // --- real Lua's rule that only the LAST expression in an argument ---
@@ -487,6 +518,20 @@ void  node_function_call (ASTNode *node, int  dest_reg)
     // --- (a call through a function VALUE, where expected_arity is -1) -- ---
     // --- in either case this falls through to ordinary single-value ---
     // --- handling, same as any other expression. ---
+    // Unknown target (a call's result, a function stored in a table, a
+    // parameter, obj:m():m()): nothing tells the callee how many arguments
+    // arrived, so any parameter the call omits would be read from stack
+    // garbage instead of being nil -- `obj:inc():inc()` with
+    // `function obj.inc(self, by) ... (by or 1)` added a junk `by`. Pad such
+    // calls with NIL up to the largest parameter count of any function in the
+    // program; callees ignore the extra trailing slots and the caller pops
+    // everything it pushed. (Known variadic targets keep their own
+    // argument-count convention below.)
+    if (expected_arity < 0 && !is_c_call && !(target_sym && target_sym->is_variadic)) {
+        extern int g_max_param_count;
+        expected_arity = g_max_param_count;
+    }
+
     int unpack_extra_slots = 0;
     ASTNode *last_arg = NULL;
     if (explicit_arg_count > 0) {
@@ -676,7 +721,7 @@ void  node_function_call (ASTNode *node, int  dest_reg)
 void node_function_pointer (ASTNode *node, int dest_reg)
 {
     if (node->as.func_ptr.func_def) {
-        generate_asm(node->as.func_ptr.func_def, 0);
+        generate_asm(node->as.func_ptr.func_def, 0);   // jumps over its own body
     }
     emit_load_function_value(node->as.func_ptr.func_def, node->as.func_ptr.mangled_name, dest_reg);
 }

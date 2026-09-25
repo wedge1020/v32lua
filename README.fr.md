@@ -219,9 +219,23 @@ par défaut lorsqu'aucun indice `--#api` n'est présent) :
   fantaisie) compilés en instructions natives Vircon32, y compris la mise
   à l'échelle des coordonnées nécessaire pour faire correspondre l'écran
   logique 240×136 de TIC-80 à la résolution physique de Vircon32.
+  `sfx()`/`music()` utilisent la même banque de sons provisoires générée
+  que la couche PICO-8 ; `print()` respecte sa couleur et renvoie la
+  largeur du texte.
 * **Couche de compatibilité PICO-8** (`--#api "pico8"`) — l'équivalent au
-  format PICO-8, à un stade d'avancement antérieur à celui de la couche
-  TIC-80.
+  format PICO-8 : `spr`/`map`/`mget`/`mset`/`fget`/`fset`, `cls`,
+  `rectfill`/`rect`/`circfill`/`circ`/`line`/`pset`/`print` (avec
+  couleur), `camera`/`color`, `btn`/`btnp` (répétition automatique
+  PICO-8), `add`/`del`/`count`/`foreach`/`for v in all(t)` (sûrs en cas de
+  suppression), les maths PICO-8 (`flr`, `rnd`, `mid`, `sin`/`cos` en
+  tours, ...), `sfx`/`music` sur une banque de sons provisoires générée, et
+  `_init`/`_update` (30 i/s)/`_update60`/`_draw`. L'écran 128×128 est mis à
+  l'échelle 2,75× et centré ; ce qui est dessiné en dehors est masqué.
+  **Une cartouche `.p8` se compile directement** (`v32lua jeu.p8`) : sa
+  section `__lua__` est le programme et ses sections `__gfx__`/`__gff__`/
+  `__map__` deviennent la planche de sprites, les drapeaux de sprites et la
+  carte. Un simple `.lua` peut prendre ces ressources dans une cartouche
+  avec `--#p8 "jeu.p8"`. Voir [doc/PICO8.md](doc/PICO8.md).
 
 Une seule surface d'API est active par cartouche ; sélectionner `tic80` ou
 `pico8` remplace la surface d'appel native au lieu de s'y ajouter.
@@ -243,6 +257,7 @@ Indices pris en charge :
 | `--#version "X.Y"` | Définit le champ de version de la cartouche dans le XML. |
 | `--#title "TITRE"` | Définit le titre de la cartouche. |
 | `--#api "tic80"` / `--#api "pico8"` | Sélectionne une couche de compatibilité d'API (voir ci-dessus). |
+| `--#p8 "cart.p8"` | PICO-8 : prend la planche de sprites, les drapeaux de sprites et la carte d'une cartouche `.p8` (implique `--#api pico8`). |
 | `--#texture NOM "chemin/image.png"` | Enregistre une ressource de texture et la lie à une constante `NOM` à la compilation. |
 | `--#sound NOM "chemin/son.vsnd"` | Enregistre une ressource sonore et la lie à une constante `NOM` à la compilation. |
 | `--#tilemap NOM "chemin/carte.csv"` | Enregistre une tilemap depuis un fichier CSV, intégrée directement dans l'image ROM (voir [doc/API.fr.md](doc/API.fr.md#tilemap--tilemap)). |
@@ -536,6 +551,11 @@ Player:move(5, -2)
   vers l'étiquette de fin de la boucle la plus interne actuelle (suivie
   via une pile interne de compilation des boucles).
 
+* **`goto` / `::étiquette::` :** étiquettes façon Lua 5.2, à portée de
+  bloc, avec références en avant — l'idiome habituel `goto continue` /
+  `::continue::` fonctionne, y compris avec le même nom d'étiquette dans
+  plusieurs boucles d'une même fonction.
+
 * **Conditionnelles :** Structures `if <cond> then ... elseif <cond> then
   ... else ... end` avec branchement en court-circuit.
 
@@ -554,6 +574,20 @@ Player:move(5, -2)
 * **Concaténation de Chaînes :** l'opérateur `..` empile automatiquement
   les opérandes et invoque la sous-routine d'exécution
   `__builtin_strcat`.
+
+* **Littéraux et méthodes de chaînes :** chaînes `"doubles"`, `'simples'`
+  et longues `[[entre crochets]]` (sans échappements ; un saut de ligne
+  juste après `[[` est ignoré). Les littéraux numériques acceptent les
+  exposants (`1e-3`, `2.5E4`). Les fonctions de la bibliothèque de chaînes
+  s'utilisent comme méthodes sur les valeurs de chaîne — `s:sub(2, #s)`,
+  `("abc"):upper()`, `s:len()`, `rep`, `byte`, `find`, `lower`, `reverse`,
+  `gsub` — et les chaînes utilisées comme clés de table sont comparées par
+  contenu, donc `t["a" .. "b"]` trouve `t.ab`.
+
+* **Nombres → chaînes :** les nombres entiers s'affichent sans point
+  décimal (`"5"`), les autres avec jusqu'à 6 chiffres fractionnaires
+  significatifs et sans zéros finaux (`"0.5"`, `"2.25"`) — précision
+  float32.
 
 * **Opérateur de Longueur :** l'opérateur `#` invoque `__builtin_len` pour
   résoudre les longueurs de chaînes ou de tables.
@@ -817,7 +851,32 @@ attente d'une décision de conception :
 
 * `pcall`/`error`/`assert`
 * `string.match`/`gmatch`, `setmetatable`
-* travail supplémentaire sur les couches d'API PICO-8 et TIC-80
+* `select()`, et `next()` comme fonction appelable (`pairs()` fonctionne)
+* L'expansion d'un appel final à valeurs multiples dans un constructeur de
+  table ou une liste d'arguments : `{f()}` et `g(f())` ne gardent que la
+  première valeur de `f()` (`{...}` et `local a, b = f()` sont bien
+  développés). La convention d'appel ne transmet pas le nombre de valeurs
+  renvoyées ; il en faudrait un.
+* L'arithmétique sur des chaînes numériques (`"10" + 5`) : Lua convertit
+  la chaîne ; ici le résultat n'est pas un nombre. Convertissez d'abord
+  avec `tonumber()`.
+* Les opérateurs bit à bit (`&`, `|`, `~`, `<<`, `>>`) et les `band`/
+  `bor`/... de PICO-8 ; `string.format` comme méthode
+  (`("%d"):format(x)`) — utilisez `string.format(...)`.
+* Le ramasse-miettes : le tas est un allocateur linéaire, donc chaque
+  table, fermeture et chaîne créée à l'exécution vit jusqu'à la
+  réinitialisation. Les jeux qui tournent longtemps devraient réutiliser
+  leurs tables plutôt que d'en créer à chaque image.
+* Les tables sont des listes d'association (sans hachage) : la recherche
+  d'une clé est linéaire en la taille de la table et, pour les clés de
+  chaîne, chaque échec fait une comparaison de contenu.
+* PICO-8 : `pal`/`palt` (compilés en no-op avec un avertissement), `sspr`,
+  `clip`, `peek`/`poke`, `cartdata`/`dget`/`dset`, `stat`, la lecture
+  réelle de `__sfx__`/`__music__` (des sons provisoires sont utilisés)
+* TIC-80 : famille `peek`/`poke`, `tri`/`trib`, `elli`/`ellib`, `clip`,
+  `key`/`keyp`, `mouse`, `font`, rotation de `spr`, et synthèse des données
+  `WAVES`/`SFX`/`MUSIC` propres à la cartouche (des sons provisoires sont
+  utilisés)
 * `tonumber(s, base)` — la forme à deux arguments, avec base explicite
 * Un diagnostic (avertissement/erreur) pour la lecture, depuis
   l'intérieur d'une fonction, d'une `local` déclarée dans un bloc

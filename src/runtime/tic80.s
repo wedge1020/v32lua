@@ -207,154 +207,161 @@ _tic80_init_flags_done:
 __builtin_tic80_spr:
     PUSH  BP
     MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
+    PUSH  R7
+    PUSH  R8
+    PUSH  R9
+    PUSH  R10
+    PUSH  R11
+    PUSH  R12
+    PUSH  R13
 
-    ;; --- Handle colorkey texture selection ---
-    MOV   R1, [BP+5]        ; colorkey parameter
+    ;; AUDIT FIXES (2026-09, verified in a headless run of the real CPU):
+    ;;  - colorkey went straight to GPU_SelectedTexture: the extremely common
+    ;;    explicit spr(id, x, y, -1) selected texture -1 (the BIOS font), and
+    ;;    every later swatch primitive inherited it. Anything outside 0-15
+    ;;    now means "no transparency" = texture 16.
+    ;;  - the flip tests ANDed into an UNINITIALIZED register (AND R3, R2 /
+    ;;    AND R11, R1), so flipping depended on leftover register contents.
+    ;;  - a flipped tile spans [pt - 8*scale, pt] (negative GPU scale), so it
+    ;;    belongs at base + (w - col)*8*scale, not (w - 1 - col) -- flipped
+    ;;    sprites were drawn one full tile to the left/up.
+    ;;  - positions are floored (FADD 0.5 + CFI truncated toward zero, so
+    ;;    sprites partly off the left/top edge landed a pixel off).
+    ;;  - all registers are preserved.
+
+    ;; --- colorkey -> texture ---
+    MOV   R1, [BP+5]
+    FLR   R1
     CFI   R1
+    MOV   R2, R1
+    ILT   R2, 0
+    JT    R2, _tic80_spr_opaque
+    MOV   R2, R1
+    IGT   R2, 15
+    JF    R2, _tic80_spr_tex
+_tic80_spr_opaque:
+    MOV   R1, 16
+_tic80_spr_tex:
     OUT   GPU_SelectedTexture, R1
 
-    ;; --- Calculate final scale ---
-    MOV   R1, [BP+6]        ; tic80_scale (float)
-    MOV   R2, 2.625
-    FMUL  R1, R2
-    MOV   R12, R1           ; X scale
-    MOV   R13, R1           ; Y scale
+    ;; --- scale (TIC-80 scale * 2.625) and flip flags ---
+    MOV   R1, [BP+6]
+    FMUL  R1, 2.625
+    MOV   R10, R1
+    FMUL  R10, 8.0            ; R10 = tile size in screen px
 
-    ;; --- Pre-calculate scaled offset (8 * scale) ---
-    MOV   R1, 8.0
-    FMUL  R1, R12
-    MOV   R10, R1           ; R10 = 8 * scale
-
-    ;; --- Apply flip ---
     MOV   R2, [BP+7]
+    FLR   R2
     CFI   R2
-    AND   R3, R2
-    AND   R3, 1
-    IEQ   R3, 1
-    JF    R3, _tic80_spr_no_flip_x
-    FSGN  R12
-_tic80_spr_no_flip_x:
-    OUT   GPU_DrawingScaleX, R12
+    MOV   R12, R2
+    AND   R12, 1              ; R12 = flip x (0/1)
+    MOV   R13, R2
+    AND   R13, 2
+    SHL   R13, -1             ; R13 = flip y (0/1)
 
-    AND   R3, R2
-    AND   R3, 2
-    IEQ   R3, 2
-    JF    R3, _tic80_spr_no_flip_y
-    FSGN  R13
-_tic80_spr_no_flip_y:
-    OUT   GPU_DrawingScaleY, R13
+    MOV   R2, R1
+    JF    R12, _tic80_spr_sx
+    FSGN  R2
+_tic80_spr_sx:
+    OUT   GPU_DrawingScaleX, R2
+    MOV   R2, R1
+    JF    R13, _tic80_spr_sy
+    FSGN  R2
+_tic80_spr_sy:
+    OUT   GPU_DrawingScaleY, R2
 
-    ;; --- Prepare Loop Limits ---
-    MOV   R5, [BP+9]        ; w
-    CFI   R5
-    MOV   R6, [BP+10]       ; h
-    CFI   R6
-    MOV   R7, [BP+2]        ; id
-    CFI   R7
+    ;; --- loop limits / base ---
+    MOV   R5, [BP+9]
+    CFI   R5                  ; w
+    MOV   R6, [BP+10]
+    CFI   R6                  ; h
+    MOV   R7, [BP+2]
+    FLR   R7
+    CFI   R7                  ; id
 
-    ;; --- FIX: Base x/y are ALREADY scaled (from caller).
-    ;;         Only ensure they are integers, NO additional scaling.
-    MOV   R8, [BP+3]        ; x (Vircon32 pixels)
-    FMUL  R8, 2.625         ; multiply by x axis screen factor
+    MOV   R8, [BP+3]
+    FMUL  R8, 2.625
     FADD  R8, 0.5
-    CFI   R8                ; Convert to integer (no scaling)
-
-    MOV   R9, [BP+4]        ; y (Vircon32 pixels)
-    FMUL  R9, 2.625         ; multiply by y axis screen factor
+    FLR   R8
+    CFI   R8                  ; base x (screen px)
+    MOV   R9, [BP+4]
+    FMUL  R9, 2.625
     FADD  R9, 0.5
-    CFI   R9                ; Convert to integer (no scaling)
+    FLR   R9
+    CFI   R9                  ; base y
 
-    MOV   R4, 0             ; row counter
-
+    MOV   R4, 0               ; row
 _tic80_spr_row_loop_start:
     MOV   R1, R4
     IGE   R1, R6
     JT    R1, _tic80_spr_end
-    MOV   R3, 0             ; col counter
-
+    MOV   R3, 0               ; col
 _tic80_spr_col_loop_start:
     MOV   R1, R3
     IGE   R1, R5
     JT    R1, _tic80_spr_row_loop_end
 
-    ;; --- Select region ---
     MOV   R1, R4
     IMUL  R1, 16
     IADD  R1, R3
     IADD  R1, R7
     OUT   GPU_SelectedRegion, R1
 
-    ;; --- Calculate X (with rounding) ---
-    MOV   R1, [BP+7]
-    CFI   R1
-    AND   R11, R1
-    AND   R11, 1
-    IEQ   R11, 1
-    JT    R11, _tic80_spr_calc_flip_x
-
-    ;; Normal X = base_x + (col * 8 * scale)
+    ;; x = base + col*tile, or base + (w - col)*tile when flipped
     MOV   R1, R3
-    CIF   R1
-    FMUL  R1, R10           ; col * 8 * scale
-    FADD  R1, 0.5           ; Round to nearest pixel
-    CFI   R1
-    IADD  R1, R8            ; Add base X
-    JMP   _tic80_spr_set_x
-
-_tic80_spr_calc_flip_x:
+    JF    R12, _tic80_spr_x_plain
     MOV   R1, R5
-    ISUB  R1, 1
     ISUB  R1, R3
+_tic80_spr_x_plain:
     CIF   R1
     FMUL  R1, R10
-    FADD  R1, 0.5           ; Round to nearest pixel
+    FADD  R1, 0.5
+    FLR   R1
     CFI   R1
     IADD  R1, R8
-
-_tic80_spr_set_x:
     OUT   GPU_DrawingPointX, R1
 
-    ;; --- Calculate Y (with rounding) ---
-    MOV   R1, [BP+7]
-    CFI   R1
-    AND   R11, R1
-    AND   R11, 2
-    IEQ   R11, 2
-    JT    R11, _tic80_spr_calc_flip_y
-
-    ;; Normal Y = base_y + (row * 8 * scale)
     MOV   R1, R4
-    CIF   R1
-    FMUL  R1, R10
-    FADD  R1, 0.5           ; Round to nearest pixel
-    CFI   R1
-    IADD  R1, R9
-    JMP   _tic80_spr_set_y
-
-_tic80_spr_calc_flip_y:
+    JF    R13, _tic80_spr_y_plain
     MOV   R1, R6
-    ISUB  R1, 1
     ISUB  R1, R4
+_tic80_spr_y_plain:
     CIF   R1
     FMUL  R1, R10
-    FADD  R1, 0.5           ; Round to nearest pixel
+    FADD  R1, 0.5
+    FLR   R1
     CFI   R1
     IADD  R1, R9
-
-_tic80_spr_set_y:
     OUT   GPU_DrawingPointY, R1
 
-    ;; --- Draw ---
     OUT   GPU_Command, GPUCommand_DrawRegionZoomed
 
     IADD  R3, 1
     JMP   _tic80_spr_col_loop_start
-
 _tic80_spr_row_loop_end:
     IADD  R4, 1
     JMP   _tic80_spr_row_loop_start
 
 _tic80_spr_end:
+    POP   R13
+    POP   R12
+    POP   R11
+    POP   R10
+    POP   R9
+    POP   R8
+    POP   R7
+    POP   R6
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
     MOV   SP, BP
     POP   BP
     RET
@@ -992,11 +999,16 @@ __builtin_tic80_map:
     PUSH  R13
 
     ;; Load buffer pointer
+    ;; Buffer pointer: a register_global()'d word starts as BOXED_NIL (the
+    ;; nil-init sweep), not 0 -- test both before using it as an address.
     MOV   R1,  var_TIC80_MAP_BUFFER_PTR
     MOV   R12, [R1]
-    IEQ   R12, 0
-    JT    R12, _tic80_map_done
-    MOV   R12, [R1]         ; restore R12 after destructive comparison
+    MOV   R0, R12
+    IEQ   R0, 0
+    JT    R0, _tic80_map_done
+    MOV   R0, R12
+    IEQ   R0, BOXED_NIL
+    JT    R0, _tic80_map_done
 
     ;; Load arguments
     MOV   R5, [BP+2]        ; sx (source X in map)  <-- Was R1
@@ -1017,12 +1029,12 @@ __builtin_tic80_map:
     CFI   R6
 
     ;; Load ACTUAL map dimensions
-    MOV   R7, var_TIC80_MAP_WIDTH
-    MOV   R7, [R7]          ; R7 = actual width
-    MOV   R8, var_TIC80_MAP_HEIGHT
-    MOV   R8, [R8]          ; R8 = actual height
-
-    ;; Validate dimensions
+    ;; (The old code CLAMPED the source origin so the whole w x h block fit
+    ;; inside the cart's stored map -- with h larger than the stored height
+    ;; that produced a NEGATIVE origin, and super_breakout's
+    ;; map(0,0,MAP_WIDTH,MAP_HEIGHT) read far outside the buffer. Its sy<0
+    ;; path also skipped initializing the row counter. Cells are now
+    ;; resolved one at a time below, TIC-80 style.)
     MOV   R11, R3
     ILT   R11, 1
     JT    R11, _tic80_map_done
@@ -1030,46 +1042,6 @@ __builtin_tic80_map:
     ILT   R11, 1
     JT    R11, _tic80_map_done
 
-    ;; Clamp sx: 0 <= sx <= width - w
-    MOV   R11, R5
-    ILT   R11, 0
-    JT    R11, _tic80_map_sx_zero
-    MOV   R9,  R7
-    ISUB  R9,  R3
-    MOV   R11, R5
-    IGT   R11, R9
-    JT    R11, _tic80_map_sx_max
-    JMP   _tic80_map_check_sy
-
-_tic80_map_sx_zero:
-    MOV   R5, 0
-    JMP   _tic80_map_check_sy
-
-_tic80_map_sx_max:
-    MOV   R5, R9
-
-_tic80_map_check_sy:
-    MOV   R11, R6
-    ILT   R11, 0
-    JT    R11, _tic80_map_sy_zero
-    MOV   R9,  R8
-    ISUB  R9,  R4
-    MOV   R11, R6
-    IGT   R11, R9
-    JT    R11, _tic80_map_sy_max
-    JMP   _tic80_map_row_loop_prestart
-
-_tic80_map_sy_zero:
-    MOV   R6, 0
-    JMP   _tic80_map_row_loop_start
-
-_tic80_map_sy_max:
-    MOV   R6, R9
-
-    ;; Save width in R11 for byte index calculation
-    MOV   R11, R7
-
-    ;; Outer loop: rows (R9)
 _tic80_map_row_loop_prestart:
     MOV   R9, 0
 _tic80_map_row_loop_start:
@@ -1085,21 +1057,42 @@ _tic80_map_col_loop_start:
     JT    R7, _tic80_map_row_loop_next
 
     ;; Calculate map cell position: (sx + col, sy + row)
+    ;; Map cell = (x + col, y + row), wrapped into TIC-80's 240 x 136 map
+    ;; like TIC-80 does; cells the cart's MAP data doesn't cover read as 0.
     MOV   R7, R5
-    IADD  R7, R10          ; R7 = sx + col
+    IADD  R7, R10
+    IMOD  R7, 240
+    MOV   R11, R7
+    ILT   R11, 0
+    JF    R11, _tic80_map_x_wrapped
+    IADD  R7, 240
+_tic80_map_x_wrapped:
     MOV   R8, R6
-    IADD  R8, R9           ; R8 = sy + row
-
-    ;; Calculate byte index: (sy+row) * width + (sx+col)
+    IADD  R8, R9
+    IMOD  R8, 136
+    MOV   R11, R8
+    ILT   R11, 0
+    JF    R11, _tic80_map_y_wrapped
+    IADD  R8, 136
+_tic80_map_y_wrapped:
     MOV   R11, var_TIC80_MAP_WIDTH
-    MOV   R11, [R11]       ; R7 = actual width
-    IMUL  R8, R11          ; R8 = (sy+row) * width (R11 is safely preserved)
-    IADD  R7, R8           ; R7 = byte index
-
-    ;; Load tile index directly
-    MOV   R8, R12          ; R12 is value at var_TIC80_MAP_BUFFER_PTR
-    IADD  R8, R7           ; 
-    MOV   R7, [R8]         ; R7 = tile index (Leaves R10 untouched!)
+    MOV   R11, [R11]
+    MOV   R0, R7
+    IGE   R0, R11
+    JT    R0, _tic80_map_empty_cell      ; x beyond stored map
+    MOV   R0, var_TIC80_MAP_HEIGHT
+    MOV   R0, [R0]
+    ILE   R0, R8
+    JT    R0, _tic80_map_empty_cell      ; y beyond stored map
+    IMUL  R8, R11                        ; y * width
+    IADD  R7, R8                         ; cell index
+    MOV   R8, R12
+    IADD  R8, R7
+    MOV   R7, [R8]                       ; tile index
+    JMP   _tic80_map_have_cell
+_tic80_map_empty_cell:
+    MOV   R7, 0
+_tic80_map_have_cell:
 
     PUSH  R1               ; x save
     PUSH  R2               ; y save
@@ -1471,6 +1464,10 @@ _tic80_fset_done:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 __tic80_draw_swatch:
+    ;; Select the texture explicitly (swatches are opaque on every sheet;
+    ;; line() already uses texture 0). Relying on "whatever is selected"
+    ;; drew rect/pix/circ from the BIOS font after any spr(..., -1).
+    OUT   GPU_SelectedTexture, 0
     MOV   R8, R5
     IADD  R8, 512
     OUT   GPU_SelectedRegion, R8
@@ -1485,11 +1482,13 @@ __tic80_draw_swatch:
 
     FMUL  R1, 2.625
     FADD  R1, 0.5
+    FLR   R1
     CFI   R1
     OUT   GPU_DrawingPointX, R1
 
     FMUL  R2, 2.625
     FADD  R2, 0.5
+    FLR   R2
     CFI   R2
     OUT   GPU_DrawingPointY, R2
 
@@ -1997,3 +1996,62 @@ __circb_done:
     POP   BP
     RET
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_tic80_print(text, x, y, color)
+;; [BP+5] = text, [BP+4] = x, [BP+3] = y, [BP+2] = color (TIC-80 px / index)
+;; Returns R0 = width in TIC-80 px (#text * 6) as a float.
+;; Color is applied as a GPU multiply over the white BIOS font; the current
+;; multiply color (e.g. the pause-screen dim) is saved and restored.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+__builtin_tic80_print:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+
+    IN    R3, GPU_MultiplyColor          ; saved multiply
+
+    MOV   R1, [BP+2]
+    FLR   R1
+    CFI   R1
+    AND   R1, 15
+    MOV   R2, __tic80_palette
+    IADD  R1, R2
+    MOV   R1, [R1]
+    OUT   GPU_MultiplyColor, R1
+
+    MOV   R1, [BP+4]                     ; x
+    FMUL  R1, 2.625
+    FADD  R1, 0.5
+    FLR   R1
+    CFI   R1
+    MOV   R2, [BP+3]                     ; y
+    FMUL  R2, 2.625
+    FADD  R2, 0.5
+    FLR   R2
+    CFI   R2
+
+    ;; __builtin_print ABI: [BP+4] = x, [BP+3] = y, [BP+2] = value
+    PUSH  R1
+    PUSH  R2
+    MOV   R1, [BP+5]
+    PUSH  R1
+    CALL  __builtin_print
+    IADD  SP, 3
+
+    OUT   GPU_MultiplyColor, R3
+
+    MOV   R1, [BP+5]
+    PUSH  R1
+    CALL  __builtin_len                  ; 0 for non-strings
+    IADD  SP, 1
+    FMUL  R0, 6.0
+
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET

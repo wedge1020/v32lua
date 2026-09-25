@@ -216,9 +216,22 @@ defecto cuando no hay ninguna pista `--#api` presente):
   consola de fantasía) compiladas hacia instrucciones nativas de Vircon32,
   incluyendo el escalado de coordenadas necesario para mapear la pantalla
   lógica de 240×136 de TIC-80 a la resolución física de Vircon32.
+  `sfx()`/`music()` usan el mismo banco de tonos provisionales generado que
+  la capa PICO-8; `print()` respeta su color y devuelve el ancho del texto.
 * **Capa de compatibilidad PICO-8** (`--#api "pico8"`) — el equivalente con
-  la forma de PICO-8, en una etapa de completitud anterior a la de la capa
-  TIC-80.
+  la forma de PICO-8: `spr`/`map`/`mget`/`mset`/`fget`/`fset`, `cls`,
+  `rectfill`/`rect`/`circfill`/`circ`/`line`/`pset`/`print` (con color),
+  `camera`/`color`, `btn`/`btnp` (autorrepetición de PICO-8), `add`/`del`/
+  `count`/`foreach`/`for v in all(t)` (seguro ante borrados), matemáticas
+  de PICO-8 (`flr`, `rnd`, `mid`, `sin`/`cos` en vueltas, ...), `sfx`/
+  `music` sobre un banco de tonos provisionales generado, y `_init`/
+  `_update` (30 fps)/`_update60`/`_draw`. La pantalla de 128×128 se escala
+  2,75× y se centra; lo que se dibuja fuera de ella queda enmascarado. **Un
+  cartucho `.p8` compila directamente** (`v32lua juego.p8`): su sección
+  `__lua__` es el programa y sus secciones `__gfx__`/`__gff__`/`__map__` se
+  convierten en la hoja de sprites, las banderas de sprites y el mapa. Un
+  `.lua` simple puede tomar esos recursos de un cartucho con
+  `--#p8 "juego.p8"`. Ver [doc/PICO8.md](doc/PICO8.md).
 
 Solo una superficie de API está activa por cartucho; seleccionar `tic80` o
 `pico8` reemplaza la superficie de llamadas nativa en lugar de añadirse a
@@ -240,6 +253,7 @@ Pistas soportadas:
 | `--#version "X.Y"` | Establece el campo de versión del cartucho en el XML. |
 | `--#title "TÍTULO"` | Establece el título del cartucho. |
 | `--#api "tic80"` / `--#api "pico8"` | Selecciona una capa de compatibilidad de API (ver arriba). |
+| `--#p8 "cart.p8"` | PICO-8: toma la hoja de sprites, las banderas de sprites y el mapa de un cartucho `.p8` (implica `--#api pico8`). |
 | `--#texture NOMBRE "ruta/imagen.png"` | Registra un recurso de textura y lo vincula a una constante `NOMBRE` en tiempo de compilación. |
 | `--#sound NOMBRE "ruta/sonido.vsnd"` | Registra un recurso de sonido y lo vincula a una constante `NOMBRE` en tiempo de compilación. |
 | `--#tilemap NOMBRE "ruta/mapa.csv"` | Registra un mapa de mosaicos desde un archivo CSV, incrustado directamente en la imagen ROM (ver [doc/API.es.md](doc/API.es.md#mapa-de-mosaicos-tilemap)). |
@@ -527,6 +541,11 @@ Player:move(5, -2)
   etiqueta final del bucle más interno actual (rastreado mediante una
   pila interna de compilación de bucles).
 
+* **`goto` / `::etiqueta::`:** etiquetas al estilo de Lua 5.2, con ámbito
+  de bloque y referencias hacia adelante — el modismo habitual
+  `goto continue` / `::continue::` funciona, incluso con el mismo nombre de
+  etiqueta en varios bucles de una misma función.
+
 * **Condicionales:** Estructuras `if <cond> then ... elseif <cond> then
   ... else ... end` con ramificación de cortocircuito.
 
@@ -545,6 +564,19 @@ Player:move(5, -2)
 * **Concatenación de Cadenas:** el operador `..` empuja automáticamente
   los operandos e invoca la subrutina en tiempo de ejecución
   `__builtin_strcat`.
+
+* **Literales y métodos de cadena:** cadenas `"dobles"`, `'simples'` y
+  largas `[[entre corchetes]]` (sin escapes; se descarta un salto de línea
+  justo después de `[[`). Los literales numéricos aceptan exponentes
+  (`1e-3`, `2.5E4`). Las funciones de la biblioteca de cadenas funcionan
+  como métodos sobre valores de cadena — `s:sub(2, #s)`, `("abc"):upper()`,
+  `s:len()`, `rep`, `byte`, `find`, `lower`, `reverse`, `gsub` — y las
+  cadenas usadas como claves de tabla se comparan por contenido, así que
+  `t["a" .. "b"]` encuentra `t.ab`.
+
+* **Números → cadenas:** los números enteros se imprimen sin punto decimal
+  (`"5"`); los demás con hasta 6 dígitos fraccionarios significativos y sin
+  ceros finales (`"0.5"`, `"2.25"`) — precisión float32.
 
 * **Operador de Longitud:** el operador `#` invoca `__builtin_len` para
   resolver longitudes de cadenas o tablas.
@@ -802,7 +834,30 @@ una decisión de diseño:
 
 * `pcall`/`error`/`assert`
 * `string.match`/`gmatch`, `setmetatable`
-* trabajo adicional en las capas de API de PICO-8 y TIC-80
+* `select()`, y `next()` como función invocable (`pairs()` funciona)
+* Expandir una llamada final de múltiples valores dentro de un constructor
+  de tabla o una lista de argumentos: `{f()}` y `g(f())` conservan solo el
+  primer valor de `f()` (`{...}` y `local a, b = f()` sí se expanden). La
+  convención de llamada no transporta un recuento de retornos; esto lo
+  necesita.
+* Aritmética con cadenas numéricas (`"10" + 5`): Lua convierte la cadena;
+  aquí el resultado no es un número. Convierta primero con `tonumber()`.
+* Operadores a nivel de bits (`&`, `|`, `~`, `<<`, `>>`) y los `band`/
+  `bor`/... de PICO-8; `string.format` como método (`("%d"):format(x)`) —
+  use `string.format(...)`.
+* Recolección de basura: el heap es un asignador lineal, así que cada
+  tabla, clausura y cadena en tiempo de ejecución vive hasta el reinicio.
+  Los juegos de larga duración deberían reutilizar tablas en lugar de
+  crearlas en cada fotograma.
+* Las tablas son listas de asociación (sin hashing): la búsqueda de una
+  clave es lineal en el tamaño de la tabla y, para claves de cadena, cada
+  fallo hace una comparación de contenido.
+* PICO-8: `pal`/`palt` (compilan a no-ops con una advertencia), `sspr`,
+  `clip`, `peek`/`poke`, `cartdata`/`dget`/`dset`, `stat`, reproducción
+  real de `__sfx__`/`__music__` (se usan tonos provisionales)
+* TIC-80: familia `peek`/`poke`, `tri`/`trib`, `elli`/`ellib`, `clip`,
+  `key`/`keyp`, `mouse`, `font`, rotación en `spr`, y síntesis de los datos
+  `WAVES`/`SFX`/`MUSIC` propios del cartucho (se usan tonos provisionales)
 * `tonumber(s, base)` — la forma de dos argumentos, con base explícita
 * Un diagnóstico (advertencia/error) para leer, desde dentro de una
   función, una `local` declarada en un bloque léxicamente fuera de

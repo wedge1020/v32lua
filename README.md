@@ -209,8 +209,21 @@ present):
   functions, and the fantasy-console-style asset sections) compiled down to
   native Vircon32 instructions, including the coordinate scaling needed to
   map TIC-80's 240×136 logical screen onto Vircon32's physical resolution.
+  `sfx()`/`music()` play from the same generated placeholder tone bank as
+  the PICO-8 layer; `print()` honours its color and returns the text width.
 * **PICO-8 compatibility layer** (`--#api "pico8"`) — the PICO-8-shaped
-  equivalent, at an earlier stage of completeness than the TIC-80 layer.
+  equivalent: `spr`/`map`/`mget`/`mset`/`fget`/`fset`, `cls`, `rectfill`/
+  `rect`/`circfill`/`circ`/`line`/`pset`/`print` (with color),
+  `camera`/`color`, `btn`/`btnp` (PICO-8 autorepeat), `add`/`del`/
+  `count`/`foreach`/`for v in all(t)` (deletion-safe), PICO-8 math
+  (`flr`, `rnd`, `mid`, turn-based `sin`/`cos`, ...), `sfx`/`music` on a
+  generated placeholder tone bank, and `_init`/`_update` (30 fps)/
+  `_update60`/`_draw`. The 128×128 screen is scaled 2.75× and centered;
+  drawing outside it is masked. A **`.p8` cart compiles directly**
+  (`v32lua game.p8`): its `__lua__` section is the program and its
+  `__gfx__`/`__gff__`/`__map__` sections become the sprite sheet, sprite
+  flags and map. A plain `.lua` can take those assets from a cart with
+  `--#p8 "game.p8"`. See [doc/PICO8.md](doc/PICO8.md).
 
 Only  one API  surface  is  active per  cartridge;  selecting `tic80`  or
 `pico8` replaces the native call surface rather than adding to it.
@@ -231,6 +244,7 @@ Supported hints:
 | `--#version "X.Y"` | Sets the cartridge version field in the XML. |
 | `--#title "TITLE"` | Sets the cart title. |
 | `--#api "tic80"` / `--#api "pico8"` | Selects a compatibility API layer (see above). |
+| `--#p8 "cart.p8"` | PICO-8: take the sprite sheet, sprite flags and map from a `.p8` cart (implies `--#api pico8`). |
 | `--#texture NAME "path/image.png"` | Registers a texture resource and binds it to a compile-time constant `NAME`. |
 | `--#sound NAME "path/sound.vsnd"` | Registers a sound resource and binds it to a compile-time constant `NAME`. |
 | `--#tilemap NAME "path/map.csv"` | Registers a tilemap from a CSV file, embedded directly into the ROM image (see [doc/API.md](doc/API.md#tilemap-tilemap)). |
@@ -505,6 +519,10 @@ Player:move(5, -2)
   of the current innermost loop (tracked via an internal compilation loop
   stack).
 
+* **`goto` / `::label::`:** Lua 5.2-style labels, block-scoped, with
+  forward references — the usual `goto continue` / `::continue::` idiom
+  works, including the same label name in several loops of one function.
+
 * **Conditionals:** `if <cond> then ... elseif <cond> then ... else ...
   end` structures with short-circuit branching.
 
@@ -521,6 +539,18 @@ Player:move(5, -2)
 
 * **String Concatenation:** `..` operator automatically pushes operands
   and invokes the runtime subroutine `__builtin_strcat`.
+
+* **String literals & methods:** `"double"`, `'single'` and long
+  `[[bracket]]` strings (no escapes; a newline right after `[[` is
+  dropped). Number literals accept exponents (`1e-3`, `2.5E4`). String
+  library calls work as methods on string values — `s:sub(2, #s)`,
+  `("abc"):upper()`, `s:len()`, `rep`, `byte`, `find`, `lower`,
+  `reverse`, `gsub` — and strings used as table keys compare by content,
+  so `t["a" .. "b"]` finds `t.ab`.
+
+* **Numbers → strings:** whole numbers print without a decimal point
+  (`"5"`), others with up to 6 significant fractional digits and no
+  trailing zeros (`"0.5"`, `"2.25"`) — float32 precision.
 
 * **Length Operator:** `#` operator invokes `__builtin_len` to resolve
   string or table lengths.
@@ -759,7 +789,27 @@ decision:
 
 * `pcall`/`error`/`assert`
 * `string.match`/`gmatch`, `setmetatable`
-* additional work on PICO8 and TIC80 API layers
+* `select()`, and `next()` as a callable function (`pairs()` works)
+* Expanding a trailing multi-value call into a table constructor or an
+  argument list: `{f()}` and `g(f())` keep only `f()`'s first value
+  (`{...}` and `local a, b = f()` do expand). The calling convention
+  carries no return count; this needs one.
+* Arithmetic on numeric strings (`"10" + 5`): Lua coerces the string; here
+  the result is not a number. Convert with `tonumber()` first.
+* Bitwise operators (`&`, `|`, `~`, `<<`, `>>`) and PICO-8's
+  `band`/`bor`/...; `string.format` as a method (`("%d"):format(x)`) —
+  use `string.format(...)`.
+* Garbage collection: the heap is a bump allocator, so every table,
+  closure and runtime string lives until reset. Long-running games should
+  reuse tables rather than create them per frame.
+* Tables are association lists (no hashing): key lookup is linear in the
+  table's size, and for string keys each miss does a content compare.
+* PICO-8: `pal`/`palt` (compile to no-ops with a warning), `sspr`,
+  `clip`, `peek`/`poke`, `cartdata`/`dget`/`dset`, `stat`, real
+  `__sfx__`/`__music__` playback (placeholder tones are used)
+* TIC-80: `peek`/`poke` family, `tri`/`trib`, `elli`/`ellib`, `clip`,
+  `key`/`keyp`, `mouse`, `font`, `spr` rotation, and synthesis of a cart's
+  own `WAVES`/`SFX`/`MUSIC` data (placeholder tones are used)
 * `tonumber(s, base)` — the two-argument, explicit-base form
 * A diagnostic (warn/error) for reading, from inside a function, a
   `local` declared in a block lexically outside any function at chunk

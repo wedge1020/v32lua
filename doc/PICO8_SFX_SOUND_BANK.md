@@ -22,10 +22,14 @@ select from a small bank of generic placeholder tones instead:
   compile-time or runtime. Tone `k` is `pico8_tone_base_id + k`.
 - A PICO-8 index `n` maps onto tone `n & (PICO8_TONE_COUNT-1)` -- same index
   always plays the same placeholder tone.
-- These are still real `--#sound` resources: `pico8_tone0.vsnd` ..
-  `pico8_tone7.vsnd` must exist alongside the cart at build time, same as
-  any texture/sound a cart declares by hand. The compiler references a
-  sound resource; it cannot fabricate the sample data inside one.
+- These are still real `--#sound` resources, `pico8_tone0.vsnd` ..
+  `pico8_tone7.vsnd`, referenced from the cart XML. **The compiler now
+  generates them** next to the output `.asm` (square-wave blips a minor
+  third apart from C4, 0.18 s, linear decay) the first time a cart uses
+  `sfx()`/`music()` -- but never overwrites an existing file, so a
+  hand-made tone set always wins. (They used to have to be made by hand.)
+- The bank is registered on first use of `sfx()`/`music()`, not when
+  `--#api pico8` is seen.
 
 ## sfx(n [, channel[, offset[, length]]])
 
@@ -37,8 +41,9 @@ select from a small bank of generic placeholder tones instead:
   handed to `emit_vircon32_sfx_play_intrinsic()` as a synthetic
   `NODE_NUMBER`, so it takes that emitter's own static-fold path.
 - Dynamic `n` (celeste's `psfx` wrapper: `sfx(num)`, `num` a parameter)
-  needs a new runtime routine, `__builtin_pico8_sfx` (`runtime.s`), which
-  does the `AND`-mapping in assembly and then mirrors
+  goes through a runtime routine, `__builtin_tonebank_sfx` (`vircon32.s`;
+  formerly `__builtin_pico8_sfx` in `pico8.s`, moved so TIC-80 can share
+  it), which does the `AND`-mapping in assembly and then mirrors
   `__builtin_vircon32_sfx_play` exactly (channel resolution, cursor
   auto-advance, channel-ownership masks).
 
@@ -57,7 +62,9 @@ select from a small bank of generic placeholder tones instead:
   `emit_vircon32_channel_cmd_intrinsic()`, which would also cut any
   playing `sfx()`).
 - `n >= 0` plays the mapped tone on channel 0, looped (PICO-8 patterns loop
-  by default) via `emit_vircon32_play_intrinsic()`.
+  by default) via `emit_vircon32_play_intrinsic()` -- as
+  `music.play(tone, 0, true)`. (Until the 2026-09 audit the loop flag was
+  passed in the CHANNEL position, so music never actually looped.)
 
 ## Known limitations
 
@@ -67,7 +74,17 @@ select from a small bank of generic placeholder tones instead:
 - `music()`'s per-call fade and channel-mask arguments are accepted but
   inert.
 - `music()` requires a compile-time-constant track number.
-- TIC-80's `sfx()`/`music()` are still stub/TODO placeholders in
-  `v32lua.c` (`emit_tic80_sfx_intrinsic`/`emit_tic80_music_intrinsic`) --
-  not touched by this change. The same tone-bank treatment would carry over
-  directly if/when that's wanted.
+
+## TIC-80
+
+TIC-80's `sfx()`/`music()` (previously empty stubs) now use the same bank:
+
+- `sfx(id [, note, duration, channel, volume, speed])`: `id` -> tone
+  `id & 7`; `channel` (TIC-80's 4th argument) passed through, absent ->
+  auto channel; `sfx(-1, ...)` stops that channel (or every sfx channel).
+  Literal ids fold at compile time; dynamic ids use `__builtin_tonebank_sfx`.
+  `note`/`duration`/`volume`/`speed` are accepted and not reproduced.
+- `music(track)` loops tone `track & 7` on channel 0; `music()` /
+  `music(-1)` stops it. The track must be a compile-time constant.
+- A TIC-80 cart's own `WAVES`/`SFX`/`MUSIC` sections are still not
+  synthesized.

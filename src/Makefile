@@ -34,6 +34,7 @@ OBJS = $(SRCS:.c=.o)
 all: $(TARGET)
 
 $(TARGET): $(OBJS)
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -o $@ $^ $(CLIBS)
 
 parser.c ../inc/parser.h: parser.y

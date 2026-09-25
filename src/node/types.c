@@ -53,13 +53,23 @@ void  node_string (ASTNode *node, int  dest_reg)
 
 void node_concat (ASTNode *node, int dest_reg)
 {
-    // Evaluate left operand into R0 and push immediately
-    generate_asm(node->as.binary.left, 0);
-    emit_asm("PUSH R0             ; Save left operand\n");
+    // Each operand is evaluated into a REAL register and pushed at once.
+    // (This used to call generate_asm(operand, 0) and push R0 -- but
+    // dest_reg 0 means "discard" throughout the code generator, so any
+    // operand whose emitter honours that (math.floor(x), math.abs(x), ...)
+    // left R0 holding a stale value: `math.floor(7.9) .. ""` produced the
+    // PREVIOUS concatenation's result, `"y" .. math.floor(7.9)` gave "yy".)
+    int reg = allocate_register();
+    generate_asm(node->as.binary.left, reg);
+    ensure_in_register(reg);
+    emit_asm("PUSH R%d             ; Save left operand\n", reg);
+    unlock_register(reg);
 
-    // Evaluate right operand into R0 and push immediately
-    generate_asm(node->as.binary.right, 0);
-    emit_asm("PUSH R0             ; Save right operand\n");
+    reg = allocate_register();
+    generate_asm(node->as.binary.right, reg);
+    ensure_in_register(reg);
+    emit_asm("PUSH R%d             ; Save right operand\n", reg);
+    unlock_register(reg);
 
     // Call __builtin_strcat (operands safely on stack)
     emit_asm("CALL __builtin_strcat\n");

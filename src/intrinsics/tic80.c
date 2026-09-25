@@ -303,80 +303,45 @@ bool emit_tic80_cls_intrinsic(ASTNode *node) {
     return true;
 }
 
-bool emit_tic80_print_intrinsic(ASTNode *node) {
-    emit_asm("    ;; --- TIC-80 print(value, x, y) Intrinsic ---\n");
+// TIC-80 print(text [, x [, y [, color [, fixed [, scale [, smallfont]]]]]])
+// -> width of the printed text in TIC-80 pixels.
+// x/y default to 0 and color to 15, like TIC-80. The BIOS font is white, so
+// color is applied as a GPU multiply color (it used to be ignored). The
+// returned width -- used by the common `local w = print(s, 0, -6)` centering
+// idiom -- is #text * 6 (TIC-80's default font advance); it used to be
+// whatever R0 held. fixed/scale/smallfont are accepted and ignored.
+// Arguments are pushed as they are evaluated (they used to sit in pinned
+// registers across each other's evaluation, so print(f(), g(), 0) could
+// clobber f()'s result).
+bool emit_tic80_print_intrinsic(ASTNode *node, int dest_reg) {
+    emit_asm("    ;; --- TIC-80 print() Intrinsic ---\n");
 
-    // Extract arguments: value (arg0), x (arg1), y (arg2)
-    ASTNode *arg_val = node->as.call.args_head;
-    ASTNode *arg_x   = (arg_val != NULL) ? arg_val->next : NULL;
-    ASTNode *arg_y   = (arg_x   != NULL) ? arg_x->next   : NULL;
-
-    if (arg_val == NULL || arg_x == NULL || arg_y == NULL) {
+    ASTNode *args[4] = { NULL };
+    int n = 0;
+    for (ASTNode *c = node->as.call.args_head; c != NULL && n < 4; c = c->next) args[n++] = c;
+    if (n < 1) {
         compiler_error(ERR_SEMANTIC, node->line_number,
-                       "TIC-80 print() requires 3 arguments: print(value, x, y)");
+                       "TIC-80 print() requires at least 1 argument: print(text [, x, y, color])");
+        return false;
     }
 
-    int reg_val = allocate_pinned_register();
-    int reg_x   = allocate_pinned_register();
-    int reg_y   = allocate_pinned_register();
-
-    generate_asm(arg_val, reg_val);
-    generate_asm(arg_x, reg_x);
-    generate_asm(arg_y, reg_y);
-
-    // -----------------------------------------------------------------
-    // Scale TIC-80 logical pixel coordinates (a 240x136 "virtual" screen)
-    // into real Vircon32 screen pixels -- the same 2.625 factor every
-    // other TIC-80 drawing primitive applies (see __tic80_draw_swatch in
-    // the runtime, used by pix/line/rect/rectb/circ/circb). Without this,
-    // print() was the only TIC-80 drawing call plotting raw 0-240/0-136
-    // values directly onto the actual (larger) Vircon32 screen, which is
-    // why everything clustered up near the top-left instead of being
-    // proportionally positioned.
-    //
-    // This scaling can't live inside __builtin_print/__bios_print_text
-    // themselves -- those are shared with the non-TIC-80 print() path and
-    // with the pause-overlay text (which pushes raw Vircon32 pixel
-    // coordinates like 275, 170 directly, unscaled, and would break if
-    // the shared routine started scaling everything). It has to happen
-    // here, at the TIC-80-specific call site, exactly where every other
-    // TIC-80 intrinsic does its own scaling before handing off.
-    // -----------------------------------------------------------------
-    emit_asm("FMUL R%d, 2.625 ; Scale TIC-80 X to Vircon32 pixels\n", reg_x);
-    emit_asm("FADD R%d, 0.5 ; Round to nearest pixel\n", reg_x);
-    emit_asm("FMUL R%d, 2.625 ; Scale TIC-80 Y to Vircon32 pixels\n", reg_y);
-    emit_asm("FADD R%d, 0.5 ; Round to nearest pixel\n", reg_y);
-
-    // Convert coordinates to hardware integers
-    emit_asm("CFI R%d ; Convert X to hardware integer\n", reg_x);
-    emit_asm("CFI R%d ; Convert Y to hardware integer\n", reg_y);
-
-    // Push in order expected by runtime: x, y, value
-    emit_asm("PUSH R%d ; Push X coordinate\n", reg_x);
-    emit_asm("PUSH R%d ; Push Y coordinate\n", reg_y);
-    emit_asm("PUSH R%d ; Push value\n", reg_val);
-
-    emit_asm("CALL __builtin_print\n");
-    emit_asm("IADD SP, 3 ; Clean up arguments\n");
-
-    // FIX: these registers were allocated with allocate_pinned_register(),
-    // which sets register_pinned[reg] = 1. Releasing them with plain
-    // unlock_register() clears the inventory slot but leaves the pinned
-    // flag set forever -- every phase of allocate_register() except the
-    // emergency pinned-register-stealing phase refuses to hand out a
-    // pinned register, so each print() call was permanently retiring 3
-    // registers from circulation for the rest of compilation. Programs
-    // with enough print() calls (or enough of anything else register-
-    // hungry downstream) would eventually exhaust the free pool and fall
-    // into the emergency path, which silently force-spills a register
-    // some OTHER, unrelated piece of code still believes is safely
-    // pinned -- corrupting whatever value that code expected to still be
-    // there. unlock_pinned_register() clears BOTH the pin and the
-    // inventory slot, which is what these registers actually need.
-    unlock_pinned_register(reg_val);
-    unlock_pinned_register(reg_x);
-    unlock_pinned_register(reg_y);
-
+    // [BP+5] = text, [BP+4] = x, [BP+3] = y, [BP+2] = color
+    static const char *defaults[4] = { NULL, "0.0", "0.0", "15.0" };
+    for (int i = 0; i < 4; i++) {
+        int reg = allocate_register();
+        if (args[i] != NULL && args[i]->type != NODE_NIL) {
+            generate_asm(args[i], reg);
+        } else {
+            emit_asm("MOV R%d, %s\n", reg, defaults[i] ? defaults[i] : "BOXED_NIL");
+        }
+        emit_asm("PUSH R%d ; print arg %d\n", reg, i + 1);
+        unlock_register(reg);
+    }
+    emit_asm("CALL __builtin_tic80_print\n");
+    emit_asm("IADD SP, 4\n");
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R0 ; text width\n", dest_reg);
+    }
     return true;
 }
 
@@ -549,12 +514,14 @@ bool emit_tic80_play_intrinsic(ASTNode *node, int dest_reg) {
     // Set selected sound
     if (args[0]) {
         generate_asm(args[0], 1);  // R1 = sound_id
+        emit_asm("CFI R1 ; ports take integers, Lua numbers are floats\n");
         emit_asm("OUT SPU_SelectedSound, R1\n");
     }
 
     // Set channel (default 0)
     if (args[1]) {
         generate_asm(args[1], 1);
+        emit_asm("CFI R1\n");
         emit_asm("OUT SPU_SelectedChannel, R1\n");
     } else {
         emit_asm("MOV R1, 0\n");
@@ -583,33 +550,125 @@ bool emit_tic80_play_intrinsic(ASTNode *node, int dest_reg) {
     return true;
 }
 
+// ============================================================================
+// TIC-80 sfx(id [, note [, duration [, channel [, volume [, speed]]]]])
+// TIC-80 music([track [, frame [, row [, loop [, sustain]]]]])
+// ----------------------------------------------------------------------------
+// Both were empty stubs (sfx() evaluated its id into R1 and did nothing).
+// They now use the same placeholder tone bank as the PICO-8 layer (see
+// register_pico8_tone_bank(): 8 generated tones, id -> tone id & 7), on the
+// native sfx.play()/music.play() machinery:
+//   - sfx(-1 [,...,channel])  stops that channel (or every sfx channel)
+//   - channel (TIC-80: 0-3) is passed through; absent -> auto channel
+//   - note/duration/volume/speed are accepted and not reproduced
+//   - music(track) loops the track's tone; music() / music(-1) stops it
+// A cart's own WAVES/SFX/MUSIC data is not synthesized (not implemented).
+// ============================================================================
 bool emit_tic80_sfx_intrinsic(ASTNode *node, int dest_reg) {
-    emit_asm("    ;; --- TIC-80 sfx() Intrinsic ---\n");
+    emit_asm("    ;; --- TIC-80 sfx() Intrinsic (tone bank) ---\n");
 
-    // sfx(sfx_id, channel, volume, speed)
-    // Same as play() but for SFX (0-31)
-
-    // For now, just map to play() with SFX offset
-    ASTNode *sfx_arg = node->as.call.args_head;
-    if (sfx_arg) {
-        // Convert SFX ID to sound ID (assuming SFX are stored first)
-        generate_asm(sfx_arg, 1);
-        emit_asm("IADD R1, %d ; SFX offset\n", 0); // TODO: actual offset
+    ASTNode *args[6] = { NULL };
+    int n = 0;
+    for (ASTNode *c = node->as.call.args_head; c != NULL && n < 6; c = c->next) args[n++] = c;
+    if (n < 1) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+            "sfx() requires at least 1 argument: sfx(id [, note, duration, channel, volume, speed])");
+        return false;
     }
 
-    // Call play intrinsic with modified sound ID
-    // ... (rest similar to play)
+    register_pico8_tone_bank();
+    runtime_req.needs_vircon32 = true;
 
+    ASTNode *channel = (n >= 4 && args[3]->type != NODE_NIL) ? args[3] : NULL;
+
+    double id;
+    if (spu_static_number(args[0], &id)) {
+        if (id < 0) {
+            ASTNode *stop = make_node(NODE_FUNCTION_CALL);
+            stop->line_number       = node->line_number;
+            if (channel != NULL) {
+                // detach the channel expression from the TIC-80 arg chain
+                ASTNode *copy = malloc(sizeof(ASTNode));
+                memcpy(copy, channel, sizeof(ASTNode));
+                copy->next = NULL;
+                stop->as.call.args_head = copy;
+            }
+            return emit_vircon32_sfx_stop_intrinsic(stop, dest_reg);
+        }
+        ASTNode *tone = make_node(NODE_NUMBER);
+        tone->as.number.val = (double)(pico8_tone_base_id + (((int) id) & (PICO8_TONE_COUNT - 1)));
+        if (channel != NULL) {
+            ASTNode *copy = malloc(sizeof(ASTNode));
+            memcpy(copy, channel, sizeof(ASTNode));
+            copy->next = NULL;
+            tone->next = copy;
+        }
+        ASTNode *call = make_node(NODE_FUNCTION_CALL);
+        call->line_number       = node->line_number;
+        call->as.call.args_head = tone;
+        return emit_vircon32_sfx_play_intrinsic(call, dest_reg);
+    }
+
+    // Dynamic id: shared runtime routine resolves the tone at run time.
+    // [BP+2] = id, [BP+3] = channel or nil, [BP+4] = tone base (raw int)
+    emit_asm("MOV  R0, %d ; tone bank base id\n", pico8_tone_base_id);
+    emit_asm("PUSH R0\n");
+    if (channel != NULL) {
+        int reg = allocate_register();
+        generate_asm(channel, reg);
+        emit_asm("PUSH R%d ; channel\n", reg);
+        unlock_register(reg);
+    } else {
+        emit_asm("MOV  R0, BOXED_NIL\n");
+        emit_asm("PUSH R0 ; channel -> auto\n");
+    }
+    int reg = allocate_register();
+    generate_asm(args[0], reg);
+    emit_asm("PUSH R%d ; sfx id\n", reg);
+    unlock_register(reg);
+    emit_asm("CALL __builtin_tonebank_sfx\n");
+    emit_asm("IADD SP, 3\n");
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, BOXED_NIL\n", dest_reg);
+    }
     return true;
 }
 
 bool emit_tic80_music_intrinsic(ASTNode *node, int dest_reg) {
-    emit_asm("    ;; --- TIC-80 music() Intrinsic ---\n");
+    emit_asm("    ;; --- TIC-80 music() Intrinsic (tone bank) ---\n");
 
-    // music(track_id, channel, volume, speed)
-    // TODO: Implement music playback
+    register_pico8_tone_bank();
+    runtime_req.needs_vircon32 = true;
 
-    return true;
+    ASTNode *track = node->as.call.args_head;
+    double t = -1.0;
+    if (track != NULL && !spu_static_number(track, &t)) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+            "music(): the track number must be a compile-time constant");
+        return false;
+    }
+
+    if (t < 0) {
+        // music() / music(-1): stop -- music plays on channel 0
+        ASTNode *chan0 = make_node(NODE_NUMBER);
+        chan0->as.number.val = 0.0;
+        ASTNode *stop = make_node(NODE_FUNCTION_CALL);
+        stop->line_number       = node->line_number;
+        stop->as.call.args_head = chan0;
+        return emit_vircon32_channel_cmd_intrinsic(stop, dest_reg, "stop");
+    }
+
+    ASTNode *tone = make_node(NODE_NUMBER);
+    tone->as.number.val = (double)(pico8_tone_base_id + (((int) t) & (PICO8_TONE_COUNT - 1)));
+    // music.play(SOUND, CHANNEL, CHANLOOP): channel 0, loop on
+    ASTNode *chan0_m = make_node(NODE_NUMBER);
+    chan0_m->as.number.val = 0.0;
+    tone->next = chan0_m;
+    chan0_m->next = make_node_boolean(true);
+    ASTNode *call = make_node(NODE_FUNCTION_CALL);
+    call->line_number       = node->line_number;
+    call->as.call.args_head = tone;
+    return emit_vircon32_play_intrinsic(call, dest_reg);
 }
 
 /**

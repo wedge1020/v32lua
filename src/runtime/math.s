@@ -67,11 +67,9 @@ __builtin_random:
     IEQ   R6, NAN_VALUE
     JT    R6, _random_1arg      ; If NaN-boxed, only 1 argument
 
-    ;; Special case: [BP+3] == 0 means no second argument
-    ;; (stack initialized to 0 by ISUB SP, N in caller)
-    MOV   R6, R5
-    IEQ   R6, 0
-    JT    R6, _random_1arg      ; Zero = no second argument
+    ;; (Callers always push both slots, BOXED_NIL for an absent argument --
+    ;; see emit_math_random_intrinsic. The old "0 in [BP+3] means absent"
+    ;; heuristic misread a genuine math.random(m, 0).)
 
     ;; We have 2 arguments
     MOV   R1, R5               ; R1 = arg2 (n)

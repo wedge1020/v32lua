@@ -278,11 +278,29 @@ void  node_table_get (ASTNode *node, int  dest_reg)
     mark_register_live(table_reg, 2);
     mark_register_live(key_reg, 2);
 
-    generate_asm(node->as.table_get.table_expr, table_reg);
-    generate_asm(node->as.table_get.key, key_reg);
+    // The table pointer must survive the KEY expression, which may CALL
+    // (t[1 + f()], t[a .. b], t[#x] ...): a raw hardware CALL clobbers the
+    // register regardless of pinning -- same bug node_table_set() already
+    // fixes above. Found via celeste's `got_fruit[1+level_index()]`, whose
+    // table register came back as level_index()'s scratch value and trapped
+    // "attempt to index a non-table value". Leaf keys can't emit a CALL,
+    // so the common t.x / t[i] / t["k"] reads skip the spill.
+    ASTNode *key = node->as.table_get.key;
+    bool key_is_leaf = key != NULL &&
+        (key->type == NODE_NUMBER || key->type == NODE_STRING ||
+         key->type == NODE_IDENTIFIER || key->type == NODE_NIL ||
+         key->type == NODE_BOOLEAN);
 
+    generate_asm(node->as.table_get.table_expr, table_reg);
     ensure_in_register(table_reg);
+    if (!key_is_leaf) {
+        emit_asm ("PUSH R%d ; spill table pointer (key expr may CALL)", table_reg);
+    }
+    generate_asm(key, key_reg);
     ensure_in_register(key_reg);
+    if (!key_is_leaf) {
+        emit_asm ("POP  R%d ; reload table pointer", table_reg);
+    }
 
     emit_asm ("PUSH R%d ; Arg1: Table Pointer", table_reg);
     emit_asm ("PUSH R%d ; Arg2: Key", key_reg);

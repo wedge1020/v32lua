@@ -13,6 +13,20 @@ void yyerror (const char *s);
 // Add your new helper prototype here:
 char *mangle_method_name (const char *table_name, const char *method_name);
 
+/* Largest parameter count of any function in the program (self included for
+   ':' methods, '...' excluded). Calls whose target arity is unknown at
+   compile time are NIL-padded up to this -- see node_function_call(). */
+int g_max_param_count = 0;
+static void note_function_param_count (ASTNode *params)
+{
+    int n = 0;
+    for (ASTNode *p = params; p != NULL; p = p->next) {
+        if (p->type == NODE_IDENTIFIER && strcmp (p->as.id.name, "...") == 0) continue;
+        n++;
+    }
+    if (n > g_max_param_count) g_max_param_count = n;
+}
+
 %}
 
 %union {
@@ -45,6 +59,7 @@ char *mangle_method_name (const char *table_name, const char *method_name);
 %token TOKEN_TRUE TOKEN_FALSE TOKEN_NIL TOKEN_FLOORDIV
 %token TOKEN_DOTS
 %token TOKEN_REPEAT TOKEN_UNTIL
+%token TOKEN_GOTO TOKEN_DBCOLON
 
 %type <ast_node> statement statement_list stat_list expr function_def return_stmt
 %type <ast_node> table_constructor function_call else_branch prefix_expr
@@ -189,6 +204,15 @@ if_start:
 
 statement:
       function_call              { $$ = $1; }
+    | TOKEN_GOTO TOKEN_IDENTIFIER {
+        /* Lua 5.2+ goto -- see generate_block()'s label scopes */
+        $$ = make_node(NODE_GOTO);
+        $$->as.id.name = $2;
+    }
+    | TOKEN_DBCOLON TOKEN_IDENTIFIER TOKEN_DBCOLON {
+        $$ = make_node(NODE_LABEL);
+        $$->as.id.name = $2;
+    }
     | var_list '=' expr_list {
         $$ = make_node(NODE_MULTIPLE_ASSIGNMENT);
         $$->as.mult_assign.targets_head = $1;
@@ -434,6 +458,7 @@ statement:
         ASTNode* func_def = $2;
         func_def->as.function_def.name = strdup($3);
         func_def->as.function_def.params = $5;
+        note_function_param_count(func_def->as.function_def.params);
         func_def->as.function_def.body = $7;
 
         // 2. Initialize and check variadic status
@@ -456,6 +481,7 @@ statement:
         ASTNode* func_def = $2;
         func_def->as.function_def.name = strdup($3);
         func_def->as.function_def.params = $5;
+        note_function_param_count(func_def->as.function_def.params);
         func_def->as.function_def.body = $7;
 
         // 2. Initialize and check variadic status for local functions
@@ -505,6 +531,7 @@ statement:
         ASTNode* func_def = $2;
         func_def->as.function_def.name = mangled_name;
         func_def->as.function_def.params = self_param;
+        note_function_param_count(func_def->as.function_def.params);
         func_def->as.function_def.body = $9;
         func_def->as.function_def.is_variadic = 0;
 
@@ -540,6 +567,7 @@ statement:
         ASTNode* func_def = $2;
         func_def->as.function_def.name = mangled_name;
         func_def->as.function_def.params = $7;
+        note_function_param_count(func_def->as.function_def.params);
         func_def->as.function_def.body = $9;
         func_def->as.function_def.is_variadic = 0;
 
@@ -650,6 +678,7 @@ function_def:
         ASTNode* func_def = $1;
         func_def->as.function_def.name = strdup($2);
         func_def->as.function_def.params = $4;
+        note_function_param_count(func_def->as.function_def.params);
         func_def->as.function_def.body = $6;
 
         // NEW: Check if parameter_list contains "..."
@@ -685,6 +714,7 @@ function_def:
         ASTNode* func_def = $1;
         func_def->as.function_def.name = mangled_name;
         func_def->as.function_def.params = $6;
+        note_function_param_count(func_def->as.function_def.params);
         func_def->as.function_def.body = $8;
 
         // 3. Instantiate a function pointer node evaluating to that address
@@ -717,6 +747,7 @@ function_def:
         ASTNode* func_def = $1;
         func_def->as.function_def.name = mangled_name;
         func_def->as.function_def.params = self_param; // Set self as the head of the list
+        note_function_param_count(func_def->as.function_def.params);
         func_def->as.function_def.body = $8;
 
         // 4. Instantiate a function pointer node evaluating to that address
@@ -825,6 +856,7 @@ expr:
         ASTNode* func_def = $1;
         func_def->as.function_def.name = strdup(buf);
         func_def->as.function_def.params = $3;
+        note_function_param_count(func_def->as.function_def.params);
         func_def->as.function_def.body = $5;
 
         // Initialize and check variadic status for anonymous functions

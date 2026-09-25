@@ -169,7 +169,9 @@ __strcat_finish:
     RET
 
 ;; ---------------------------------------------------------------------------
-;; Universal Equality (==): Returns raw integer 1 (true) or 0 (false) in R0
+;; Universal Equality (==): Returns BOXED_TRUE / BOXED_FALSE in R0.
+;; (This header used to say "raw integer 1 / 0" -- it never did; both boxed
+;; booleans are non-zero, so a caller testing JT R0 always saw "equal".)
 ;; Incoming Stack: [BP+3] = Left_Val, [BP+2] = Right_Val
 ;; Handles: bitwise-identical values (fast path), string comparisons, and
 ;;         numeric comparisons (raw IEEE 754 floats in NaN-boxing scheme)
@@ -189,8 +191,8 @@ __builtin_eq:
     ;; In NaN-boxing: numbers are raw floats, other types have BOXED_DATA tag
     MOV  R1, [BP+3]
     MOV  R3, R1
-    AND  R3, BOXED_DATA
-    INE  R3, 0               ; Non-zero = tagged (not a number)
+    AND  R3, NAN_VALUE       ; exponent all ones = NaN-boxed (not a number);
+    IEQ  R3, NAN_VALUE       ; (BOXED_DATA caught every float >= 2.0 or < 0)
     JF   R3, __eq_check_right_number
 
     ;; Left is tagged, so not a number - check if it's a string
@@ -198,8 +200,8 @@ __builtin_eq:
 
 __eq_check_right_number:
     MOV  R3, R2
-    AND  R3, BOXED_DATA
-    INE  R3, 0               ; Non-zero = tagged (not a number)
+    AND  R3, NAN_VALUE       ; exponent all ones = NaN-boxed (not a number);
+    IEQ  R3, NAN_VALUE       ; (BOXED_DATA caught every float >= 2.0 or < 0)
     JF   R3, __eq_both_numbers
 
     ;; Right is tagged, left is not - different types, not equal
@@ -1010,6 +1012,37 @@ __ftoa_reverse_frac_loop:
     JMP  __ftoa_reverse_frac_loop
 
 __ftoa_done:
+    ;; Default mode (precision -1) formats like Lua's %.14g as far as float32
+    ;; allows: no trailing zeros ("0.5", not "0.500000"; "2.25", not
+    ;; "2.250000"), and no '.' when rounding left nothing after it. Only
+    ;; applied when a '.' was actually written, so "100" keeps its zeros.
+    MOV  R10, [BP+2]
+    IEQ  R10, -1
+    JF   R10, __ftoa_terminate
+    MOV  R10, R2
+__ftoa_find_dot:
+    MOV  R11, R10
+    IGE  R11, R9
+    JT   R11, __ftoa_terminate       ; no '.' -> nothing to trim
+    MOV  R11, [R10]
+    IEQ  R11, 46
+    JT   R11, __ftoa_trim_zeros
+    IADD R10, 1
+    JMP  __ftoa_find_dot
+__ftoa_trim_zeros:
+    MOV  R10, R9
+    ISUB R10, 1                      ; last written char
+    MOV  R11, [R10]
+    IEQ  R11, 48                     ; '0'?
+    JF   R11, __ftoa_trim_dot
+    MOV  R9, R10
+    JMP  __ftoa_trim_zeros
+__ftoa_trim_dot:
+    MOV  R11, [R10]
+    IEQ  R11, 46                     ; bare '.' left?
+    JF   R11, __ftoa_terminate
+    MOV  R9, R10
+__ftoa_terminate:
     MOV  R10, 0
     MOV  [R9], R10               ; null terminator
     MOV  R0, R2                  ; return base pointer
@@ -3071,3 +3104,220 @@ __string_gsub_finish:
     POP   BP
     RET
 
+;; ===========================================================================
+;; String methods: s:name(...) support
+;; ---------------------------------------------------------------------------
+;; __builtin_string_method_lookup: [BP+2] = key -> R0 = boxed function for
+;; a known string-library name, or BOXED_NIL. Called by __builtin_table_get
+;; when the "table" is a string. Saves everything but R0.
+;;
+;; __strmeth_*: Lua-ABI wrappers ([BP+2] = self string, [BP+3].. = args;
+;; the compiler NIL-pads method calls to these names, see
+;; string_method_arity() in function.c) that forward to the existing
+;; __builtin_string_* routines, which take the same [BP+2].. layout.
+;; format() is variadic and is not offered as a method.
+;; ===========================================================================
+__strmeth_name_len:
+    string "len"
+__strmeth_name_sub:
+    string "sub"
+__strmeth_name_upper:
+    string "upper"
+__strmeth_name_lower:
+    string "lower"
+__strmeth_name_rep:
+    string "rep"
+__strmeth_name_byte:
+    string "byte"
+__strmeth_name_find:
+    string "find"
+__strmeth_name_reverse:
+    string "reverse"
+__strmeth_name_gsub:
+    string "gsub"
+
+__builtin_string_method_lookup:
+    PUSH BP
+    MOV  BP, SP
+    PUSH R1
+    PUSH R2
+    MOV  R1, __strmeth_name_len
+    CALL __strmeth_key_is
+    JF   R0, __strmeth_try_after_len
+    MOV  R0, __strmeth_len
+    OR   R0, BOXED_FUNCTION
+    JMP  __strmeth_lookup_done
+__strmeth_try_after_len:
+    MOV  R1, __strmeth_name_sub
+    CALL __strmeth_key_is
+    JF   R0, __strmeth_try_after_sub
+    MOV  R0, __strmeth_sub
+    OR   R0, BOXED_FUNCTION
+    JMP  __strmeth_lookup_done
+__strmeth_try_after_sub:
+    MOV  R1, __strmeth_name_upper
+    CALL __strmeth_key_is
+    JF   R0, __strmeth_try_after_upper
+    MOV  R0, __strmeth_upper
+    OR   R0, BOXED_FUNCTION
+    JMP  __strmeth_lookup_done
+__strmeth_try_after_upper:
+    MOV  R1, __strmeth_name_lower
+    CALL __strmeth_key_is
+    JF   R0, __strmeth_try_after_lower
+    MOV  R0, __strmeth_lower
+    OR   R0, BOXED_FUNCTION
+    JMP  __strmeth_lookup_done
+__strmeth_try_after_lower:
+    MOV  R1, __strmeth_name_rep
+    CALL __strmeth_key_is
+    JF   R0, __strmeth_try_after_rep
+    MOV  R0, __strmeth_rep
+    OR   R0, BOXED_FUNCTION
+    JMP  __strmeth_lookup_done
+__strmeth_try_after_rep:
+    MOV  R1, __strmeth_name_byte
+    CALL __strmeth_key_is
+    JF   R0, __strmeth_try_after_byte
+    MOV  R0, __strmeth_byte
+    OR   R0, BOXED_FUNCTION
+    JMP  __strmeth_lookup_done
+__strmeth_try_after_byte:
+    MOV  R1, __strmeth_name_find
+    CALL __strmeth_key_is
+    JF   R0, __strmeth_try_after_find
+    MOV  R0, __strmeth_find
+    OR   R0, BOXED_FUNCTION
+    JMP  __strmeth_lookup_done
+__strmeth_try_after_find:
+    MOV  R1, __strmeth_name_reverse
+    CALL __strmeth_key_is
+    JF   R0, __strmeth_try_after_reverse
+    MOV  R0, __strmeth_reverse
+    OR   R0, BOXED_FUNCTION
+    JMP  __strmeth_lookup_done
+__strmeth_try_after_reverse:
+    MOV  R1, __strmeth_name_gsub
+    CALL __strmeth_key_is
+    JF   R0, __strmeth_try_after_gsub
+    MOV  R0, __strmeth_gsub
+    OR   R0, BOXED_FUNCTION
+    JMP  __strmeth_lookup_done
+__strmeth_try_after_gsub:
+    MOV  R0, BOXED_NIL
+__strmeth_lookup_done:
+    POP  R2
+    POP  R1
+    MOV  SP, BP
+    POP  BP
+    RET
+
+;; __strmeth_key_is (internal): R1 = raw ROM address of a name; compares it
+;; with the lookup key at [BP+2] of the CALLER's frame -> R0 = 1 / 0
+__strmeth_key_is:
+    OR   R1, BOXED_ROMSTRING
+    MOV  R2, [BP+2]
+    PUSH R2                      ; left  -> [BP+3]
+    PUSH R1                      ; right -> [BP+2]
+    CALL __builtin_eq
+    IADD SP, 2
+    IEQ  R0, BOXED_TRUE
+    RET
+
+__strmeth_len:
+    PUSH BP
+    MOV  BP, SP
+    MOV  R0, [BP+2]
+    PUSH R0
+    CALL __builtin_string_len
+    MOV  SP, BP
+    POP  BP
+    RET
+__strmeth_upper:
+    PUSH BP
+    MOV  BP, SP
+    MOV  R0, [BP+2]
+    PUSH R0
+    CALL __builtin_string_upper
+    MOV  SP, BP
+    POP  BP
+    RET
+__strmeth_lower:
+    PUSH BP
+    MOV  BP, SP
+    MOV  R0, [BP+2]
+    PUSH R0
+    CALL __builtin_string_lower
+    MOV  SP, BP
+    POP  BP
+    RET
+__strmeth_reverse:
+    PUSH BP
+    MOV  BP, SP
+    MOV  R0, [BP+2]
+    PUSH R0
+    CALL __builtin_string_reverse
+    MOV  SP, BP
+    POP  BP
+    RET
+__strmeth_rep:
+    PUSH BP
+    MOV  BP, SP
+    MOV  R0, [BP+3]
+    PUSH R0
+    MOV  R0, [BP+2]
+    PUSH R0
+    CALL __builtin_string_rep
+    MOV  SP, BP
+    POP  BP
+    RET
+__strmeth_find:
+    PUSH BP
+    MOV  BP, SP
+    MOV  R0, [BP+3]
+    PUSH R0
+    MOV  R0, [BP+2]
+    PUSH R0
+    CALL __builtin_string_find
+    MOV  SP, BP
+    POP  BP
+    RET
+__strmeth_sub:
+    PUSH BP
+    MOV  BP, SP
+    MOV  R0, [BP+4]
+    PUSH R0
+    MOV  R0, [BP+3]
+    PUSH R0
+    MOV  R0, [BP+2]
+    PUSH R0
+    CALL __builtin_string_sub
+    MOV  SP, BP
+    POP  BP
+    RET
+__strmeth_byte:
+    PUSH BP
+    MOV  BP, SP
+    MOV  R0, [BP+4]
+    PUSH R0
+    MOV  R0, [BP+3]
+    PUSH R0
+    MOV  R0, [BP+2]
+    PUSH R0
+    CALL __builtin_string_byte
+    MOV  SP, BP
+    POP  BP
+    RET
+__strmeth_gsub:
+    PUSH BP
+    MOV  BP, SP
+    MOV  R0, [BP+4]
+    PUSH R0
+    MOV  R0, [BP+3]
+    PUSH R0
+    MOV  R0, [BP+2]
+    PUSH R0
+    CALL __builtin_string_gsub
+    MOV  SP, BP
+    POP  BP
+    RET

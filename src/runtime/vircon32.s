@@ -2164,3 +2164,155 @@ _v32_tmrender_done:
     POP  BP
     RET
 
+;; ============================================================================
+;; __builtin_tonebank_sfx: tone-bank sfx(n [, channel]) with a DYNAMIC n
+;; Shared by PICO-8 sfx() and TIC-80 sfx() (moved here from pico8.s so the
+;; TIC-80 layer can use it too).
+;; ============================================================================
+;; Stack layout relative to BP:
+;; [BP+2]: n         (Lua float -- raw PICO-8 sfx index; <0 means "stop")
+;; [BP+3]: channel   (Lua float 0-15, or BOXED_NIL -> auto/all)
+;; [BP+4]: base_id   (RAW HARDWARE INTEGER, NOT a Lua float -- this is
+;;                    pico8_tone_base_id, the resource id the compiler
+;;                    assigned placeholder tone 0. Tones 1-7 are
+;;                    base_id+1 .. base_id+7, contiguous, since the whole
+;;                    bank is registered in one shot -- see
+;;                    register_pico8_tone_bank() in pico8.c. Pushed bare,
+;;                    never boxed: nothing but this one routine ever reads
+;;                    it, same convention as VIRCON32_SFX_CURSOR below.)
+;;
+;; Only reached for a compile-time-UNKNOWN n -- emit_tonebank_sfx_intrinsic()
+;; in pico8.c folds every literal n straight into a static
+;; emit_vircon32_sfx_play_intrinsic() call, no CALL at all. This routine
+;; exists purely so celeste.lua's `psfx` wrapper (sfx(num), where num is a
+;; parameter, not a literal) has somewhere to resolve the PICO-8 index ->
+;; placeholder-tone mapping at runtime. Its channel handling and channel-
+;; ownership bookkeeping mirror __builtin_vircon32_sfx_play exactly (see
+;; that routine's own comments for the rationale); only the sound-id
+;; resolution step is different.
+;;
+;; n < 0 is PICO-8's "stop" form (sfx(-1 [, channel])). PICO-8 requires an
+;; explicit channel to stop just one; a bare sfx(-1) with no channel here
+;; is a deliberate no-op -- the all-sfx-channels form is sfx.stop() itself,
+;; reachable directly and not through this dynamic path.
+;; ============================================================================
+__builtin_tonebank_sfx:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+
+    MOV   R1, [BP+2]
+    CFI   R1                      ; raw PICO-8 index as a hardware integer
+
+    MOV   R2, R1
+    ILT   R2, 0
+    JT    R2, _tonebank_sfx_stop_form
+
+    ;; --- Non-negative index: map into the placeholder tone bank ---
+    AND   R1, 7                   ; wrap into PICO8_TONE_COUNT (8) entries
+    MOV   R2, [BP+4]              ; base_id (raw integer, see header note)
+    IADD  R1, R2                  ; R1 = resolved placeholder tone id
+
+    ;; --- Resolve the channel (identical to __builtin_vircon32_sfx_play) ---
+    MOV   R2, [BP+3]
+    MOV   R3, R2
+    IEQ   R3, BOXED_NIL
+    JT    R3, _tonebank_sfx_auto_channel
+
+    CFI   R2
+    MOV   R3, R2
+    ILT   R3, 0
+    JT    R3, _tonebank_sfx_clamp_low
+    MOV   R3, R2
+    IGT   R3, 15
+    JF    R3, _tonebank_sfx_channel_ready
+    MOV   R2, 15
+    JMP   _tonebank_sfx_channel_ready
+
+_tonebank_sfx_clamp_low:
+    MOV   R2, 0
+    JMP   _tonebank_sfx_channel_ready
+
+_tonebank_sfx_auto_channel:
+    MOV   R2, [VIRCON32_SFX_CURSOR]
+    MOV   R3, R2
+    IADD  R3, 1
+    MOV   R4, R3
+    IGT   R4, 15
+    JF    R4, _tonebank_sfx_store_cursor
+    MOV   R3, 1
+
+_tonebank_sfx_store_cursor:
+    MOV   [VIRCON32_SFX_CURSOR], R3
+
+_tonebank_sfx_channel_ready:
+    OUT   SPU_SelectedChannel, R2
+
+    ;; --- Stop, THEN assign (a sound only assigns to a stopped channel) ---
+    OUT   SPU_Command, SPUCommand_StopSelectedChannel
+    OUT   SPU_ChannelAssignedSound, R1
+
+    ;; --- Track channel ownership: claim for sfx, release from music ---
+    MOV   R3, 1
+    SHL   R3, R2                        ; R3 = 1 << channel
+    MOV   R4, [VIRCON32_SFX_CHANNEL_MASK]
+    OR    R4, R3
+    MOV   [VIRCON32_SFX_CHANNEL_MASK], R4
+
+    MOV   R4, R3
+    NOT   R4                            ; R4 = ~(1 << channel)
+    MOV   R3, [VIRCON32_MUSIC_CHANNEL_MASK]
+    AND   R3, R4
+    MOV   [VIRCON32_MUSIC_CHANNEL_MASK], R3
+
+    ;; --- Volume/speed: no arguments to carry them on this call shape ---
+    OUT   SPU_ChannelVolume, 1.0
+    OUT   SPU_ChannelSpeed, 1.0
+
+    ;; --- Start, then clear the loop flag the command just set ---
+    OUT   SPU_Command, SPUCommand_PlaySelectedChannel
+    OUT   SPU_ChannelLoopEnabled, 0
+
+    MOV   R0, R2
+    CIF   R0
+    JMP   _tonebank_sfx_done
+
+_tonebank_sfx_stop_form:
+    MOV   R2, [BP+3]
+    MOV   R3, R2
+    IEQ   R3, BOXED_NIL
+    JT    R3, _tonebank_sfx_stop_done
+
+    CFI   R2
+    MOV   R3, R2
+    ILT   R3, 0
+    JT    R3, _tonebank_sfx_stop_clamp_low
+    MOV   R3, R2
+    IGT   R3, 15
+    JF    R3, _tonebank_sfx_stop_channel_ready
+    MOV   R2, 15
+    JMP   _tonebank_sfx_stop_channel_ready
+
+_tonebank_sfx_stop_clamp_low:
+    MOV   R2, 0
+
+_tonebank_sfx_stop_channel_ready:
+    OUT   SPU_SelectedChannel, R2
+    OUT   SPU_Command, SPUCommand_StopSelectedChannel
+
+_tonebank_sfx_stop_done:
+    MOV   R0, BOXED_NIL
+
+_tonebank_sfx_done:
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+

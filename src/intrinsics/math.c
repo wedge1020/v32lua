@@ -322,44 +322,45 @@ bool emit_math_random_intrinsic(ASTNode *node, int dest_reg)
  
     emit_asm("    ;; --- Intrinsic: math.random() ---\n");
  
-    // Push arguments in REVERSE order, matching every other intrinsic in
-    // this codebase and __builtin_random's own documented contract:
-    // [BP+2] = first argument, [BP+3] = second argument. Since the last
-    // value pushed ends up at [BP+2], arg2 must be pushed BEFORE arg1.
- 
-    int arg1_reg = 0, arg2_reg = 0;
- 
+    // ALWAYS push exactly two slots -- [BP+3] = second argument, [BP+2] =
+    // first -- with BOXED_NIL standing in for a missing one.
+    // __builtin_random tells "no argument" from "argument" by whether the
+    // slot holds a NaN-boxed word; it used to be handed NO slots for
+    // math.random() and so inspected whatever the CALLER had left on the
+    // stack (PICO-8 rnd(10) spills its 10.0 there, so its inner no-arg
+    // call took the math.random(10) integer path and returned 1..10).
+    //
+    // Arguments are evaluated left to right and each is pushed at once, so
+    // a nested CALL in the second can't clobber the first.
     if (arg_count >= 1) {
-        arg1_reg = allocate_pinned_register();
-        generate_asm(arg, arg1_reg);
+        int r1 = allocate_pinned_register();
+        generate_asm(arg, r1);
+        emit_asm("    PUSH R%d       ; math.random: arg 1 (temp)\n", r1);
+        if (arg_count == 2) {
+            int r2 = allocate_pinned_register();
+            generate_asm(arg->next, r2);
+            emit_asm("    POP  R%d       ; reload arg 1\n", r1);
+            emit_asm("    PUSH R%d       ; [BP+3] = arg 2\n", r2);
+            unlock_pinned_register(r2);
+        } else {
+            emit_asm("    POP  R%d       ; reload arg 1\n", r1);
+            emit_asm("    MOV  R0, BOXED_NIL\n");
+            emit_asm("    PUSH R0        ; [BP+3] = no arg 2\n");
+        }
+        emit_asm("    PUSH R%d       ; [BP+2] = arg 1\n", r1);
+        unlock_pinned_register(r1);
+    } else {
+        emit_asm("    MOV  R0, BOXED_NIL\n");
+        emit_asm("    PUSH R0        ; [BP+3] = no arg 2\n");
+        emit_asm("    PUSH R0        ; [BP+2] = no arg 1\n");
     }
- 
-    if (arg_count == 2) {
-        arg2_reg = allocate_pinned_register();
-        generate_asm(arg->next, arg2_reg);
-        emit_asm("    PUSH R%d       ; Push second argument\n", arg2_reg);
-    }
- 
-    if (arg_count >= 1) {
-        emit_asm("    PUSH R%d       ; Push first argument\n", arg1_reg);
-    }
- 
-    // Call the runtime subroutine
+
     emit_asm("    CALL __builtin_random\n");
- 
-    // Clean up stack: 2 args = pop 2, 1 arg = pop 1, 0 args = pop 0
-    if (arg_count > 0) {
-        emit_asm("    IADD SP, %d    ; Clean up %d argument(s)\n", arg_count, arg_count);
-    }
- 
-    // Result is in R0
+    emit_asm("    IADD SP, 2     ; Clean up both argument slots\n");
+
     if (dest_reg != 0) {
         emit_asm("    MOV R%d, R0    ; Transfer result to dest_reg\n", dest_reg);
     }
- 
-    if (arg1_reg) unlock_pinned_register(arg1_reg);
-    if (arg2_reg) unlock_pinned_register(arg2_reg);
- 
     return true;
 }
 

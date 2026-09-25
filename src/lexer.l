@@ -4,6 +4,8 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wsign-compare"
 
+static int lex_in_tic80_section = 0;   /* see the TIC-80 asset-data rule */
+
 char *process_string_literal (const char *text, int  len)
 {
     // Allocate space. The processed string will never be longer 
@@ -115,6 +117,7 @@ static int compound_assign_token (NodeType op)
     char *end = strchr(yytext, '>');
     if (end) *end = '\0';
     yylval.string_val = strdup(start);  // Returns "TILES"
+    lex_in_tic80_section = 1;
     return TOKEN_TIC80_SECTION_HEADER;
 }
 
@@ -123,12 +126,20 @@ static int compound_assign_token (NodeType op)
     char *end = strchr(yytext, '>');
     if (end) *end = '\0';
     yylval.string_val = strdup(start);  // Returns "TILES"
+    lex_in_tic80_section = 0;
     return TOKEN_TIC80_SECTION_FOOTER;
 }
 
 "-- "[0-9]+[:][0-9a-fA-F]+\r?\n {
-    yylval.string_val = strdup(yytext + 3);  // Skip "-- "
-    return TOKEN_TIC80_ASSET_DATA;
+    // Only INSIDE a TIC-80 -- <SECTION> ... -- </SECTION> block. Outside
+    // one, "-- 5:6" / "-- 3:30 timeout" is just a comment -- it used to be
+    // returned as asset data anywhere and fail the parse with a syntax error.
+    if (!lex_in_tic80_section) {
+        /* ordinary comment: skip (yylineno counts the newline itself) */
+    } else {
+        yylval.string_val = strdup(yytext + 3);  // Skip "-- "
+        return TOKEN_TIC80_ASSET_DATA;
+    }
 }
 
 "--#".* { 
@@ -151,6 +162,8 @@ static int compound_assign_token (NodeType op)
 "for"                   { return TOKEN_FOR;      }
 "in"                    { return TOKEN_IN;       }
 "break"                 { return TOKEN_BREAK;    }
+"goto"                  { return TOKEN_GOTO;     }
+"::"                    { return TOKEN_DBCOLON;  }
 "do"                    { return TOKEN_DO;       }
 "if"                    { return TOKEN_IF;       }
 "elseif"                { return TOKEN_ELSEIF;   }
@@ -233,18 +246,42 @@ static int compound_assign_token (NodeType op)
                             return (TOKEN_NUMBER);
                         }
 
-[0-9]+(\.[0-9]+)?       { 
+[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)? {
+                            /* exponent form (1e-17, 2.5E3) added: TIC-80
+                               exports and hand-written tables use it --
+                               warm_wheels.lua failed to parse without it */
                             yylval.number_val  = atof (yytext); 
                             return (TOKEN_NUMBER); 
                         }
 
-\.[0-9]+                {
+\.[0-9]+([eE][+-]?[0-9]+)? {
                             yylval.number_val  = atof (yytext);
                             return (TOKEN_NUMBER);
                         }
 
 \"(\\.|[^"\\])*\"       { 
                             yylval.string_val  = process_string_literal (yytext, yyleng); 
+                            return (TOKEN_STRING);
+                        }
+
+\'(\\.|[^'\\\n])*\'      {
+                            /* single-quoted strings -- plain Lua, but only
+                               "..." used to be accepted */
+                            yylval.string_val  = process_string_literal (yytext, yyleng);
+                            return (TOKEN_STRING);
+                        }
+
+"[["([^\]]|\][^\]])*"]]" {
+                            /* long string [[...]]: no escape processing; a
+                               newline right after the opening [[ is dropped,
+                               as in Lua */
+                            int start = 2, len = yyleng - 4;
+                            if (len > 0 && yytext[start] == '\r') { start++; len--; }
+                            if (len > 0 && yytext[start] == '\n') { start++; len--; }
+                            char *str = (char *) malloc (len + 1);
+                            memcpy (str, yytext + start, len);
+                            str[len] = '\0';
+                            yylval.string_val  = str;
                             return (TOKEN_STRING);
                         }
 

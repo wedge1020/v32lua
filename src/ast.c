@@ -117,6 +117,11 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
             runtime_req.needs_tic80           = false;
             runtime_req.needs_vircon32        = false;
             runtime_req.needs_tables          = true;
+            // PICO-8's bare math globals (rnd/flr/min/max/tan/...) alias onto
+            // math.* emitters that CALL __builtin_* routines in math.s, but
+            // needs_math is otherwise only set for a literal "math." prefix
+            // -- tan()/rnd() in a PICO-8 cart failed to assemble without it.
+            runtime_req.needs_math            = true;
         } else if (strcmp(api_name, "tic80") == 0) {
             runtime_req.needs_tic80           = true;
             runtime_req.needs_pico8           = false;
@@ -126,6 +131,28 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
             compiler_error(ERR_SEMANTIC, -1, "Unknown API: %s. Use 'pico8' or 'tic80'", api_name);
         }
         node->as.cart_hint.value = strdup(api_name);
+    }
+    else if (strcmp(action, "p8") == 0 && tokens >= 2) {
+        // --#p8 "cart.p8" -- take __gfx__/__gff__/__map__ from a .p8 file
+        // (a stripped .lua export carries none of them). Implies pico8.
+        char path[128];
+        size_t n = strlen(param1);
+        if (n >= 2 && param1[0] == '"' && param1[n-1] == '"') {
+            snprintf(path, sizeof(path), "%.*s", (int)(n - 2), param1 + 1);
+        } else {
+            snprintf(path, sizeof(path), "%s", param1);
+        }
+        if (!pico8_load_cart_assets(path, g_lua_filename)) {
+            compiler_error(ERR_SEMANTIC, yylineno, "--#p8: cannot read cartridge '%s'", path);
+        }
+        // same effect as --#api pico8 (put this hint first, like --#api,
+        // so PICO-8-only syntax later in the file is recognised)
+        runtime_req.needs_pico8    = true;
+        runtime_req.needs_tic80    = false;
+        runtime_req.needs_vircon32 = false;
+        runtime_req.needs_tables   = true;
+        runtime_req.needs_math     = true;
+        node->as.cart_hint.value = strdup(path);
     }
     else if (strcmp(action, "version") == 0 && tokens >= 2) {
         // e.g., --#version 1.1

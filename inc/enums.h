@@ -12,6 +12,8 @@ typedef enum
     NODE_FOR_NUMERIC,
     NODE_FOR_GENERIC,
     NODE_BREAK,
+    NODE_GOTO,
+    NODE_LABEL,
     NODE_IF,
     NODE_DO_BLOCK,
     NODE_FUNCTION_DEF,

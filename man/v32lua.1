@@ -9,7 +9,7 @@ v32lua \- compile a subset of Lua to Vircon32 assembly and cartridge XML
 .RB [ \-v ]
 .RB [ \-d ]
 .RB [ \-w ]
-.I input.lua
+.IR input.lua " | " cart.p8
 .br
 .B v32lua
 .B \-\-version
@@ -266,9 +266,44 @@ statement is a syntax error (give it a value); and all program
 execution must occur inside a function reachable from
 .BR main() / game_loop() .
 .PP
+Also supported: single-quoted and long
+.RB ( [[...]] )
+string literals, exponent number literals
+.RB ( 1e\-3 ),
+.B goto
+with block-scoped
+.B ::labels::
+(forward references included), and string-library calls as methods on
+string values
+.RB ( s:sub(2,\ #s) ", " (\(dqx\(dq):upper() ).
+Strings used as table keys compare by content.
+.PP
+A PICO-8 cartridge compiles directly: given a
+.I .p8
+file, only its
+.B __lua__
+section is compiled (line numbers still refer to the
+.I .p8
+file) and its
+.BR __gfx__ ", " __gff__ " and " __map__
+sections become the sprite sheet, sprite flags and map. A
+.I .lua
+program can take those assets from a cart with
+.BR \-\-#p8\ \(dqcart.p8\(dq .
+.PP
 Not yet implemented:
 .BR pcall / error / assert ;
 .BR string.match / gmatch ", " setmetatable ;
+.BR select() ,
+and
+.B next()
+as a callable function;
+expansion of a trailing multi-value call inside a table constructor or
+argument list
+.RB ( {f()} ", " g(f()) " keep only the first value);"
+arithmetic coercion of numeric strings;
+bitwise operators;
+garbage collection (the heap only grows);
 the two-argument, explicit-base form of
 .BR tonumber() " (an explicit numeric base);"
 and a diagnostic for reading, from inside a function, a
@@ -285,7 +320,7 @@ Cartridge metadata and resources are declared with
 line comments, parsed by the preprocessor stage and used to generate
 the companion XML file:
 .BR \-\-#version ", " \-\-#title ", " \-\-#api ", " \-\-#texture ,
-.BR \-\-#sound ", " \-\-#tilemap ", and " \-\-#include .
+.BR \-\-#sound ", " \-\-#tilemap ", " \-\-#p8 ", and " \-\-#include .
 A
 .B \-\-#texture
 or
@@ -305,6 +340,16 @@ as in a monolithic file.
 .TP
 .I *.lua
 Input source, in the Lua subset this tool accepts.
+.TP
+.I *.p8
+A PICO-8 cartridge, compiled directly (see
+.BR "LANGUAGE NOTES" ).
+.TP
+.IR *_pico8.vtex ", " pico8_tone0.vsnd " .. " pico8_tone7.vsnd
+Generated next to the output for PICO-8 carts (sprite sheet + color
+swatches) and for PICO-8/TIC-80 carts that use
+.BR sfx() / music()
+(placeholder tones; an existing file of the same name is kept).
 .TP
 .I *.asm
 Generated Vircon32 assembly, ready to be handed to the Vircon32

@@ -595,12 +595,21 @@ int   emit_variable_map (void)
 
     if (runtime_req.needs_pico8)
     {
+        // Fixed RAM (not heap): must exist before any top-level cart code,
+        // which runs inside __global_scope_initialization. See pico8.s.
         fprintf (out(), "%%define  PICO8_CAMERA_X           0x%.8X\n", next_ram_address);
         fprintf (out(), "%%define  PICO8_CAMERA_Y           0x%.8X\n", (next_ram_address + 1));
-        next_ram_address    = next_ram_address + 2; // +2: camera x, y (boxed floats)
+        fprintf (out(), "%%define  PICO8_PEN                0x%.8X\n", (next_ram_address + 2));
+        next_ram_address    = next_ram_address + 3; // camera x, y (floats), pen (int)
+        fprintf (out(), "%%define  PICO8_FLAGS_RAM          0x%.8X\n", next_ram_address);
+        next_ram_address    = next_ram_address + 256;
+        fprintf (out(), "%%define  PICO8_MAP_RAM            0x%.8X\n", next_ram_address);
+        next_ram_address    = next_ram_address + (PICO8_MAP_WIDTH * PICO8_MAP_HEIGHT) / 4;
+        fprintf (out(), "%%define  PICO8_FRAME_STEP         %d\n", pico8_frame_step);
+        lines_printed      += 6;
     }
 
-    if (runtime_req.needs_vircon32)
+    // Unconditional -- see the allocation comment in main.c.
     {
         fprintf (out(), "%%define  VIRCON32_BTN_PREV_STATE  0x%.8X\n", vircon32_btn_prev_state_base);
         fprintf (out(), "%%define  VIRCON32_SFX_CURSOR      0x%.8X\n", vircon32_sfx_cursor_base);
@@ -776,7 +785,10 @@ void  emit_runtime_library (void)
     // API bundles (all-or-nothing)
     //
     if (runtime_req.needs_pico8)
+    {
         emit_embedded_asm (runtime_pico8_start);
+        emit_pico8_cart_data (out());
+    }
     if (runtime_req.needs_tic80)
     {
         emit_embedded_asm (runtime_tic80_start);

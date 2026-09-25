@@ -9,6 +9,76 @@
 ;;                 the R2/R3/R6 save below, which only protects values across
 ;;                 the internal CALL __malloc)
 ;; ---------------------------------------------------------------------------
+;; __table_key_streq (internal): R4 = stored key, R2 = search key
+;;   -> R4 = 1 if BOTH are strings with equal contents, else 0.
+;;   Preserves every other register.
+;; Table keys used to be compared bitwise only, i.e. strings by ADDRESS:
+;; t["ab"] = 1; t["a" .. "b"] read nil, and t["q" .. 1] = 5 twice created two
+;; entries. Only literals worked, because equal literals share one ROM label.
+;; Called only after the bitwise compare failed; the tag pre-check keeps
+;; numeric / table / boolean keys off the slow path.
+;; ---------------------------------------------------------------------------
+__table_key_streq:
+    PUSH R0
+    MOV  R0, R2
+    AND  R0, 0x7FC00000
+    IEQ  R0, 0x7FC00000          ; search key string-tagged (ROM or RAM)?
+    JF   R0, __table_key_streq_no
+    MOV  R0, R4
+    AND  R0, 0x7FC00000
+    IEQ  R0, 0x7FC00000          ; stored key string-tagged?
+    JF   R0, __table_key_streq_no
+    ;; nil/false/true share the RAM-string tag with payload < 4
+    MOV  R0, R2
+    AND  R0, BOXED_PAYLOAD
+    ILT  R0, 4
+    JT   R0, __table_key_streq_no
+    MOV  R0, R4
+    AND  R0, BOXED_PAYLOAD
+    ILT  R0, 4
+    JT   R0, __table_key_streq_no
+
+    ;; Inline char-by-char compare (one char per word, NUL-terminated). Most
+    ;; mismatching keys differ in the first character, so this exits almost
+    ;; immediately -- a full __builtin_eq per non-matching key made field
+    ;; lookups in celeste's object tables ~40% slower overall.
+    PUSH R1
+    PUSH R2
+    PUSH R3
+    MOV  R0, R2
+    CALL __unbox_string          ; R0 = address (uses R1)
+    MOV  R2, R0
+    MOV  R0, R4
+    CALL __unbox_string
+    MOV  R4, R0                  ; R4 = stored key address, R2 = search key address
+__table_key_streq_loop:
+    MOV  R0, [R2]
+    MOV  R1, [R4]
+    MOV  R3, R0
+    IEQ  R3, R1
+    JF   R3, __table_key_streq_diff
+    IEQ  R0, 0                   ; both hit NUL together -> equal
+    JT   R0, __table_key_streq_same
+    IADD R2, 1
+    IADD R4, 1
+    JMP  __table_key_streq_loop
+__table_key_streq_same:
+    MOV  R4, 1
+    JMP  __table_key_streq_out
+__table_key_streq_diff:
+    MOV  R4, 0
+__table_key_streq_out:
+    POP  R3
+    POP  R2
+    POP  R1
+    POP  R0
+    RET
+__table_key_streq_no:
+    MOV  R4, 0
+    POP  R0
+    RET
+
+;; ---------------------------------------------------------------------------
 __builtin_table_new:
     PUSH BP
     MOV  BP, SP
@@ -84,7 +154,7 @@ __builtin_table_get:
     MOV  R4, R1
     AND  R4, BOXED_DATA      ; Isolate upper tag bits
     IEQ  R4, BOXED_TABLE      ; Is it tagged as a Table?
-    JF   R4, __runtime_error_not_table ; Trap if indexing a non-table!
+    JF   R4, __table_get_non_table ; strings resolve methods; else trap
 
     ;; --- OPTIMIZATION: EARLY UNBOXING ---
     ;; Strip tag immediately! R1 is now permanently the raw RAM heap address.
@@ -166,6 +236,11 @@ __builtin_table_get_scan_loop:
     MOV  R4, [R7]            ; Load Stored Key directly into scratch R4
     IEQ  R4, R2              ; Does Stored Key == Search Key? (Destroys R4!)
     JT   R4, __builtin_table_get_found ; Match found!
+    ;; Equal strings at different addresses (any runtime-built string --
+    ;; "k" .. i, string.sub, tostring) must still match: compare contents.
+    MOV  R4, [R7]
+    CALL __table_key_streq
+    JT   R4, __builtin_table_get_found
     
     ;; No match: advance memory pointer and decrement loop counter
     IADD R7, 2               ; Advance pointer by 2 words (skip Value slot to next Key)
@@ -185,6 +260,33 @@ __builtin_table_get_check_next_bucket:
 __builtin_table_get_found:
     IADD R7, 1               ; Value is stored exactly 1 word after the matching Key
     MOV  R0, [R7]            ; Read Value into return register R0
+    JMP  __builtin_table_get_done
+
+;; --- Indexing a non-table: Lua strings index the string library --------
+;; `s:sub(1, 2)` compiles to get(s, "sub") + call(self = s). Strings have
+;; no metatable here, so this resolves the name directly to a wrapper with
+;; the normal Lua function ABI (see __strmeth_* in string.s). Anything else
+;; (or an unknown name on a string) is still the not-a-table runtime error.
+__table_get_non_table:
+    MOV  R4, R1
+    AND  R4, BOXED_DATA
+    IEQ  R4, BOXED_ROMSTRING
+    JT   R4, __table_get_string_method
+    MOV  R4, R1
+    AND  R4, BOXED_DATA
+    IEQ  R4, BOXED_RAMSTRING
+    JF   R4, __runtime_error_not_table
+    MOV  R4, R1
+    AND  R4, BOXED_PAYLOAD
+    ILT  R4, 4                   ; nil/false/true share the RAM-string tag
+    JT   R4, __runtime_error_not_table
+__table_get_string_method:
+    PUSH R2
+    CALL __builtin_string_method_lookup
+    IADD SP, 1
+    MOV  R4, R0
+    IEQ  R4, BOXED_NIL
+    JT   R4, __runtime_error_not_table
     JMP  __builtin_table_get_done
 
 __builtin_table_get_not_found:
@@ -461,6 +563,9 @@ __builtin_table_set_scan_pairs:
     MOV  R4, [R8]            ; Load stored Key into scratch R4
     IEQ  R4, R2              ; Does Stored Key == Search Key? (Destroys R4!)
     JT   R4, __builtin_table_set_overwrite_val ; Found existing key -> Overwrite value!
+    MOV  R4, [R8]            ; equal-content string at another address?
+    CALL __table_key_streq
+    JT   R4, __builtin_table_set_overwrite_val
 
     ;; No match: advance memory pointer and decrement loop counter
     IADD R8, 2               ; Advance 2 words (skip Value slot to next Key)

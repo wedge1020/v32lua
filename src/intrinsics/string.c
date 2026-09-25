@@ -1,148 +1,89 @@
 #include "v32lua.h"
 
+// ============================================================================
+// Shared argument pusher for the string runtime routines, which all take
+// their FIRST argument at [BP+2], second at [BP+3], ...
+//
+// Every multi-argument string intrinsic used to evaluate its arguments into
+// registers one after another and only then push them. Pinning a register
+// does not protect it from a raw hardware CALL, so any later argument that
+// itself CALLs (#s, f(), a .. b, ...) could clobber an earlier one:
+// string.sub(s, 2, #s) returned "" because __builtin_len wiped s's register
+// (7 of 9 cases in the audit's differential test were wrong).
+//
+// Now: evaluate strictly left to right, PUSH each value as soon as it is
+// computed, NIL-pad up to `slots`, optionally append a NIL terminator, then
+// reverse the whole block in place so the first argument ends up at the
+// lowest address ([BP+2] in the callee) -- the technique
+// emit_string_format_intrinsic() already used.
+// Returns the number of words pushed (for the caller's IADD SP, n).
+// ============================================================================
+static int push_string_args (ASTNode *first, int slots, bool nil_terminator)
+{
+    ASTNode *a = first;
+    int pushed = 0;
+    for (int i = 0; i < slots || (slots < 0 && a != NULL); i++) {
+        int reg = allocate_register ();
+        if (a != NULL) {
+            generate_asm (a, reg);
+            ensure_in_register (reg);
+            a = a->next;
+        } else {
+            emit_asm ("MOV R%d, BOXED_NIL ; absent optional argument\n", reg);
+        }
+        emit_asm ("PUSH R%d ; string arg %d\n", reg, i + 1);
+        unlock_register (reg);
+        pushed++;
+    }
+    if (nil_terminator) {
+        emit_asm ("MOV R0, BOXED_NIL\n");
+        emit_asm ("PUSH R0 ; BOXED_NIL terminator\n");
+        pushed++;
+    }
+    if (pushed > 1) {
+        int ra = allocate_register ();
+        lock_register (ra);
+        int rb = allocate_register ();
+        for (int i = 0; i < pushed / 2; i++) {
+            int j = pushed - 1 - i;
+            emit_asm ("MOV R%d, [SP+%d]\n", ra, i);
+            emit_asm ("MOV R%d, [SP+%d]\n", rb, j);
+            emit_asm ("MOV [SP+%d], R%d\n", i, rb);
+            emit_asm ("MOV [SP+%d], R%d\n", j, ra);
+        }
+        unlock_register (rb);
+        unlock_register (ra);
+    }
+    return pushed;
+}
+
+static void call_string_routine (const char *routine, int pushed, int dest_reg)
+{
+    emit_asm ("CALL %s\n", routine);
+    emit_asm ("IADD SP, %d ; Clean up arguments\n", pushed);
+    if (dest_reg != 0) {
+        emit_asm ("MOV R%d, R0 ; Store result\n", dest_reg);
+    }
+}
+
 bool emit_string_byte_intrinsic(ASTNode *node, int dest_reg) {
-    // Validate we have at least 1 argument (the string)
-    ASTNode *arg = node->as.call.args_head;
-    if (!arg) {
+    if (!node->as.call.args_head) {
         compiler_error(ERR_SEMANTIC, node->line_number,
             "string.byte() requires at least 1 argument");
         return false;
     }
-
     emit_asm("    ;; --- Intrinsic: string.byte(s [, i [, j]]) ---\n");
-
-    // ============================================================
-    // PHASE 1: Evaluate all arguments into registers first
-    // This ensures we don't lose track of register allocations
-    // ============================================================
-    int str_reg = allocate_pinned_register();
-    generate_asm(arg, str_reg);
-
-    int start_reg = 0;
-    bool has_start = false;
-    arg = arg->next;
-    if (arg) {
-        start_reg = allocate_pinned_register();
-        generate_asm(arg, start_reg);
-        has_start = true;
-
-        int end_reg = 0;
-        bool has_end = false;
-        arg = arg->next;
-        if (arg) {
-            end_reg = allocate_pinned_register();
-            generate_asm(arg, end_reg);
-            has_end = true;
-        }
-
-        // =========================================================
-        // PHASE 2: Push arguments in REVERSE order
-        //
-        // VIRCON32 STACK BEHAVIOR: PUSH decrements SP *before* storing
-        // So pushing A, B, C results in stack: [SP] = C, [SP+1] = B, [SP+2] = A
-        //
-        // Runtime __builtin_string_byte expects:
-        //   [BP+2] = string (first argument)
-        //   [BP+3] = start index (second argument)
-        //   [BP+4] = end index (third argument)
-        //
-        // To achieve this, we push in reverse: end, start, string
-        // This way after CALL: [BP+2] = string, [BP+3] = start, [BP+4] = end
-        // =========================================================
-        if (has_end) {
-            emit_asm("PUSH R%d             ; Arg 3: End index\n", end_reg);
-            unlock_pinned_register(end_reg);
-        } else {
-            // No end index provided - use nil
-            emit_asm("MOV R0, BOXED_NIL\n");
-            emit_asm("PUSH R0             ; No end index (nil)\n");
-        }
-
-        emit_asm("PUSH R%d             ; Arg 2: Start index\n", start_reg);
-        unlock_pinned_register(start_reg);
-    } else {
-        // No start or end indices - both default to nil
-        emit_asm("MOV R0, BOXED_NIL\n");
-        emit_asm("PUSH R0             ; No end index (nil)\n");
-        emit_asm("PUSH R0             ; No start index (nil)\n");
-    }
-
-    // Push string LAST so it ends up at [BP+2] after CALL
-    emit_asm("PUSH R%d             ; Arg 1: String\n", str_reg);
-
-    // =========================================================
-    // PHASE 3: Call runtime and clean up
-    // =========================================================
-    emit_asm("CALL __builtin_string_byte\n");
-    emit_asm("IADD SP, 3           ; Clean up 3 arguments\n");
-
-    if (dest_reg != 0) {
-        emit_asm("MOV R%d, R0         ; Store result\n", dest_reg);
-    }
-
-    unlock_pinned_register(str_reg);
+    // [BP+2] = string, [BP+3] = start (nil ok), [BP+4] = end (nil ok)
+    int n = push_string_args(node->as.call.args_head, 3, false);
+    call_string_routine("__builtin_string_byte", n, dest_reg);
     return true;
 }
 
 bool emit_string_char_intrinsic(ASTNode *node, int dest_reg) {
-    // Count arguments
-    ASTNode *arg = node->as.call.args_head;
-    int arg_count = 0;
-    while (arg) {
-        arg_count++;
-        arg = arg->next;
-    }
-
     emit_asm("    ;; --- Intrinsic: string.char(b1, b2, ..., bn) ---\n");
-
-    // ============================================================
-    // PHASE 1: Evaluate all arguments into registers first
-    // We need to hold all registers until we push in reverse order
-    // ============================================================
-    arg = node->as.call.args_head;
-    int *arg_regs = malloc(arg_count * sizeof(int));
-    for (int i = 0; i < arg_count && arg; i++) {
-        arg_regs[i] = allocate_pinned_register();
-        generate_asm(arg, arg_regs[i]);
-        arg = arg->next;
-    }
-
-    // ============================================================
-    // PHASE 2: Push arguments in REVERSE order
-    //
-    // Runtime __builtin_string_char expects:
-    //   [BP+2] = first byte argument
-    //   [BP+3] = second byte argument
-    //   ...
-    //   [BP+2+N] = BOXED_NIL (terminator)
-    //
-    // It scans forward from [BP+2] until it hits NIL.
-    //
-    // To achieve this with downward-growing stack:
-    // Push NIL first, then argN, argN-1, ..., arg1
-    // This results in stack: arg1, arg2, ..., argN, NIL
-    // After CALL: [BP+2] = arg1, [BP+3] = arg2, ..., [BP+2+N] = NIL
-    // ============================================================
-    emit_asm("MOV R0, BOXED_NIL\n");
-    emit_asm("PUSH R0             ; BOXED_NIL terminator\n");
-
-    // Push arguments from last to first
-    for (int i = arg_count - 1; i >= 0; i--) {
-        emit_asm("PUSH R%d             ; Byte value\n", arg_regs[i]);
-        unlock_pinned_register(arg_regs[i]);
-    }
-    free(arg_regs);
-
-    // ============================================================
-    // PHASE 3: Call runtime and clean up
-    // ============================================================
-    emit_asm("CALL __builtin_string_char\n");
-    emit_asm("IADD SP, %d           ; Clean up %d arguments\n", arg_count + 1, arg_count + 1);
-
-    if (dest_reg != 0) {
-        emit_asm("MOV R%d, R0         ; Store result\n", dest_reg);
-    }
-
+    // [BP+2] = first byte ... [BP+2+N] = BOXED_NIL terminator
+    int n = push_string_args(node->as.call.args_head, -1, true);
+    call_string_routine("__builtin_string_char", n, dest_reg);
     return true;
 }
 
@@ -274,45 +215,10 @@ bool emit_string_sub_intrinsic(ASTNode *node, int dest_reg) {
             "string.sub() requires at least 2 arguments (s, i)");
         return false;
     }
-    ASTNode *arg_i = arg_s->next;
-    ASTNode *arg_j = arg_i->next;  // optional -- defaults to end of string
-
     emit_asm("    ;; --- Intrinsic: string.sub(s, i [, j]) ---\n");
-
-    int str_reg = allocate_pinned_register();
-    generate_asm(arg_s, str_reg);
-
-    int i_reg = allocate_pinned_register();
-    generate_asm(arg_i, i_reg);
-
-    int j_reg = 0;
-    bool has_j = false;
-    if (arg_j) {
-        j_reg = allocate_pinned_register();
-        generate_asm(arg_j, j_reg);
-        has_j = true;
-    }
-
-    // Push in reverse: j, i, s -> after CALL: [BP+2]=s [BP+3]=i [BP+4]=j
-    if (has_j) {
-        emit_asm("PUSH R%d             ; Arg 3: j (end index)\n", j_reg);
-        unlock_pinned_register(j_reg);
-    } else {
-        emit_asm("MOV R0, BOXED_NIL\n");
-        emit_asm("PUSH R0             ; No j provided -- runtime defaults to end of string\n");
-    }
-
-    emit_asm("PUSH R%d             ; Arg 2: i (start index)\n", i_reg);
-    unlock_pinned_register(i_reg);
-    emit_asm("PUSH R%d             ; Arg 1: string\n", str_reg);
-    unlock_pinned_register(str_reg);
-
-    emit_asm("CALL __builtin_string_sub\n");
-    emit_asm("IADD SP, 3           ; Clean up 3 arguments\n");
-
-    if (dest_reg != 0) {
-        emit_asm("MOV R%d, R0         ; Store result\n", dest_reg);
-    }
+    // [BP+2] = s, [BP+3] = i, [BP+4] = j (nil -> end of string)
+    int n = push_string_args(arg_s, 3, false);
+    call_string_routine("__builtin_string_sub", n, dest_reg);
     return true;
 }
 
@@ -376,28 +282,9 @@ bool emit_string_rep_intrinsic(ASTNode *node, int dest_reg) {
             "string.rep() requires 2 arguments (s, n)");
         return false;
     }
-    ASTNode *arg_n = arg_s->next;
-
     emit_asm("    ;; --- Intrinsic: string.rep(s, n) ---\n");
-
-    int str_reg = allocate_pinned_register();
-    generate_asm(arg_s, str_reg);
-
-    int n_reg = allocate_pinned_register();
-    generate_asm(arg_n, n_reg);
-
-    // Push in reverse: n, s -> after CALL: [BP+2]=s [BP+3]=n
-    emit_asm("PUSH R%d             ; Arg 2: n\n", n_reg);
-    unlock_pinned_register(n_reg);
-    emit_asm("PUSH R%d             ; Arg 1: string\n", str_reg);
-    unlock_pinned_register(str_reg);
-
-    emit_asm("CALL __builtin_string_rep\n");
-    emit_asm("IADD SP, 2           ; Clean up 2 arguments\n");
-
-    if (dest_reg != 0) {
-        emit_asm("MOV R%d, R0         ; Store result\n", dest_reg);
-    }
+    int n = push_string_args(arg_s, 2, false);
+    call_string_routine("__builtin_string_rep", n, dest_reg);
     return true;
 }
 
@@ -445,28 +332,9 @@ bool emit_string_find_intrinsic(ASTNode *node, int dest_reg) {
             "string.find() requires at least 2 arguments (s, pattern)");
         return false;
     }
-    ASTNode *arg_pat = arg_s->next;
-
     emit_asm("    ;; --- Intrinsic: string.find(s, pattern) [plain substring only] ---\n");
-
-    int str_reg = allocate_pinned_register();
-    generate_asm(arg_s, str_reg);
-
-    int pat_reg = allocate_pinned_register();
-    generate_asm(arg_pat, pat_reg);
-
-    // Push in reverse: pattern, s -> after CALL: [BP+2]=s [BP+3]=pattern
-    emit_asm("PUSH R%d             ; Arg 2: pattern (plain substring)\n", pat_reg);
-    unlock_pinned_register(pat_reg);
-    emit_asm("PUSH R%d             ; Arg 1: string\n", str_reg);
-    unlock_pinned_register(str_reg);
-
-    emit_asm("CALL __builtin_string_find\n");
-    emit_asm("IADD SP, 2           ; Clean up 2 arguments\n");
-
-    if (dest_reg != 0) {
-        emit_asm("MOV R%d, R0         ; Store result\n", dest_reg);
-    }
+    int n = push_string_args(arg_s, 2, false);
+    call_string_routine("__builtin_string_find", n, dest_reg);
     return true;
 }
 
@@ -485,34 +353,9 @@ bool emit_string_gsub_intrinsic(ASTNode *node, int dest_reg) {
             "string.gsub() requires 3 arguments (s, pattern, repl)");
         return false;
     }
-    ASTNode *arg_pat  = arg_s->next;
-    ASTNode *arg_repl = arg_pat->next;
-
     emit_asm("    ;; --- Intrinsic: string.gsub(s, pattern, repl) [plain substitution only] ---\n");
-
-    int str_reg = allocate_pinned_register();
-    generate_asm(arg_s, str_reg);
-
-    int pat_reg = allocate_pinned_register();
-    generate_asm(arg_pat, pat_reg);
-
-    int repl_reg = allocate_pinned_register();
-    generate_asm(arg_repl, repl_reg);
-
-    // Push in reverse: repl, pattern, s -> after CALL: [BP+2]=s [BP+3]=pattern [BP+4]=repl
-    emit_asm("PUSH R%d             ; Arg 3: repl\n", repl_reg);
-    unlock_pinned_register(repl_reg);
-    emit_asm("PUSH R%d             ; Arg 2: pattern (plain substring)\n", pat_reg);
-    unlock_pinned_register(pat_reg);
-    emit_asm("PUSH R%d             ; Arg 1: string\n", str_reg);
-    unlock_pinned_register(str_reg);
-
-    emit_asm("CALL __builtin_string_gsub\n");
-    emit_asm("IADD SP, 3           ; Clean up 3 arguments\n");
-
-    if (dest_reg != 0) {
-        emit_asm("MOV R%d, R0         ; Store result\n", dest_reg);
-    }
+    int n = push_string_args(arg_s, 3, false);
+    call_string_routine("__builtin_string_gsub", n, dest_reg);
     return true;
 }
 

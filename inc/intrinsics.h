@@ -53,14 +53,14 @@ bool  emit_type_intrinsic (ASTNode *, int);
 //
 // PICO8 API layer intrinsics
 //
-bool  emit_pico8_spr_intrinsic      (ASTNode *);
+bool  emit_pico8_spr_intrinsic      (ASTNode *, int);
 bool  emit_pico8_btn_intrinsic      (ASTNode *, int);
 bool  emit_pico8_btnp_intrinsic     (ASTNode *, int);
 bool  emit_pico8_add_intrinsic      (ASTNode *, int);
-bool  emit_pico8_cls_intrinsic      (ASTNode *);
+bool  emit_pico8_cls_intrinsic      (ASTNode *, int);
 bool  emit_pico8_mget_intrinsic     (ASTNode *, int);
 bool  emit_pico8_mset_intrinsic     (ASTNode *, int);
-bool  emit_pico8_map_intrinsic      (ASTNode *);
+bool  emit_pico8_map_intrinsic      (ASTNode *, int);
 bool  emit_pico8_rnd_intrinsic      (ASTNode *, int);
 bool  emit_pico8_sgn_intrinsic      (ASTNode *, int);
 bool  emit_pico8_mid_intrinsic      (ASTNode *, int);
@@ -77,6 +77,13 @@ bool  emit_pico8_rectfill_intrinsic (ASTNode *, int);
 bool  emit_pico8_circfill_intrinsic (ASTNode *, int);
 bool  emit_pico8_line_intrinsic     (ASTNode *, int);
 bool  emit_pico8_print_intrinsic    (ASTNode *, int);
+bool  emit_pico8_rect_intrinsic     (ASTNode *, int);
+bool  emit_pico8_pset_intrinsic     (ASTNode *, int);
+bool  emit_pico8_circ_intrinsic     (ASTNode *, int);
+bool  emit_pico8_color_intrinsic    (ASTNode *, int);
+bool  emit_pico8_fget_intrinsic     (ASTNode *, int);
+bool  emit_pico8_fset_intrinsic     (ASTNode *, int);
+bool  emit_pico8_pal_intrinsic      (ASTNode *, int, const char *);
 
 //////////////////////////////////////////////////////////////////////////////
 //
@@ -87,7 +94,7 @@ bool  emit_tic80_btn_intrinsic   (ASTNode *, int);
 bool  emit_tic80_btnp_intrinsic  (ASTNode *, int);
 bool  emit_tic80_add_intrinsic   (ASTNode *, int);
 bool  emit_tic80_cls_intrinsic   (ASTNode *);
-bool  emit_tic80_print_intrinsic (ASTNode *);
+bool  emit_tic80_print_intrinsic    (ASTNode *, int);
 // TIC-80 Map Functions
 bool  emit_tic80_mget_intrinsic  (ASTNode *, int);
 bool  emit_tic80_mset_intrinsic  (ASTNode *, int);

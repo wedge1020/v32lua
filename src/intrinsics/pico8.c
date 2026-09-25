@@ -2,6 +2,10 @@
 
 #define MAX_SPR_ARGS 7  // n, x, y, w, h, flip_x, flip_y
 
+static bool pico8_push_args (ASTNode *node, int max_args,
+                             const char *names[], int *out_arg_count);
+static void pico8_warn_unsupported_once (int *flag, int line, const char *what);
+
 /**
  * Emits assembly for the spr() intrinsic (PICO-8 compatibility).
  *
@@ -13,7 +17,7 @@
  * @param node The AST node representing the function call.
  * @return     true if successfully emitted, false on error.
  */
-bool emit_pico8_spr_intrinsic(ASTNode *node)
+bool emit_pico8_spr_intrinsic(ASTNode *node, int dest_reg)
 {
     emit_asm("    ;; --- PICO-8 spr() Intrinsic ---\n");
 
@@ -77,6 +81,9 @@ bool emit_pico8_spr_intrinsic(ASTNode *node)
     emit_asm("CALL __builtin_pico8_spr\n");
     emit_asm("IADD SP, %d ; Clean up spr() arguments\n", MAX_SPR_ARGS);
 
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R0 ; spr() returns nil\n", dest_reg);
+    }
     return true;
 }
 
@@ -92,57 +99,26 @@ bool emit_pico8_spr_intrinsic(ASTNode *node)
  * @param dest_reg The destination register for the result (0 = discard).
  * @return          true if successfully emitted, false on error.
  */
-bool emit_pico8_btn_intrinsic(ASTNode *node, int dest_reg)
+static bool pico8_emit_button (ASTNode *node, int dest_reg, const char *routine)
 {
-    emit_asm("    ;; --- PICO-8 btn() Intrinsic ---\n");
-
-    // --- Collect up to 2 arguments (button_id, player_id) ---
+    // btn(i, [p]) / btnp(i, [p]): [BP+2] = i (nil -> bitfield), [BP+3] = p
+    static const char *names[2] = { "button", "player" };
     int arg_count = 0;
-    ASTNode *curr = node->as.call.args_head;
-    ASTNode *args[2] = { NULL };
-    while (curr != NULL && arg_count < 2) {
-        args[arg_count++] = curr;
-        curr = curr->next;
-    }
+    pico8_push_args (node, 2, names, &arg_count);
 
-    // --- Push arguments right-to-left (standard ABI) ---
+    emit_asm("CALL %s\n", routine);
+    emit_asm("IADD SP, 2 ; Clean up button arguments\n");
 
-    // Arg 1: Player ID (default = 0)
-    int reg = allocate_register();
-    register_pinned[reg] = 1;
-    if (arg_count > 1) {
-        generate_asm(args[1], reg);
-        emit_asm("PUSH R%d ; Arg 2: Player ID\n", reg);
-    } else {
-        emit_asm("MOV R%d, 0.000000 ; Default Player 0\n", reg);
-        emit_asm("PUSH R%d\n", reg);
-    }
-    register_pinned[reg] = 0;
-    unlock_register(reg);
-
-    // Arg 0: Button ID (or BOXED_NIL for bitfield mode)
-    reg = allocate_register();
-    register_pinned[reg] = 1;
-    if (arg_count > 0) {
-        generate_asm(args[0], reg);
-        emit_asm("PUSH R%d ; Arg 1: Button ID\n", reg);
-    } else {
-        emit_asm("MOV R%d, BOXED_NIL ; Trigger bitfield mode\n", reg);
-        emit_asm("PUSH R%d\n", reg);
-    }
-    register_pinned[reg] = 0;
-    unlock_register(reg);
-
-    // --- Call runtime subroutine and clean up stack ---
-    emit_asm("CALL __builtin_pico8_btn\n");
-    emit_asm("IADD SP, 2 ; Clean up btn() arguments\n");
-
-    // Transfer result from R0 to dest_reg if needed
     if (dest_reg != 0) {
         emit_asm("MOV R%d, R0 ; Transfer return value\n", dest_reg);
     }
-
     return true;
+}
+
+bool emit_pico8_btn_intrinsic(ASTNode *node, int dest_reg)
+{
+    emit_asm("    ;; --- PICO-8 btn() Intrinsic ---\n");
+    return pico8_emit_button (node, dest_reg, "__builtin_pico8_btn");
 }
 
 /**
@@ -331,46 +307,23 @@ bool emit_pico8_mset_intrinsic(ASTNode *node, int dest_reg) {
  * color_key parameter real PICO-8's map() doesn't have. Fixed to match
  * the real signature.
  */
-bool emit_pico8_map_intrinsic(ASTNode *node) {
+bool emit_pico8_map_intrinsic(ASTNode *node, int dest_reg) {
     emit_asm("    ;; --- PICO-8 map() Intrinsic ---\n");
 
+    // Every argument is optional (PICO-8 0.2 defaults: 0,0,0,0,128,32,
+    // layer 0) -- absent ones are NIL-padded and defaulted by the runtime.
+    // Arguments are pushed as they are evaluated, right-to-left, so a
+    // nested CALL in one can't clobber another.
+    static const char *names[7] = { "celx", "cely", "sx", "sy", "celw", "celh", "layer" };
     int arg_count = 0;
-    ASTNode *curr = node->as.call.args_head;
-    ASTNode *args[7] = { NULL };
-    while (curr != NULL && arg_count < 7) {
-        args[arg_count++] = curr;
-        curr = curr->next;
-    }
-
-    if (arg_count < 6) {
-        compiler_error(ERR_SEMANTIC, node->line_number,
-                      "PICO-8 map() requires at least 6 arguments: "
-                      "map(celx, cely, sx, sy, celw, celh)");
-        return false;
-    }
-
-    // Push right-to-left: layer (or default 0), celh, celw, sy, sx, cely, celx
-    if (arg_count >= 7) {
-        int reg = allocate_register();
-        generate_asm(args[6], reg);  // layer
-        emit_asm("PUSH R%d ; Arg 7: layer\n", reg);
-        unlock_register(reg);
-    } else {
-        emit_asm("MOV R0, 0.000000 ; Default layer (draw everything)\n");
-        emit_asm("PUSH R0 ; Arg 7: layer (default)\n");
-    }
-
-    static const char *names[6] = { "celx", "cely", "sx", "sy", "celw", "celh" };
-    for (int i = 5; i >= 0; i--) {
-        int reg = allocate_register();
-        generate_asm(args[i], reg);
-        emit_asm("PUSH R%d ; Arg %d: %s\n", reg, i + 1, names[i]);
-        unlock_register(reg);
-    }
+    pico8_push_args (node, 7, names, &arg_count);
 
     emit_asm("CALL __builtin_pico8_map\n");
     emit_asm("IADD SP, 7 ; Clean up map() arguments\n");
 
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R0 ; map() returns nil\n", dest_reg);
+    }
     return true;
 }
 
@@ -378,7 +331,7 @@ bool emit_pico8_map_intrinsic(ASTNode *node) {
  * Emits assembly for PICO-8 cls(color) intrinsic
  * color can be: palette index (0-15), hex string ("0xRRGGBB"), or hex number
  */
-bool emit_pico8_cls_intrinsic(ASTNode *node) {
+bool emit_pico8_cls_intrinsic(ASTNode *node, int dest_reg) {
     emit_asm("    ;; --- PICO-8 cls() Intrinsic ---\n");
 
     ASTNode *arg = node->as.call.args_head;
@@ -394,82 +347,21 @@ bool emit_pico8_cls_intrinsic(ASTNode *node) {
     emit_asm("CALL __builtin_pico8_cls\n");
     emit_asm("IADD SP, 1 ; Clean up cls() arguments\n");
 
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R0 ; cls() returns nil\n", dest_reg);
+    }
     return true;
 }
 
 /**
- * Emits assembly for the btnp() intrinsic (PICO-8 compatibility).
- *
- * Syntax:
- *   btnp(id) -> returns true if button was pressed this frame
- *   btnp(id, hold) -> returns true with custom hold
- *   btnp(id, hold, period) -> returns true with custom hold and period
- *
- * @param node     The AST node representing the function call.
- * @param dest_reg The destination register for the result (0 = discard).
- * @return          true if successfully emitted, false on error.
+ * PICO-8 btnp(i, [p]) -- true on the first frame of a press, then with
+ * PICO-8's 15-frame-delay / 4-frame autorepeat. (This used to take
+ * TIC-80's btnp(id, hold, period) signature, so a player argument landed
+ * in "hold" and the runtime selected a gamepad from the wrong stack slot.)
  */
 bool emit_pico8_btnp_intrinsic(ASTNode *node, int dest_reg) {
     emit_asm("    ;; --- PICO-8 btnp() Intrinsic ---\n");
-
-    // Collect up to 3 arguments (id, hold, period)
-    int arg_count = 0;
-    ASTNode *curr = node->as.call.args_head;
-    ASTNode *args[3] = { NULL };
-    while (curr != NULL && arg_count < 3) {
-        args[arg_count++] = curr;
-        curr = curr->next;
-    }
-
-    // Push arguments right-to-left (standard ABI)
-    // Order: period (2), hold (1), id (0)
-
-    // Arg 2: period (default = -1)
-    int reg = allocate_register();
-    register_pinned[reg] = 1;
-    if (arg_count > 2) {
-        generate_asm(args[2], reg);
-    } else {
-        emit_asm("MOV R%d, -1.000000 ; Default period\n", reg);
-    }
-    emit_asm("PUSH R%d ; Arg 3: period\n", reg);
-    register_pinned[reg] = 0;
-    unlock_register(reg);
-
-    // Arg 1: hold (default = -1)
-    reg = allocate_register();
-    register_pinned[reg] = 1;
-    if (arg_count > 1) {
-        generate_asm(args[1], reg);
-    } else {
-        emit_asm("MOV R%d, -1.000000 ; Default hold\n", reg);
-    }
-    emit_asm("PUSH R%d ; Arg 2: hold\n", reg);
-    register_pinned[reg] = 0;
-    unlock_register(reg);
-
-    // Arg 0: Button ID (required)
-    reg = allocate_register();
-    register_pinned[reg] = 1;
-    if (arg_count > 0) {
-        generate_asm(args[0], reg);
-    } else {
-        emit_asm("MOV R%d, BOXED_NIL ; Missing required arg!\n", reg);
-    }
-    emit_asm("PUSH R%d ; Arg 1: Button ID\n", reg);
-    register_pinned[reg] = 0;
-    unlock_register(reg);
-
-    // Call runtime subroutine and clean up stack
-    emit_asm("CALL __builtin_pico8_btnp\n");
-    emit_asm("IADD SP, 3 ; Clean up btnp() arguments\n");
-
-    // Transfer result from R0 to dest_reg if needed
-    if (dest_reg != 0) {
-        emit_asm("MOV R%d, R0 ; Transfer return value\n", dest_reg);
-    }
-
-    return true;
+    return pico8_emit_button (node, dest_reg, "__builtin_pico8_btnp");
 }
 
 /**
@@ -507,7 +399,11 @@ bool emit_pico8_rnd_intrinsic(ASTNode *node, int dest_reg)
     emit_asm("PUSH R%d ; spill x across __builtin_random CALL\n", x_reg);
     register_pinned[x_reg] = 0;
 
-    emit_asm("CALL __builtin_random ; no args -> R0 = float in [0,1)\n");
+    emit_asm("MOV  R0, BOXED_NIL\n");
+    emit_asm("PUSH R0 ; [BP+3] = no arg 2\n");
+    emit_asm("PUSH R0 ; [BP+2] = no arg 1 -> float in [0,1)\n");
+    emit_asm("CALL __builtin_random\n");
+    emit_asm("IADD SP, 2\n");
 
     int result_reg = (dest_reg != 0) ? dest_reg : allocate_register();
     emit_asm("POP  R%d ; reload x\n", x_reg);
@@ -575,12 +471,18 @@ bool emit_pico8_mid_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- PICO-8 mid(a, b, c) Intrinsic ---\n");
 
+    // Each argument is pushed as soon as it is evaluated: a nested CALL in
+    // b or c (mid(0, rnd(10), 5)) used to clobber a's still-live register.
     int a_reg = allocate_register();
     int b_reg = allocate_register();
     int c_reg = allocate_register();
     generate_asm(arg, a_reg);
+    emit_asm("PUSH R%d ; mid: spill a\n", a_reg);
     generate_asm(arg->next, b_reg);
+    emit_asm("PUSH R%d ; mid: spill b\n", b_reg);
     generate_asm(arg->next->next, c_reg);
+    emit_asm("POP  R%d ; mid: reload b\n", b_reg);
+    emit_asm("POP  R%d ; mid: reload a\n", a_reg);
 
     int min_ab = allocate_register();
     int max_ab = allocate_register();
@@ -679,7 +581,7 @@ bool emit_pico8_foreach_intrinsic(ASTNode *node, int dest_reg)
 //
 // A dynamic n (celeste.lua's `psfx` wrapper -- sfx(num), where num is a
 // parameter, not a literal) can't be folded, since the mapping itself needs
-// a runtime AND -- __builtin_pico8_sfx (runtime.s) does the same mapping in
+// a runtime AND -- __builtin_tonebank_sfx (vircon32.s) does the same mapping in
 // assembly and then does exactly what __builtin_vircon32_sfx_play does.
 bool emit_pico8_sfx_intrinsic (ASTNode *node, int dest_reg)
 {
@@ -747,7 +649,7 @@ bool emit_pico8_sfx_intrinsic (ASTNode *node, int dest_reg)
     emit_asm ("PUSH R%d ; Arg 1: pico8 sfx index (signed; <0 means stop)\n", n_reg);
     unlock_register (n_reg);
 
-    emit_asm ("CALL __builtin_pico8_sfx\n");
+    emit_asm ("CALL __builtin_tonebank_sfx\n");
     emit_asm ("IADD SP, 3 ; Clean up sfx() arguments\n");
 
     if (dest_reg != 0) {
@@ -816,7 +718,13 @@ bool emit_pico8_music_intrinsic (ASTNode *node, int dest_reg)
 
     ASTNode *sound_lit = make_node (NODE_NUMBER);
     sound_lit->as.number.val = (double) tone_id;
-    sound_lit->next          = make_node_boolean (true);   // patterns loop
+    // music.play(SOUND, CHANNEL, CHANLOOP): channel 0 (music's channel),
+    // loop on. (This used to pass `true` as the SECOND argument -- which is
+    // the CHANNEL -- so music never looped.)
+    ASTNode *chan0_m = make_node (NODE_NUMBER);
+    chan0_m->as.number.val = 0.0;
+    sound_lit->next = chan0_m;
+    chan0_m->next   = make_node_boolean (true);
 
     ASTNode *call_node = make_node (NODE_FUNCTION_CALL);
     call_node->line_number       = node->line_number;
@@ -1006,8 +914,10 @@ bool emit_pico8_cos_intrinsic (ASTNode *node, int dest_reg)
     emit_asm ("    FMUL R%d, R%d ; x = x * 2*PI (turns -> radians)\n",
                arg_reg, tmp_reg);
 
-    // hardware cosine -- no flip
-    emit_asm ("    COS  R%d ; cos(radians)\n", arg_reg);
+    // There is NO COS instruction on Vircon32 (only SIN/ACOS/ATAN2) -- the
+    // old "COS Rn" failed to assemble. cos(r) = sin(r + PI/2), no flip.
+    emit_asm ("    FADD R%d, 1.5707963267948966 ; + PI/2\n", arg_reg);
+    emit_asm ("    SIN  R%d ; cos(radians) = sin(radians + PI/2)\n", arg_reg);
 
     if (dest_reg != 0) {
         emit_asm ("    MOV  R%d, R%d ; Transfer result to dest_reg\n",
@@ -1254,6 +1164,112 @@ bool emit_pico8_print_intrinsic (ASTNode *node, int dest_reg)
 
     if (dest_reg != 0) {
         emit_asm ("    MOV R%d, R0 ; passthrough string\n", dest_reg);
+    }
+    return true;
+}
+
+// ============================================================================
+// Warn once per compile about a PICO-8 call that is accepted but has no
+// Vircon32 equivalent (so carts that use it still build).
+// ============================================================================
+static void pico8_warn_unsupported_once (int *flag, int line, const char *what)
+{
+    if (*flag) return;
+    *flag = 1;
+    compiler_warning (ERR_SEMANTIC, line, "%s", what);
+}
+
+// Shared shape for the simple "push N args, CALL, result in R0" primitives.
+static bool pico8_simple_call (ASTNode *node, int dest_reg, int max_args,
+                               const char *names[], int min_args,
+                               const char *routine, const char *usage)
+{
+    int arg_count = 0;
+    pico8_push_args (node, max_args, names, &arg_count);
+    if (arg_count < min_args) {
+        compiler_error (ERR_SEMANTIC, node->line_number, "PICO-8 %s", usage);
+        return false;
+    }
+    emit_asm ("    CALL %s\n", routine);
+    emit_asm ("    IADD SP, %d\n", max_args);
+    if (dest_reg != 0) {
+        emit_asm ("    MOV R%d, R0\n", dest_reg);
+    }
+    return true;
+}
+
+// rect(x0, y0, x1, y1 [, col]) -- rectangle outline
+bool emit_pico8_rect_intrinsic (ASTNode *node, int dest_reg)
+{
+    static const char *names[5] = { "x0", "y0", "x1", "y1", "color" };
+    return pico8_simple_call (node, dest_reg, 5, names, 4, "__builtin_pico8_rect",
+                              "rect() expects at least 4 arguments: rect(x0, y0, x1, y1 [, color])");
+}
+
+// pset(x, y [, col])
+bool emit_pico8_pset_intrinsic (ASTNode *node, int dest_reg)
+{
+    static const char *names[3] = { "x", "y", "color" };
+    return pico8_simple_call (node, dest_reg, 3, names, 2, "__builtin_pico8_pset",
+                              "pset() expects at least 2 arguments: pset(x, y [, color])");
+}
+
+// circ(x, y [, r [, col]]) -- circle outline
+bool emit_pico8_circ_intrinsic (ASTNode *node, int dest_reg)
+{
+    static const char *names[4] = { "x", "y", "radius", "color" };
+    return pico8_simple_call (node, dest_reg, 4, names, 2, "__builtin_pico8_circ",
+                              "circ() expects at least 2 arguments: circ(x, y [, r [, color]])");
+}
+
+// color([col]) -- set the pen used when a primitive's color is omitted
+bool emit_pico8_color_intrinsic (ASTNode *node, int dest_reg)
+{
+    static const char *names[1] = { "color" };
+    return pico8_simple_call (node, dest_reg, 1, names, 0, "__builtin_pico8_color", "");
+}
+
+// fget(n [, f]) -- sprite flags from __gff__ (number, or boolean for bit f)
+bool emit_pico8_fget_intrinsic (ASTNode *node, int dest_reg)
+{
+    static const char *names[2] = { "sprite", "flag" };
+    return pico8_simple_call (node, dest_reg, 2, names, 1, "__builtin_pico8_fget",
+                              "fget() expects 1 or 2 arguments: fget(n [, f])");
+}
+
+// fset(n, [f,] v)
+bool emit_pico8_fset_intrinsic (ASTNode *node, int dest_reg)
+{
+    static const char *names[3] = { "sprite", "flag_or_value", "value" };
+    return pico8_simple_call (node, dest_reg, 3, names, 2, "__builtin_pico8_fset",
+                              "fset() expects 2 or 3 arguments: fset(n, [f,] v)");
+}
+
+// pal() / palt() -- palette remapping has no cheap Vircon32 equivalent
+// (sprite colors are baked into the texture). Accepted as no-ops with one
+// warning so carts still build; arguments are still evaluated for their
+// side effects.
+bool emit_pico8_pal_intrinsic (ASTNode *node, int dest_reg, const char *name)
+{
+    static int warned_pal = 0, warned_palt = 0;
+    int *flag = (strcmp (name, "palt") == 0) ? &warned_palt : &warned_pal;
+    char msg[160];
+    snprintf (msg, sizeof (msg),
+              "%s() is not supported on Vircon32 (palette remapping of baked sprite "
+              "colors); calls compile to no-ops", name);
+    pico8_warn_unsupported_once (flag, node->line_number, msg);
+
+    for (ASTNode *a = node->as.call.args_head; a != NULL; a = a->next) {
+        if (a->type == NODE_NUMBER || a->type == NODE_NIL || a->type == NODE_BOOLEAN ||
+            a->type == NODE_STRING || a->type == NODE_IDENTIFIER) {
+            continue;   // no side effects to preserve
+        }
+        int reg = allocate_register ();
+        generate_asm (a, reg);
+        unlock_register (reg);
+    }
+    if (dest_reg != 0) {
+        emit_asm ("    MOV R%d, BOXED_NIL ; %s() returns nil here\n", dest_reg, name);
     }
     return true;
 }

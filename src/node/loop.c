@@ -316,9 +316,142 @@ void  node_for_numeric (ASTNode *node)
 // FIX 2 (retained): loop control registers are unpinned around the call
 // and body so the body doesn't exhaust the register file.
 // ============================================================================
+// ============================================================================
+// PICO-8: `for v in all(t) do ... end`
+// ----------------------------------------------------------------------------
+// Lowered directly instead of going through the iterator-function protocol:
+// all() needs mutable per-loop state (index + previous element) to get
+// PICO-8's deletion-tolerant semantics, and returning it through a closure
+// or a heap block would allocate on every loop entry -- with no GC, that is
+// a permanent leak per frame. Here the state lives in three hidden stack
+// locals and each step is a pure call:
+//     __builtin_pico8_all_step(t, i, prev) -> R0 = element or nil, R2 = i
+// Only nil ends the loop (a false element is still visited, as in Lua).
+// Extra loop variables (for a, b in all(t)) are nil.
+// ============================================================================
+static bool is_pico8_all_call (ASTNode *iter)
+{
+    if (!runtime_req.needs_pico8 || iter == NULL || iter->next != NULL ||
+        iter->type != NODE_FUNCTION_CALL) {
+        return false;
+    }
+    char name[256] = {0};
+    if (!resolve_static_path (iter->as.call.target, name)) {
+        return false;
+    }
+    return strcmp (name, "all") == 0;
+}
+
+static void node_for_all (ASTNode *node, int label_id, const char *ctx)
+{
+    ASTNode *call   = node->as.for_generic.iter_expr;
+    ASTNode *t_expr = call->as.call.args_head;
+
+    if (t_expr == NULL || t_expr->next != NULL) {
+        compiler_error (ERR_SEMANTIC, node->line_number,
+            "all() expects exactly one argument: for v in all(t) do ... end");
+        return;
+    }
+
+    char start_label[128], end_label[128];
+    snprintf (start_label, sizeof (start_label), "__%s_for_gen_start_%d", ctx, label_id);
+    snprintf (end_label,   sizeof (end_label),   "__%s_for_gen_end_%d",   ctx, label_id);
+
+    push_scope ();
+    push_loop (label_id, LOOP_TYPE_FOR_GENERIC);
+
+    char t_var[64], i_var[64], prev_var[64];
+    snprintf (t_var,    sizeof (t_var),    "__all_t_%d",    label_id);
+    snprintf (i_var,    sizeof (i_var),    "__all_i_%d",    label_id);
+    snprintf (prev_var, sizeof (prev_var), "__all_prev_%d", label_id);
+    register_local (t_var);
+    register_local (i_var);
+    register_local (prev_var);
+
+    char acc_t[128], acc_i[128], acc_prev[128];
+    get_variable_access_string (t_var,    acc_t);
+    get_variable_access_string (i_var,    acc_i);
+    get_variable_access_string (prev_var, acc_prev);
+
+    int reg = allocate_register ();
+    generate_asm (t_expr, reg);
+    ensure_in_register (reg);
+    emit_asm ("MOV %s, R%d ; all(): table\n", acc_t, reg);
+    emit_asm ("MOV R%d, 1\n", reg);
+    emit_asm ("MOV %s, R%d ; all(): index (raw int)\n", acc_i, reg);
+    emit_asm ("MOV R%d, BOXED_NIL\n", reg);
+    emit_asm ("MOV %s, R%d ; all(): previous element\n", acc_prev, reg);
+    unlock_register (reg);
+
+    // loop variables
+    int var_count = 0;
+    for (ASTNode *v = node->as.for_generic.var_list; v != NULL; v = v->next) var_count++;
+    SymbolNode **var_syms = (SymbolNode **) malloc ((var_count ? var_count : 1) * sizeof (SymbolNode *));
+    {
+        int i = 0;
+        for (ASTNode *v = node->as.for_generic.var_list; v != NULL; v = v->next)
+            var_syms[i++] = register_local (v->as.id.name);
+    }
+
+    emit_asm ("%s:\n", start_label);
+
+    int saved_pinned[NUM_GPRS];
+    for (int i = 0; i < NUM_GPRS; i++) {
+        saved_pinned[i]    = register_pinned[i];
+        register_pinned[i] = 0;
+    }
+
+    reg = allocate_register ();
+    emit_asm ("MOV R%d, %s\n", reg, acc_prev);
+    emit_asm ("PUSH R%d ; prev -> [BP+4]\n", reg);
+    emit_asm ("MOV R%d, %s\n", reg, acc_i);
+    emit_asm ("PUSH R%d ; i -> [BP+3]\n", reg);
+    emit_asm ("MOV R%d, %s\n", reg, acc_t);
+    emit_asm ("PUSH R%d ; t -> [BP+2]\n", reg);
+    unlock_register (reg);
+    emit_asm ("CALL __builtin_pico8_all_step\n");
+    emit_asm ("IADD SP, 3\n");
+
+    // R2 (new index) is consumed before any register is allocated.
+    emit_asm ("MOV %s, R2 ; all(): save index\n", acc_i);
+    emit_asm ("MOV %s, R0 ; all(): save element as prev\n", acc_prev);
+    reg = allocate_register ();
+    emit_asm ("MOV R%d, R0\n", reg);
+    emit_asm ("IEQ R%d, BOXED_NIL ; nil ends the loop (false does not)\n", reg);
+    emit_asm ("JT R%d, %s\n", reg, end_label);
+    unlock_register (reg);
+
+    for (int i = 0; i < var_count; i++) {
+        reg = allocate_register ();
+        if (i == 0) emit_asm ("MOV R%d, %s ; loop variable = element\n", reg, acc_prev);
+        else        emit_asm ("MOV R%d, BOXED_NIL\n", reg);
+        emit_initialize_local (var_syms[i], reg);
+        unlock_register (reg);
+    }
+
+    push_scope ();
+    generate_block (node->as.for_generic.body);
+    pop_scope ();
+
+    emit_asm ("JMP %s\n", start_label);
+    emit_asm ("%s:\n", end_label);
+
+    for (int i = 0; i < NUM_GPRS; i++) {
+        register_pinned[i] = saved_pinned[i];
+    }
+    free (var_syms);
+    pop_loop ();
+    pop_scope ();
+}
+
 void node_for_generic(ASTNode *node)
 {
     int label_id = get_next_label();
+
+    if (is_pico8_all_call (node->as.for_generic.iter_expr)) {
+        node_for_all (node, label_id, get_current_function_name ());
+        return;
+    }
     const char *ctx = get_current_function_name();
 
     char start_label[128], end_label[128];
