@@ -1,4 +1,4 @@
---#title "[pico8] celeste"
+--#title "[v32lua] PICO8 API: celeste"
 --#api pico8
 --#p8 "celeste.p8"
 -- ~celeste~
