@@ -228,6 +228,29 @@ hint; and a
 textual preprocessor for multi-file projects, resolved before parsing
 begins.
 .PP
+Graphics conveniences in the native API:
+.B ioports.gpu.clear()
+takes no argument (reuse the current clear color), a preset name
+.RB ( \(dqblack\(dq ", " \(dqwhite\(dq ", " \(dqblue\(dq ,
+.BR \(dqred\(dq ", " \(dqgreen\(dq ),
+a packed
+.I 0xAABBGGRR
+color (a literal, or a
+.B hex()
+value when it comes from a variable), or separate components as
+.BI clear( r ", " g ", " b " [, " a ])\fR,\fP
+each 0\(en255 with alpha defaulting to 255 (opaque) \(em folded to a
+constant when all are literals, packed at runtime otherwise.
+.BR spr() 's
+eighth argument,
+.IR blend_mode ,
+accepts either a number
+.RB ( 0x20 ", " 0x21 ", " 0x22 )
+or one of the string literals
+.BR \(dqalpha\(dq " (or " \(dqdefault\(dq "), " \(dqadd\(dq ", or " \(dqsubtract\(dq ,
+resolved at compile time; for example
+.BR "spr(id, x, y, nil, nil, nil, nil, \(dqadd\(dq)" .
+.PP
 Explicit, permanent deviations from standard Lua, made to suit
 Vircon32's freestanding environment: IEEE-754 float32 only, with no
 Lua 5.3+ integer/float dual-number type \(em integers above 2^24 are

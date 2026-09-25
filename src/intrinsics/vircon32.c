@@ -131,7 +131,29 @@ bool emit_vircon32_spr_intrinsic(ASTNode *node, int dest_reg)
     // =========================================================================
 
     // Arg 8: blend_mode (default: VIRCON32_BLEND_ALPHA)
-    if (has_blend_mode) {
+    //
+    // A STRING LITERAL names the mode and is folded at compile time:
+    //   "alpha" / "default" -> 0x20, "add" -> 0x21, "subtract" -> 0x22
+    // Pushed as a float like every other spr() argument; the runtime CFIs it.
+    // Only literals are recognized -- a string held in a variable would reach
+    // the runtime as a NaN-boxed pointer, and there is no runtime string
+    // dispatch here.
+    if (has_blend_mode && args[7]->type == NODE_STRING) {
+        const char *mode = args[7]->as.string_val.value;
+        int blend;
+        if      (strcmp(mode, "alpha")    == 0 ||
+                 strcmp(mode, "default")  == 0) blend = VIRCON32_BLEND_ALPHA;
+        else if (strcmp(mode, "add")      == 0) blend = VIRCON32_BLEND_ADD;
+        else if (strcmp(mode, "subtract") == 0) blend = VIRCON32_BLEND_SUBTRACT;
+        else {
+            compiler_error(ERR_SEMANTIC, node->line_number,
+                "spr(): invalid blend_mode '%s' (expected \"alpha\", \"default\", "
+                "\"add\" or \"subtract\", or a number 0x20..0x22)", mode);
+            return false;
+        }
+        emit_asm("MOV R0, %d.000000 ; blend_mode \"%s\" (0x%02X)\n", blend, mode, blend);
+        emit_asm("PUSH R0\n");
+    } else if (has_blend_mode) {
         int reg = allocate_register();
         generate_asm(args[7], reg);
         emit_asm("PUSH R%d ; Arg 8: blend_mode\n", reg);

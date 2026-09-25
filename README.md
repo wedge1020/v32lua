@@ -610,7 +610,7 @@ sample of the most commonly used entries:
 | **`ioports.gpu.minX/minY/maxX/maxY`** | `GPU_RegionMin/MaxX/Y` | Read / Write | Defines the pixel boundaries of the active texture region. |
 | **`ioports.gpu.hotX/hotY`** | `GPU_RegionHotSpotX/Y` | Read / Write | Sets the drawing origin (hotspot) relative to the sprite region. |
 | **`ioports.gpu.draw([mode])`** | `GPU_Command` | Function Call | Executes a hardware draw command: `"zoom"`, `"rotate"`, `"rotozoom"`, or default. |
-| **`ioports.gpu.clear([color])`** | `GPU_ClearColor` + `GPU_Command` | Function Call | Sets the clear color and wipes the screen. Supports preset color strings (`"black"`, `"white"`, `"blue"`, `"red"`, `"green"`) or numeric hex values. |
+| **`ioports.gpu.clear([color])`**<br>**`ioports.gpu.clear(r, g, b [, a])`** | `GPU_ClearColor` + `GPU_Command` | Function Call | Sets the clear color and wipes the screen. Supports preset color strings (`"black"`, `"white"`, `"blue"`, `"red"`, `"green"`), a packed `0xAABBGGRR` value (a literal, or `hex()` for a variable), or separate components: `clear(r, g, b [, a])`, each `0`–`255`, alpha defaulting to opaque. |
 
 *Gamepad & Input (`ioports.inp.*`)*
 

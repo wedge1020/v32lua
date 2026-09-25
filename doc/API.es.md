@@ -402,20 +402,34 @@ píxel `(x, y)`.
 | `scale_x`, `scale_y` | `1.0` | factores de escala X/Y independientes |
 | `angle_deg` | `0` | rotación, en **grados**, sentido antihorario; convertido internamente a radianes (el `GPU_DrawingAngle` de la consola está en radianes) |
 | `color_mult` | `0xFFFFFFFF` | color de multiplicación RGBA empaquetado — `0xFFFFFFFF` es "sin cambio" |
-| `blend_mode` | `VIRCON32_BLEND_ALPHA` (`0x20`) | ver los modos de mezcla abajo |
+| `blend_mode` | `"alpha"` (`0x20`) | una cadena con el nombre del modo o su valor numérico — ver los modos de mezcla abajo |
 
 Un argumento puede **omitirse** (simplemente dejar de suministrar
 argumentos finales) o pasarse como un **`nil` explícito** para saltarlo y
 llegar a uno posterior — `spr(id, x, y, nil, nil, 45)` para rotar sin
 tocar la escala — ambos significan "usa el valor por defecto."
 
-Modos de mezcla:
+Modos de mezcla — pasa la cadena con el nombre o el número:
 
-| Constante | Valor |
-|---|---|
-| `VIRCON32_BLEND_ALPHA` | `0x20` |
-| `VIRCON32_BLEND_ADD` | `0x21` |
-| `VIRCON32_BLEND_SUBTRACT` | `0x22` |
+| Cadena | Número | Efecto |
+|---|---|---|
+| `"alpha"` o `"default"` | `0x20` | mezcla alfa normal (el valor por defecto) |
+| `"add"` | `0x21` | aditiva — aclara lo que hay debajo |
+| `"subtract"` | `0x22` | sustractiva — oscurece lo que hay debajo |
+
+```lua
+spr(7, 100, 80, nil, nil, nil, nil, "add")       -- efecto de brillo / luz
+spr(7, 100, 80, nil, nil, nil, nil, 0x21)        -- lo mismo, numérico
+spr(7, 100, 80, nil, nil, nil, 0x80FFFFFF, "alpha")
+```
+
+La cadena del modo debe ser un **literal de cadena**; se resuelve a su
+número en tiempo de compilación, y cualquier otra cadena (`"multiply"`,
+una errata) es un error de compilación. Una cadena guardada en una
+variable no se reconoce (no hay despacho de cadenas en tiempo de
+ejecución — llegaría a la GPU como un puntero, no como un modo); guarda el
+modo en una variable como número (`local mode = 0x21`). Los números se
+pasan tal cual, como antes.
 
 `spr()` no devuelve nada (`nil` de Lua), a la par de que la consola no
 tiene ningún valor significativo que devolver de una llamada de dibujo.
@@ -459,20 +473,48 @@ llamada situada en un contexto de expresión (`local unused = spr(1, 10, 10)`)
 recibe correctamente `nil` asignado, igual que cualquier otro intrínseco
 en este archivo.
 
-**ioports.gpu.clear([color])**
+**ioports.gpu.clear([color]) / ioports.gpu.clear(r, g, b [, a])**
 
-Limpia la pantalla: escribe `GPU_ClearColor` (si se da un argumento de
-color) y luego emite `GPUCommand_ClearScreen`. `color` acepta ya sea un
-entero RGBA empaquetado o una de cinco cadenas de nombre preestablecidas —
-`"black"`, `"white"`, `"blue"`, `"red"`, `"green"` — resueltas en tiempo
-de compilación cuando es un literal de cadena. Omite el argumento para
-limpiar con lo que `GPU_ClearColor` contenga actualmente.
+Limpia la pantalla: escribe `GPU_ClearColor` (si se da un color) y luego
+emite `GPUCommand_ClearScreen`. Omite los argumentos para limpiar con lo
+que `GPU_ClearColor` contenga actualmente. El color puede darse de cuatro
+formas:
+
+| Forma | Ejemplo | Notas |
+|---|---|---|
+| nombre preestablecido | `clear("black")` | `"black"`, `"white"`, `"blue"`, `"red"`, `"green"` — literal de cadena, resuelto en tiempo de compilación; cualquier otro nombre es un error de compilación |
+| literal empaquetado | `clear(0xFF202020)` | `0xAABBGGRR`; se pliega en tiempo de compilación a la palabra cruda de 32 bits |
+| palabra empaquetada | `clear(hex("0xFF202020"))`, `clear(c)` | un valor no literal se escribe al puerto sin tocar, así que ya debe contener la palabra cruda — es decir, venir de `hex()` |
+| componentes | `clear(32, 32, 32)`, `clear(r, g, b, 128)` | rojo, verde, azul, alfa, cada uno `0`–`255`; alfa es opcional y por defecto vale `255` (opaco) |
 
 ```lua
 ioports.gpu.clear("black")
-ioports.gpu.clear(0xFF202020)   -- RGBA empaquetado, no un nombre preestablecido
-ioports.gpu.clear()             -- reutiliza el último ClearColor establecido
+ioports.gpu.clear(0xFF202020)       -- 0xAABBGGRR empaquetado, gris oscuro
+ioports.gpu.clear(32, 32, 32)       -- el mismo gris oscuro, por componentes
+ioports.gpu.clear(r, g, b)          -- también con variables; alfa = 255
+ioports.gpu.clear(0, 0, 64, 128)    -- azul oscuro semitransparente
+ioports.gpu.clear()                 -- reutiliza el último ClearColor establecido
 ```
+
+Ten en cuenta que el orden de bytes de la GPU es `0xAABBGGRR` — el rojo
+es el byte *bajo* — que es la razón principal de la forma por
+componentes: `clear(r, g, b)` lo empaqueta en el orden correcto por ti.
+
+La forma por componentes acepta 3 o 4 argumentos (2, o más de 4, es un
+error de compilación). Cuando todos los componentes son literales se
+pliega a una sola constante empaquetada en tiempo de compilación — los
+literales fuera de rango se limitan a `0`–`255` con una advertencia. En
+otro caso cada componente se evalúa como una expresión normal, se limita
+a `0`–`255`, se trunca a entero y se empaqueta en tiempo de ejecución. Un
+`nil` explícito para `a` significa opaco, igual que omitirlo; no hay
+comprobación de nil en tiempo de ejecución en los componentes, así que una
+variable que sea `nil` en ejecución da un color indefinido.
+
+*Por qué una variable empaquetada necesita `hex()`:* los números de v32lua
+son float32, así que un número como `0xFF202020` guardado en una variable
+contiene un flotante, no los bits del color, y `clear()` no puede
+distinguirlos en tiempo de ejecución. Los literales escritos directamente
+en la llamada funcionan, porque se pliegan en tiempo de compilación.
 
 **Definiendo regiones de textura**
 

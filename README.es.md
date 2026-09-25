@@ -642,7 +642,7 @@ ejemplos trabajados. Una breve muestra de las entradas de uso más común:
 | **`ioports.gpu.minX/minY/maxX/maxY`** | `GPU_RegionMin/MaxX/Y` | Lectura / Escritura | Define los límites en píxeles de la región de textura activa. |
 | **`ioports.gpu.hotX/hotY`** | `GPU_RegionHotSpotX/Y` | Lectura / Escritura | Establece el origen de dibujo (hotspot) relativo a la región del sprite. |
 | **`ioports.gpu.draw([modo])`** | `GPU_Command` | Llamada a Función | Ejecuta un comando de dibujo de hardware: `"zoom"`, `"rotate"`, `"rotozoom"`, o el valor por defecto. |
-| **`ioports.gpu.clear([color])`** | `GPU_ClearColor` + `GPU_Command` | Llamada a Función | Establece el color de borrado y limpia la pantalla. Admite cadenas de color preestablecidas (`"black"`, `"white"`, `"blue"`, `"red"`, `"green"`) o valores hexadecimales numéricos. |
+| **`ioports.gpu.clear([color])`**<br>**`ioports.gpu.clear(r, g, b [, a])`** | `GPU_ClearColor` + `GPU_Command` | Llamada a Función | Establece el color de borrado y limpia la pantalla. Admite cadenas de color preestablecidas (`"black"`, `"white"`, `"blue"`, `"red"`, `"green"`), un valor empaquetado `0xAABBGGRR` (un literal, o `hex()` para una variable), o componentes separados: `clear(r, g, b [, a])`, cada uno `0`–`255`, con alfa opaco por defecto. |
 
 *Mando de Juego y Entrada (`ioports.inp.*`)*
 

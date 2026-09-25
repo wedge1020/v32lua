@@ -653,7 +653,7 @@ les signatures d'appel, et des exemples détaillés. Voici un bref
 | **`ioports.gpu.minX/minY/maxX/maxY`** | `GPU_RegionMin/MaxX/Y` | Lecture / Écriture | Définit les limites en pixels de la région de texture active. |
 | **`ioports.gpu.hotX/hotY`** | `GPU_RegionHotSpotX/Y` | Lecture / Écriture | Définit l'origine de dessin (hotspot) relative à la région du sprite. |
 | **`ioports.gpu.draw([mode])`** | `GPU_Command` | Appel de Fonction | Exécute une commande de dessin matérielle : `"zoom"`, `"rotate"`, `"rotozoom"`, ou la valeur par défaut. |
-| **`ioports.gpu.clear([couleur])`** | `GPU_ClearColor` + `GPU_Command` | Appel de Fonction | Définit la couleur d'effacement et efface l'écran. Prend en charge des chaînes de couleurs prédéfinies (`"black"`, `"white"`, `"blue"`, `"red"`, `"green"`) ou des valeurs hexadécimales numériques. |
+| **`ioports.gpu.clear([couleur])`**<br>**`ioports.gpu.clear(r, g, b [, a])`** | `GPU_ClearColor` + `GPU_Command` | Appel de Fonction | Définit la couleur d'effacement et efface l'écran. Prend en charge des chaînes de couleurs prédéfinies (`"black"`, `"white"`, `"blue"`, `"red"`, `"green"`), une valeur compressée `0xAABBGGRR` (un littéral, ou `hex()` pour une variable), ou des composantes séparées : `clear(r, g, b [, a])`, chacune de `0` à `255`, alpha opaque par défaut. |
 
 *Manette et Entrées (`ioports.inp.*`)*
 

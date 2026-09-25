@@ -365,20 +365,33 @@ or a raw region index) at pixel position `(x, y)`.
 | `scale_x`, `scale_y` | `1.0` | independent X/Y scale factors |
 | `angle_deg` | `0` | rotation, **degrees**, counter-clockwise; converted to radians internally (console's `GPU_DrawingAngle` is radians) |
 | `color_mult` | `0xFFFFFFFF` | packed RGBA multiply color — `0xFFFFFFFF` is "no change" |
-| `blend_mode` | `VIRCON32_BLEND_ALPHA` (`0x20`) | see blend modes below |
+| `blend_mode` | `"alpha"` (`0x20`) | a mode name string or its numeric value — see blend modes below |
 
 An argument can be **omitted** (just stop supplying trailing arguments) or
 passed as an **explicit `nil`** to skip it and reach a later one —
 `spr(id, x, y, nil, nil, 45)` to rotate without touching scale — both mean
 "use the default."
 
-Blend modes:
+Blend modes — pass either the name string or the number:
 
-| Constant | Value |
-|---|---|
-| `VIRCON32_BLEND_ALPHA` | `0x20` |
-| `VIRCON32_BLEND_ADD` | `0x21` |
-| `VIRCON32_BLEND_SUBTRACT` | `0x22` |
+| String | Number | Effect |
+|---|---|---|
+| `"alpha"` or `"default"` | `0x20` | normal alpha blending (the default) |
+| `"add"` | `0x21` | additive — brightens what's underneath |
+| `"subtract"` | `0x22` | subtractive — darkens what's underneath |
+
+```lua
+spr(7, 100, 80, nil, nil, nil, nil, "add")       -- glow / light effect
+spr(7, 100, 80, nil, nil, nil, nil, 0x21)        -- same thing, numeric
+spr(7, 100, 80, nil, nil, nil, 0x80FFFFFF, "alpha")
+```
+
+A mode string must be a **string literal**; it's resolved to its number at
+compile time, and any other string (`"multiply"`, a typo) is a compile
+error. A string held in a variable is not recognized (there's no runtime
+string dispatch — it would reach the GPU as a pointer, not a mode); keep
+the mode in a variable as a number instead (`local mode = 0x21`). Numbers
+are passed through as-is, as before.
 
 `spr()` returns nothing (Lua `nil`), matching the console having no
 meaningful value to hand back from a draw call. More than 8 arguments is a
@@ -418,20 +431,45 @@ being omitted entirely — both fall back to the default. A call sitting in
 an expression context (`local unused = spr(1, 10, 10)`) correctly gets
 `nil` assigned, matching every other intrinsic in this file.
 
-**ioports.gpu.clear([color])**
+**ioports.gpu.clear([color]) / ioports.gpu.clear(r, g, b [, a])**
 
-Clears the screen: writes `GPU_ClearColor` (if a color argument is given)
-then issues `GPUCommand_ClearScreen`. `color` accepts either a packed RGBA
-integer or one of five preset name strings — `"black"`, `"white"`,
-`"blue"`, `"red"`, `"green"` — resolved at compile time when it's a string
-literal. Omit the argument to clear with whatever `GPU_ClearColor`
-currently holds.
+Clears the screen: writes `GPU_ClearColor` (if a color is given) then
+issues `GPUCommand_ClearScreen`. Omit the arguments to clear with whatever
+`GPU_ClearColor` currently holds. The color can be given four ways:
+
+| Form | Example | Notes |
+|---|---|---|
+| preset name | `clear("black")` | `"black"`, `"white"`, `"blue"`, `"red"`, `"green"` — string literal, resolved at compile time; any other name is a compile error |
+| packed literal | `clear(0xFF202020)` | `0xAABBGGRR`; folded at compile time to the raw 32-bit word |
+| packed word | `clear(hex("0xFF202020"))`, `clear(c)` | a non-literal value is written to the port untouched, so it must already hold the raw word — i.e. come from `hex()` |
+| components | `clear(32, 32, 32)`, `clear(r, g, b, 128)` | red, green, blue, alpha, each `0`–`255`; alpha is optional and defaults to `255` (opaque) |
 
 ```lua
 ioports.gpu.clear("black")
-ioports.gpu.clear(0xFF202020)   -- packed RGBA, not a preset name
-ioports.gpu.clear()             -- reuses the last ClearColor set
+ioports.gpu.clear(0xFF202020)       -- packed 0xAABBGGRR, dark grey
+ioports.gpu.clear(32, 32, 32)       -- the same dark grey, as components
+ioports.gpu.clear(r, g, b)          -- variables work too; alpha = 255
+ioports.gpu.clear(0, 0, 64, 128)    -- half-transparent dark blue
+ioports.gpu.clear()                 -- reuses the last ClearColor set
 ```
+
+Note the GPU's byte order is `0xAABBGGRR` — red is the *low* byte — which
+is the main reason the component form exists: `clear(r, g, b)` packs it in
+the right order for you.
+
+The component form accepts 3 or 4 arguments (2, or more than 4, is a
+compile error). When every component is a literal it folds to a single
+packed constant at compile time — out-of-range literals are clamped to
+`0`–`255` with a warning. Otherwise each component is evaluated as an
+ordinary expression, clamped to `0`–`255`, truncated to an integer, and
+packed at runtime. An explicit `nil` for `a` means opaque, like leaving it
+out; there is no runtime nil check on the components, so a variable that
+is `nil` at runtime gives an undefined color.
+
+*Why a packed variable needs `hex()`:* v32lua numbers are float32, so a
+number like `0xFF202020` stored in a variable holds a float, not the color
+bits, and `clear()` can't tell the two apart at runtime. Literals written
+directly in the call are fine, because they're folded at compile time.
 
 **Defining texture regions**
 

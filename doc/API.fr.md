@@ -404,7 +404,7 @@ pixel `(x, y)`.
 | `scale_x`, `scale_y` | `1.0` | facteurs d'échelle X/Y indépendants |
 | `angle_deg` | `0` | rotation, en **degrés**, sens antihoraire ; convertie en radians en interne (le `GPU_DrawingAngle` de la console est en radians) |
 | `color_mult` | `0xFFFFFFFF` | couleur de multiplication RGBA compressée — `0xFFFFFFFF` signifie « aucun changement » |
-| `blend_mode` | `VIRCON32_BLEND_ALPHA` (`0x20`) | voir les modes de fondu ci-dessous |
+| `blend_mode` | `"alpha"` (`0x20`) | une chaîne nommant le mode ou sa valeur numérique — voir les modes de fondu ci-dessous |
 
 Un argument peut être **omis** (simplement arrêter de fournir les
 arguments suivants) ou passé comme un **`nil` explicite** pour le sauter
@@ -412,13 +412,27 @@ et atteindre un argument ultérieur — `spr(id, x, y, nil, nil, 45)` pour
 faire pivoter sans toucher à l'échelle — les deux signifient « utiliser la
 valeur par défaut ».
 
-Modes de fondu :
+Modes de fondu — passez soit la chaîne du nom, soit le nombre :
 
-| Constante | Valeur |
-|---|---|
-| `VIRCON32_BLEND_ALPHA` | `0x20` |
-| `VIRCON32_BLEND_ADD` | `0x21` |
-| `VIRCON32_BLEND_SUBTRACT` | `0x22` |
+| Chaîne | Nombre | Effet |
+|---|---|---|
+| `"alpha"` ou `"default"` | `0x20` | fondu alpha normal (par défaut) |
+| `"add"` | `0x21` | additif — éclaircit ce qui est dessous |
+| `"subtract"` | `0x22` | soustractif — assombrit ce qui est dessous |
+
+```lua
+spr(7, 100, 80, nil, nil, nil, nil, "add")       -- effet de lueur / lumière
+spr(7, 100, 80, nil, nil, nil, nil, 0x21)        -- la même chose, en numérique
+spr(7, 100, 80, nil, nil, nil, 0x80FFFFFF, "alpha")
+```
+
+La chaîne du mode doit être une **chaîne littérale** ; elle est résolue en
+son nombre à la compilation, et toute autre chaîne (`"multiply"`, une
+faute de frappe) est une erreur de compilation. Une chaîne stockée dans
+une variable n'est pas reconnue (il n'y a pas de dispatch de chaînes à
+l'exécution — elle atteindrait le GPU comme un pointeur, pas comme un
+mode) ; gardez plutôt le mode dans une variable sous forme de nombre
+(`local mode = 0x21`). Les nombres sont transmis tels quels, comme avant.
 
 `spr()` ne renvoie rien (`nil` Lua), ce qui correspond au fait que la
 console n'a aucune valeur significative à renvoyer d'un appel de dessin.
@@ -463,20 +477,48 @@ défaut. Un appel situé dans un contexte d'expression
 (`local unused = spr(1, 10, 10)`) se voit correctement assigner `nil`,
 comme tout autre intrinsèque de ce document.
 
-**ioports.gpu.clear([couleur])**
+**ioports.gpu.clear([couleur]) / ioports.gpu.clear(r, g, b [, a])**
 
-Efface l'écran : écrit `GPU_ClearColor` (si un argument de couleur est
-fourni) puis émet `GPUCommand_ClearScreen`. `couleur` accepte soit un
-entier RGBA compressé, soit l'une des cinq chaînes de nom prédéfinies —
-`"black"`, `"white"`, `"blue"`, `"red"`, `"green"` — résolues à la
-compilation lorsqu'il s'agit d'un littéral de chaîne. Omettez l'argument
-pour effacer avec ce que `GPU_ClearColor` contient actuellement.
+Efface l'écran : écrit `GPU_ClearColor` (si une couleur est donnée) puis
+émet `GPUCommand_ClearScreen`. Omettez les arguments pour effacer avec ce
+que `GPU_ClearColor` contient actuellement. La couleur peut être donnée de
+quatre façons :
+
+| Forme | Exemple | Notes |
+|---|---|---|
+| nom prédéfini | `clear("black")` | `"black"`, `"white"`, `"blue"`, `"red"`, `"green"` — chaîne littérale, résolue à la compilation ; tout autre nom est une erreur de compilation |
+| littéral compressé | `clear(0xFF202020)` | `0xAABBGGRR` ; replié à la compilation en mot brut de 32 bits |
+| mot compressé | `clear(hex("0xFF202020"))`, `clear(c)` | une valeur non littérale est écrite telle quelle sur le port, elle doit donc déjà contenir le mot brut — c'est-à-dire provenir de `hex()` |
+| composantes | `clear(32, 32, 32)`, `clear(r, g, b, 128)` | rouge, vert, bleu, alpha, chacune de `0` à `255` ; alpha est facultatif et vaut `255` (opaque) par défaut |
 
 ```lua
 ioports.gpu.clear("black")
-ioports.gpu.clear(0xFF202020)   -- RGBA compressé, pas un nom prédéfini
-ioports.gpu.clear()             -- réutilise le dernier ClearColor défini
+ioports.gpu.clear(0xFF202020)       -- 0xAABBGGRR compressé, gris foncé
+ioports.gpu.clear(32, 32, 32)       -- le même gris foncé, en composantes
+ioports.gpu.clear(r, g, b)          -- fonctionne aussi avec des variables ; alpha = 255
+ioports.gpu.clear(0, 0, 64, 128)    -- bleu foncé semi-transparent
+ioports.gpu.clear()                 -- réutilise le dernier ClearColor défini
 ```
+
+Notez que l'ordre des octets du GPU est `0xAABBGGRR` — le rouge est
+l'octet de *poids faible* — c'est la raison principale de la forme en
+composantes : `clear(r, g, b)` les range dans le bon ordre pour vous.
+
+La forme en composantes accepte 3 ou 4 arguments (2, ou plus de 4, est une
+erreur de compilation). Quand toutes les composantes sont littérales, elle
+est repliée en une seule constante à la compilation — les littéraux hors
+plage sont bornés à `0`–`255` avec un avertissement. Sinon chaque
+composante est évaluée comme une expression ordinaire, bornée à
+`0`–`255`, tronquée en entier et assemblée à l'exécution. Un `nil`
+explicite pour `a` signifie opaque, comme l'omettre ; il n'y a pas de
+vérification de nil à l'exécution sur les composantes, donc une variable
+valant `nil` à l'exécution donne une couleur indéfinie.
+
+*Pourquoi une variable compressée a besoin de `hex()` :* les nombres de
+v32lua sont des float32, donc un nombre comme `0xFF202020` stocké dans une
+variable contient un flottant, pas les bits de la couleur, et `clear()` ne
+peut pas les distinguer à l'exécution. Les littéraux écrits directement
+dans l'appel fonctionnent, car ils sont repliés à la compilation.
 
 **Définir des régions de texture**
 
