@@ -1,5 +1,6 @@
 --#title "[pico8] celeste"
 --#api pico8
+--#p8 "celeste.p8"
 -- ~celeste~
 -- matt thorson + noel berry
 
