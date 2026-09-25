@@ -27,4 +27,7 @@ void  emit_get_gamepad_inputs_intrinsic (int);
 void  emit_tic80_map_data (FILE *);
 void  emit_cart_title_label (const char *);
 
+void emit_env_table (FILE *);
+extern bool g_uses_env;
+
 #endif

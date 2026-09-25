@@ -611,6 +611,8 @@ bool emit_tic80_sfx_intrinsic(ASTNode *node, int dest_reg) {
 
     // Dynamic id: shared runtime routine resolves the tone at run time.
     // [BP+2] = id, [BP+3] = channel or nil, [BP+4] = tone base (raw int)
+    emit_asm("MOV  R0, %d ; tone bank mask\n", PICO8_TONE_COUNT - 1);
+    emit_asm("PUSH R0\n");
     emit_asm("MOV  R0, %d ; tone bank base id\n", pico8_tone_base_id);
     emit_asm("PUSH R0\n");
     if (channel != NULL) {
@@ -627,7 +629,7 @@ bool emit_tic80_sfx_intrinsic(ASTNode *node, int dest_reg) {
     emit_asm("PUSH R%d ; sfx id\n", reg);
     unlock_register(reg);
     emit_asm("CALL __builtin_tonebank_sfx\n");
-    emit_asm("IADD SP, 3\n");
+    emit_asm("IADD SP, 4\n");
     if (dest_reg != 0) {
         emit_asm("MOV R%d, BOXED_NIL\n", dest_reg);
     }

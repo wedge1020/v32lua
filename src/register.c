@@ -178,7 +178,18 @@ void update_register_live(int reg)
 // in the compiler, not something safe to paper over at runtime. Failing
 // loudly here, at the exact point of exhaustion, is far more debuggable
 // than letting a corrupted ROM run and blue-screen minutes later.
+static int allocate_register_inner(void);
+static int g_alloc_serial = 0;
+static int register_alloc_serial[NUM_GPRS];
+
 int allocate_register(void)
+{
+    int r = allocate_register_inner();
+    if (r > 0) register_alloc_serial[r] = ++g_alloc_serial;
+    return r;
+}
+
+static int allocate_register_inner(void)
 {
     // Phase 1: Free register
     for (int i = 1; i < NUM_GPRS; i++) {
@@ -192,7 +203,11 @@ int allocate_register(void)
     // Phase 2: Dead register (use_distance == 0)
     for (int i = 1; i < NUM_GPRS; i++) {
         if (register_inventory[i] && !register_pinned[i] && register_use_distance[i] == 0) {
-            register_use_distance[i] = 0;
+            // Mark it live for a moment: with distance left at 0, the very
+            // next allocate_register() call returned this same register
+            // again, so `t.k` handed out one register for both the table
+            // and the key (celeste: "attempt to index a non-table value").
+            register_use_distance[i] = 1;
             return i;
         }
     }
@@ -201,8 +216,13 @@ int allocate_register(void)
     int best_candidate = -1;
     int max_distance = -1;
 
+    // A register handed out by one of the last two allocations is most
+    // likely still waiting for its value (e.g. a table register while its
+    // key is being allocated); stealing it produces two operands in one
+    // register. Skip those unless nothing else is left.
     for (int i = 1; i < NUM_GPRS; i++) {
-        if (register_inventory[i] && !register_pinned[i]) {
+        if (register_inventory[i] && !register_pinned[i] &&
+            g_alloc_serial - register_alloc_serial[i] >= 2) {
             if (register_use_distance[i] > max_distance) {
                 max_distance = register_use_distance[i];
                 best_candidate = i;

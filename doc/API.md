@@ -419,11 +419,14 @@ persistent GPU state every draw variant consults, unlike
 branches that actually use them (harmless to leave stale, since e.g.
 `DrawRegionRotated` is defined to ignore scale entirely).
 
-`color_mult`'s default of `0xFFFFFFFF` is passed through the calling
-convention as a Lua float, and `4294967295.0` is not exactly representable
-in a 32-bit float — it rounds up to `4294967296.0`. The runtime converts it
-through `CFI` (float → integer bit pattern) rather than using it directly,
-which recovers the correct `0xFFFFFFFF` regardless.
+`color_mult` is a packed `0xAABBGGRR` word and is written to
+`GPU_MultiplyColor` as-is, without a float → integer conversion (the same
+model as `ioports.gpu.clear(color)`). A numeric literal (`0xFFFFFFFF`,
+`0x80FFFFFF`, `-1`) is folded to that word at compile time. Any other
+expression must already hold the packed word: `hex("0xFF8080FF")`
+directly, or a variable assigned from `hex()`. A plain number computed at
+runtime is *not* converted — float32 can't hold a 32-bit color exactly
+anyway.
 
 An explicitly-passed `nil` for an optional argument (e.g.
 `spr(id, x, y, nil, nil, 45)`) is treated identically to that argument

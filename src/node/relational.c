@@ -15,10 +15,34 @@ void  node_relational (ASTNode *node, int  dest_reg)
     emit_asm ("POP R%d ; reload spilled left operand\n", dest_reg);
 
     if (node->as.binary.operator == OP_EQ || node->as.binary.operator == OP_NEQ) {
+        // Inline fast path: identical bits are equal; when they differ,
+        // only a number (0 vs -0) or a string (same text, other address)
+        // on the left can still be equal -- anything else (tables,
+        // functions) is settled here without calling __builtin_eq.
+        int         id  = get_next_label ();
+        const char *ctx = get_current_function_name ();
+        emit_asm("MOV  R0, R%d\n", dest_reg);
+        emit_asm("IEQ  R0, R%d ; identical?\n", right_reg);
+        emit_asm("JT   R0, __%s_eq_true_%d\n", ctx, id);
+        emit_asm("MOV  R0, R%d\n", dest_reg);
+        emit_asm("AND  R0, NAN_VALUE\n");
+        emit_asm("IEQ  R0, NAN_VALUE\n");
+        emit_asm("JF   R0, __%s_eq_call_%d ; left is a number\n", ctx, id);
+        emit_asm("MOV  R0, R%d\n", dest_reg);
+        emit_asm("AND  R0, 0x7FC00000\n");
+        emit_asm("IEQ  R0, 0x7FC00000\n");
+        emit_asm("JT   R0, __%s_eq_call_%d ; left is a string (or nil/boolean)\n", ctx, id);
+        emit_asm("MOV  R0, BOXED_FALSE\n");
+        emit_asm("JMP  __%s_eq_done_%d\n", ctx, id);
+        emit_asm("__%s_eq_true_%d:\n", ctx, id);
+        emit_asm("MOV  R0, BOXED_TRUE\n");
+        emit_asm("JMP  __%s_eq_done_%d\n", ctx, id);
+        emit_asm("__%s_eq_call_%d:\n", ctx, id);
         emit_asm("PUSH R%d\n", dest_reg);
         emit_asm("PUSH R%d\n", right_reg);
         emit_asm("CALL __builtin_eq\n");
         emit_asm("IADD SP, 2\n");
+        emit_asm("__%s_eq_done_%d:\n", ctx, id);
 
         if (node->as.binary.operator == OP_NEQ) {
             emit_asm("MOV R%d, R0\n", dest_reg);

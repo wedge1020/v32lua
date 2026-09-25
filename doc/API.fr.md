@@ -463,12 +463,14 @@ qui ne sont écrits que dans les branches qui les utilisent réellement
 (sans danger de les laisser périmés, puisque par exemple
 `DrawRegionRotated` est défini pour ignorer entièrement l'échelle).
 
-La valeur par défaut `0xFFFFFFFF` de `color_mult` est transmise via la
-convention d'appel comme un flottant Lua, et `4294967295.0` n'est pas
-exactement représentable dans un flottant 32 bits — elle est arrondie à
-`4294967296.0`. Le moteur d'exécution la convertit via `CFI` (flottant →
-motif de bits entier) plutôt que de l'utiliser directement, ce qui
-récupère correctement `0xFFFFFFFF` dans tous les cas.
+`color_mult` est un mot compressé `0xAABBGGRR`, écrit tel quel dans
+`GPU_MultiplyColor`, sans conversion flottant → entier (le même modèle que
+`ioports.gpu.clear(couleur)`). Un littéral numérique (`0xFFFFFFFF`,
+`0x80FFFFFF`, `-1`) est converti en ce mot à la compilation. Toute autre
+expression doit déjà contenir le mot compressé : `hex("0xFF8080FF")`
+directement, ou une variable affectée depuis `hex()`. Un nombre calculé à
+l'exécution n'est *pas* converti — un float32 ne peut pas représenter
+exactement une couleur 32 bits.
 
 Un `nil` explicitement passé pour un argument optionnel (par exemple
 `spr(id, x, y, nil, nil, 45)`) est traité de façon identique à cet

@@ -228,7 +228,10 @@ par défaut lorsqu'aucun indice `--#api` n'est présent) :
   couleur), `camera`/`color`, `btn`/`btnp` (répétition automatique
   PICO-8), `add`/`del`/`count`/`foreach`/`for v in all(t)` (sûrs en cas de
   suppression), les maths PICO-8 (`flr`, `rnd`, `mid`, `sin`/`cos` en
-  tours, ...), `sfx`/`music` sur une banque de sons provisoires générée, et
+  tours, ...), `sspr`, `split`, `tostr`/`tonum`, `_ENV[nom]`, les
+  raccourcis de syntaxe PICO-8 (`?`, `\`, `f"chaîne"`, glyphes des
+  boutons, ...), `sfx`/`music` qui jouent le `__sfx__`/`__music__` de la
+  cartouche elle-même (synthétisé à la compilation), et
   `_init`/`_update` (30 i/s)/`_update60`/`_draw`. L'écran 128×128 est mis à
   l'échelle 2,75× et centré ; ce qui est dessiné en dehors est masqué.
   **Une cartouche `.p8` se compile directement** (`v32lua jeu.p8`) : sa
@@ -867,12 +870,10 @@ attente d'une décision de conception :
   table, fermeture et chaîne créée à l'exécution vit jusqu'à la
   réinitialisation. Les jeux qui tournent longtemps devraient réutiliser
   leurs tables plutôt que d'en créer à chaque image.
-* Les tables sont des listes d'association (sans hachage) : la recherche
-  d'une clé est linéaire en la taille de la table et, pour les clés de
-  chaîne, chaque échec fait une comparaison de contenu.
-* PICO-8 : `pal`/`palt` (compilés en no-op avec un avertissement), `sspr`,
-  `clip`, `peek`/`poke`, `cartdata`/`dget`/`dset`, `stat`, la lecture
-  réelle de `__sfx__`/`__music__` (des sons provisoires sont utilisés)
+* PICO-8 : `pal`/`palt` (compilés en no-op avec un avertissement),
+  `clip`, `peek`/`poke`, `cartdata`/`dget`/`dset`, les vraies valeurs de
+  `stat`, les largeurs fractionnaires de `spr` ; les filtres de l'éditeur
+  de SFX dans le son synthétisé
 * TIC-80 : famille `peek`/`poke`, `tri`/`trib`, `elli`/`ellib`, `clip`,
   `key`/`keyp`, `mouse`, `font`, rotation de `spr`, et synthèse des données
   `WAVES`/`SFX`/`MUSIC` propres à la cartouche (des sons provisoires sont

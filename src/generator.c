@@ -974,6 +974,8 @@ void generate_program (ASTNode *head)
         // at 30 fps for _update (two Vircon32 frames per tick -- the old
         // loop ran every cart at double speed) or 60 fps for _update60.
         emit_asm ("__start:\n");
+        emit_asm ("IN   R0, TIM_FrameCounter\n");
+        emit_asm ("MOV  [PICO8_TICK_FRAME], R0 ; frame this tick started on\n");
         if (has_update)
         {
             emit_asm ("CALL %s ; Execute %s()\n",
@@ -985,10 +987,17 @@ void generate_program (ASTNode *head)
             emit_asm ("CALL __function__draw   ; Execute _draw()\n");
             emit_asm ("CALL __builtin_pico8_present ; mask off-canvas drawing (PICO-8 clips to 128x128)\n");
         }
-        for (int w = 0; w < pico8_frame_step; w++)
-        {
-            emit_asm ("WAIT\n");
-        }
+        // Pace by the frame counter, not a fixed number of WAITs: a tick
+        // that runs past one frame then costs no extra frame, so _update
+        // keeps its 30 (or 60) calls per second as long as a tick fits in
+        // its PICO8_FRAME_STEP frames.
+        emit_asm ("__pico8_pace:\n");
+        emit_asm ("WAIT\n");
+        emit_asm ("IN   R0, TIM_FrameCounter\n");
+        emit_asm ("MOV  R1, [PICO8_TICK_FRAME]\n");
+        emit_asm ("ISUB R0, R1\n");
+        emit_asm ("ILT  R0, PICO8_FRAME_STEP\n");
+        emit_asm ("JT   R0, __pico8_pace\n");
         emit_asm ("JMP __start\n");
     }
     else if (has_update)

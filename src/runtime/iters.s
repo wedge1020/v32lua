@@ -8,9 +8,10 @@
 ;; Returns: R0 = key, R2 = value (or R0 = NIL when exhausted)
 ;; ===========================================================================
 __builtin_next:
+    ;; Order: the array part (keys 1..capacity with a value), then the hash
+    ;; part's slots in slot order. See "TABLE STORAGE" in table.s.
     PUSH BP
     MOV  BP, SP
-
     PUSH R1
     PUSH R3
     PUSH R4
@@ -21,89 +22,106 @@ __builtin_next:
 
     MOV  R1, [BP+2]          ; R1 = Tagged Table Pointer (state)
     MOV  R2, [BP+3]          ; R2 = Current Key (or NIL for first call)
-
-    ;; --- Validate table ---
     MOV  R3, R1
     AND  R3, BOXED_DATA
     IEQ  R3, BOXED_TABLE
     JF   R3, __next_error_not_table
-    AND  R1, BOXED_PAYLOAD   ; R1 = raw table header address (unboxed for good)
+    AND  R1, BOXED_PAYLOAD
 
-    MOV  R6, [R1+3]          ; R6 = Base Hash Data Pointer
-    MOV  R3, R6               ; Test on scratch R3 to preserve R6 pointer
-                              ; (IEQ is destructive -- overwrites its first
-                              ; operand with the 0/1 result. The original
-                              ; code tested R6 directly here, which is
-                              ; exactly the class of bug __builtin_table_get
-                              ; and __builtin_table_set's equivalent checks
-                              ; already guard against with a scratch
-                              ; register -- this was the one spot in
-                              ; __builtin_next that didn't get the same
-                              ; treatment.)
-    IEQ  R3, 0
-    JT   R3, __next_done_nil  ; No hash storage at all -> table is empty
-
-    ;; --- R8 = "still searching for R2" flag ---
-    ;; If R2 is NIL, we want the very first live entry -- we're already
-    ;; "past" the search key. Otherwise we must scan until we see R2
-    ;; itself before considering anything a candidate.
-    MOV  R8, R2
-    IEQ  R8, BOXED_NIL
-    JT   R8, __next_seeking_done
-    MOV  R8, 1
-    JMP  __next_scan_bucket
-__next_seeking_done:
-    MOV  R8, 0
-
-__next_scan_bucket:
-    MOV  R4, [R6]              ; R4 = PairCount in this bucket
-    MOV  R7, R6
-    IADD R7, 2                 ; R7 = running pointer to Key0
-
-__next_scan_pair:
-    MOV  R3, R4
-    IEQ  R3, 0
-    JT   R3, __next_next_bucket   ; No more pairs in this bucket
-
-    MOV  R5, [R7]               ; R5 = stored key at this slot
-
-    MOV  R3, R8
-    IEQ  R3, 0
-    JT   R3, __next_have_target  ; not seeking anymore -> this slot is a candidate
-
-    ;; Still seeking: is this slot the key we're looking for?
-    MOV  R3, R5
-    IEQ  R3, R2
-    JF   R3, __next_advance_pair
-    MOV  R8, 0                  ; Found it -- next live slot is our candidate
-    JMP  __next_advance_pair
-
-__next_have_target:
-    ;; This slot is a candidate. Skip it if its value is nil (deleted key).
-    MOV  R3, [R7+1]
+    MOV  R7, [R1]
+    AND  R7, TABLE_ARRAYSIZE ; R7 = array capacity
+    MOV  R6, 0               ; R6 = array index to resume at (0-based)
+    MOV  R3, R2
     IEQ  R3, BOXED_NIL
-    JT   R3, __next_advance_pair
+    JT   R3, __next_array
+    ;; a whole-number key inside the array part?
+    MOV  R3, R2
+    AND  R3, NAN_VALUE
+    IEQ  R3, NAN_VALUE
+    JT   R3, __next_from_hash
+    MOV  R3, R2
+    CFI  R3
+    MOV  R4, R3
+    CIF  R4
+    INE  R4, R2
+    JT   R4, __next_from_hash
+    MOV  R4, R3
+    ILT  R4, 1
+    JT   R4, __next_from_hash
+    MOV  R4, R3
+    IGT  R4, R7
+    JT   R4, __next_from_hash
+    MOV  R6, R3              ; resume after key k -> index k
 
-    ;; Live entry -- this is the result.
-    MOV  R0, R5                 ; R0 = key
-    MOV  R2, [R7+1]             ; R2 = value
+__next_array:
+    MOV  R8, [R1+2]
+__next_array_loop:
+    MOV  R3, R6
+    IGE  R3, R7
+    JT   R3, __next_hash_start
+    MOV  R3, R8
+    IADD R3, R6
+    MOV  R2, [R3]
+    MOV  R3, R2
+    IEQ  R3, BOXED_NIL
+    JF   R3, __next_array_hit
+    IADD R6, 1
+    JMP  __next_array_loop
+__next_array_hit:
+    MOV  R0, R6
+    IADD R0, 1
+    CIF  R0                  ; key = index + 1 (value already in R2)
     JMP  __next_done
 
-__next_advance_pair:
-    IADD R7, 2
-    ISUB R4, 1
-    JMP  __next_scan_pair
+__next_from_hash:
+    MOV  R5, [R1+3]
+    MOV  R3, R5
+    IEQ  R3, 0
+    JT   R3, __next_done_nil
+    MOV  R3, R2
+    IEQ  R3, 0x80000000      ; -0 == 0
+    JF   R3, __next_find
+    MOV  R2, 0
+__next_find:
+    CALL __table_hash_find   ; R0 = slot address of the current key, or 0
+    MOV  R3, R0
+    IEQ  R3, 0
+    JT   R3, __next_done_nil
+    ISUB R0, R5
+    ISUB R0, 2
+    SHL  R0, -1
+    MOV  R6, R0
+    IADD R6, 1               ; resume at the following slot
+    JMP  __next_hash_loop_init
 
-__next_next_bucket:
-    ;; (IEQ is destructive: the old code tested R3 in place and then
-    ;; "stepped" to R3 -- i.e. to address 0 or 1 -- so pairs() over any
-    ;; table with more than one hash bucket (> 7 keys) never terminated.)
-    MOV  R3, [R6+1]              ; R3 = NextBucketPtr
-    MOV  R5, R3
-    IEQ  R5, 0
-    JT   R5, __next_done_nil     ; End of chain, nothing left
-    MOV  R6, R3
-    JMP  __next_scan_bucket
+__next_hash_start:
+    MOV  R6, 0
+__next_hash_loop_init:
+    MOV  R5, [R1+3]
+    MOV  R3, R5
+    IEQ  R3, 0
+    JT   R3, __next_done_nil
+    MOV  R7, [R5]            ; hash capacity
+__next_hash_loop:
+    MOV  R3, R6
+    IGE  R3, R7
+    JT   R3, __next_done_nil
+    MOV  R4, R6
+    SHL  R4, 1
+    IADD R4, R5
+    IADD R4, 2               ; slot address
+    MOV  R0, [R4]
+    MOV  R3, R0
+    IEQ  R3, BOXED_NIL
+    JT   R3, __next_hash_next
+    MOV  R2, [R4+1]
+    MOV  R3, R2
+    IEQ  R3, BOXED_NIL
+    JF   R3, __next_done       ; live entry: R0 = key, R2 = value
+__next_hash_next:
+    IADD R6, 1
+    JMP  __next_hash_loop
+
 __next_done_nil:
     MOV  R0, BOXED_NIL
 
@@ -115,7 +133,6 @@ __next_done:
     POP  R4
     POP  R3
     POP  R1
-
     MOV  SP, BP
     POP  BP
     RET

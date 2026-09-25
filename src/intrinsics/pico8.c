@@ -602,7 +602,12 @@ bool emit_pico8_sfx_intrinsic (ASTNode *node, int dest_reg)
                            "sfx(): offset/length arguments have no Vircon32 equivalent and are ignored");
     }
 
-    register_pico8_tone_bank ();
+    // A cart with __sfx__ data (a .p8, or --#p8) plays its own synthesized
+    // SFX; otherwise the placeholder tone bank stands in.
+    bool real   = register_pico8_sfx_sounds ();
+    if (!real) register_pico8_tone_bank ();
+    int  base   = real ? pico8_sfx_base_id : pico8_tone_base_id;
+    int  mask   = real ? 63 : PICO8_TONE_COUNT - 1;
     runtime_req.needs_vircon32 = true;
 
     double n_val;
@@ -616,7 +621,7 @@ bool emit_pico8_sfx_intrinsic (ASTNode *node, int dest_reg)
             return emit_vircon32_sfx_stop_intrinsic (stop_node, dest_reg);
         }
 
-        int tone_id = pico8_tone_base_id + (((int) n_val) & (PICO8_TONE_COUNT - 1));
+        int tone_id = base + (((int) n_val) & mask);
 
         ASTNode *sound_lit = make_node (NODE_NUMBER);
         sound_lit->as.number.val = (double) tone_id;
@@ -631,8 +636,10 @@ bool emit_pico8_sfx_intrinsic (ASTNode *node, int dest_reg)
     // Dynamic index: resolve the tone mapping at runtime.
     emit_asm("    ;; --- PICO-8 sfx() Intrinsic (dynamic index) ---\n");
 
-    emit_asm("MOV  R0, %d ; tone bank base id\n", pico8_tone_base_id);
-    emit_asm("PUSH R0 ; Arg 3: tone bank base id\n");
+    emit_asm("MOV  R0, %d ; sound bank mask\n", mask);
+    emit_asm("PUSH R0 ; Arg 4: bank size - 1\n");
+    emit_asm("MOV  R0, %d ; sound bank base id\n", base);
+    emit_asm("PUSH R0 ; Arg 3: bank base id\n");
 
     if (args[1] != NULL) {
         int reg = allocate_register();
@@ -650,7 +657,7 @@ bool emit_pico8_sfx_intrinsic (ASTNode *node, int dest_reg)
     unlock_register (n_reg);
 
     emit_asm ("CALL __builtin_tonebank_sfx\n");
-    emit_asm ("IADD SP, 3 ; Clean up sfx() arguments\n");
+    emit_asm ("IADD SP, 4 ; Clean up sfx() arguments\n");
 
     if (dest_reg != 0) {
         emit_asm ("MOV  R%d, R0\n", dest_reg);
@@ -689,14 +696,26 @@ bool emit_pico8_music_intrinsic (ASTNode *node, int dest_reg)
         return false;
     }
 
-    register_pico8_tone_bank ();
     runtime_req.needs_vircon32 = true;
 
     double n_val;
     if (!spu_static_number (args[0], &n_val)) {
-        compiler_error (ERR_SEMANTIC, node->line_number,
-                         "music(): the track number must be a compile-time constant");
-        return false;
+        if (!pico8_has_audio ()) {
+            compiler_error (ERR_SEMANTIC, node->line_number,
+                             "music(): a computed track number needs the cart's __music__ "
+                             "data (compile the .p8, or add --#p8 \"cart.p8\")");
+            return false;
+        }
+        // Computed pattern: render every song start, look it up at runtime.
+        pico8_register_all_songs ();
+        int reg = allocate_register ();
+        generate_asm (args[0], reg);
+        emit_asm ("PUSH R%d ; music(): pattern\n", reg);
+        unlock_register (reg);
+        emit_asm ("CALL __builtin_pico8_music\n");
+        emit_asm ("IADD SP, 1\n");
+        if (dest_reg != 0) emit_asm ("MOV  R%d, BOXED_NIL\n", dest_reg);
+        return true;
     }
 
     if (n_val < 0) {
@@ -714,7 +733,29 @@ bool emit_pico8_music_intrinsic (ASTNode *node, int dest_reg)
         return emit_vircon32_channel_cmd_intrinsic (stop_node, dest_reg, "stop");
     }
 
-    int tone_id = pico8_tone_base_id + (((int) n_val) & (PICO8_TONE_COUNT - 1));
+    // A cart with __music__ data: the whole song starting at pattern n is
+    // synthesized into one sound (pico8_audio.c); set its loop points so
+    // the SPU loops back to the song's loop-start pattern.
+    int  tone_id = -1, loop_start = 0, loop_end = 0;
+    bool song_loops = true;
+    if (pico8_has_audio ()) {
+        tone_id = pico8_music_sound ((int) n_val, &loop_start, &loop_end, &song_loops);
+        if (tone_id < 0) {
+            // an empty pattern: PICO-8 plays silence, i.e. stops the music
+            ASTNode *chan0 = make_node (NODE_NUMBER);
+            chan0->as.number.val = 0.0;
+            ASTNode *stop_node = make_node (NODE_FUNCTION_CALL);
+            stop_node->line_number       = node->line_number;
+            stop_node->as.call.args_head = chan0;
+            return emit_vircon32_channel_cmd_intrinsic (stop_node, dest_reg, "stop");
+        }
+        emit_asm ("OUT  SPU_SelectedSound, %d ; music(%d): song loop points\n", tone_id, (int) n_val);
+        emit_asm ("OUT  SPU_SoundLoopStart, %d\n", loop_start);
+        emit_asm ("OUT  SPU_SoundLoopEnd, %d\n", loop_end);
+    } else {
+        register_pico8_tone_bank ();
+        tone_id = pico8_tone_base_id + (((int) n_val) & (PICO8_TONE_COUNT - 1));
+    }
 
     ASTNode *sound_lit = make_node (NODE_NUMBER);
     sound_lit->as.number.val = (double) tone_id;
@@ -724,7 +765,7 @@ bool emit_pico8_music_intrinsic (ASTNode *node, int dest_reg)
     ASTNode *chan0_m = make_node (NODE_NUMBER);
     chan0_m->as.number.val = 0.0;
     sound_lit->next = chan0_m;
-    chan0_m->next   = make_node_boolean (true);
+    chan0_m->next   = make_node_boolean (song_loops);
 
     ASTNode *call_node = make_node (NODE_FUNCTION_CALL);
     call_node->line_number       = node->line_number;
@@ -1031,8 +1072,9 @@ bool emit_pico8_camera_intrinsic (ASTNode *node, int dest_reg)
 static bool pico8_push_args (ASTNode *node, int max_args,
                              const char *names[], int *out_arg_count)
 {
-    ASTNode *args[8] = { NULL };
+    ASTNode *args[16] = { NULL };
     int      arg_count = 0;
+    if (max_args > 16) max_args = 16;
     for (ASTNode *curr = node->as.call.args_head;
          curr != NULL && arg_count < max_args; curr = curr->next) {
         args[arg_count++] = curr;
@@ -1272,4 +1314,13 @@ bool emit_pico8_pal_intrinsic (ASTNode *node, int dest_reg, const char *name)
         emit_asm ("    MOV R%d, BOXED_NIL ; %s() returns nil here\n", dest_reg, name);
     }
     return true;
+}
+
+// sspr(sx, sy, sw, sh, dx, dy [, dw, dh [, flip_x, flip_y]])
+bool emit_pico8_sspr_intrinsic (ASTNode *node, int dest_reg)
+{
+    static const char *names[10] = { "sx", "sy", "sw", "sh", "dx", "dy",
+                                     "dw", "dh", "flip_x", "flip_y" };
+    return pico8_simple_call (node, dest_reg, 10, names, 6, "__builtin_pico8_sspr",
+        "sspr() expects at least 6 arguments: sspr(sx, sy, sw, sh, dx, dy [, dw, dh [, flip_x, flip_y]])");
 }

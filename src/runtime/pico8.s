@@ -177,33 +177,7 @@ _pico8_init_state:
     OUT   GPU_MultiplyColor, R0
     OUT   GPU_ActiveBlending, GPUBlendingMode_Alpha
 
-    ;; map ROM -> RAM (2048 words)
-    MOV   R1, __pico8_map_rom
-    MOV   R2, PICO8_MAP_RAM
-    MOV   R3, PICO8_MAP_WORDS
-_pico8_init_map_loop:
-    MOV   R0, [R1]
-    MOV   [R2], R0
-    IADD  R1, 1
-    IADD  R2, 1
-    ISUB  R3, 1
-    MOV   R0, R3
-    IGT   R0, 0
-    JT    R0, _pico8_init_map_loop
-
-    ;; sprite flags ROM -> RAM (256 words)
-    MOV   R1, __pico8_flags_rom
-    MOV   R2, PICO8_FLAGS_RAM
-    MOV   R3, 256
-_pico8_init_flags_loop:
-    MOV   R0, [R1]
-    MOV   [R2], R0
-    IADD  R1, 1
-    IADD  R2, 1
-    ISUB  R3, 1
-    MOV   R0, R3
-    IGT   R0, 0
-    JT    R0, _pico8_init_flags_loop
+    CALL  __builtin_pico8_reload
 
     POP   R4
     POP   R3
@@ -367,12 +341,18 @@ _pico8_mset_done:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 __builtin_pico8_map:
+    ;; Only the cells that can land on the 128x128 screen are visited, and
+    ;; each is drawn inline (one region draw, no spr() call): at 2.75x a map
+    ;; cell is exactly 22 screen px, so cell (c, r) sits at X0 + 22c, Y0 + 22r.
+    ;; Frame: [BP-1]=row [BP-2]=col [BP-3]=celx [BP-4]=cely [BP-5]=col_end
+    ;;        [BP-6]=row_end [BP-7]=layer [BP-8]=X0 [BP-9]=Y0 [BP-10]=col_start
     PUSH  BP
     MOV   BP, SP
-    ISUB  SP, 7
+    ISUB  SP, 10
     PUSH  R1
     PUSH  R2
     PUSH  R3
+    PUSH  R4
 
     MOV   R1, [BP+2]
     CALL  __pico8_to_int
@@ -403,16 +383,92 @@ _pico8_map_have_h:
     CALL  __pico8_to_int
     MOV   [BP-7], R1
 
-    MOV   R1, 0
-    MOV   [BP-1], R1             ; row = 0
+    ;; --- x: sx - cam_x (float), X0 = round(that * SCALE) + OFFSET_X ---
+    MOV   R1, [BP+4]
+    CALL  __pico8_to_int
+    CIF   R1
+    MOV   R2, [PICO8_CAMERA_X]
+    FSUB  R1, R2                 ; R1 = screen x of cell column 0 (pico8 px)
+    MOV   R2, R1
+    FMUL  R2, PICO8_SCALE
+    FADD  R2, 0.5
+    FLR   R2
+    CFI   R2
+    IADD  R2, PICO8_OFFSET_X
+    MOV   [BP-8], R2
+    ;; first visible column: (-8 - x0) / 8 rounded up, clamped to 0
+    MOV   R2, -7.0
+    FSUB  R2, R1
+    FDIV  R2, 8.0
+    CEIL  R2
+    CFI   R2
+    MOV   R3, R2
+    ILT   R3, 0
+    JF    R3, _pico8_map_cs_ok
+    MOV   R2, 0
+_pico8_map_cs_ok:
+    MOV   [BP-10], R2
+    ;; one past the last visible column: (128 - x0) / 8 rounded up
+    MOV   R2, 128.0
+    FSUB  R2, R1
+    FDIV  R2, 8.0
+    CEIL  R2
+    CFI   R2
+    MOV   R3, [BP-5]
+    IMIN  R2, R3
+    MOV   [BP-5], R2
+
+    ;; --- y: same ---
+    MOV   R1, [BP+5]
+    CALL  __pico8_to_int
+    CIF   R1
+    MOV   R2, [PICO8_CAMERA_Y]
+    FSUB  R1, R2
+    MOV   R2, R1
+    FMUL  R2, PICO8_SCALE
+    FADD  R2, 0.5
+    FLR   R2
+    CFI   R2
+    IADD  R2, PICO8_OFFSET_Y
+    MOV   [BP-9], R2
+    MOV   R2, -7.0
+    FSUB  R2, R1
+    FDIV  R2, 8.0
+    CEIL  R2
+    CFI   R2
+    MOV   R3, R2
+    ILT   R3, 0
+    JF    R3, _pico8_map_rs_ok
+    MOV   R2, 0
+_pico8_map_rs_ok:
+    MOV   [BP-1], R2             ; row = first visible row
+    MOV   R2, 128.0
+    FSUB  R2, R1
+    FDIV  R2, 8.0
+    CEIL  R2
+    CFI   R2
+    MOV   R3, [BP-6]
+    IMIN  R2, R3
+    MOV   [BP-6], R2
+
+    OUT   GPU_SelectedTexture, 0
+    MOV   R1, PICO8_SCALE
+    OUT   GPU_DrawingScaleX, R1
+    OUT   GPU_DrawingScaleY, R1
 
 _pico8_map_row:
     MOV   R1, [BP-1]
     MOV   R2, [BP-6]
     ILT   R1, R2
     JF    R1, _pico8_map_done
-    MOV   R1, 0
-    MOV   [BP-2], R1             ; col = 0
+    ;; screen y of this row
+    MOV   R1, [BP-1]
+    IMUL  R1, 22
+    MOV   R2, [BP-9]
+    IADD  R1, R2
+    OUT   GPU_DrawingPointY, R1
+    MOV   R1, [BP-10]
+    MOV   [BP-2], R1             ; col = first visible column
 
 _pico8_map_col:
     MOV   R1, [BP-2]
@@ -450,31 +506,13 @@ _pico8_map_col:
     JT    R2, _pico8_map_next_col
 
 _pico8_map_draw:
-    ;; spr(tile, sx + col*8, sy + row*8) -- spr applies camera/scale
-    MOV   R0, BOXED_FALSE
-    PUSH  R0                     ; flip_y
-    PUSH  R0                     ; flip_x
-    MOV   R0, 1.0
-    PUSH  R0                     ; h
-    PUSH  R0                     ; w
-    MOV   R1, [BP+5]
-    CALL  __pico8_to_int
-    MOV   R2, [BP-1]
-    IMUL  R2, 8
+    OUT   GPU_SelectedRegion, R3
+    MOV   R1, [BP-2]
+    IMUL  R1, 22
+    MOV   R2, [BP-8]
     IADD  R1, R2
-    CIF   R1
-    PUSH  R1                     ; y
-    MOV   R1, [BP+4]
-    CALL  __pico8_to_int
-    MOV   R2, [BP-2]
-    IMUL  R2, 8
-    IADD  R1, R2
-    CIF   R1
-    PUSH  R1                     ; x
-    CIF   R3
-    PUSH  R3                     ; n
-    CALL  __builtin_pico8_spr
-    IADD  SP, 7
+    OUT   GPU_DrawingPointX, R1
+    OUT   GPU_Command, GPUCommand_DrawRegionZoomed
 
 _pico8_map_next_col:
     MOV   R1, [BP-2]
@@ -490,6 +528,7 @@ _pico8_map_next_row:
 
 _pico8_map_done:
     MOV   R0, BOXED_NIL
+    POP   R4
     POP   R3
     POP   R2
     POP   R1
@@ -876,61 +915,48 @@ _pico8_btn_done:
 ;; Frame slots: [BP-1] = #t, [BP-2] = i
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 __builtin_pico8_all_step:
+    ;; [BP+2] = t, [BP+3] = i (raw int), [BP+4] = prev.
+    ;; Returns R0 = element (nil when done), R2 = its index.
     PUSH  BP
     MOV   BP, SP
-    ISUB  SP, 2
     PUSH  R1
+    PUSH  R3
+    PUSH  R4
 
     MOV   R1, [BP+2]
-    PUSH  R1
-    CALL  __builtin_len
-    IADD  SP, 1
-    MOV   R1, R0
-    CFI   R1
-    MOV   [BP-1], R1             ; n = #t
-    MOV   R1, [BP+3]
-    MOV   [BP-2], R1             ; i
+    MOV   R4, R1
+    AND   R4, BOXED_DATA
+    IEQ   R4, BOXED_TABLE
+    JF    R4, __runtime_error_not_table
+    AND   R1, BOXED_PAYLOAD      ; raw header
+    MOV   R4, [R1+1]             ; n = #t
+    MOV   R3, [BP+3]             ; i
 
-    ;; if t[i] == prev then i += 1
-    MOV   R1, [BP+2]
-    PUSH  R1                     ; [BP+3] = table
-    MOV   R1, [BP-2]
-    CIF   R1
-    PUSH  R1                     ; [BP+2] = key
-    CALL  __builtin_table_get
-    IADD  SP, 2
-    MOV   R1, [BP+4]
-    IEQ   R0, R1
+    ;; if t[i] == prev then i += 1 (the current element survived)
+    CALL  __table_rawget_int
+    MOV   R2, [BP+4]
+    IEQ   R0, R2
     JF    R0, _pico8_all_skip
-    MOV   R1, [BP-2]
-    IADD  R1, 1
-    MOV   [BP-2], R1
+    IADD  R3, 1
 
 _pico8_all_skip:
     ;; while i <= n and t[i] == nil do i += 1
-    MOV   R1, [BP-2]
-    MOV   R0, [BP-1]
-    IGT   R1, R0
-    JT    R1, _pico8_all_end
-    MOV   R1, [BP+2]
-    PUSH  R1
-    MOV   R1, [BP-2]
-    CIF   R1
-    PUSH  R1
-    CALL  __builtin_table_get
-    IADD  SP, 2
-    MOV   R1, R0
-    IEQ   R1, BOXED_NIL
-    JF    R1, _pico8_all_found
-    MOV   R1, [BP-2]
-    IADD  R1, 1
-    MOV   [BP-2], R1
+    MOV   R2, R3
+    IGT   R2, R4
+    JT    R2, _pico8_all_end
+    CALL  __table_rawget_int
+    MOV   R2, R0
+    IEQ   R2, BOXED_NIL
+    JF    R2, _pico8_all_found
+    IADD  R3, 1
     JMP   _pico8_all_skip
 
 _pico8_all_end:
     MOV   R0, BOXED_NIL
 _pico8_all_found:
-    MOV   R2, [BP-2]
+    MOV   R2, R3
+    POP   R4
+    POP   R3
     POP   R1
     MOV   SP, BP
     POP   BP
@@ -999,7 +1025,7 @@ _pico8_foreach_done:
 ;; parked in the hash part). String/other keys are NOT counted -- the old
 ;; version counted every hash pair, so count({1,2,x=5}) returned 3.
 ;;
-;; Bucket layout: Word 0 = PairCount, Word 1 = NextBucketPtr, then
+;; (Table layout: see "TABLE STORAGE" in table.s.)
 ;; PairCount (key, value) word pairs from offset 2.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 __builtin_pico8_count:
@@ -1022,12 +1048,10 @@ __builtin_pico8_count:
 
     MOV   R7, 0                   ; count
 
-    ;; --- array part: [array_ptr, array_ptr + length) ---
+    ;; --- array part: every slot 1..capacity holding a value ---
     MOV   R3, [R1+2]
-    MOV   R2, R3
-    IEQ   R2, 0
-    JT    R2, _pico8_count_hash
-    MOV   R4, [R1+1]
+    MOV   R4, [R1]
+    AND   R4, TABLE_ARRAYSIZE
     IADD  R4, R3
 _pico8_count_array_loop:
     MOV   R2, R3
@@ -1047,25 +1071,19 @@ _pico8_count_hash:
     MOV   R2, R3
     IEQ   R2, 0
     JT    R2, _pico8_count_done
-
-_pico8_count_bucket_loop:
-    MOV   R5, [R3]                ; pair count
+    MOV   R6, [R3]                ; capacity
+    SHL   R6, 1
     MOV   R4, R3
-    IADD  R4, 2                   ; -> first key
-    MOV   R6, R5
-    IMUL  R6, 2
-    IADD  R6, R4                  ; pairs end
-
+    IADD  R4, 2                   ; first slot
+    IADD  R6, R4                  ; end of slots
 _pico8_count_pair_loop:
     MOV   R2, R4
     IEQ   R2, R6
-    JT    R2, _pico8_count_next_bucket
-
+    JT    R2, _pico8_count_done
     MOV   R2, [R4+1]              ; value
     IEQ   R2, BOXED_NIL
     JT    R2, _pico8_count_pair_next
-
-    MOV   R5, [R4]                ; key
+    MOV   R5, [R4]                ; key (BOXED_NIL = empty slot: fails below)
     MOV   R2, R5
     AND   R2, NAN_VALUE
     IEQ   R2, NAN_VALUE           ; boxed (string/table/bool/...) key?
@@ -1078,18 +1096,9 @@ _pico8_count_pair_loop:
     FEQ   R2, R5                  ; whole number?
     JF    R2, _pico8_count_pair_next
     IADD  R7, 1
-
 _pico8_count_pair_next:
     IADD  R4, 2
     JMP   _pico8_count_pair_loop
-
-_pico8_count_next_bucket:
-    MOV   R6, [R3+1]
-    MOV   R2, R6
-    IEQ   R2, 0
-    JT    R2, _pico8_count_done
-    MOV   R3, R6
-    JMP   _pico8_count_bucket_loop
 
 _pico8_count_done:
     MOV   R0, R7
@@ -1899,5 +1908,242 @@ __builtin_pico8_present:
     OUT   GPU_Command, GPUCommand_DrawRegionZoomed
     OUT   GPU_DrawingPointY, 356          ; 4 + 352
     OUT   GPU_Command, GPUCommand_DrawRegionZoomed
+    POP   R1
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_pico8_music(n): music() with a computed pattern number.
+;; [BP+2] = n. Looks n up in __pico8_music_table (4 words per pattern:
+;; sound id or -1, loop start, loop end, loop flag -- emitted by the
+;; compiler from the cart's __music__ data) and plays that song on SPU
+;; channel 0; n < 0, n > 63 or a pattern that starts no song stops it.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+__builtin_pico8_music:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    MOV   R1, [BP+2]
+    CALL  __pico8_to_int
+    MOV   R2, R1
+    ILT   R2, 0
+    JT    R2, _pico8_music_stop
+    MOV   R2, R1
+    IGT   R2, 63
+    JT    R2, _pico8_music_stop
+    MOV   R2, R1
+    SHL   R2, 2
+    MOV   R3, __pico8_music_table
+    IADD  R2, R3
+    MOV   R3, [R2]
+    MOV   R4, R3
+    ILT   R4, 0
+    JT    R4, _pico8_music_stop
+    OUT   SPU_SelectedSound, R3
+    MOV   R4, [R2+1]
+    OUT   SPU_SoundLoopStart, R4
+    MOV   R4, [R2+2]
+    OUT   SPU_SoundLoopEnd, R4
+    OUT   SPU_SelectedChannel, 0
+    OUT   SPU_Command, SPUCommand_StopSelectedChannel
+    OUT   SPU_ChannelAssignedSound, R3
+    OUT   SPU_ChannelVolume, 1.0
+    OUT   SPU_ChannelSpeed, 1.0
+    OUT   SPU_Command, SPUCommand_PlaySelectedChannel
+    MOV   R4, [R2+3]
+    OUT   SPU_ChannelLoopEnabled, R4
+    MOV   R4, [VIRCON32_MUSIC_CHANNEL_MASK]
+    OR    R4, 1
+    MOV   [VIRCON32_MUSIC_CHANNEL_MASK], R4
+    MOV   R4, [VIRCON32_SFX_CHANNEL_MASK]
+    AND   R4, 0xFFFFFFFE
+    MOV   [VIRCON32_SFX_CHANNEL_MASK], R4
+    JMP   _pico8_music_done
+_pico8_music_stop:
+    OUT   SPU_SelectedChannel, 0
+    OUT   SPU_Command, SPUCommand_StopSelectedChannel
+_pico8_music_done:
+    MOV   R0, BOXED_NIL
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_pico8_sspr(sx, sy, sw, sh, dx, dy [, dw, dh [, flip_x, flip_y]])
+;; [BP+2..11]. Draws a rectangle of the sprite sheet, stretched to dw x dh
+;; (default sw x sh), through a scratch GPU region (PICO8_SSPR_REGION)
+;; that is redefined on every call.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+%define PICO8_SSPR_REGION 4095
+__builtin_pico8_sspr:
+    PUSH  BP
+    MOV   BP, SP
+    ISUB  SP, 6
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+
+    OUT   GPU_SelectedTexture, 0
+    OUT   GPU_SelectedRegion, PICO8_SSPR_REGION
+
+    MOV   R1, [BP+4]              ; sw
+    CALL  __pico8_to_int
+    MOV   [BP-1], R1
+    MOV   R2, R1
+    ILE   R2, 0
+    JT    R2, _pico8_sspr_done
+    MOV   R1, [BP+5]              ; sh
+    CALL  __pico8_to_int
+    MOV   [BP-2], R1
+    MOV   R2, R1
+    ILE   R2, 0
+    JT    R2, _pico8_sspr_done
+
+    MOV   R1, [BP+2]              ; sx
+    CALL  __pico8_to_int
+    OUT   GPU_RegionMinX, R1
+    OUT   GPU_RegionHotspotX, R1
+    MOV   R2, [BP-1]
+    IADD  R1, R2
+    ISUB  R1, 1
+    OUT   GPU_RegionMaxX, R1
+    MOV   R1, [BP+3]              ; sy
+    CALL  __pico8_to_int
+    OUT   GPU_RegionMinY, R1
+    OUT   GPU_RegionHotspotY, R1
+    MOV   R2, [BP-2]
+    IADD  R1, R2
+    ISUB  R1, 1
+    OUT   GPU_RegionMaxY, R1
+
+    ;; dw/dh (nil -> sw/sh), as floats in [BP-3]/[BP-4]
+    MOV   R1, [BP+8]
+    MOV   R2, R1
+    IEQ   R2, BOXED_NIL
+    JF    R2, _pico8_sspr_have_dw
+    MOV   R1, [BP-1]
+    CIF   R1
+_pico8_sspr_have_dw:
+    MOV   [BP-3], R1
+    MOV   R1, [BP+9]
+    MOV   R2, R1
+    IEQ   R2, BOXED_NIL
+    JF    R2, _pico8_sspr_have_dh
+    MOV   R1, [BP-2]
+    CIF   R1
+_pico8_sspr_have_dh:
+    MOV   [BP-4], R1
+
+    ;; x: scale = dw/sw * SCALE; flipped -> negative, drawn from dx + dw
+    MOV   R1, [BP+6]
+    CALL  __pico8_to_int
+    CIF   R1
+    MOV   [BP-5], R1              ; dx (float)
+    MOV   R2, [BP-3]
+    MOV   R3, [BP-1]
+    CIF   R3
+    FDIV  R2, R3
+    FMUL  R2, PICO8_SCALE
+    MOV   R3, R1
+    MOV   R1, [BP+10]
+    CALL  __pico8_truthy
+    JF    R0, _pico8_sspr_xs
+    FSGN  R2
+    MOV   R4, [BP-3]
+    FADD  R3, R4
+_pico8_sspr_xs:
+    OUT   GPU_DrawingScaleX, R2
+    MOV   R4, [PICO8_CAMERA_X]
+    FSUB  R3, R4
+    FMUL  R3, PICO8_SCALE
+    FADD  R3, 0.5
+    FLR   R3
+    CFI   R3
+    IADD  R3, PICO8_OFFSET_X
+    OUT   GPU_DrawingPointX, R3
+
+    MOV   R1, [BP+7]
+    CALL  __pico8_to_int
+    CIF   R1
+    MOV   R2, [BP-4]
+    MOV   R3, [BP-2]
+    CIF   R3
+    FDIV  R2, R3
+    FMUL  R2, PICO8_SCALE
+    MOV   R3, R1
+    MOV   R1, [BP+11]
+    CALL  __pico8_truthy
+    JF    R0, _pico8_sspr_ys
+    FSGN  R2
+    MOV   R4, [BP-4]
+    FADD  R3, R4
+_pico8_sspr_ys:
+    OUT   GPU_DrawingScaleY, R2
+    MOV   R4, [PICO8_CAMERA_Y]
+    FSUB  R3, R4
+    FMUL  R3, PICO8_SCALE
+    FADD  R3, 0.5
+    FLR   R3
+    CFI   R3
+    IADD  R3, PICO8_OFFSET_Y
+    OUT   GPU_DrawingPointY, R3
+
+    OUT   GPU_Command, GPUCommand_DrawRegionZoomed
+
+_pico8_sspr_done:
+    MOV   R0, BOXED_NIL
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_pico8_reload: reload() -- restore the map and sprite flags from
+;; the cart ROM (undoing mset()/fset()). Also used by __builtin_pico8_init.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+__builtin_pico8_reload:
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    ;; map ROM -> RAM (2048 words)
+    MOV   R1, __pico8_map_rom
+    MOV   R2, PICO8_MAP_RAM
+    MOV   R3, PICO8_MAP_WORDS
+_pico8_init_map_loop:
+    MOV   R0, [R1]
+    MOV   [R2], R0
+    IADD  R1, 1
+    IADD  R2, 1
+    ISUB  R3, 1
+    MOV   R0, R3
+    IGT   R0, 0
+    JT    R0, _pico8_init_map_loop
+
+    ;; sprite flags ROM -> RAM (256 words)
+    MOV   R1, __pico8_flags_rom
+    MOV   R2, PICO8_FLAGS_RAM
+    MOV   R3, 256
+_pico8_init_flags_loop:
+    MOV   R0, [R1]
+    MOV   [R2], R0
+    IADD  R1, 1
+    IADD  R2, 1
+    ISUB  R3, 1
+    MOV   R0, R3
+    IGT   R0, 0
+    JT    R0, _pico8_init_flags_loop
+    MOV   R0, BOXED_NIL
+    POP   R3
+    POP   R2
     POP   R1
     RET

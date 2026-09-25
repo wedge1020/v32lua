@@ -136,130 +136,64 @@ __builtin_table_new:
 __builtin_table_get:
     PUSH BP
     MOV  BP, SP
-    
-    ;; --- Callee-Save: Preserve 7 working registers ---
+
+    ;; --- Callee-Save (only R1-R5 are used here; helpers save their own) ---
     PUSH R1
     PUSH R2
     PUSH R3
     PUSH R4
     PUSH R5
-    PUSH R6
-    PUSH R7
 
-    MOV  R1, [BP+3]          ; R1 = Tagged Table Pointer (0x7F80xxxx)
-    MOV  R2, [BP+2]          ; R2 = Search Key (preserved throughout routine)
+    MOV  R1, [BP+3]          ; R1 = Tagged Table Pointer
+    MOV  R2, [BP+2]          ; R2 = Search Key
 
-    ;; --- 1. STRICT TABLE TYPE VALIDATION ---
-    ;; Ensure R1 is actually a Table before touching memory!
     MOV  R4, R1
-    AND  R4, BOXED_DATA      ; Isolate upper tag bits
-    IEQ  R4, BOXED_TABLE      ; Is it tagged as a Table?
+    AND  R4, BOXED_DATA
+    IEQ  R4, BOXED_TABLE
     JF   R4, __table_get_non_table ; strings resolve methods; else trap
+    AND  R1, BOXED_PAYLOAD   ; R1 = raw header address
 
-    ;; --- OPTIMIZATION: EARLY UNBOXING ---
-    ;; Strip tag immediately! R1 is now permanently the raw RAM heap address.
-    ;; This eliminates all redundant unboxing instructions in subsequent
-    ;; branches.
-    AND  R1, BOXED_PAYLOAD
-
-    ;; --- 2. FAST-PATH VALIDATION (O(1) Contiguous Array Read) ---
-    ;; FAST-PATH CHECK 1: Is Key an unboxed IEEE Float?
+    ;; --- Array part: whole-number key in 1..capacity -> O(1) read ---
     MOV  R3, R2
-    AND  R3, NAN_VALUE      ; Isolate exponent bits
-    IEQ  R3, NAN_VALUE      ; Are all exponent bits 1s? (If so, it's tagged)
-    JT   R3, __builtin_table_get_fallback
-
-    ;; FAST-PATH CHECK 2: Convert float to integer & verify no fractional part
-    MOV  R3, R2              ; Copy float Key to R3
-    CFI  R3                  ; Vircon32 in-place conversion: R3 = (int) R3
-    
-    ;; Ensure float key had no fractional component (R3 == R2 mathematically)
+    AND  R3, NAN_VALUE
+    IEQ  R3, NAN_VALUE       ; boxed (not a number)?
+    JT   R3, __builtin_table_get_hash
+    MOV  R3, R2
+    CFI  R3                  ; R3 = (int) key
     MOV  R4, R3
-    CIF  R4                  ; Cast int back to float in R4
-    INE  R4, R2              ; If (float)(int)Key != Key, it's fractional -> fallback!
-    JT   R4, __builtin_table_get_fallback
-
-    ;; FAST-PATH CHECK 3: Is integer key >= 1?
-    MOV  R4, R3              ; Copy integer index to R4 for comparison
-    ILT  R4, 1               ; Destructive test: Is integer key < 1?
-    JT   R4, __builtin_table_get_fallback ; Zero or negative keys go to fallback!
-
-    ;; FAST-PATH CHECK 4: Is Key within LENGTH AND array allocated?
-    MOV  R5, [R1+1]          ; R5 = Array LENGTH (Word 1)
-    MOV  R6, [R1+2]          ; R6 = Array Data Pointer
-    IEQ  R6, 0
-    JT   R6, __builtin_table_get_fallback_intkey   ; no array, but key is a known-valid positive int (R3)
+    CIF  R4
+    INE  R4, R2              ; fractional?
+    JT   R4, __builtin_table_get_hash_num
+    MOV  R4, R3
+    ILT  R4, 1
+    JT   R4, __builtin_table_get_hash_num
+    MOV  R5, [R1]
+    AND  R5, TABLE_ARRAYSIZE ; capacity
     MOV  R4, R3
     IGT  R4, R5
-    JT   R4, __builtin_table_get_fallback
-
-    ;; --- FAST-PATH EXECUTION: O(1) Contiguous Array Read ---
-    MOV  R5, [R1+2]          ; R5 = Array Data Pointer (from Table Header Word 2)
-    ISUB R3, 1               ; Convert 1-based Lua index to 0-based memory offset
-    IADD R5, R3              ; Memory Address = ArrayPtr + (Key - 1)
-    MOV  R0, [R5]            ; Read value directly from contiguous heap buffer!
+    JT   R4, __builtin_table_get_hash
+    MOV  R5, [R1+2]          ; array data
+    IADD R5, R3
+    ISUB R5, 1
+    MOV  R0, [R5]
     JMP  __builtin_table_get_done
 
-__builtin_table_get_fallback_intkey:
-    ;; NOTE: this used to short-circuit straight to "not found" whenever the
-    ;; key was numerically beyond the tracked contiguous `length` (Word 1),
-    ;; on the assumption that nothing could be stored past it. But we only
-    ;; land in this branch when there's NO array (array pointer is null,
-    ;; Word 2 == 0) -- in that case the hash is the *only* storage, and
-    ;; __builtin_table_set stores any positive-integer key there
-    ;; unconditionally, regardless of whether it also happened to advance
-    ;; `length` (e.g. `t[5] = "x"` on an empty table). The shortcut was
-    ;; therefore returning nil for keys that had genuinely been set. Just
-    ;; fall through to a real hash scan.
-    JMP  __builtin_table_get_fallback
-
-;; --- FALLBACK EXECUTION: Association List Scan ---
-__builtin_table_get_fallback:
-    ;; Note: R1 is already unboxed! We read directly from Table Header Word 3.
-    MOV  R5, [R1+3]          ; R5 = Base Hash Data Pointer
-    MOV  R4, R5              ; Test on scratch R4 to preserve R5 pointer
-    IEQ  R4, 0               ; Is Hash Buffer null (no sparse keys stored)?
+__builtin_table_get_hash_num:
+    ;; -0 and 0 are the same key
+    MOV  R4, R2
+    IEQ  R4, 0x80000000
+    JF   R4, __builtin_table_get_hash
+    MOV  R2, 0
+__builtin_table_get_hash:
+    MOV  R5, [R1+3]          ; hash block
+    MOV  R4, R5
+    IEQ  R4, 0
     JT   R4, __builtin_table_get_not_found
-
-;; --- BUCKET SEARCH LOOP ---
-__builtin_table_get_bucket_loop:
-    MOV  R6, [R5]            ; R6 = PairCount (how many pairs are stored in this bucket)
-    MOV  R7, R5              ; Setup R7 as running memory pointer
-    IADD R7, 2               ; Advance R7 to point directly at Key0 (Offset 2 words)
-
-__builtin_table_get_scan_loop:
-    MOV  R4, R6              ; Check remaining pairs using scratch R4
-    IEQ  R4, 0               ; Have we checked all stored pairs in this bucket?
-    JT   R4, __builtin_table_get_check_next_bucket ; If 0, step to next bucket in chain!
-    
-    ;; OPTIMIZATION: ZERO-COST DESTRUCTIVE COMPARISON
-    MOV  R4, [R7]            ; Load Stored Key directly into scratch R4
-    IEQ  R4, R2              ; Does Stored Key == Search Key? (Destroys R4!)
-    JT   R4, __builtin_table_get_found ; Match found!
-    ;; Equal strings at different addresses (any runtime-built string --
-    ;; "k" .. i, string.sub, tostring) must still match: compare contents.
-    MOV  R4, [R7]
-    CALL __table_key_streq
-    JT   R4, __builtin_table_get_found
-    
-    ;; No match: advance memory pointer and decrement loop counter
-    IADD R7, 2               ; Advance pointer by 2 words (skip Value slot to next Key)
-    ISUB R6, 1               ; Decrement remaining PairCount
-    JMP  __builtin_table_get_scan_loop
-
-;; --- BUCKET CHAIN STEPPING ---
-__builtin_table_get_check_next_bucket:
-    MOV  R4, [R5+1]          ; Load NextBucketPtr (Word 1 of current bucket)
-    MOV  R3, R4              ; Test on scratch R3 to preserve NextBucketPtr in R4
-    IEQ  R3, 0               ; Is this the end of the chain (Next == 0x0)?
-    JT   R3, __builtin_table_get_not_found ; End of chain reached -> Key does not exist!
-    
-    MOV  R5, R4              ; Step forward: Current Bucket = Next Bucket
-    JMP  __builtin_table_get_bucket_loop ; Scan the next bucket in the chain!
-
-__builtin_table_get_found:
-    IADD R7, 1               ; Value is stored exactly 1 word after the matching Key
-    MOV  R0, [R7]            ; Read Value into return register R0
+    CALL __table_hash_find   ; R0 = slot address or 0
+    MOV  R4, R0
+    IEQ  R4, 0
+    JT   R4, __builtin_table_get_not_found
+    MOV  R0, [R0+1]
     JMP  __builtin_table_get_done
 
 ;; --- Indexing a non-table: Lua strings index the string library --------
@@ -290,33 +224,536 @@ __table_get_string_method:
     JMP  __builtin_table_get_done
 
 __builtin_table_get_not_found:
-    MOV  R0, BOXED_NIL      ; Key does not exist -> Return canonical Lua Nil!
+    MOV  R0, BOXED_NIL
 
 __builtin_table_get_done:
-    ;; --- Callee-Restore: Pop 7 working registers in reverse order (LIFO) ---
+    POP  R5
+    POP  R4
+    POP  R3
+    POP  R2
+    POP  R1
+    MOV  SP, BP
+    POP  BP
+    RET
+
+;; ---------------------------------------------------------------------------
+;; __builtin_table_getk(t, k): t[k] for a string-LITERAL k (the compiler
+;; emits this for t.field / t["field"]). Pushed like table_get (table,
+;; then key); no BP frame. A literal's hash sits in the word before it, so
+;; the lookup is: read hash, probe. A hit on a bitwise-equal key or an
+;; empty slot settles it here; anything unusual (not a table, no hash
+;; part, a non-literal string key in the probe path that might be equal by
+;; content) defers to the general __builtin_table_get.
+;; ---------------------------------------------------------------------------
+__builtin_table_getk:
+    PUSH R1
+    PUSH R2
+    PUSH R3
+    PUSH R4
+    MOV  R1, [SP+6]          ; table (SP: 4 saved regs + return address)
+    MOV  R2, R1
+    AND  R2, BOXED_DATA
+    IEQ  R2, BOXED_TABLE
+    JF   R2, __table_getk_slow
+    AND  R1, BOXED_PAYLOAD
+    MOV  R1, [R1+3]          ; hash block
+    MOV  R2, R1
+    IEQ  R2, 0
+    JT   R2, __table_getk_nil
+    MOV  R3, [SP+5]          ; key (pooled literal)
+    MOV  R2, R3
+    AND  R2, BOXED_PAYLOAD
+    OR   R2, V32_CART_PAGE
+    ISUB R2, 1
+    MOV  R2, [R2]            ; its precomputed hash
+    MOV  R4, [R1]
+    ISUB R4, 1               ; mask
+    AND  R2, R4
+__table_getk_probe:
+    MOV  R0, R2
+    SHL  R0, 1
+    IADD R0, R1
+    IADD R0, 2               ; slot
+    PUSH R0
+    MOV  R0, [R0]            ; stored key
+    IEQ  R0, R3
+    JT   R0, __table_getk_hit
+    MOV  R0, [SP]
+    MOV  R0, [R0]
+    IEQ  R0, BOXED_NIL
+    JT   R0, __table_getk_miss
+    ;; a string key that isn't a pooled literal could still be equal by
+    ;; content: let the general routine decide
+    MOV  R0, [SP]
+    MOV  R0, [R0]
+    AND  R0, 0x7FC00000
+    IEQ  R0, 0x7FC00000
+    JF   R0, __table_getk_next
+    MOV  R0, [SP]
+    MOV  R0, [R0]
+    AND  R0, BOXED_CATEGORY
+    JT   R0, __table_getk_slow_pop           ; RAM string
+    MOV  R0, [SP]
+    MOV  R0, [R0]
+    AND  R0, BOXED_PAYLOAD
+    OR   R0, V32_CART_PAGE
+    PUSH R1
+    MOV  R1, __string_pool_start
+    IGT  R1, R0
+    JT   R1, __table_getk_slow_pop2
+    MOV  R1, __string_pool_end
+    IGT  R1, R0
+    JF   R1, __table_getk_slow_pop2
+    POP  R1                  ; another pooled literal: different string
+__table_getk_next:
+    POP  R0
+    IADD R2, 1
+    AND  R2, R4
+    JMP  __table_getk_probe
+__table_getk_hit:
+    POP  R0
+    MOV  R0, [R0+1]
+    JMP  __table_getk_done
+__table_getk_miss:
+    POP  R0
+__table_getk_nil:
+    MOV  R0, BOXED_NIL
+__table_getk_done:
+    POP  R4
+    POP  R3
+    POP  R2
+    POP  R1
+    RET
+__table_getk_slow_pop2:
+    POP  R1
+__table_getk_slow_pop:
+    POP  R0
+__table_getk_slow:
+    MOV  R0, [SP+6]
+    PUSH R0
+    MOV  R0, [SP+6]          ; key (one more word on the stack now)
+    PUSH R0
+    CALL __builtin_table_get
+    IADD SP, 2
+    JMP  __table_getk_done
+
+;; __table_rawget_int (internal): R1 = raw table header, R3 = integer key
+;;   -> R0 = t[key]. Array part read directly; otherwise the general get.
+;;   Preserves everything else.
+__table_rawget_int:
+    PUSH R2
+    MOV  R0, R3
+    ILT  R0, 1
+    JT   R0, __table_rawget_int_slow
+    MOV  R0, [R1]
+    AND  R0, TABLE_ARRAYSIZE
+    MOV  R2, R3
+    IGT  R2, R0
+    JT   R2, __table_rawget_int_slow
+    MOV  R0, [R1+2]
+    IADD R0, R3
+    ISUB R0, 1
+    MOV  R0, [R0]
+    POP  R2
+    RET
+__table_rawget_int_slow:
+    MOV  R0, R1
+    OR   R0, BOXED_TABLE
+    PUSH R0
+    MOV  R0, R3
+    CIF  R0
+    PUSH R0
+    CALL __builtin_table_get
+    IADD SP, 2
+    POP  R2
+    RET
+
+;; ===========================================================================
+;; TABLE STORAGE (2026-09 rewrite)
+;; ---------------------------------------------------------------------------
+;; Header (4 words): [0] array capacity (low 16 bits), [1] length (the
+;; border # reports), [2] array data pointer, [3] hash block pointer.
+;;
+;; ARRAY PART: keys 1..capacity live in a plain word array (nil = absent):
+;; O(1) reads/writes. It grows by doubling (min 8) when a key lands at most
+;; 2x past the current capacity -- i.e. arrays built by appending, or
+;; filled in any order from 1 -- and any of the new range's keys already
+;; in the hash part are moved into it, so a key is never in both parts.
+;;
+;; HASH PART: open addressing, linear probing, power-of-two capacity, kept
+;; at most 3/4 full. Block: [0] capacity, [1] used slots, then capacity
+;; (key, value) pairs; an empty slot's key is BOXED_NIL (nil is never a
+;; key). Deleting stores a nil value and leaves the key in place (keeps
+;; probe chains intact); growing drops those.
+;;
+;; STRING KEYS hash by CONTENT (FNV-1a over the characters), so a string
+;; built at runtime finds the same slot as the literal. String literals
+;; carry their hash precomputed by the compiler in the word just before
+;; them (the __string_pool_start..__string_pool_end block), so the usual
+;; `obj.field` lookup never touches the characters at all.
+;; ===========================================================================
+
+;; __table_hash: R0 = key -> R0 = 32-bit hash. Preserves every other register.
+__table_hash:
+    PUSH R1
+    PUSH R2
+    MOV  R1, R0
+    AND  R1, 0x7FC00000
+    IEQ  R1, 0x7FC00000      ; string-tagged (or nil/false/true)?
+    JF   R1, __table_hash_scalar
+    MOV  R1, R0
+    AND  R1, BOXED_PAYLOAD
+    ILT  R1, 4               ; nil/false/true
+    JT   R1, __table_hash_scalar
+    MOV  R1, R0
+    AND  R1, BOXED_CATEGORY
+    JT   R1, __table_hash_content      ; RAM string
+    ;; ROM string: a pooled literal has its hash stored just before it
+    MOV  R1, R0
+    AND  R1, BOXED_PAYLOAD
+    OR   R1, V32_CART_PAGE   ; R1 = ROM address
+    MOV  R2, __string_pool_start
+    IGT  R2, R1
+    JT   R2, __table_hash_content
+    MOV  R2, __string_pool_end
+    IGT  R2, R1
+    JF   R2, __table_hash_content
+    ISUB R1, 1
+    MOV  R0, [R1]
+    POP  R2
+    POP  R1
+    RET
+__table_hash_content:
+    PUSH R3
+    CALL __unbox_string      ; R0 = address (uses R1)
+    MOV  R1, R0
+    MOV  R0, 0x811C9DC5      ; FNV-1a offset basis
+__table_hash_content_loop:
+    MOV  R2, [R1]
+    MOV  R3, R2
+    IEQ  R3, 0
+    JT   R3, __table_hash_content_done
+    AND  R2, 0xFF
+    XOR  R0, R2
+    IMUL R0, 16777619        ; FNV prime (32-bit wraparound)
+    IADD R1, 1
+    JMP  __table_hash_content_loop
+__table_hash_content_done:
+    POP  R3
+    POP  R2
+    POP  R1
+    RET
+__table_hash_scalar:
+    IMUL R0, 0x9E3779B1      ; Fibonacci hashing of the key bits
+    MOV  R1, R0
+    SHL  R1, -16             ; (negative count = logical right shift)
+    XOR  R0, R1
+    POP  R2
+    POP  R1
+    RET
+
+;; __table_hash_find: R5 = hash block, R2 = key (not nil)
+;;   -> R0 = address of the key's slot, or 0 if absent;
+;;      R3 = the empty slot the probe stopped at (insertion point).
+;;   Preserves everything else.
+__table_hash_find:
+    PUSH R4
+    PUSH R6
+    PUSH R7
+    MOV  R0, R2
+    CALL __table_hash
+    MOV  R7, [R5]
+    ISUB R7, 1               ; R7 = capacity - 1 (mask)
+    AND  R0, R7              ; R0 = slot index
+__table_hash_find_loop:
+    MOV  R3, R0
+    SHL  R3, 1
+    IADD R3, R5
+    IADD R3, 2               ; R3 = slot address
+    MOV  R4, [R3]
+    MOV  R6, R4
+    IEQ  R6, BOXED_NIL
+    JT   R6, __table_hash_find_absent
+    MOV  R6, R4
+    IEQ  R6, R2
+    JT   R6, __table_hash_find_hit
+    CALL __table_key_streq   ; equal-content strings at different addresses
+    JT   R4, __table_hash_find_hit
+    IADD R0, 1
+    AND  R0, R7
+    JMP  __table_hash_find_loop
+__table_hash_find_hit:
+    MOV  R0, R3
+    JMP  __table_hash_find_out
+__table_hash_find_absent:
+    MOV  R0, 0
+__table_hash_find_out:
+    POP  R7
+    POP  R6
+    POP  R4
+    RET
+
+;; __table_hash_new: R0 = capacity (power of two) -> R0 = new empty block.
+;; Preserves everything else.
+__table_hash_new:
+    PUSH R1
+    PUSH R2
+    PUSH R3
+    PUSH R6
+    MOV  R1, R0
+    MOV  R2, R0
+    SHL  R2, 1
+    IADD R2, 2
+    PUSH R1                  ; __malloc clobbers R1-R3, R6
+    PUSH R2
+    CALL __malloc
+    IADD SP, 1
+    POP  R1
+    MOV  R2, R0
+    IEQ  R2, 0
+    JT   R2, __oom_handler
+    MOV  [R0], R1            ; capacity
+    MOV  R2, 0
+    MOV  [R0+1], R2          ; used
+    MOV  R2, R0
+    IADD R2, 2
+    MOV  R3, BOXED_NIL
+__table_hash_new_fill:
+    MOV  R6, R1
+    IEQ  R6, 0
+    JT   R6, __table_hash_new_done
+    MOV  [R2], R3
+    IADD R2, 2
+    ISUB R1, 1
+    JMP  __table_hash_new_fill
+__table_hash_new_done:
+    POP  R6
+    POP  R3
+    POP  R2
+    POP  R1
+    RET
+
+;; __table_hash_grow: R1 = raw table header. Replaces its hash block with
+;; one of twice the capacity, re-inserting every live entry (nil-valued
+;; ones are dropped). Preserves everything.
+__table_hash_grow:
+    PUSH R0
+    PUSH R2
+    PUSH R3
+    PUSH R4
+    PUSH R5
+    PUSH R6
+    PUSH R7
+    PUSH R8
+    MOV  R6, [R1+3]          ; old block
+    MOV  R7, [R6]            ; old capacity
+    MOV  R0, R7
+    SHL  R0, 1
+    CALL __table_hash_new
+    MOV  R5, R0              ; new block
+    MOV  [R1+3], R5
+    IADD R6, 2               ; old slot pointer
+__table_hash_grow_loop:
+    MOV  R8, R7
+    IEQ  R8, 0
+    JT   R8, __table_hash_grow_done
+    MOV  R2, [R6]
+    MOV  R8, R2
+    IEQ  R8, BOXED_NIL
+    JT   R8, __table_hash_grow_next
+    MOV  R4, [R6+1]
+    MOV  R8, R4
+    IEQ  R8, BOXED_NIL
+    JT   R8, __table_hash_grow_next
+    CALL __table_hash_find   ; R3 = empty slot (keys are unique)
+    MOV  [R3], R2
+    MOV  [R3+1], R4
+    MOV  R8, [R5+1]
+    IADD R8, 1
+    MOV  [R5+1], R8
+__table_hash_grow_next:
+    IADD R6, 2
+    ISUB R7, 1
+    JMP  __table_hash_grow_loop
+__table_hash_grow_done:
+    POP  R8
     POP  R7
     POP  R6
     POP  R5
     POP  R4
     POP  R3
     POP  R2
-    POP  R1
+    POP  R0
+    RET
 
-    MOV  SP, BP
-    POP  BP
+;; __table_hash_store: R1 = raw header, R2 = key (not nil), R3 = value.
+;; Preserves everything.
+__table_hash_store:
+    PUSH R0
+    PUSH R3
+    PUSH R4
+    PUSH R5
+    PUSH R6
+    MOV  R6, R3              ; R6 = value
+    MOV  R5, [R1+3]
+    MOV  R4, R5
+    INE  R4, 0
+    JT   R4, __table_hash_store_have
+    MOV  R4, R6
+    IEQ  R4, BOXED_NIL       ; deleting from an empty hash: nothing to do
+    JT   R4, __table_hash_store_done
+    MOV  R0, 8
+    CALL __table_hash_new
+    MOV  R5, R0
+    MOV  [R1+3], R5
+__table_hash_store_have:
+    CALL __table_hash_find
+    MOV  R4, R0
+    IEQ  R4, 0
+    JT   R4, __table_hash_store_insert
+    MOV  [R0+1], R6          ; existing key: overwrite (nil = delete)
+    JMP  __table_hash_store_done
+__table_hash_store_insert:
+    MOV  R4, R6
+    IEQ  R4, BOXED_NIL       ; absent key set to nil: nothing to do
+    JT   R4, __table_hash_store_done
+    ;; keep the block at most 3/4 full: (used + 1) * 4 > capacity * 3 -> grow
+    MOV  R4, [R5+1]
+    IADD R4, 1
+    SHL  R4, 2
+    MOV  R0, [R5]
+    IMUL R0, 3
+    IGT  R4, R0
+    JF   R4, __table_hash_store_put
+    CALL __table_hash_grow
+    MOV  R5, [R1+3]
+    CALL __table_hash_find   ; new insertion slot in R3
+__table_hash_store_put:
+    MOV  [R3], R2
+    MOV  [R3+1], R6
+    MOV  R4, [R5+1]
+    IADD R4, 1
+    MOV  [R5+1], R4
+__table_hash_store_done:
+    POP  R6
+    POP  R5
+    POP  R4
+    POP  R3
+    POP  R0
+    RET
+
+;; __table_array_grow: R1 = raw header, R4 = key that must fit (int >= 1).
+;; New capacity = max(8, 2 * capacity), doubled until it covers R4. Copies
+;; the old array, nil-fills the rest, then moves any of the new range's
+;; keys out of the hash part. Preserves everything.
+__table_array_grow:
+    PUSH R0
+    PUSH R2
+    PUSH R3
+    PUSH R5
+    PUSH R6
+    PUSH R7
+    PUSH R8
+    MOV  R5, [R1]
+    AND  R5, TABLE_ARRAYSIZE ; R5 = old capacity
+    MOV  R6, R5
+    SHL  R6, 1
+    MOV  R7, R6
+    ILT  R7, 8
+    JF   R7, __table_array_grow_cap
+    MOV  R6, 8
+__table_array_grow_cap:
+    MOV  R7, R6
+    ILT  R7, R4
+    JF   R7, __table_array_grow_alloc
+    SHL  R6, 1
+    JMP  __table_array_grow_cap
+__table_array_grow_alloc:
+    PUSH R1                  ; __malloc clobbers R1-R3, R6
+    PUSH R6
+    PUSH R6
+    CALL __malloc
+    IADD SP, 1
+    POP  R6
+    POP  R1
+    MOV  R7, R0
+    IEQ  R7, 0
+    JT   R7, __oom_handler
+    ;; copy old contents, nil-fill the rest
+    MOV  R2, [R1+2]          ; old data (may be 0 when capacity 0)
+    MOV  R3, 0
+__table_array_grow_copy:
+    MOV  R7, R3
+    IGE  R7, R6
+    JT   R7, __table_array_grow_copied
+    MOV  R8, BOXED_NIL
+    MOV  R7, R3
+    ILT  R7, R5
+    JF   R7, __table_array_grow_put
+    MOV  R8, R2
+    IADD R8, R3
+    MOV  R8, [R8]
+__table_array_grow_put:
+    MOV  R7, R0
+    IADD R7, R3
+    MOV  [R7], R8
+    IADD R3, 1
+    JMP  __table_array_grow_copy
+__table_array_grow_copied:
+    MOV  [R1+2], R0
+    MOV  R7, [R1]
+    AND  R7, 0xFFFF0000
+    OR   R7, R6
+    MOV  [R1], R7
+    ;; migrate keys old_capacity+1 .. new_capacity out of the hash part
+    MOV  R8, [R1+3]
+    MOV  R7, R8
+    IEQ  R7, 0
+    JT   R7, __table_array_grow_done
+    MOV  R3, R5              ; R3 = index - 1
+__table_array_grow_migrate:
+    MOV  R7, R3
+    IGE  R7, R6
+    JT   R7, __table_array_grow_done
+    PUSH R3
+    PUSH R5
+    MOV  R2, R3
+    IADD R2, 1
+    CIF  R2                  ; key as a Lua number
+    MOV  R5, R8
+    CALL __table_hash_find
+    MOV  R7, R0
+    POP  R5
+    POP  R3
+    IEQ  R7, 0
+    JT   R7, __table_array_grow_migrate_next
+    MOV  R2, [R0+1]          ; value
+    MOV  R7, BOXED_NIL
+    MOV  [R0+1], R7          ; delete from hash
+    MOV  R7, [R1+2]
+    IADD R7, R3
+    MOV  [R7], R2
+__table_array_grow_migrate_next:
+    IADD R3, 1
+    JMP  __table_array_grow_migrate
+__table_array_grow_done:
+    POP  R8
+    POP  R7
+    POP  R6
+    POP  R5
+    POP  R3
+    POP  R2
+    POP  R0
     RET
 
 ;; ---------------------------------------------------------------------------
 ;; Table Write Indexer: t[k] = v
 ;; Incoming Stack: [BP+4] = Table Pointer, [BP+3] = Key, [BP+2] = Value
-;; Register Usage: R1-R8 (Audited: reduced from 10 registers to 8, fixing
-;;                 R10 bug! -- and, in this pass, an R9 bug in the hash
-;;                 length-bookkeeping block that had slipped through.)
+;; Preserves R1-R8.
 ;; ---------------------------------------------------------------------------
 __builtin_table_set:
     PUSH BP
     MOV  BP, SP
-
     PUSH R1
     PUSH R2
     PUSH R3
@@ -327,325 +764,136 @@ __builtin_table_set:
     PUSH R8
 
     MOV  R1, [BP+4]          ; R1 = Tagged Table Pointer
-    MOV  R2, [BP+3]          ; R2 = Search Key
-    MOV  R3, [BP+2]          ; R3 = Value to store
-
-    ;; --- Validate & unbox table pointer EXACTLY ONCE ---
-    ;; (Previously this validation/unbox ran once for the nil case and then
-    ;; unconditionally AGAIN afterward, on a pointer already stripped down
-    ;; to a raw payload address -- the second pass always failed its own
-    ;; tag check, so every `t[k] = nil` unconditionally trapped into
-    ;; __runtime_error_not_table. Validating/unboxing exactly once, up
-    ;; front, fixes this for both the nil and non-nil cases -- nil values
-    ;; now simply fall through and get stored like any other value, which
-    ;; __builtin_table_get reads back correctly.)
+    MOV  R2, [BP+3]          ; R2 = Key
+    MOV  R3, [BP+2]          ; R3 = Value
     MOV  R4, R1
     AND  R4, BOXED_DATA
     IEQ  R4, BOXED_TABLE
     JF   R4, __runtime_error_not_table
-    AND  R1, BOXED_PAYLOAD   ; R1 = raw RAM address (unboxed once, for good)
+    AND  R1, BOXED_PAYLOAD
 
-    ;; --- 2. FAST-PATH VALIDATION (O(1) Contiguous Array Write) ---
-    ;; FAST-PATH CHECK 1: Is Key an unboxed IEEE Float?
+    ;; nil key: nothing can be stored (Lua raises an error; ignored here)
     MOV  R4, R2
-    AND  R4, NAN_VALUE      ; Isolate exponent bits
-    IEQ  R4, NAN_VALUE      ; Are all exponent bits 1s? (If so, it's tagged/NaN)
-    JT   R4, __builtin_table_set_fallback
+    IEQ  R4, BOXED_NIL
+    JT   R4, __builtin_table_set_done
 
-    ;; FAST-PATH CHECK 2: Convert float to integer & verify no fractional part
-    MOV  R4, R2              ; Copy float Key to R4
-    CFI  R4                  ; Vircon32 in-place conversion: R4 = (int) R4
-
-    ;; Ensure float key had no fractional component (R4 == R2 mathematically)
+    ;; --- whole-number key >= 1? ---
+    MOV  R4, R2
+    AND  R4, NAN_VALUE
+    IEQ  R4, NAN_VALUE
+    JT   R4, __builtin_table_set_hash
+    MOV  R4, R2
+    CFI  R4                  ; R4 = (int) key
     MOV  R5, R4
-    CIF  R5                  ; Cast int back to float in R5
-    INE  R5, R2              ; If (float)(int)Key != Key, it's fractional -> fallback!
-    JT   R5, __builtin_table_set_fallback
+    CIF  R5
+    INE  R5, R2
+    JT   R5, __builtin_table_set_hash_num
+    MOV  R5, R4
+    ILT  R5, 1
+    JT   R5, __builtin_table_set_hash_num
 
-    ;; FAST-PATH CHECK 3: Is integer key >= 1?
-    MOV  R5, R4              ; Copy integer index to R5 for comparison
-    ILT  R5, 1               ; Destructive test: Is integer key < 1?
-    JT   R5, __builtin_table_set_fallback ; Zero or negative keys go to fallback!
-
-    ;; --- FAST-PATH CHECK 4: Is Key within CAPACITY? (not Length!) ---
-    MOV  R6, [R1]            ; R6 = Flags from Table Header Word 0
-    AND  R6, TABLE_ARRAYSIZE ; Extract capacity from lower bits
-    MOV  R7, R4              ; Copy integer index R4 to scratch R7
-    IGT  R7, R6              ; Destructive test: Is Key > Capacity?
-    JT   R7, __builtin_table_set_reallocate ; Need array reallocation!
-
-    ;; --- FAST-PATH EXECUTION: O(1) Contiguous Array Write ---
-    MOV  R6, [R1+2]          ; R6 = Array Data Pointer (from Table Header Word 2)
-    MOV  R2, R4              ; R2 = preserve original 1-based key (boxed float
-                              ;      key no longer needed past this point, so
-                              ;      R2 is free to reuse as scratch here)
-    ISUB R4, 1               ; Convert 1-based Lua index to 0-based memory offset
-    IADD R6, R4              ; Memory Address = ArrayPtr + (Key - 1)
-    MOV  [R6], R3            ; Write Value directly into contiguous array slot!
-
-    ;; --- UPDATE LENGTH FOR CONTIGUOUS KEYS ---
-    ;; NOTE: this path is currently unreachable in practice -- array
-    ;; capacity is always 0 (see __builtin_table_set_reallocate's TODO), so
-    ;; every write funnels through the hash fallback below instead. Fixing
-    ;; it now anyway so it's correct on day one once real array storage
-    ;; lands. As written before this pass, this block compared/stored using
-    ;; the *0-based* offset (R4, already decremented above) against
-    ;; length+1, which was off by one on both the comparison and the stored
-    ;; value -- using the preserved 1-based key (R2) instead fixes that too.
-    ;;
-    ;; R2 = original 1-based key, R7 = current contiguous length.
-    ;;   1. Non-nil value written exactly at length+1 -> length grows to R2.
-    ;;   2. Nil value written exactly at length (clearing the last element)
-    ;;      -> length shrinks to R2-1. This is what makes the common
-    ;;      `t[#t] = nil` "pop" idiom work.
-    ;; Anything else (gaps, mid-array holes, out-of-range) intentionally
-    ;; leaves length untouched -- Lua only guarantees *a* border, not
-    ;; necessarily the largest one.
-    MOV  R7, [R1+1]          ; R7 = Current contiguous length
-    MOV  R5, R3
-    IEQ  R5, BOXED_NIL       ; Is the value we just stored nil?
-    JT   R5, __builtin_table_set_array_maybe_shrink
-
-    ;; --- Non-nil: grow if this extended the array by exactly one ---
-    MOV  R5, R7
-    IADD R5, 1                ; R5 = length + 1
-    MOV  R6, R2
-    IEQ  R6, R5                ; R6 = (key == length + 1)?
-    JF   R6, __builtin_table_set_done
-    MOV  [R1+1], R2            ; New length = the key we just wrote
-    JMP  __builtin_table_set_done
-
-__builtin_table_set_array_maybe_shrink:
-    ;; --- Nil: clamp length down to key-1 if key was within the tracked
-    ;; contiguous range (key <= length) -- same rationale as the
-    ;; hash-fallback version of this logic above; see there for details.
-    MOV  R6, R2
-    IGT  R6, R7                 ; R6 = (key > length)? out of range -> no-op
-    JT   R6, __builtin_table_set_done
-    MOV  R7, R2
-    ISUB R7, 1                   ; length = key - 1
-    MOV  [R1+1], R7
-
-    JMP  __builtin_table_set_done
-
-;; --- REALLOCATION PATH: Key exceeds array capacity ---
-__builtin_table_set_reallocate:
-    ;; TODO: Implement proper array reallocation
-    MOV  R6, [R1+3]          ; R6 = Base Hash Data Pointer
-    JMP  __builtin_table_set_fallback
-
-;; --- FALLBACK EXECUTION: Association List Storage ---
-__builtin_table_set_fallback:
-    ;; Note: R1 is already unboxed! Read directly from Table Header Word 3.
-    MOV  R6, [R1+3]          ; R6 = Base Hash Data Pointer
-
-    ;; --- UPDATE LENGTH FOR POSITIVE INTEGER KEYS ---
-    MOV  R7, R2              ; R7 = Key
-    AND  R7, NAN_VALUE
-    IEQ  R7, NAN_VALUE
-    JF   R7, __builtin_table_set_hash_check_int ; Not tagged, might be integer
-
-    ;; Tagged key - go to hash storage without length update
-    JMP  __builtin_table_set_hash_store
-
-__builtin_table_set_hash_check_int:
-    ;; Check if key is a positive integer
-    MOV  R7, R2
-    CFI  R7                  ; R7 = integer key
-    MOV  R8, R7
-    CIF  R8                  ; R8 = float(int key)
-
-    ;; --- Scratch here MUST stay within R1-R8 ---
-    ;; This function only PUSH/POPs R1-R8 at entry/exit. The bucket-chain
-    ;; code further below already calls this out explicitly for R10
-    ;; ("reuse R7 ... instead of clobbering unsaved R10!") -- this block
-    ;; previously used an unsaved R9 for the same kind of scratch compare,
-    ;; silently destroying any caller value that happened to live in R9.
-    ;; Reusing R4 (dead here -- see FAST-PATH CHECK 2/3 above, nothing
-    ;; downstream in this block still needs it) keeps everything in-budget.
-    MOV  R4, R8
-    INE  R4, R2               ; Has fractional part? (R4 destroyed; R2/R7/R8 kept)
-    JT   R4, __builtin_table_set_hash_store
-
-    ;; Check if integer >= 1
-    MOV  R4, R7
-    ILT  R4, 1
-    JT   R4, __builtin_table_set_hash_store ; < 1
-
-    ;; --- Key is a positive integer: keep contiguous LENGTH in sync ---
-    ;; R7 = integer key, R8 = current contiguous length.
-    ;;   1. Non-nil value stored exactly at key == length + 1 (appending)
-    ;;      -> length grows to R7.
-    ;;   2. Nil value stored exactly at key == length (clearing the last
-    ;;      element) -> length shrinks to R7 - 1. This is what makes
-    ;;      `t[#t] = nil` ("pop") work correctly instead of leaving a
-    ;;      removed element permanently counted in #t.
-    ;; Anything else (gaps, mid-table holes, out-of-range keys) intentionally
-    ;; leaves length untouched -- Lua only guarantees *a* border, not
-    ;; necessarily the largest one.
-    MOV  R8, [R1+1]          ; R8 = Current contiguous length
-    MOV  R4, R3
-    IEQ  R4, BOXED_NIL       ; Is the value being stored nil?
-    JT   R4, __builtin_table_set_hash_maybe_shrink
-
-    ;; --- Non-nil: grow if this appends exactly one past the end ---
-    MOV  R4, R8
-    IADD R4, 1                 ; R4 = length + 1
-    IEQ  R4, R7                 ; R4 = (length + 1 == key)?
-    JF   R4, __builtin_table_set_hash_store
-    MOV  [R1+1], R7             ; length = key
-    JMP  __builtin_table_set_hash_store
-
-__builtin_table_set_hash_maybe_shrink:
-    ;; --- Nil: clamp length down to key-1 if this key was within the
-    ;; currently-tracked contiguous range (key <= length), not just an
-    ;; exact match on the last element. This handles clearing out of
-    ;; order -- e.g. `t[1]=nil; t[2]=nil; t[3]=nil` on a {1,2,3} table --
-    ;; by collapsing length to 0 as soon as the lowest surviving index is
-    ;; cleared, matching what real Lua's # operator converges to once an
-    ;; entire array-part range is nil'd out. An exact-match-only check
-    ;; (key == length) only covers clearing from the top down (the
-    ;; `t[#t] = nil` "pop" idiom); this covers both. Keys already beyond
-    ;; the current length are already uncounted, so they stay a no-op.
-    MOV  R4, R7
-    IGT  R4, R8                ; R4 = (key > length)? out of range -> no-op
-    JT   R4, __builtin_table_set_hash_store
-    MOV  R8, R7
-    ISUB R8, 1                  ; length = key - 1
-    MOV  [R1+1], R8
-
-__builtin_table_set_hash_store:
-    ;; Resume original hash storage logic:
-    MOV  R4, R6              ; Test on scratch R4 to preserve R6 pointer
-
-    ;; 1. Ensure Base Hash Buffer exists (Test on scratch R4)
-    MOV  R4, R6
-    INE  R4, 0               ; Is Base Hash Pointer non-null?
-    JT   R4, __builtin_table_set_bucket_loop
-
-    ;; Allocate Base Bucket (16 words)
-    PUSH R1
-    PUSH R2
-    PUSH R3
-    MOV  R0, 16
-    PUSH R0
-    CALL __malloc
-    IADD SP, 1               ; Correct stack cleanup for SP growing down!
-    POP  R3
-    POP  R2
-    POP  R1
-
-    MOV  R6, R0              ; R6 = New Base Bucket Address
-    MOV  R4, R6              ; Check OOM on scratch register R4
-    IEQ  R4, 0
-    JT   R4, __oom_handler   ; Trap out-of-memory if allocation failed
-
-    ;; Initialize Base Bucket header
-    MOV  R7, 0
-    MOV  [R6], R7            ; Word 0: PairCount = 0
-    MOV  [R6+1], R7          ; Word 1: NextBucketPtr = 0x0 (Tail)
-
-    ;; Link newly created Base Bucket to Table Header Word 3 (R1 is raw RAM address!)
-    MOV  [R1+3], R6
-
-;; --- BUCKET SEARCH LOOP ---
-__builtin_table_set_bucket_loop:
-    MOV  R7, [R6]            ; R7 = PairCount in current bucket
-    MOV  R8, R6              ; Setup R8 as running memory pointer
-    IADD R8, 2               ; Advance R8 to point directly at Key0 (Offset 2 words)
-
-__builtin_table_set_scan_pairs:
-    MOV  R4, R7              ; Check remaining pairs using scratch R4
-    IEQ  R4, 0               ; Have we checked all stored pairs in this bucket?
-    JT   R4, __builtin_table_set_check_next_bucket ; If 0, check chain or append!
-
-    ;; OPTIMIZATION: ZERO-COST DESTRUCTIVE COMPARISON
-    MOV  R4, [R8]            ; Load stored Key into scratch R4
-    IEQ  R4, R2              ; Does Stored Key == Search Key? (Destroys R4!)
-    JT   R4, __builtin_table_set_overwrite_val ; Found existing key -> Overwrite value!
-    MOV  R4, [R8]            ; equal-content string at another address?
-    CALL __table_key_streq
-    JT   R4, __builtin_table_set_overwrite_val
-
-    ;; No match: advance memory pointer and decrement loop counter
-    IADD R8, 2               ; Advance 2 words (skip Value slot to next Key)
-    ISUB R7, 1               ; Decrement remaining PairCount
-    JMP  __builtin_table_set_scan_pairs
-
-__builtin_table_set_overwrite_val:
-    IADD R8, 1               ; Step from Key slot to Value slot (Offset +1 word)
-    MOV  [R8], R3            ; Update value in place
-    JMP  __builtin_table_set_done
-
-;; --- BUCKET CHAIN STEPPING ---
-__builtin_table_set_check_next_bucket:
-    MOV  R4, [R6+1]          ; Load NextBucketPtr (Word 1 of current bucket)
-
-    ;; OPTIMIZATION & BUG FIX: REUSE DEAD REGISTER
-    ;; At this point, R7 (PairCount) reached 0 and is completely dead.
-    ;; We reuse R7 to test NextBucketPtr instead of clobbering unsaved R10!
+    MOV  R5, [R1]
+    AND  R5, TABLE_ARRAYSIZE ; capacity
+    MOV  R6, R4
+    IGT  R6, R5
+    JF   R6, __builtin_table_set_array
+    ;; beyond capacity: grow the array if the key is within 2x of it
+    ;; (min 8) and a real value is being stored; otherwise hash it
+    MOV  R6, R3
+    IEQ  R6, BOXED_NIL
+    JT   R6, __builtin_table_set_hash
+    MOV  R6, R5
+    SHL  R6, 1
+    MOV  R7, R6
+    ILT  R7, 8
+    JF   R7, __builtin_table_set_grow_limit
+    MOV  R6, 8
+__builtin_table_set_grow_limit:
     MOV  R7, R4
-    IEQ  R7, 0               ; Is this the end of the chain (Next == 0x0)?
-    JT   R7, __builtin_table_set_append_to_tail ; If end of chain, append new pair!
+    IGT  R7, R6
+    JT   R7, __builtin_table_set_hash
+    CALL __table_array_grow
 
-    MOV  R6, R4              ; Step forward: Current Bucket = Next Bucket
-    JMP  __builtin_table_set_bucket_loop ; Scan the next bucket in the chain!
-
-;; --- APPEND NEW PAIR (Reached tail bucket and key was not found) ---
-__builtin_table_set_append_to_tail:
-    MOV  R7, [R6]            ; R7 = PairCount of the TAIL bucket
-    MOV  R4, R7              ; Check capacity on scratch R4
-    IGE  R4, 7               ; Is this tail bucket completely full (7 pairs / 14 words)?
-    JT   R4, __builtin_table_set_allocate_extension_bucket
-
-    ;; Room exists in tail bucket.
-    ;; Note: Because we advanced R8 exactly PairCount times in the scan loop above,
-    ;; R8 already points directly to the first unallocated Key slot!
-    MOV  [R8], R2            ; Store new Key
-    IADD R8, 1               ; Step to Value slot
-    MOV  [R8], R3            ; Store new Value
-
-    ;; Increment PairCount in current tail bucket header
-    IADD R7, 1
-    MOV  [R6], R7
+__builtin_table_set_array:
+    MOV  R6, [R1+2]
+    IADD R6, R4
+    ISUB R6, 1
+    MOV  [R6], R3
+    ;; --- keep the border (#t) in step ---
+    MOV  R7, [R1+1]          ; length
+    MOV  R6, R3
+    IEQ  R6, BOXED_NIL
+    JT   R6, __builtin_table_set_array_nil
+    MOV  R6, R7
+    IADD R6, 1
+    IEQ  R6, R4              ; appended right after the border?
+    JF   R6, __builtin_table_set_done
+    ;; extend over any values already stored beyond it
+    MOV  R5, [R1]
+    AND  R5, TABLE_ARRAYSIZE
+    MOV  R8, [R1+2]
+__builtin_table_set_extend:
+    MOV  R6, R4
+    IGE  R6, R5
+    JT   R6, __builtin_table_set_extend_hash
+    MOV  R6, R8
+    IADD R6, R4
+    MOV  R6, [R6]            ; slot for key R4 + 1
+    IEQ  R6, BOXED_NIL
+    JT   R6, __builtin_table_set_extended
+    IADD R4, 1
+    JMP  __builtin_table_set_extend
+__builtin_table_set_extend_hash:
+    ;; the border reached the end of the array part: if the hash part holds
+    ;; key capacity+1, pull that range into the array and keep going
+    MOV  R6, [R1+3]
+    MOV  R7, R6
+    IEQ  R7, 0
+    JT   R7, __builtin_table_set_extended
+    PUSH R2
+    PUSH R5
+    MOV  R2, R4
+    IADD R2, 1
+    CIF  R2
+    MOV  R5, R6
+    CALL __table_hash_find
+    POP  R5
+    POP  R2
+    MOV  R7, R0
+    IEQ  R7, 0
+    JT   R7, __builtin_table_set_extended
+    MOV  R7, [R0+1]
+    IEQ  R7, BOXED_NIL
+    JT   R7, __builtin_table_set_extended
+    PUSH R4
+    IADD R4, 1
+    CALL __table_array_grow   ; migrates capacity+1 .. new capacity
+    POP  R4
+    MOV  R5, [R1]
+    AND  R5, TABLE_ARRAYSIZE
+    MOV  R8, [R1+2]
+    JMP  __builtin_table_set_extend
+__builtin_table_set_extended:
+    MOV  [R1+1], R4
+    JMP  __builtin_table_set_done
+__builtin_table_set_array_nil:
+    ;; clearing a slot inside the border moves the border below it
+    MOV  R6, R4
+    IGT  R6, R7
+    JT   R6, __builtin_table_set_done
+    ISUB R4, 1
+    MOV  [R1+1], R4
     JMP  __builtin_table_set_done
 
-;; --- ALLOCATE EXTENSION BUCKET (Tail bucket was full) ---
-__builtin_table_set_allocate_extension_bucket:
-    ;; Preserve working registers across __malloc call
-    PUSH R1
-    PUSH R2
-    PUSH R3
-    PUSH R6
-    MOV  R0, 16              ; Request another 16-word chunk for extension bucket
-    PUSH R0
-    CALL __malloc
-    IADD SP, 1               ; Correct stack cleanup direction!
-    POP  R6
-    POP  R3
-    POP  R2
-    POP  R1
-
-    MOV  R8, R0              ; R8 = New Extension Bucket Address
-    MOV  R4, R8              ; Check OOM on scratch register R4
-    IEQ  R4, 0
-    JT   R4, __oom_handler   ; Trap out-of-memory if allocation failed
-
-    ;; Initialize New Extension Bucket Header
-    MOV  R7, 1
-    MOV  [R8], R7            ; Word 0: PairCount = 1 (we are storing 1 pair immediately)
-    MOV  R7, 0
-    MOV  [R8+1], R7          ; Word 1: NextBucketPtr = 0x0 (This is the new tail!)
-
-    ;; Store the new Key/Value pair directly into Slot 0 of the new bucket
-    MOV  [R8+2], R2          ; Word 2: Key0
-    MOV  [R8+3], R3          ; Word 3: Val0
-
-    ;; Link old tail bucket to this new extension bucket!
-    MOV  [R6+1], R8          ; OldTailBucket[NextBucketPtr] = NewBucketAddress
+__builtin_table_set_hash_num:
+    MOV  R4, R2
+    IEQ  R4, 0x80000000      ; -0 is the same key as 0
+    JF   R4, __builtin_table_set_hash
+    MOV  R2, 0
+__builtin_table_set_hash:
+    CALL __table_hash_store
 
 __builtin_table_set_done:
-    ;; --- Callee-Restore: Pop 8 working registers in reverse order (LIFO) ---
     POP  R8
     POP  R7
     POP  R6
@@ -654,7 +902,6 @@ __builtin_table_set_done:
     POP  R3
     POP  R2
     POP  R1
-
     MOV  SP, BP
     POP  BP
     RET
@@ -1201,6 +1448,9 @@ __builtin_table_remove:
     PUSH R6
     PUSH R7
     PUSH R8
+    PUSH R9
+    PUSH R10
+    PUSH R11
 
     ;; --- Load arguments ---
     MOV  R1, [BP+3]          ; R1 = Tagged Table Pointer
@@ -1267,12 +1517,19 @@ __table_remove_last:
     MOV  R4, R3              ; Position = length (last element)
 
 __table_remove_at_position:
+    MOV  R6, R4
+    ILT  R6, 1                ; empty table: nothing to remove
+    JT   R6, __table_remove_not_found
     ;; --- Get array data pointer ---
     MOV  R5, [R1+2]          ; R5 = array data pointer
 
-    ;; --- Check if array exists ---
+    ;; --- Whole range 1..length in the array part? Then shift in place ---
     MOV  R6, R5
     IEQ  R6, 0
+    JT   R6, __table_remove_hash_path
+    MOV  R6, [R1]
+    AND  R6, TABLE_ARRAYSIZE
+    ILT  R6, R3               ; capacity < length: part of it is hashed
     JT   R6, __table_remove_hash_path   ; No array (the common case: __builtin_table_set's
                                      ; reallocation path is currently a stub, so array-
                                      ; backed tables never actually exist) -> use the
@@ -1295,12 +1552,11 @@ __table_remove_shift_loop:
     JF   R9, __table_remove_update_length
 
     MOV  R9, R5
-    IADD R9, R8
-    ISUB R9, 1
+    IADD R9, R8              ; element R8+1 (0-based R8) ...
 
     MOV  R10, R5
     IADD R10, R8
-    ISUB R10, 2
+    ISUB R10, 1              ; ... moves down to element R8
 
     MOV  R11, [R9]
     MOV  [R10], R11
@@ -1309,6 +1565,12 @@ __table_remove_shift_loop:
     JMP  __table_remove_shift_loop
 
 __table_remove_update_length:
+    ;; clear the vacated last slot, then shrink the border
+    MOV  R9, R5
+    IADD R9, R3
+    ISUB R9, 1
+    MOV  R10, BOXED_NIL
+    MOV  [R9], R10
     ISUB R3, 1
     MOV  [R1+1], R3
 
@@ -1414,6 +1676,9 @@ __table_remove_invalid_position:
 
 __table_remove_done:
     ;; --- Callee-Restore ---
+    POP  R11
+    POP  R10
+    POP  R9
     POP  R8
     POP  R7
     POP  R6

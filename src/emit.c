@@ -139,9 +139,9 @@ void  emit_asm (const char *format, ...) {
         // =====================================================================
         char *dest = NULL;  // First operand (destination), or NULL
         char *src = NULL;   // Second operand (source), or NULL
+        char op_copy[EMIT_BUFFER_SIZE];  // dest/src point into this: keep it in scope
 
         if (operands != NULL && *operands != '\0') {
-            char op_copy[EMIT_BUFFER_SIZE];
             strncpy(op_copy, operands, sizeof(op_copy) - 1);
             op_copy[sizeof(op_copy) - 1] = '\0'; // Ensure null-termination
 
@@ -600,7 +600,8 @@ int   emit_variable_map (void)
         fprintf (out(), "%%define  PICO8_CAMERA_X           0x%.8X\n", next_ram_address);
         fprintf (out(), "%%define  PICO8_CAMERA_Y           0x%.8X\n", (next_ram_address + 1));
         fprintf (out(), "%%define  PICO8_PEN                0x%.8X\n", (next_ram_address + 2));
-        next_ram_address    = next_ram_address + 3; // camera x, y (floats), pen (int)
+        fprintf (out(), "%%define  PICO8_TICK_FRAME         0x%.8X\n", (next_ram_address + 3));
+        next_ram_address    = next_ram_address + 4; // camera x, y (floats), pen (int), tick frame
         fprintf (out(), "%%define  PICO8_FLAGS_RAM          0x%.8X\n", next_ram_address);
         next_ram_address    = next_ram_address + 256;
         fprintf (out(), "%%define  PICO8_MAP_RAM            0x%.8X\n", next_ram_address);
@@ -714,12 +715,24 @@ void  emit_string_data_section (void)
     // rather than living at a separate location in the file.
     emit_cart_title_label (g_lua_filename);
 
+    // Every literal is preceded by its FNV-1a content hash, and the whole
+    // pool is bracketed by __string_pool_start/_end: table lookups with a
+    // literal key read the hash instead of hashing the characters (see
+    // __table_hash in table.s). The runtime computes the identical hash
+    // for strings built at run time.
+    fprintf (out(), "\n__string_pool_start:\n");
     if (strings_head               != NULL)
     {
         fprintf (out(), "\n; --- String Literal Allocations ---\n");
         StringLiteralNode *current  = strings_head;
         while (current             != NULL)
         {
+            uint32_t h = 0x811C9DC5u;
+            for (const unsigned char *c = (const unsigned char *) current -> value; *c; c++) {
+                h ^= (uint32_t)(*c & 0xFF);
+                h *= 16777619u;
+            }
+            fprintf (out(), "    integer 0x%08X\n", h);
             fprintf (out(), "__string_%d:\n", current -> id);
             fprintf (out(), "    string \"");
             emit_escaped_asm_string (out(), current -> value);
@@ -727,6 +740,7 @@ void  emit_string_data_section (void)
             current                 = current -> next;
         }
     }
+    fprintf (out(), "__string_pool_end:\n    integer 0\n");
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -788,6 +802,10 @@ void  emit_runtime_library (void)
     {
         emit_embedded_asm (runtime_pico8_start);
         emit_pico8_cart_data (out());
+    }
+    if (g_uses_env)
+    {
+        emit_env_table (out());
     }
     if (runtime_req.needs_tic80)
     {
@@ -1142,4 +1160,108 @@ void emit_cart_title_label(const char *input_filename)
     fprintf(out(), "    string \"");
     emit_escaped_asm_string(out(), truncated);
     fprintf(out(), "\"\n\n");
+}
+
+// ----------------------------------------------------------------------
+// _ENV support: a (name, address) table of every global, plus the two
+// lookup routines node_table_get()/node_table_set() call for _ENV[k].
+// ----------------------------------------------------------------------
+void emit_env_table (FILE *f)
+{
+    int count = 0;
+    for (SymbolNode *c = global_scope ? global_scope->symbols : NULL; c; c = c->next)
+        if (c->type == SYM_GLOBAL && c->location > 0) count++;
+
+    fprintf (f, "\n;; --- _ENV: global name table (%d globals) ---\n", count);
+    fprintf (f, "__env_table:\n    integer %d\n", count);
+    int i = 0;
+    for (SymbolNode *c = global_scope ? global_scope->symbols : NULL; c; c = c->next) {
+        if (c->type != SYM_GLOBAL || c->location <= 0) continue;
+        fprintf (f, "    pointer __env_name_%d\n    integer 0x%08X\n", i++, c->location);
+    }
+    i = 0;
+    for (SymbolNode *c = global_scope ? global_scope->symbols : NULL; c; c = c->next) {
+        if (c->type != SYM_GLOBAL || c->location <= 0) continue;
+        fprintf (f, "__env_name_%d:\n    string \"%s\"\n", i++, c->name);
+    }
+    fputs (
+";; __env_find: R1 = boxed key -> R2 = global's RAM address, or -1\n"
+"__env_find:\n"
+"    PUSH  R3\n"
+"    PUSH  R4\n"
+"    PUSH  R5\n"
+"    MOV   R3, __env_table\n"
+"    MOV   R4, [R3]\n"
+"    IADD  R3, 1\n"
+"__env_find_loop:\n"
+"    MOV   R5, R4\n"
+"    ILE   R5, 0\n"
+"    JT    R5, __env_find_none\n"
+"    MOV   R5, [R3]\n"
+"    OR    R5, BOXED_ROMSTRING\n"
+"    PUSH  R3\n"
+"    PUSH  R4\n"
+"    PUSH  R1\n"
+"    PUSH  R1\n"
+"    PUSH  R5\n"
+"    CALL  __builtin_eq\n"
+"    IADD  SP, 2\n"
+"    POP   R1\n"
+"    POP   R4\n"
+"    POP   R3\n"
+"    IEQ   R0, BOXED_TRUE\n"
+"    JT    R0, __env_find_hit\n"
+"    IADD  R3, 2\n"
+"    ISUB  R4, 1\n"
+"    JMP   __env_find_loop\n"
+"__env_find_hit:\n"
+"    MOV   R2, [R3+1]\n"
+"    JMP   __env_find_done\n"
+"__env_find_none:\n"
+"    MOV   R2, -1\n"
+"__env_find_done:\n"
+"    POP   R5\n"
+"    POP   R4\n"
+"    POP   R3\n"
+"    RET\n"
+";; __builtin_env_get(key) -> R0 = value of the global named key, or nil\n"
+"__builtin_env_get:\n"
+"    PUSH  BP\n"
+"    MOV   BP, SP\n"
+"    PUSH  R1\n"
+"    PUSH  R2\n"
+"    MOV   R1, [BP+2]\n"
+"    CALL  __env_find\n"
+"    MOV   R0, BOXED_NIL\n"
+"    MOV   R1, R2\n"
+"    ILT   R1, 0\n"
+"    JT    R1, __env_get_done\n"
+"    MOV   R0, [R2]\n"
+"__env_get_done:\n"
+"    POP   R2\n"
+"    POP   R1\n"
+"    MOV   SP, BP\n"
+"    POP   BP\n"
+"    RET\n"
+";; __builtin_env_set(key, value): assigns an existing global by name\n"
+";; (a name the program never uses as a global has no slot: ignored)\n"
+"__builtin_env_set:\n"
+"    PUSH  BP\n"
+"    MOV   BP, SP\n"
+"    PUSH  R1\n"
+"    PUSH  R2\n"
+"    MOV   R1, [BP+2]\n"
+"    CALL  __env_find\n"
+"    MOV   R1, R2\n"
+"    ILT   R1, 0\n"
+"    JT    R1, __env_set_done\n"
+"    MOV   R1, [BP+3]\n"
+"    MOV   [R2], R1\n"
+"__env_set_done:\n"
+"    MOV   R0, BOXED_NIL\n"
+"    POP   R2\n"
+"    POP   R1\n"
+"    MOV   SP, BP\n"
+"    POP   BP\n"
+"    RET\n", f);
 }

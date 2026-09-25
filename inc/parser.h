@@ -99,7 +99,8 @@ extern int yydebug;
     TOKEN_REPEAT = 300,            /* TOKEN_REPEAT  */
     TOKEN_UNTIL = 301,             /* TOKEN_UNTIL  */
     TOKEN_GOTO = 302,              /* TOKEN_GOTO  */
-    TOKEN_DBCOLON = 303            /* TOKEN_DBCOLON  */
+    TOKEN_DBCOLON = 303,           /* TOKEN_DBCOLON  */
+    TOKEN_PRINT_SHORT = 304        /* TOKEN_PRINT_SHORT  */
   };
   typedef enum yytokentype yytoken_kind_t;
 #endif
@@ -108,13 +109,13 @@ extern int yydebug;
 #if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED
 union YYSTYPE
 {
-#line 32 "parser.y"
+#line 68 "parser.y"
 
     double   number_val;
     char    *string_val;
     ASTNode *ast_node;
 
-#line 118 "../inc/parser.h"
+#line 119 "../inc/parser.h"
 
 };
 typedef union YYSTYPE YYSTYPE;

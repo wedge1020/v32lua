@@ -223,8 +223,11 @@ defecto cuando no hay ninguna pista `--#api` presente):
   `rectfill`/`rect`/`circfill`/`circ`/`line`/`pset`/`print` (con color),
   `camera`/`color`, `btn`/`btnp` (autorrepetición de PICO-8), `add`/`del`/
   `count`/`foreach`/`for v in all(t)` (seguro ante borrados), matemáticas
-  de PICO-8 (`flr`, `rnd`, `mid`, `sin`/`cos` en vueltas, ...), `sfx`/
-  `music` sobre un banco de tonos provisionales generado, y `_init`/
+  de PICO-8 (`flr`, `rnd`, `mid`, `sin`/`cos` en vueltas, ...), `sspr`,
+  `split`, `tostr`/`tonum`, `_ENV[nombre]`, los atajos de sintaxis de
+  PICO-8 (`?`, `\`, `f"cad"`, glifos de botones, ...), `sfx`/`music` que
+  reproducen el `__sfx__`/`__music__` del propio cartucho (sintetizado al
+  compilar), y `_init`/
   `_update` (30 fps)/`_update60`/`_draw`. La pantalla de 128×128 se escala
   2,75× y se centra; lo que se dibuja fuera de ella queda enmascarado. **Un
   cartucho `.p8` compila directamente** (`v32lua juego.p8`): su sección
@@ -849,12 +852,10 @@ una decisión de diseño:
   tabla, clausura y cadena en tiempo de ejecución vive hasta el reinicio.
   Los juegos de larga duración deberían reutilizar tablas en lugar de
   crearlas en cada fotograma.
-* Las tablas son listas de asociación (sin hashing): la búsqueda de una
-  clave es lineal en el tamaño de la tabla y, para claves de cadena, cada
-  fallo hace una comparación de contenido.
-* PICO-8: `pal`/`palt` (compilan a no-ops con una advertencia), `sspr`,
-  `clip`, `peek`/`poke`, `cartdata`/`dget`/`dset`, `stat`, reproducción
-  real de `__sfx__`/`__music__` (se usan tonos provisionales)
+* PICO-8: `pal`/`palt` (compilan a no-ops con una advertencia), `clip`,
+  `peek`/`poke`, `cartdata`/`dget`/`dset`, valores reales de `stat`,
+  anchos fraccionarios en `spr`; los filtros del editor de SFX en el
+  sonido sintetizado
 * TIC-80: familia `peek`/`poke`, `tri`/`trib`, `elli`/`ellib`, `clip`,
   `key`/`keyp`, `mouse`, `font`, rotación en `spr`, y síntesis de los datos
   `WAVES`/`SFX`/`MUSIC` propios del cartucho (se usan tonos provisionales)

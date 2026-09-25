@@ -17,6 +17,8 @@ char *mangle_method_name (const char *table_name, const char *method_name);
    ':' methods, '...' excluded). Calls whose target arity is unknown at
    compile time are NIL-padded up to this -- see node_function_call(). */
 int g_max_param_count = 0;
+/* nesting depth of `function` bodies while parsing (see func_start) */
+static int g_func_depth = 0;
 static void note_function_param_count (ASTNode *params)
 {
     int n = 0;
@@ -25,6 +27,40 @@ static void note_function_param_count (ASTNode *params)
         n++;
     }
     if (n > g_max_param_count) g_max_param_count = n;
+}
+
+
+/* function t.f(...) / function t:f(...): t.f = function([self,] ...) end */
+static int method_fn_counter = 0;
+static ASTNode *make_method_function_assignment (ASTNode *func_def, char *table,
+                                                 char *method, ASTNode *params,
+                                                 ASTNode *body, bool add_self)
+{
+    char buf[256];
+    snprintf (buf, sizeof (buf), "%s_%s__m%d", table, method, method_fn_counter++);
+    if (add_self) {
+        ASTNode *self_param = make_node_ident ("self");
+        self_param->next = params;
+        params = self_param;
+    }
+    func_def->as.function_def.name = strdup (buf);
+    func_def->as.function_def.params = params;
+    note_function_param_count (params);
+    func_def->as.function_def.body = body;
+    func_def->as.function_def.is_variadic = 0;
+    for (ASTNode *p = params; p != NULL; p = p->next)
+        if (p->type == NODE_IDENTIFIER && strcmp (p->as.id.name, "...") == 0)
+            func_def->as.function_def.is_variadic = 1;
+
+    ASTNode *func_ptr = make_node (NODE_FUNCTION_POINTER);
+    func_ptr->as.func_ptr.mangled_name = strdup (buf);
+    func_ptr->as.func_ptr.func_def = func_def;
+
+    ASTNode *table_set = make_node (NODE_TABLE_SET);
+    table_set->as.table_set.table_expr = make_node_ident (table);
+    table_set->as.table_set.key        = make_node_string (method);
+    table_set->as.table_set.value      = func_ptr;
+    return table_set;
 }
 
 %}
@@ -59,7 +95,7 @@ static void note_function_param_count (ASTNode *params)
 %token TOKEN_TRUE TOKEN_FALSE TOKEN_NIL TOKEN_FLOORDIV
 %token TOKEN_DOTS
 %token TOKEN_REPEAT TOKEN_UNTIL
-%token TOKEN_GOTO TOKEN_DBCOLON
+%token TOKEN_GOTO TOKEN_DBCOLON TOKEN_PRINT_SHORT
 
 %type <ast_node> statement statement_list stat_list expr function_def return_stmt
 %type <ast_node> table_constructor function_call else_branch prefix_expr
@@ -184,7 +220,7 @@ argument_list:
 
 /* --- Helper Rules to Capture Opening Line Numbers --- */
 func_start:
-    TOKEN_FUNCTION { $$ = make_node(NODE_FUNCTION_DEF); }
+    TOKEN_FUNCTION { $$ = make_node(NODE_FUNCTION_DEF); g_func_depth++; }
     ;
 
 while_start:
@@ -204,6 +240,13 @@ if_start:
 
 statement:
       function_call              { $$ = $1; }
+    | TOKEN_PRINT_SHORT expr_list {
+        /* PICO-8 `?a, b, c` == print(a, b, c) */
+        $$ = make_node(NODE_FUNCTION_CALL);
+        $$->as.call.target = make_node_ident("print");
+        $$->as.call.is_method_call = 0;
+        $$->as.call.args_head = $2;
+    }
     | TOKEN_GOTO TOKEN_IDENTIFIER {
         /* Lua 5.2+ goto -- see generate_block()'s label scopes */
         $$ = make_node(NODE_GOTO);
@@ -450,7 +493,7 @@ statement:
         $$->as.inline_asm.code = $3;
     }
     | TOKEN_LOCAL func_start TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END
-    {
+    { g_func_depth--; 
         // local function myfunc(...) ... end
         // This is equivalent to: local myfunc = function(...) ... end
 
@@ -472,9 +515,38 @@ statement:
             p = p->next;
         }
 
-        // ✅ SILENTLY IGNORE 'local': Just return the function_def node directly
-        // (No assignment node created, no is_local flag set)
-        $$ = func_def;
+        if (g_func_depth > 0) {
+            // Inside another function: a real local closure, exactly
+            // `local NAME; NAME = function(...) ... end` -- so the body can
+            // capture the enclosing function's locals (and itself, for
+            // recursion). It used to become a global, capture-less named
+            // function, which read garbage for captured variables.
+            static int local_fn_counter = 0;
+            char buf[256];
+            snprintf (buf, sizeof (buf), "%s__l%d", $3, local_fn_counter++);
+            func_def->as.function_def.name = strdup (buf);
+
+            ASTNode *decl = make_node (NODE_MULTIPLE_ASSIGNMENT);
+            decl->as.mult_assign.is_local = 1;
+            decl->as.mult_assign.targets_head = make_node_ident ($3);
+            decl->as.mult_assign.values_head = NULL;
+
+            ASTNode *func_ptr = make_node (NODE_FUNCTION_POINTER);
+            func_ptr->as.func_ptr.mangled_name = strdup (buf);
+            func_ptr->as.func_ptr.func_def = func_def;
+
+            ASTNode *assign = make_node (NODE_MULTIPLE_ASSIGNMENT);
+            assign->as.mult_assign.is_local = 0;
+            assign->as.mult_assign.targets_head = make_node_ident ($3);
+            assign->as.mult_assign.values_head = func_ptr;
+
+            decl->next = assign;
+            $$ = decl;
+        } else {
+            // Top level: stays a named function (direct calls, no closure
+            // needed -- there are no enclosing locals to capture).
+            $$ = func_def;
+        }
 
         /* until we pursue actual local functions, comment this out
         // 1. Get the pre-allocated function_def node from func_start
@@ -510,7 +582,7 @@ statement:
         $$ = func_def;*/
     }
     | TOKEN_LOCAL func_start TOKEN_IDENTIFIER ':' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END
-    {
+    { g_func_depth--; 
         // local function obj:method(...) ... end
         //
         // Not standard Lua (real Lua's "local function" only accepts a
@@ -554,7 +626,7 @@ statement:
         $$ = func_def;
     }
     | TOKEN_LOCAL func_start TOKEN_IDENTIFIER '.' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END
-    {
+    { g_func_depth--; 
         // local function obj.method(...) ... end
         //
         // Dot form: unlike the colon form above, NO implicit 'self' is
@@ -673,7 +745,7 @@ expr_list:
 
 function_def:
     /* Standard Function: function my_func() ... end */
-    func_start TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
+    func_start TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END { g_func_depth--; 
         // 1. Build the structural function definition using pre-allocated node
         ASTNode* func_def = $1;
         func_def->as.function_def.name = strdup($2);
@@ -706,66 +778,20 @@ function_def:
         $$ = func_def;
     }
     | /* Table Dot Method Desugaring: function my_table.my_func() ... end */
-    func_start TOKEN_IDENTIFIER '.' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
-        // 1. Create a unique mangled label using the helper function
-        char* mangled_name = mangle_method_name($2, $4);
-
-        // 2. Build the structural function definition body using pre-allocated node
-        ASTNode* func_def = $1;
-        func_def->as.function_def.name = mangled_name;
-        func_def->as.function_def.params = $6;
-        note_function_param_count(func_def->as.function_def.params);
-        func_def->as.function_def.body = $8;
-
-        // 3. Instantiate a function pointer node evaluating to that address
-        ASTNode* func_ptr = make_node(NODE_FUNCTION_POINTER);
-        func_ptr->as.func_ptr.mangled_name = strdup(mangled_name);
-
-        ASTNode* key_node = make_node_string($4);
-        ASTNode* table_node = make_node_ident($2);
-        
-        // 4. Tie it all into a table assignment: table[key] = func_ptr
-        ASTNode* table_set = make_node(NODE_TABLE_SET);
-        table_set->as.table_set.table_expr = table_node;
-        table_set->as.table_set.key = key_node;
-        table_set->as.table_set.value = func_ptr;
-
-        // 5. Chain them sequentially so the compiler outputs both properties cleanly
-        func_def->next = table_set;
-        $$ = func_def;
+    func_start TOKEN_IDENTIFIER '.' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END { g_func_depth--; 
+        // Lua semantics: exactly `my_table.my_func = function(...) ... end`.
+        // Built as a function EXPRESSION (func_def carried by the pointer,
+        // uniquely named) so that a definition inside another function
+        // captures that function's locals as a closure -- evercore's
+        // `function obj.left() return obj.x ... end` inside init_object().
+        // (It used to become a hoisted, capture-less function named
+        // my_table_my_func, which read garbage for `obj`.)
+        $$ = make_method_function_assignment($1, $2, $4, $6, $8, false);
     }
     | /* Table Colon Method Desugaring: function my_table:my_func() ... end */
-    func_start TOKEN_IDENTIFIER ':' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
-        // 1. Create a unique mangled label using the helper function
-        char* mangled_name = mangle_method_name($2, $4);
-
-        // 2. INJECT "self" as the first parameter!
-        ASTNode* self_param = make_node_ident("self");
-        self_param->next = $6; // Link it to the rest of the parameters
-
-        // 3. Build the structural function definition body using pre-allocated node
-        ASTNode* func_def = $1;
-        func_def->as.function_def.name = mangled_name;
-        func_def->as.function_def.params = self_param; // Set self as the head of the list
-        note_function_param_count(func_def->as.function_def.params);
-        func_def->as.function_def.body = $8;
-
-        // 4. Instantiate a function pointer node evaluating to that address
-        ASTNode* func_ptr = make_node(NODE_FUNCTION_POINTER);
-        func_ptr->as.func_ptr.mangled_name = strdup(mangled_name);
-
-        ASTNode* key_node = make_node_string($4);
-        ASTNode* table_node = make_node_ident($2);
-        
-        // 5. Tie it all into a table assignment: table[key] = func_ptr
-        ASTNode* table_set = make_node(NODE_TABLE_SET);
-        table_set->as.table_set.table_expr = table_node;
-        table_set->as.table_set.key = key_node;
-        table_set->as.table_set.value = func_ptr;
-
-        // 6. Chain them sequentially so the compiler outputs both properties cleanly
-        func_def->next = table_set;
-        $$ = func_def;
+    func_start TOKEN_IDENTIFIER ':' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END { g_func_depth--; 
+        // `my_table.my_func = function(self, ...) ... end` -- see the dot form.
+        $$ = make_method_function_assignment($1, $2, $4, $6, $8, true);
     }
     ;
 
@@ -848,7 +874,7 @@ expr:
     | expr TOKEN_OR expr      { $$ = make_node(NODE_OR);         $$->as.binary.left = $1;     $$->as.binary.right = $3; }
     | expr TOKEN_CONCAT expr  { $$ = make_node(NODE_CONCAT);     $$->as.binary.left = $1;     $$->as.binary.right = $3; }
     | func_start '(' parameter_list ')' statement_list TOKEN_END
-    {
+    { g_func_depth--; 
         static int anon_counter = 0;
         char buf[64];
         snprintf(buf, sizeof(buf), "__anon_%d", anon_counter++);
@@ -916,6 +942,37 @@ function_call:
         node->as.call.is_method_call = 0;
         node->as.call.args_head = $3;
         $$ = node;
+    }
+    /* Lua's single-argument call forms: f"str" and f{table} */
+    | TOKEN_IDENTIFIER TOKEN_STRING {
+        $$ = make_node(NODE_FUNCTION_CALL);
+        $$->as.call.target = make_node_ident($1);
+        $$->as.call.is_method_call = 0;
+        $$->as.call.args_head = make_node_string($2);
+    }
+    | TOKEN_IDENTIFIER table_constructor {
+        $$ = make_node(NODE_FUNCTION_CALL);
+        $$->as.call.target = make_node_ident($1);
+        $$->as.call.is_method_call = 0;
+        $$->as.call.args_head = $2;
+    }
+    | prefix_expr '.' TOKEN_IDENTIFIER TOKEN_STRING {
+        ASTNode* dynamic_lookup = make_node(NODE_TABLE_GET);
+        dynamic_lookup->as.table_get.table_expr = $1;
+        dynamic_lookup->as.table_get.key = make_node_string($3);
+        $$ = make_node(NODE_FUNCTION_CALL);
+        $$->as.call.target = dynamic_lookup;
+        $$->as.call.is_method_call = 0;
+        $$->as.call.args_head = make_node_string($4);
+    }
+    | prefix_expr ':' TOKEN_IDENTIFIER TOKEN_STRING {
+        ASTNode* dynamic_lookup = make_node(NODE_TABLE_GET);
+        dynamic_lookup->as.table_get.table_expr = $1;
+        dynamic_lookup->as.table_get.key = make_node_string($3);
+        $$ = make_node(NODE_FUNCTION_CALL);
+        $$->as.call.target = dynamic_lookup;
+        $$->as.call.is_method_call = 1;
+        $$->as.call.args_head = make_node_string($4);
     }
     ;
 

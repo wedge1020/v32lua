@@ -459,12 +459,14 @@ que solo se escriben en las ramas que realmente los usan (inofensivo
 dejarlos obsoletos, ya que por ejemplo `DrawRegionRotated` está definido
 para ignorar la escala por completo).
 
-El valor por defecto de `color_mult`, `0xFFFFFFFF`, se pasa a través de la
-convención de llamada como un flotante de Lua, y `4294967295.0` no es
-exactamente representable en un flotante de 32 bits — se redondea hacia
-arriba a `4294967296.0`. El tiempo de ejecución lo convierte mediante
-`CFI` (flotante → patrón de bits entero) en lugar de usarlo directamente,
-lo cual recupera el `0xFFFFFFFF` correcto de todos modos.
+`color_mult` es una palabra empaquetada `0xAABBGGRR` y se escribe en
+`GPU_MultiplyColor` tal cual, sin conversión de flotante a entero (el
+mismo modelo que `ioports.gpu.clear(color)`). Un literal numérico
+(`0xFFFFFFFF`, `0x80FFFFFF`, `-1`) se convierte en esa palabra al compilar.
+Cualquier otra expresión debe contener ya la palabra empaquetada:
+`hex("0xFF8080FF")` directamente, o una variable asignada desde `hex()`. Un
+número calculado en tiempo de ejecución *no* se convierte — un float32 no
+puede representar exactamente un color de 32 bits.
 
 Un `nil` pasado explícitamente para un argumento opcional (por ejemplo,
 `spr(id, x, y, nil, nil, 45)`) se trata idénticamente a que ese argumento

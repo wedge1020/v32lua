@@ -1,5 +1,13 @@
 # PICO-8 sfx()/music(): generic placeholder tone bank
 
+> **Superseded when cart data is available.** A `.p8` compiled directly,
+> or a `.lua` with `--#p8 "cart.p8"`, now plays the cart's own
+> `__sfx__`/`__music__`, synthesized at compile time — see "Sound" in
+> [PICO8.md](PICO8.md). This placeholder bank is only used when no such
+> data exists (plain `--#api pico8`), and by the TIC-80 layer. A looped
+> placeholder tone is what made `music()` sound like the same short
+> sound repeating.
+
 ## Problem
 
 `celeste.lua` (and any stripped `.lua` export of a PICO-8 cart, as opposed to

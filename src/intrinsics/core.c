@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include "v32lua.h"
 
 // ============================================================================
@@ -127,6 +128,110 @@ void validate_ioports_path(const char* base_path, const char* key, int line_num)
 // ============================================================================
 
 // variables that are backed by functions
+// PICO-8 builtins whose arguments are all numbers (see the call site).
+static const char *pico8_numeric_builtins[] = {
+    "rnd", "srand", "flr", "ceil", "abs", "min", "max", "mid", "sgn", "sin",
+    "cos", "tan", "sqrt", "atan2", "sfx", "music", "spr", "sspr", "map",
+    "mget", "mset", "fget", "fset", "pset", "pget", "rect", "rectfill",
+    "circ", "circfill", "line", "cls", "color", "camera", "btn", "btnp",
+    "pal", "palt", "clip", "fillp", NULL
+};
+
+// Parses a whole string as a PICO-8 number literal (decimal, 0x hex,
+// optional sign). Returns false if anything but the number is present.
+static bool pico8_parse_number_string (const char *str, double *out)
+{
+    if (str == NULL || *str == '\0') return false;
+    const char *p = str;
+    int sign = 1;
+    if (*p == '-') { sign = -1; p++; }
+    else if (*p == '+') p++;
+    char *end = NULL;
+    double v;
+    if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
+        if (!isxdigit ((unsigned char) p[2])) return false;
+        v = (double) strtoul (p + 2, &end, 16);
+    } else {
+        if (!isdigit ((unsigned char) *p) && *p != '.') return false;
+        v = strtod (p, &end);
+    }
+    if (end == NULL || *end != '\0') return false;
+    *out = sign * v;
+    return true;
+}
+
+// unpack(split"a,b,c") as the LAST argument of a builtin call (a common
+// PICO-8 token-saving idiom: sspr(unpack(split"72,32,56,32,36,32"))) is
+// expanded at compile time into the literal values. A computed table can't
+// be expanded -- only its first value would be passed -- so that's an error.
+static void pico8_expand_unpack_arg (ASTNode *node)
+{
+    ASTNode **link = &node->as.call.args_head;
+    while (*link != NULL && (*link)->next != NULL) link = &(*link)->next;
+    ASTNode *last = *link;
+    if (last == NULL || last->type != NODE_FUNCTION_CALL ||
+        last->as.call.target == NULL || last->as.call.target->type != NODE_IDENTIFIER ||
+        strcmp (last->as.call.target->as.id.name, "unpack") != 0) return;
+    ASTNode *src = last->as.call.args_head;
+    if (src != NULL && src->type == NODE_FUNCTION_CALL && src->as.call.target &&
+        src->as.call.target->type == NODE_IDENTIFIER &&
+        strcmp (src->as.call.target->as.id.name, "split") == 0 &&
+        src->as.call.args_head && src->as.call.args_head->type == NODE_STRING &&
+        (src->as.call.args_head->next == NULL ||
+         src->as.call.args_head->next->type == NODE_STRING)) {
+        const char *text = src->as.call.args_head->as.string_val.value;
+        char sep = ',';
+        if (src->as.call.args_head->next)
+            sep = src->as.call.args_head->next->as.string_val.value[0];
+        ASTNode *head = NULL, **tail = &head;
+        const char *p = text;
+        for (;;) {
+            const char *e = sep ? strchr (p, sep) : NULL;
+            size_t len = e ? (size_t)(e - p) : strlen (p);
+            char *item = strndup (p, len);
+            double v;
+            ASTNode *n;
+            if (pico8_parse_number_string (item, &v)) {
+                n = make_node (NODE_NUMBER);
+                n->as.number.val = v;
+                free (item);
+            } else {
+                n = make_node_string (item);
+            }
+            n->line_number = node->line_number;
+            *tail = n;
+            tail = &n->next;
+            if (!e) break;
+            p = e + 1;
+        }
+        *link = head;
+        return;
+    }
+    compiler_error (ERR_SEMANTIC, node->line_number,
+        "unpack() as a builtin's argument is only supported on a literal split\"...\"; "
+        "index the table instead (t[1], t[2], ...)");
+}
+
+void pico8_fold_numeric_string_args (ASTNode *node, const char *func_name)
+{
+    pico8_expand_unpack_arg (node);
+
+    bool numeric = false;
+    for (int i = 0; pico8_numeric_builtins[i] != NULL; i++) {
+        if (strcmp (func_name, pico8_numeric_builtins[i]) == 0) { numeric = true; break; }
+    }
+    if (!numeric) return;
+    for (ASTNode *a = node->as.call.args_head; a != NULL; a = a->next) {
+        double v;
+        if (a->type == NODE_STRING && pico8_parse_number_string (a->as.string_val.value, &v)) {
+            ASTNode *next = a->next;
+            a->type = NODE_NUMBER;
+            a->as.number.val = v;
+            a->next = next;
+        }
+    }
+}
+
 int try_emit_action_intrinsic (const char *action, int  dest_reg)
 {
     if (strcmp (action, "ioports.inp.inputs") == 0) {
@@ -378,6 +483,12 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     {
         //try_emit_call_pico8_intrinsic (node, dest_reg);
 
+        // PICO-8 coerces numeric strings wherever a number is expected, and
+        // token-saving carts lean on it: rnd"128", sfx"38", music"-1".
+        // Literal arguments are folded to numbers here; a runtime string
+        // reaching a numeric argument is converted by the runtime helpers.
+        pico8_fold_numeric_string_args (node, func_name);
+
         // spr()
         if (strcmp (func_name, "spr") == 0)
         {
@@ -418,6 +529,15 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         if (strcmp (func_name, "abs")   == 0)
         {
             return (emit_math_abs_intrinsic (node, dest_reg));
+        }
+
+        // PICO-8 treats a missing min()/max() argument as 0: max(x) == max(x, 0)
+        if ((strcmp (func_name, "min") == 0 || strcmp (func_name, "max") == 0) &&
+            node->as.call.args_head != NULL && node->as.call.args_head->next == NULL)
+        {
+            ASTNode *zero = make_node (NODE_NUMBER);
+            zero->as.number.val = 0.0;
+            node->as.call.args_head->next = zero;
         }
 
         if (strcmp (func_name, "min")   == 0)
@@ -560,6 +680,15 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
             return (emit_pico8_print_intrinsic (node, dest_reg));
         }
 
+        if (strcmp (func_name, "sspr")  == 0) return (emit_pico8_sspr_intrinsic  (node, dest_reg));
+        if (strcmp (func_name, "reload") == 0) {
+            if (node->as.call.args_head != NULL)
+                compiler_warning (ERR_SEMANTIC, node->line_number,
+                    "reload(): only the no-argument form is supported (map and flags are restored)");
+            emit_asm ("CALL __builtin_pico8_reload\n");
+            if (dest_reg != 0) emit_asm ("MOV R%d, R0\n", dest_reg);
+            return true;
+        }
         if (strcmp (func_name, "rect")  == 0) return (emit_pico8_rect_intrinsic  (node, dest_reg));
         if (strcmp (func_name, "pset")  == 0) return (emit_pico8_pset_intrinsic  (node, dest_reg));
         if (strcmp (func_name, "circ")  == 0) return (emit_pico8_circ_intrinsic  (node, dest_reg));
@@ -1433,8 +1562,8 @@ bool emit_type_intrinsic(ASTNode *node, int dest_reg) {
     ASTNode *arg = node->as.call.args_head;
 
     // === DEBUG: Show what we actually parsed ===
-    fprintf(stderr, "[debug] emit_type_intrinsic(): args_head = %p\n", (void*)arg);
-    if (arg) {
+    if (g_verbose_debug) fprintf(stderr, "[debug] emit_type_intrinsic(): args_head = %p\n", (void*)arg);
+    if (arg && g_verbose_debug) {
         fprintf(stderr, "[debug] emit_type_intrinsic(): arg->type = %d, arg->next = %p\n",
                 arg->type, (void*)arg->next);
     }

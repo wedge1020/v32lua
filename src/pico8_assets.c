@@ -248,6 +248,10 @@ static uint8_t p8_map[PICO8_MAP_HEIGHT][PICO8_MAP_WIDTH];
 static bool    p8_have_gfx = false;
 static bool    p8_have_gff = false;
 static bool    p8_have_map = false;
+static char    p8_sfx[64][169];      // raw __sfx__ lines (8 header + 32*5 note chars)
+static char    p8_music[64][12];     // raw __music__ lines ("ff 11223344")
+static int     p8_sfx_rows   = 0;
+static int     p8_music_rows = 0;
 
 static int p8_hex (char c)
 {
@@ -289,6 +293,16 @@ static void p8_parse_asset_line (const char *section, int row, const char *line,
             if (hi >= 0 && lo >= 0) p8_gff[row * 128 + i] = (uint8_t)((hi << 4) | lo);
         }
         p8_have_gff = true;
+    } else if (strcmp (section, "sfx") == 0 && row < 64) {
+        size_t n = len < 168 ? len : 168;
+        memcpy (p8_sfx[row], line, n);
+        p8_sfx[row][n] = '\0';
+        if (row + 1 > p8_sfx_rows) p8_sfx_rows = row + 1;
+    } else if (strcmp (section, "music") == 0 && row < 64) {
+        size_t n = len < 11 ? len : 11;
+        memcpy (p8_music[row], line, n);
+        p8_music[row][n] = '\0';
+        if (row + 1 > p8_music_rows) p8_music_rows = row + 1;
     } else if (strcmp (section, "map") == 0 && row < 32) {
         for (int x = 0; x < PICO8_MAP_WIDTH && (size_t)(x * 2 + 1) < len; x++) {
             int hi = p8_hex (line[x * 2]), lo = p8_hex (line[x * 2 + 1]);
@@ -394,6 +408,17 @@ uint8_t pico8_gfx_pixel (int x, int y)
 
 bool pico8_has_gfx (void) { return p8_have_gfx; }
 
+// Raw tracker data for pico8_audio.c (NULL when the cart has no such row).
+const char *pico8_sfx_line (int n)
+{
+    return (n >= 0 && n < p8_sfx_rows && p8_sfx[n][0]) ? p8_sfx[n] : NULL;
+}
+const char *pico8_music_line (int n)
+{
+    return (n >= 0 && n < p8_music_rows && p8_music[n][0]) ? p8_music[n] : NULL;
+}
+bool pico8_has_audio (void) { return p8_sfx_rows > 0; }
+
 // ROM data the runtime reads at init: packed map (4 cells per word, cell
 // x at byte x%4 -- the same layout __builtin_pico8_mget/mset/map use) and
 // one word per sprite of fget() flags. Always emitted, zero-filled when the
@@ -413,6 +438,7 @@ void emit_pico8_cart_data (FILE *out)
             fprintf (out, "0x%08X%s", word, (w < PICO8_MAP_WIDTH / 4 - 1) ? ", " : "\n");
         }
     }
+    emit_pico8_music_table (out);
     fprintf (out, "__pico8_flags_rom:\n");
     for (int r = 0; r < 16; r++) {
         fprintf (out, "    integer ");

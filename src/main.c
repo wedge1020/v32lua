@@ -155,6 +155,18 @@ int  main (int  argc, char** argv)
     {
         char *expanded_source = expand_includes (input_filename, &g_line_map, &g_line_map_count);
 
+        // CRLF -> LF (Windows-saved sources): Lua reads a line break inside
+        // a long string as "\n", and a stray '\r' in split([[...]], "\n")
+        // data silently broke evercore's name lookups.
+        {
+            char *r = expanded_source, *w = expanded_source;
+            for (; *r; r++) {
+                if (r[0] == '\r' && r[1] == '\n') continue;
+                *w++ = *r;
+            }
+            *w = '\0';
+        }
+
         // A .p8 cartridge compiles directly: only its __lua__ section is
         // lexed (every other line blanked so line numbers still match the
         // .p8, header replaced by "--#api pico8"), and __gfx__/__gff__/
@@ -166,6 +178,14 @@ int  main (int  argc, char** argv)
             }
             free (expanded_source);
             expanded_source = lua_only;
+        }
+
+        // PICO-8 builtins implemented in Lua (split, tostr, stat, ...):
+        // appended when the program uses them. See pico8_prelude.c.
+        if (strstr (expanded_source, "--#api pico8") ||
+            strstr (expanded_source, "--#api \"pico8\"") ||
+            strstr (expanded_source, "--#p8")) {
+            expanded_source = pico8_append_prelude (expanded_source);
         }
 
         yyin = tmpfile ();

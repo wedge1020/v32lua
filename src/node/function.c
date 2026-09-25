@@ -421,7 +421,7 @@ void  node_function_call (ASTNode *node, int  dest_reg)
             // Fallback: Runtime table lookup
             emit_asm("PUSH R%d ; Arg1: Table pointer for method lookup\n", table_reg);
             emit_asm("PUSH R%d ; Arg2: Method key\n", key_reg);
-            emit_asm("CALL __builtin_table_get\n");
+            emit_asm(table_get_node->as.table_get.key->type == NODE_STRING ? "CALL __builtin_table_getk\n" : "CALL __builtin_table_get\n");
             emit_asm("IADD SP, 2 ; Clean up lookup arguments\n");
             emit_asm("MOV R%d, R0 ; Store retrieved method pointer\n", target_reg);
         }

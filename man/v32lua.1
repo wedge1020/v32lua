@@ -345,11 +345,20 @@ Input source, in the Lua subset this tool accepts.
 A PICO-8 cartridge, compiled directly (see
 .BR "LANGUAGE NOTES" ).
 .TP
-.IR *_pico8.vtex ", " pico8_tone0.vsnd " .. " pico8_tone7.vsnd
-Generated next to the output for PICO-8 carts (sprite sheet + color
-swatches) and for PICO-8/TIC-80 carts that use
+.IR *_pico8.vtex ", " *_sfxNN.vsnd ", " *_musicNN.vsnd
+Generated next to the output for PICO-8 carts: the sprite sheet (plus
+color swatches), and the cart's
+.B __sfx__
+and
+.B __music__
+data synthesized into sounds for
+.BR sfx() " and " music() .
+.TP
+.IR pico8_tone0.vsnd " .. " pico8_tone7.vsnd
+Placeholder tones for PICO-8 programs without sound data, and for TIC-80
+carts that use
 .BR sfx() / music()
-(placeholder tones; an existing file of the same name is kept).
+(an existing file of the same name is kept).
 .TP
 .I *.asm
 Generated Vircon32 assembly, ready to be handed to the Vircon32

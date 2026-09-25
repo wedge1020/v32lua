@@ -230,21 +230,12 @@ __builtin_vircon32_spr:
     OUT   GPU_DrawingPointY, R1
 
     ;; --- 3. Set color multiply / blending (applies to every draw variant) ---
-    ;; color_mult travels across the calling convention as a Lua float, like
-    ;; every other spr() argument. GPU_MultiplyColor is a packed RGBA INTEGER
-    ;; port, so the compiler-side default push is "MOV R0, -1.000000", NOT
-    ;; the numeric value 4294967295.0 -- that magnitude isn't exactly
-    ;; representable in a float32 (rounds up to 2^32) and is out of INT32
-    ;; range, so CFI's result on it is host-CPU-dependent: saturates to
-    ;; 0x7FFFFFFF on ARM64, returns the "integer indefinite" 0x80000000 on
-    ;; x86_64. Neither is 0xFFFFFFFF -- there is no wraparound semantics
-    ;; here, just two different (and both spec-valid) overflow behaviors,
-    ;; found the hard way by getting a mostly-plausible result on ARM64 and
-    ;; a broken one on x86_64. -1.0 sidesteps the overflow question
-    ;; entirely: it's exact and in-range, so CFI(-1.0) = -1, which in two's
-    ;; complement is bit-for-bit 0xFFFFFFFF, on every architecture.
-    MOV   R1, [BP+8]        ; color_mult (RGBA, packed as an int)
-    CFI   R1
+    ;; color_mult arrives as the RAW packed 0xAABBGGRR word, not as a Lua
+    ;; number: the compiler folds numeric literals to that word, and hex()
+    ;; or a variable holding a hex() value already is one. It goes straight
+    ;; to the port. (It used to be CFI'd, which turned hex("0xFFFFFFFF") --
+    ;; a NaN bit pattern -- into 0 on ARM64 hosts and 0x80000000 on x86_64.)
+    MOV   R1, [BP+8]        ; color_mult (raw packed RGBA word)
     OUT   GPU_MultiplyColor, R1
 
     MOV   R1, [BP+9]        ; blend_mode
@@ -1544,69 +1535,53 @@ _memcard_append_is_table:
     ;; string/table/function key or value is copied as its raw RAM
     ;; pointer, valid only within this run, same as the scalar path above.
     ;; Restored by __builtin_vircon32_memcard_load_table below.
-    MOV   R1, [BP+2]
-    AND   R1, BOXED_PAYLOAD             ; R1 = raw table header address
+    ;; Pairs are enumerated with __builtin_next (array part, then hash
+    ;; part; nil-valued entries skipped). __builtin_next preserves R1 and
+    ;; R3-R8, returning the key in R0 and the value in R2.
 
-    ;; --- Pass 1: count total pairs across every bucket in the chain ---
-    MOV   R2, [R1+3]                    ; R2 = first bucket (hash ptr), or 0
+    ;; --- Pass 1: count live pairs ---
     MOV   R3, 0                         ; R3 = running pair count
-
+    MOV   R0, BOXED_NIL
 _memcard_append_table_count_loop:
-    MOV   R4, R2
-    IEQ   R4, 0
+    PUSH  R0                            ; key
+    MOV   R1, [BP+2]
+    PUSH  R1                            ; table
+    CALL  __builtin_next
+    IADD  SP, 2
+    MOV   R4, R0
+    IEQ   R4, BOXED_NIL
     JT    R4, _memcard_append_table_count_done
-    MOV   R4, [R2]                      ; PairCount of this bucket
-    IADD  R3, R4
-    MOV   R2, [R2+1]                    ; step to NextBucketPtr
+    IADD  R3, 1
     JMP   _memcard_append_table_count_loop
 
 _memcard_append_table_count_done:
-    ;; R3 = total pair count (raw int) -- kept live through Pass 2 below,
-    ;; never clobbered (no CALLs happen in this routine's table path).
-
     ;; --- Write the header: [TAG_TABLE][pair_count] ---
     MOV   R5, [BP-2]                    ; base_addr
     MOV   R7, 2                         ; TAG_TABLE
     CIF   R7
     MOV   [R5], R7
     IADD  R5, 1
-
-    MOV   R7, R3                        ; a COPY of the pair count for
-    CIF   R7                            ; storage -- R3 itself stays a raw
-    MOV   [R5], R7                      ; int, needed below for the cursor
-    IADD  R5, 1                         ; math and isn't touched again here
-
-    ;; --- Pass 2: walk the chain again, writing each Key/Value pair ---
-    MOV   R1, [BP+2]
-    AND   R1, BOXED_PAYLOAD
-    MOV   R2, [R1+3]                    ; R2 = first bucket again
-
-_memcard_append_table_write_bucket:
-    MOV   R4, R2
-    IEQ   R4, 0
-    JT    R4, _memcard_append_table_write_done
-    MOV   R6, [R2]                      ; R6 = PairCount in this bucket
-    MOV   R8, R2
-    IADD  R8, 2                         ; R8 = pointer to Key0 in this bucket
-
-_memcard_append_table_write_pair:
-    MOV   R4, R6
-    IEQ   R4, 0
-    JT    R4, _memcard_append_table_write_next_bucket
-    MOV   R7, [R8]                      ; Key -- already a properly boxed
-    MOV   [R5], R7                      ; Lua value (or raw pointer); no CIF
-    IADD  R5, 1
-    IADD  R8, 1
-    MOV   R7, [R8]                      ; Value
+    MOV   R7, R3
+    CIF   R7
     MOV   [R5], R7
     IADD  R5, 1
-    IADD  R8, 1
-    ISUB  R6, 1
-    JMP   _memcard_append_table_write_pair
 
-_memcard_append_table_write_next_bucket:
-    MOV   R2, [R2+1]                    ; NextBucketPtr
-    JMP   _memcard_append_table_write_bucket
+    ;; --- Pass 2: write each Key/Value pair ---
+    MOV   R0, BOXED_NIL
+_memcard_append_table_write_pair:
+    PUSH  R0
+    MOV   R1, [BP+2]
+    PUSH  R1
+    CALL  __builtin_next
+    IADD  SP, 2
+    MOV   R4, R0
+    IEQ   R4, BOXED_NIL
+    JT    R4, _memcard_append_table_write_done
+    MOV   [R5], R0                      ; key (boxed, verbatim)
+    IADD  R5, 1
+    MOV   [R5], R2                      ; value
+    IADD  R5, 1
+    JMP   _memcard_append_table_write_pair
 
 _memcard_append_table_write_done:
     MOV   R1, [BP-1]                    ; old_cursor
@@ -2127,11 +2102,7 @@ _v32_tmrender_draw:
     ;; spr(tile_value, screen_x, screen_y, 1.0, 1.0, 0, 0xFFFFFFFF, ALPHA)
     MOV  R2, 32.000000      ; VIRCON32_BLEND_ALPHA
     PUSH R2
-    MOV  R2, -1.000000      ; 0xFFFFFFFF via CFI(-1.0) -- see the CFI-overflow
-                            ; note on __builtin_vircon32_spr above; the same
-                            ; hazard applies here since this is a hand-built
-                            ; spr() call, not one that goes through the
-                            ; compiler's color_mult emitter
+    MOV  R2, 0xFFFFFFFF     ; color_mult: raw packed RGBA word (no CFI)
     PUSH R2
     MOV  R2, 0.000000
     PUSH R2
@@ -2180,6 +2151,8 @@ _v32_tmrender_done:
 ;;                    register_pico8_tone_bank() in pico8.c. Pushed bare,
 ;;                    never boxed: nothing but this one routine ever reads
 ;;                    it, same convention as VIRCON32_SFX_CURSOR below.)
+;; [BP+5]: mask      (RAW INTEGER: bank size - 1. 7 for the 8 placeholder
+;;                    tones; 63 for a .p8 cart's 64 synthesized SFX.)
 ;;
 ;; Only reached for a compile-time-UNKNOWN n -- emit_tonebank_sfx_intrinsic()
 ;; in pico8.c folds every literal n straight into a static
@@ -2212,7 +2185,8 @@ __builtin_tonebank_sfx:
     JT    R2, _tonebank_sfx_stop_form
 
     ;; --- Non-negative index: map into the placeholder tone bank ---
-    AND   R1, 7                   ; wrap into PICO8_TONE_COUNT (8) entries
+    MOV   R2, [BP+5]              ; bank size - 1 (raw integer: 7 or 63)
+    AND   R1, R2                  ; wrap into the bank
     MOV   R2, [BP+4]              ; base_id (raw integer, see header note)
     IADD  R1, R2                  ; R1 = resolved placeholder tone id
 

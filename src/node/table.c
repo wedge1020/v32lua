@@ -1,5 +1,20 @@
 #include "v32lua.h"
 
+// `_ENV[k]` / `_ENV[k] = v`: globals looked up by NAME at runtime, through a
+// table of (name, RAM address) for every global the program has, emitted
+// after codegen (emit_env_table()). Only when _ENV isn't a variable the
+// program declared itself.
+bool g_uses_env = false;
+static bool is_env_ref (ASTNode *e)
+{
+    if (e == NULL || e->type != NODE_IDENTIFIER || strcmp (e->as.id.name, "_ENV") != 0)
+        return false;
+    SymbolNode *sym = resolve_symbol ("_ENV");
+    return sym == NULL;
+}
+
+
+
 void  node_table_constructor (ASTNode *node, int dest_reg)
 {
     // 1. Allocate new table
@@ -187,6 +202,23 @@ void  node_table_set (ASTNode *node)
         return;
     }
 
+    if (is_env_ref (node->as.table_set.table_expr)) {
+        g_uses_env = true;
+        int reg = allocate_register ();
+        generate_asm (node->as.table_set.value, reg);
+        ensure_in_register (reg);
+        emit_asm ("PUSH R%d ; _ENV value", reg);
+        unlock_register (reg);
+        reg = allocate_register ();
+        generate_asm (node->as.table_set.key, reg);
+        ensure_in_register (reg);
+        emit_asm ("PUSH R%d ; _ENV key (global name)", reg);
+        unlock_register (reg);
+        emit_asm ("CALL __builtin_env_set");
+        emit_asm ("IADD SP, 2");
+        return;
+    }
+
     // 2. Fallback: Dynamic heap assignment (table[key] = value)
     int  val_reg    = allocate_pinned_register ();
     int  table_reg  = allocate_pinned_register ();
@@ -261,6 +293,7 @@ void  node_table_set (ASTNode *node)
     unlock_pinned_register (key_reg);
 }
 
+
 void  node_table_get (ASTNode *node, int  dest_reg)
 {
     // 1. Attempt hardware intrinsic read directly into dest_reg
@@ -270,45 +303,44 @@ void  node_table_get (ASTNode *node, int  dest_reg)
         return; // Successfully emitted Vircon32 IN instruction!
     }
 
-    // 2. Fallback: Dynamic heap table lookup
-    int table_reg = allocate_register();
-    int key_reg   = allocate_register();
+    if (is_env_ref (node->as.table_get.table_expr)) {
+        g_uses_env = true;
+        int key_reg = allocate_register();
+        generate_asm(node->as.table_get.key, key_reg);
+        ensure_in_register(key_reg);
+        emit_asm ("PUSH R%d ; _ENV key (global name)", key_reg);
+        unlock_register (key_reg);
+        emit_asm ("CALL __builtin_env_get");
+        emit_asm ("IADD SP, 1");
+        emit_asm ("MOV R%d, R0", dest_reg);
+        return;
+    }
 
-    // ✅ Short-lived
-    mark_register_live(table_reg, 2);
-    mark_register_live(key_reg, 2);
-
-    // The table pointer must survive the KEY expression, which may CALL
-    // (t[1 + f()], t[a .. b], t[#x] ...): a raw hardware CALL clobbers the
-    // register regardless of pinning -- same bug node_table_set() already
-    // fixes above. Found via celeste's `got_fruit[1+level_index()]`, whose
-    // table register came back as level_index()'s scratch value and trapped
-    // "attempt to index a non-table value". Leaf keys can't emit a CALL,
-    // so the common t.x / t[i] / t["k"] reads skip the spill.
+    // 2. Fallback: Dynamic heap table lookup.
+    // Each operand is pushed as soon as it is computed, so the table value
+    // never has to survive the key expression in a register (the key may
+    // CALL, and the allocator could hand the same register out twice).
     ASTNode *key = node->as.table_get.key;
-    bool key_is_leaf = key != NULL &&
-        (key->type == NODE_NUMBER || key->type == NODE_STRING ||
-         key->type == NODE_IDENTIFIER || key->type == NODE_NIL ||
-         key->type == NODE_BOOLEAN);
-
+    int table_reg = allocate_register();
+    mark_register_live(table_reg, 2);
     generate_asm(node->as.table_get.table_expr, table_reg);
     ensure_in_register(table_reg);
-    if (!key_is_leaf) {
-        emit_asm ("PUSH R%d ; spill table pointer (key expr may CALL)", table_reg);
-    }
+    emit_asm ("PUSH R%d ; Arg1: Table Pointer", table_reg);
+    unlock_register (table_reg);
+
+    int key_reg = allocate_register();
+    mark_register_live(key_reg, 2);
     generate_asm(key, key_reg);
     ensure_in_register(key_reg);
-    if (!key_is_leaf) {
-        emit_asm ("POP  R%d ; reload table pointer", table_reg);
-    }
-
-    emit_asm ("PUSH R%d ; Arg1: Table Pointer", table_reg);
     emit_asm ("PUSH R%d ; Arg2: Key", key_reg);
+    unlock_register (key_reg);
 
-    emit_asm ("CALL __builtin_table_get");
+    // A string-literal key (t.field) takes the literal fast path: its
+    // hash is precomputed in ROM (see __builtin_table_getk in table.s).
+    if (key != NULL && key->type == NODE_STRING)
+        emit_asm ("CALL __builtin_table_getk");
+    else
+        emit_asm ("CALL __builtin_table_get");
     emit_asm ("IADD SP, 2 ; Clean up stack");
     emit_asm ("MOV R%d, R0 ; Store result in destination register", dest_reg);
-
-    unlock_register (table_reg);
-    unlock_register (key_reg);
 }

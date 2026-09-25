@@ -216,8 +216,11 @@ present):
   `rect`/`circfill`/`circ`/`line`/`pset`/`print` (with color),
   `camera`/`color`, `btn`/`btnp` (PICO-8 autorepeat), `add`/`del`/
   `count`/`foreach`/`for v in all(t)` (deletion-safe), PICO-8 math
-  (`flr`, `rnd`, `mid`, turn-based `sin`/`cos`, ...), `sfx`/`music` on a
-  generated placeholder tone bank, and `_init`/`_update` (30 fps)/
+  (`flr`, `rnd`, `mid`, turn-based `sin`/`cos`, ...), `sspr`, `split`,
+  `tostr`/`tonum`, `_ENV[name]`, the PICO-8 syntax shortcuts (`?`, `\`,
+  `f"str"`, button glyphs, ...), `sfx`/`music` playing the cart's own
+  `__sfx__`/`__music__` (synthesized at compile time), and
+  `_init`/`_update` (30 fps)/
   `_update60`/`_draw`. The 128×128 screen is scaled 2.75× and centered;
   drawing outside it is masked. A **`.p8` cart compiles directly**
   (`v32lua game.p8`): its `__lua__` section is the program and its
@@ -802,11 +805,9 @@ decision:
 * Garbage collection: the heap is a bump allocator, so every table,
   closure and runtime string lives until reset. Long-running games should
   reuse tables rather than create them per frame.
-* Tables are association lists (no hashing): key lookup is linear in the
-  table's size, and for string keys each miss does a content compare.
-* PICO-8: `pal`/`palt` (compile to no-ops with a warning), `sspr`,
-  `clip`, `peek`/`poke`, `cartdata`/`dget`/`dset`, `stat`, real
-  `__sfx__`/`__music__` playback (placeholder tones are used)
+* PICO-8: `pal`/`palt` (compile to no-ops with a warning), `clip`,
+  `peek`/`poke`, `cartdata`/`dget`/`dset`, real `stat` values, fractional
+  `spr` widths; the SFX editor's filter switches in synthesized sound
 * TIC-80: `peek`/`poke` family, `tri`/`trib`, `elli`/`ellib`, `clip`,
   `key`/`keyp`, `mouse`, `font`, `spr` rotation, and synthesis of a cart's
   own `WAVES`/`SFX`/`MUSIC` data (placeholder tones are used)

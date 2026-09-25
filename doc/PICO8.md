@@ -32,8 +32,9 @@ clips everything to its screen. Palette index 0 is transparent in sprites.
 
 `_init()` once, then per tick `_update()` → `_draw()` →
 present. `_update()` runs at 30 fps (two Vircon32 frames per tick),
-`_update60()` at 60 fps. At least one of `_update`, `_update60`, `_draw`
-must exist. Top-level code runs before `_init()`; the map and flags are
+`_update60()` at 60 fps; ticks are paced by the frame counter, so a tick
+that runs long only slows the game once it exceeds its frames. At least
+one of `_update`, `_update60`, `_draw` must exist. Top-level code runs before `_init()`; the map and flags are
 already loaded then.
 
 ## API
@@ -51,15 +52,56 @@ already loaded then.
 | `btn([i [, p]])`, `btnp([i [, p]])` | 0 left, 1 right, 2 up, 3 down, 4 O (→ A), 5 X (→ B). No `i` → bitfield. `btnp`: first frame of a press, then from frame 15 every 4 frames. |
 | `add`, `del`, `count`, `foreach`, `for v in all(t)` | `del` uses full `==` (string contents compare). `foreach`/`all` follow PICO-8's rule that deleting the current element is safe. `count(t, v)` isn't supported. |
 | `flr`, `ceil`, `abs`, `min`, `max`, `mid`, `sgn`, `rnd`, `srand`, `sin`, `cos`, `tan`, `sub` | `sin`/`cos`/`tan` take turns; `sin` is inverted (PICO-8 convention). The RNG is seeded from the clock at boot. |
-| `sfx`, `music` | Placeholder tone bank — see [PICO8_SFX_SOUND_BANK.md](PICO8_SFX_SOUND_BANK.md). |
+| `sspr(sx, sy, sw, sh, dx, dy [, dw, dh [, flip_x, flip_y]])` | Stretched blit from the sprite sheet. |
+| `sfx(n [, channel])`, `music(n)` | The cart's own `__sfx__`/`__music__`, synthesized at compile time (below). Without that data: a placeholder tone bank — see [PICO8_SFX_SOUND_BANK.md](PICO8_SFX_SOUND_BANK.md). |
+| `split(s [, sep [, convert]])`, `unpack(t [, i])` | `unpack` returns up to 8 values. |
+| `tostr(v [, hex])`, `tonum(s)`, `chr(n)`, `ord(s [, i])` | |
+| `reload()` | Restores the map and sprite flags from the cart (no arguments). |
+| `stat(n)`, `printh(s)` | Stubs (`stat` returns 0) — real functions, so `stat` works as a no-op value. |
+| `_ENV[name]` | Reads or writes the global called `name` (only globals the program uses by name exist). |
 | `pal`, `palt` | Accepted as no-ops (one warning): sprite colors are baked into the texture. |
 
-`!=` and PICO-8's other syntax extensions follow the `--#api pico8` hint.
+## Syntax
+
+With `--#api pico8` (or a `.p8`): `!=`, `+= -= *= /= %= ..= ^= \=`, `a\b`
+(integer division), `if (cond) statement`, `?expr, ...` (print), button
+glyphs ⬅️ ➡️ ⬆️ ⬇️ 🅾️ ❎ as the numbers 0–5, `f"str"` and `f{...}` calls
+(standard Lua), and numeric strings wherever a builtin expects a number
+(`rnd"128"`, `sfx"38"`, `music"-1"`). `unpack(split"72,32,56")` as the
+last argument of a builtin is expanded at compile time.
+
+## Sound
+
+When the cart's `__sfx__`/`__music__` sections are available (a `.p8` is
+compiled, or `--#p8 "cart.p8"` is given), the compiler synthesizes them:
+
+- every SFX becomes `<output>_sfxNN.vsnd` (64 files, one pass of the SFX
+  — `sfx()` doesn't loop);
+- every song that `music(n)` can start becomes `<output>_musicNN.vsnd`:
+  pattern `n` through the pattern with the loop-end or stop flag, with
+  the SPU loop point set to the loop-start pattern. A literal `n` renders
+  just that song; a computed `n` renders every song start in the cart.
+
+The synth follows PICO-8's documented model — 8 waveforms, the 8 effects
+(slide, vibrato, drop, fade in/out, fast/slow arpeggio), custom
+instruments, speed in ticks of 183/22050 s — with waveform shapes modeled
+on the zepto8 reimplementation. It is an approximation: the SFX editor's
+filter switches (noiz, buzz, detune, reverb, dampen) are ignored, and it
+hasn't been compared against PICO-8 by ear. Music plays on SPU channel 0;
+`music()`'s fade and channel-mask arguments are ignored. The files are
+44.1 kHz stereo, so a cart's sound can be tens of megabytes of ROM.
+
+## Performance
+
+Table field access, arrays and `all()` loops are the hot paths in most
+carts. Celeste runs at a full 30 updates per second in the test harness.
+evercore-style engines that test every object against every object, several
+times per object per frame, run at about a third of full speed.
 
 ## Not supported (yet)
 
-`sspr`, `clip`, `peek`/`poke`/`memcpy`/`memset`/`reload`, `cartdata`/
-`dget`/`dset`, `stat`, `menuitem`, `split`, `chr`/`ord`, `tostr`/`tonum`,
-`band`/`bor`/`shl`/..., the text cursor (`print` without coordinates
-prints at 0,0), palette remapping, and real `__sfx__`/`__music__`
-playback.
+`clip`, `peek`/`poke`/`memcpy`/`memset`, `cartdata`/`dget`/`dset`, real
+`stat` values, `menuitem`, `band`/`bor`/`shl`/..., the text cursor
+(`print` without coordinates prints at 0,0), palette remapping,
+fractional `spr` widths (`spr(n, x, y, 0.5)`), and `reload` with
+arguments.

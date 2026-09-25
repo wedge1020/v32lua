@@ -61,7 +61,7 @@ static int compound_assign_token (NodeType op)
 {
     if (!runtime_req.needs_pico8) {
         compiler_error (ERR_SYNTAX, yylineno,
-            "compound assignment operators (+=, -=, *=, /=, %%=) are a "
+            "compound assignment operators (+=, -=, *=, /=, %%=, ..=, \\\\=) are a "
             "PICO-8 extension; add --#api pico8 to use them");
     }
     yylval.number_val = (double) op;
@@ -215,6 +215,34 @@ static int compound_assign_token (NodeType op)
 "*="                    { return compound_assign_token(NODE_MUL); }
 "/="                    { return compound_assign_token(NODE_DIV); }
 "%="                    { return compound_assign_token(NODE_MOD); }
+"..="                   { return compound_assign_token(NODE_CONCAT); }
+"\\="                   { return compound_assign_token(NODE_FLOORDIV); }
+"^="                    { return compound_assign_token(NODE_POW); }
+    /* PICO-8 integer division a\b = flr(a/b) */
+"\\"                    {
+                            if (!runtime_req.needs_pico8) {
+                                compiler_error (ERR_LEXICAL, yylineno,
+                                    "'\\' (integer division) is a PICO-8 extension; use '//' or add --#api pico8");
+                            }
+                            return TOKEN_FLOORDIV;
+                        }
+    /* PICO-8 print shorthand: ?expr, ... at the start of a statement */
+"?"                     {
+                            if (!runtime_req.needs_pico8) {
+                                compiler_error (ERR_LEXICAL, yylineno,
+                                    "'?' (print shorthand) is a PICO-8 extension; add --#api pico8");
+                            }
+                            return TOKEN_PRINT_SHORT;
+                        }
+    /* PICO-8 button glyphs (P8SCII, stored as UTF-8 in .p8 files) are
+       predefined globals holding the button numbers. The trailing U+FE0F
+       variation selector is optional. */
+"\xE2\xAC\x85"(\xEF\xB8\x8F)?      { yylval.number_val = 0; return TOKEN_NUMBER; }
+"\xE2\x9E\xA1"(\xEF\xB8\x8F)?      { yylval.number_val = 1; return TOKEN_NUMBER; }
+"\xE2\xAC\x86"(\xEF\xB8\x8F)?      { yylval.number_val = 2; return TOKEN_NUMBER; }
+"\xE2\xAC\x87"(\xEF\xB8\x8F)?      { yylval.number_val = 3; return TOKEN_NUMBER; }
+"\xF0\x9F\x85\xBE"(\xEF\xB8\x8F)?  { yylval.number_val = 4; return TOKEN_NUMBER; }
+"\xE2\x9D\x8E"(\xEF\xB8\x8F)?      { yylval.number_val = 5; return TOKEN_NUMBER; }
 "+"                     { return '+'; }
 "-"                     { return '-'; }
 "*"                     { return '*'; }

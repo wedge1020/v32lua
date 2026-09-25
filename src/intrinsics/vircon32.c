@@ -164,40 +164,37 @@ bool emit_vircon32_spr_intrinsic(ASTNode *node, int dest_reg)
     }
 
     // Arg 7: color_mult (default: 0xFFFFFFFF)
-    // Arg 7: color_mult (default: 0xFFFFFFFF)
+    //
+    // Passed to the runtime as the RAW packed 0xAABBGGRR word, which it
+    // writes to GPU_MultiplyColor without a CFI (same model as
+    // ioports.gpu.clear(color)):
+    //   - absent / nil         -> 0xFFFFFFFF
+    //   - numeric literal      -> folded here to that word (0xFFFFFFFF,
+    //                             -1 and 4294967295 all give 0xFFFFFFFF)
+    //   - anything else        -> passed through as-is, so it must already
+    //                             be a packed word: hex("0x...") directly,
+    //                             or a variable that holds a hex() value.
     {
         double color_value;
         bool is_static_color = has_color_mult && spu_static_number(args[6], &color_value);
 
         if (!has_color_mult) {
-            // -1.0, not 4294967295.0 -- see the CFI-overflow note in runtime.s.
-            emit_asm("MOV R0, -1.000000 ; Default color_mult (0xFFFFFFFF via CFI(-1.0))\n");
+            emit_asm("MOV R0, 0xFFFFFFFF ; Default color_mult (opaque white)\n");
             emit_asm("PUSH R0\n");
-        } else if (is_static_color && color_value >= 2147483648.0 && color_value <= 4294967295.0) {
-            // A literal whose top bit is set (alpha byte >= 0x80 in this GPU's
-            // 0xAABBGGRR layout) -- e.g. spr(..., 0xFFFFFFFF) written directly --
-            // hits the identical CFI-overflow hazard as the old default: its
-            // positive magnitude is out of signed-int32 range. Re-emit as the
-            // NEGATIVE two's-complement double instead, so CFI's input is always
-            // in-range and its result is architecture-independent.
-            double signed_value = color_value - 4294967296.0;
-            if (signed_value < -16777216.0) {
-                // Non-0x00/0xFF alpha byte AND beyond float32's exact 24-bit
-                // integer range -- the RGB low bits may round. That's the
-                // pre-existing float-only numeric model limit, not the CFI
-                // overflow bug, but worth telling the caller about explicitly.
-                compiler_warning(ERR_SEMANTIC, node->line_number,
-                    "color_mult 0x%08X has a non-0x00/0xFF alpha byte and exceeds "
-                    "float32's exact 24-bit integer range; low bits may round",
-                    (unsigned int) color_value);
+        } else if (is_static_color) {
+            if (color_value < -2147483648.0 || color_value > 4294967295.0 ||
+                color_value != (double)(long long) color_value) {
+                compiler_error(ERR_SEMANTIC, node->line_number,
+                    "spr(): color_mult %g is not a packed 0xAABBGGRR value", color_value);
+                return false;
             }
-            emit_asm("MOV R0, %f ; Literal color_mult 0x%08X (signed for CFI)\n",
-                      signed_value, (unsigned int) color_value);
+            unsigned int word = (unsigned int)(long long) color_value;
+            emit_asm("MOV R0, 0x%08X ; Literal color_mult (raw packed RGBA)\n", word);
             emit_asm("PUSH R0\n");
         } else {
             int reg = allocate_register();
             generate_asm(args[6], reg);
-            emit_asm("PUSH R%d ; Arg 7: color_mult\n", reg);
+            emit_asm("PUSH R%d ; Arg 7: color_mult (raw packed RGBA)\n", reg);
             unlock_register(reg);
         }
     }
