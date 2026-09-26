@@ -68,7 +68,8 @@ static void  print_usage (const char *prog_name)
     fprintf (stdout, "                   cart's own title (TIC-80 '-- title:', PICO-8's first\n");
     fprintf (stdout, "                   comment line) or the file name, prefixed with\n");
     fprintf (stdout, "                   [PICO8] / [TIC80] in those API modes\n");
-    fprintf (stdout, "  --p8rate <hz>    PICO-8 sound sample rate: 11025, 22050 (default), 44100\n");
+    fprintf (stdout, "  --rate <hz>      Sample rate of sounds synthesized from a PICO-8 or TIC-80\n");
+    fprintf (stdout, "                   cart: 11025, 22050 (default), 44100 (--p8rate: same)\n");
     fprintf (stdout, "\nInput files: .lua, .p8 (PICO-8 cart), .tic (TIC-80 cart, Lua only)\n");
 }
 
@@ -164,7 +165,7 @@ int  main (int  argc, char** argv)
     int   o_dowarnings          = 1; // display warnings by default
     const char *cli_api         = NULL;
     const char *cli_title       = NULL;
-    int         cli_p8rate      = 0;
+    int         cli_rate      = 0;
 
     g_verbose_debug             = false;
 
@@ -180,10 +181,11 @@ int  main (int  argc, char** argv)
             cli_api = val;
         } else if ((val = option_value(argc, argv, &i, "--title")) != NULL) {
             cli_title = val;
-        } else if ((val = option_value(argc, argv, &i, "--p8rate")) != NULL) {
-            cli_p8rate = atoi(val);
-            if (cli_p8rate != 11025 && cli_p8rate != 22050 && cli_p8rate != 44100) {
-                fprintf(stderr, "Compiler Error: --p8rate must be 11025, 22050 or 44100 (got '%s')\n", val);
+        } else if ((val = option_value(argc, argv, &i, "--rate")) != NULL ||
+                   (val = option_value(argc, argv, &i, "--p8rate")) != NULL) {   // old name
+            cli_rate = atoi(val);
+            if (cli_rate != 11025 && cli_rate != 22050 && cli_rate != 44100) {
+                fprintf(stderr, "Compiler Error: --rate must be 11025, 22050 or 44100 (got '%s')\n", val);
                 return 1;
             }
         } else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
@@ -244,9 +246,9 @@ int  main (int  argc, char** argv)
         apply_api_mode (cli_api);
         g_cli_api_set = true;
     }
-    if (cli_p8rate != 0) {
-        pico8_audio_rate = cli_p8rate;
-        g_cli_p8rate_set = true;
+    if (cli_rate != 0) {
+        synth_audio_rate = cli_rate;
+        g_cli_rate_set = true;
     }
     if (cli_title != NULL) {
         strncpy (cart_title, cli_title, sizeof (cart_title) - 1);
@@ -255,6 +257,7 @@ int  main (int  argc, char** argv)
         g_cli_title_set    = true;
     }
     bool is_tic_cart = tic80_is_binary_cart_path (input_filename);
+    char *program_text = NULL;
     char embedded_tic80_title[128] = { 0 };   // TIC-80 "-- title:" metadata
     char embedded_pico8_title[128] = { 0 };   // PICO-8 first comment line
 
@@ -347,7 +350,7 @@ int  main (int  argc, char** argv)
         }
         fwrite (expanded_source, 1, strlen (expanded_source), yyin);
         rewind (yyin);
-        free (expanded_source);
+        program_text = expanded_source;   // kept: TIC-80 audio scans it for sfx()/music() calls
     }
 
     log_stage(3, "parser", verbose);
@@ -383,6 +386,13 @@ int  main (int  argc, char** argv)
     if (runtime_req.needs_tic80)
     {
         process_all_tic80_sections();
+
+        // The cart's own WAVES/SFX/PATTERNS/TRACKS, synthesized into sounds
+        // for the sfx()/music() calls the program makes (tic80_audio.c).
+        register_tic80_audio (program_text);
+        if (verbose && tic80_audio_rendered) {
+            fprintf (stdout, "tic80 audio: %.1f MB at %d Hz\n", tic80_audio_bytes / 1048576.0, tic80_audio_rate ());
+        }
 
         // Always generate + register the texture atlas when TIC-80 support is
         // needed, regardless of whether the source declared any TILES/SPRITES/
@@ -493,6 +503,7 @@ int  main (int  argc, char** argv)
     
     // Perform full symbol pre-pass before code generation
     register_all_globals_prepass(root_node);
+    settle_return_counts();
 
     // Aliases are recorded before codegen so that "play = music.play" at the
     // bottom of a file still governs a play(...) call at the top.

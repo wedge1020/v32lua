@@ -559,7 +559,60 @@ bool emit_tic80_play_intrinsic(ASTNode *node, int dest_reg) {
 //   - music(track) loops the track's tone; music() / music(-1) stops it
 // A cart's own WAVES/SFX/MUSIC data is not synthesized (not implemented).
 // ============================================================================
+// Pushes up to `count` call arguments for a TIC-80 sound routine, last
+// first, so args[0] lands at [BP+2]; absent ones are nil. A literal note
+// name ("C#4") in slot note_slot becomes its note number.
+static void tic80_push_sound_args(ASTNode *node, int count, int note_slot)
+{
+    ASTNode *args[8] = { NULL };
+    int n = 0;
+    for (ASTNode *c = node->as.call.args_head; c != NULL && n < 8; c = c->next) args[n++] = c;
+    for (int i = count - 1; i >= 0; i--) {
+        ASTNode *a = (i < n) ? args[i] : NULL;
+        if (a == NULL || a->type == NODE_NIL) {
+            emit_asm("MOV  R0, BOXED_NIL\n");
+            emit_asm("PUSH R0\n");
+            continue;
+        }
+        if (i == note_slot && a->type == NODE_STRING) {
+            static const char *names[] = { "C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-" };
+            const char *s = a->as.string_val.value;
+            int note = -1;
+            if (s != NULL && strlen(s) == 3 && s[2] >= '0' && s[2] <= '8')
+                for (int k = 0; k < 12; k++)
+                    if (s[0] == names[k][0] && s[1] == names[k][1]) note = k + (s[2] - '0') * 12;
+            if (note < 0) {
+                compiler_error(ERR_SEMANTIC, node->line_number,
+                    "sfx(): invalid note \"%s\", should be like C#4", s ? s : "");
+            }
+            union { float f; uint32_t u; } cv = { .f = (float) note };
+            emit_asm("MOV  R0, 0x%08X ; note %s = %d\n", cv.u, s, note);
+            emit_asm("PUSH R0\n");
+            continue;
+        }
+        int reg = allocate_register();
+        generate_asm(a, reg);
+        ensure_in_register(reg);
+        emit_asm("PUSH R%d\n", reg);
+        unlock_register(reg);
+    }
+}
+
 bool emit_tic80_sfx_intrinsic(ASTNode *node, int dest_reg) {
+    if (tic80_audio_rendered) {
+        // The cart's own SFX, synthesized at compile time (tic80_audio.c).
+        emit_asm("    ;; --- TIC-80 sfx(id, note, duration, channel, volume) ---\n");
+        if (node->as.call.args_head == NULL) {
+            compiler_error(ERR_SEMANTIC, node->line_number,
+                "sfx() requires at least 1 argument: sfx(id [, note, duration, channel, volume, speed])");
+            return false;
+        }
+        tic80_push_sound_args(node, 5, 1);
+        emit_asm("CALL __builtin_tic80_sfx\n");
+        emit_asm("IADD SP, 5\n");
+        if (dest_reg != 0) emit_asm("MOV R%d, BOXED_NIL\n", dest_reg);
+        return true;
+    }
     emit_asm("    ;; --- TIC-80 sfx() Intrinsic (tone bank) ---\n");
 
     ASTNode *args[6] = { NULL };
@@ -632,6 +685,15 @@ bool emit_tic80_sfx_intrinsic(ASTNode *node, int dest_reg) {
 }
 
 bool emit_tic80_music_intrinsic(ASTNode *node, int dest_reg) {
+    if (tic80_audio_rendered) {
+        // The cart's own tracks, synthesized at compile time (tic80_audio.c).
+        emit_asm("    ;; --- TIC-80 music(track, frame, row, loop) ---\n");
+        tic80_push_sound_args(node, 4, -1);
+        emit_asm("CALL __builtin_tic80_music\n");
+        emit_asm("IADD SP, 4\n");
+        if (dest_reg != 0) emit_asm("MOV R%d, BOXED_NIL\n", dest_reg);
+        return true;
+    }
     emit_asm("    ;; --- TIC-80 music() Intrinsic (tone bank) ---\n");
 
     register_pico8_tone_bank();

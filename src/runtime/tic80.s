@@ -126,6 +126,9 @@ _tic80_init_textures_done:
     ;; Initialize sprite flags buffer
     CALL  __builtin_tic80_init_flags
 
+    ;; Synthesized sounds: loop points, sfx channel durations
+    CALL  __tic80_audio_init
+
     ;; Restore callee-saved register
     POP   R13
 
@@ -191,7 +194,7 @@ _tic80_init_flags_done:
 ;; [BP+5]:  colorkey  (Transparent color index: 16=opaque, 0-15=transparent)
 ;; [BP+6]:  scale     (TIC-80 scale: 1.0 = 2.625 on Vircon32)
 ;; [BP+7]:  flip      (0=none, 1=horizontal, 2=vertical, 3=both)
-;; [BP+8]:  rotate    (0=0°, 1=90°, 2=180°, 3=270°) - IGNORED
+;; [BP+8]:  rotate    (0=0°, 1=90°, 2=180°, 3=270°)
 ;; [BP+9]:  w         (Grid Width in sprites)
 ;; [BP+10]: h         (Grid Height in sprites)
 ;;
@@ -206,6 +209,20 @@ _tic80_init_flags_done:
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;; ROTATE (2026-09-26): implemented, following TIC-80's own drawSprite()/
+;; drawTile() (src/core/draw.c). Each 8x8 tile gets one of the 8 dihedral
+;; orientations  o = flip, XORed with 1/3/2 for rotate 1/2/3, |4 when the
+;; axes swap (rotate 1 or 3). o 0-3 are plain flips (negative GPU scale,
+;; DrawRegionZoomed, as before); o 4-7 need a quarter turn, drawn with
+;; DrawRegionRotozoomed:  o5 = +90deg, o6 = -90deg, o4 = +90deg with Y
+;; mirrored, o7 = +90deg with X mirrored. The hotspot is the region's
+;; top-left, so the transformed tile covers [0,L] or [-L,0] on each axis;
+;; (ox, oy) moves the drawing point so it covers [T, T+L] in both cases.
+;; Multi-tile sprites pick the source tile (mx, my) and destination cell
+;; (i, j) -- swapped for 90/270 -- exactly as TIC-80 does.
+;;
+;; Locals: [BP-14] ox  [BP-15] oy  [BP-16] 1 = rotozoom  [BP-17] flip
+;;         [BP-18] rotate
 __builtin_tic80_spr:
     PUSH  BP
     MOV   BP, SP
@@ -222,17 +239,13 @@ __builtin_tic80_spr:
     PUSH  R11
     PUSH  R12
     PUSH  R13
+    ISUB  SP, 5
 
     ;; AUDIT FIXES (2026-09, verified in a headless run of the real CPU):
     ;;  - colorkey went straight to GPU_SelectedTexture: the extremely common
     ;;    explicit spr(id, x, y, -1) selected texture -1 (the BIOS font), and
     ;;    every later swatch primitive inherited it. Anything outside 0-15
     ;;    now means "no transparency" = texture 16.
-    ;;  - the flip tests ANDed into an UNINITIALIZED register (AND R3, R2 /
-    ;;    AND R11, R1), so flipping depended on leftover register contents.
-    ;;  - a flipped tile spans [pt - 8*scale, pt] (negative GPU scale), so it
-    ;;    belongs at base + (w - col)*8*scale, not (w - 1 - col) -- flipped
-    ;;    sprites were drawn one full tile to the left/up.
     ;;  - positions are floored (FADD 0.5 + CFI truncated toward zero, so
     ;;    sprites partly off the left/top edge landed a pixel off).
     ;;  - all registers are preserved.
@@ -252,33 +265,129 @@ _tic80_spr_opaque:
 _tic80_spr_tex:
     OUT   GPU_SelectedTexture, R1
 
-    ;; --- scale (TIC-80 scale * 2.625) and flip flags ---
+    ;; --- scale S (TIC-80 scale * 2.625), tile size L = 8*S ---
     MOV   R1, [BP+6]
     FMUL  R1, 2.625
     MOV   R10, R1
-    FMUL  R10, 8.0            ; R10 = tile size in screen px
+    FMUL  R10, 8.0
 
-    MOV   R2, [BP+7]
-    FLR   R2
-    CFI   R2
-    MOV   R12, R2
-    AND   R12, 1              ; R12 = flip x (0/1)
-    MOV   R13, R2
-    AND   R13, 2
-    SHL   R13, -1             ; R13 = flip y (0/1)
+    ;; --- flip (R11) and rotate (R12), 0-3 ---
+    MOV   R11, [BP+7]
+    FLR   R11
+    CFI   R11
+    AND   R11, 3
+    MOV   R12, [BP+8]
+    FLR   R12
+    CFI   R12
+    AND   R12, 3
+    MOV   [BP-17], R11
+    MOV   [BP-18], R12
 
-    MOV   R2, R1
-    JF    R12, _tic80_spr_sx
-    FSGN  R2
-_tic80_spr_sx:
-    OUT   GPU_DrawingScaleX, R2
-    MOV   R2, R1
-    JF    R13, _tic80_spr_sy
-    FSGN  R2
-_tic80_spr_sy:
-    OUT   GPU_DrawingScaleY, R2
+    ;; --- orientation o (R2) ---
+    MOV   R2, R11
+    MOV   R3, R12
+    IEQ   R3, 1
+    JF    R3, _tic80_spr_o1
+    XOR   R2, 1
+_tic80_spr_o1:
+    MOV   R3, R12
+    IEQ   R3, 2
+    JF    R3, _tic80_spr_o2
+    XOR   R2, 3
+_tic80_spr_o2:
+    MOV   R3, R12
+    IEQ   R3, 3
+    JF    R3, _tic80_spr_o3
+    XOR   R2, 2
+_tic80_spr_o3:
+    MOV   R3, R12
+    AND   R3, 1
+    JF    R3, _tic80_spr_o4
+    OR    R2, 4
+_tic80_spr_o4:
 
-    ;; --- loop limits / base ---
+    ;; --- per-orientation GPU setup: R5/R6 scale x/y, R8 angle,
+    ;;     R3/R13 ox/oy (0 or L), R9 rotozoom flag ---
+    MOV   R4, R10
+    FADD  R4, 0.5
+    FLR   R4
+    CFI   R4                  ; R4 = L in whole screen px
+    MOV   R5, R1
+    MOV   R6, R1
+    MOV   R8, 0.0
+    MOV   R3, 0
+    MOV   R13, 0
+    MOV   R9, 0
+
+    MOV   R7, R2
+    IEQ   R7, 0
+    JT    R7, _tic80_spr_or_done    ; common case: no flip, no rotation
+    MOV   R7, R2
+    IEQ   R7, 1
+    JT    R7, _tic80_spr_or1
+    MOV   R7, R2
+    IEQ   R7, 2
+    JT    R7, _tic80_spr_or2
+    MOV   R7, R2
+    IEQ   R7, 3
+    JT    R7, _tic80_spr_or3
+    MOV   R7, R2
+    IEQ   R7, 4
+    JT    R7, _tic80_spr_or4
+    MOV   R7, R2
+    IEQ   R7, 5
+    JT    R7, _tic80_spr_or5
+    MOV   R7, R2
+    IEQ   R7, 6
+    JT    R7, _tic80_spr_or6
+    MOV   R7, R2
+    IEQ   R7, 7
+    JT    R7, _tic80_spr_or7
+    JMP   _tic80_spr_or_done
+_tic80_spr_or1:                 ; mirror X
+    FSGN  R5
+    MOV   R3, R4
+    JMP   _tic80_spr_or_done
+_tic80_spr_or2:                 ; mirror Y
+    FSGN  R6
+    MOV   R13, R4
+    JMP   _tic80_spr_or_done
+_tic80_spr_or3:                 ; mirror both (= 180deg)
+    FSGN  R5
+    FSGN  R6
+    MOV   R3, R4
+    MOV   R13, R4
+    JMP   _tic80_spr_or_done
+_tic80_spr_or4:                 ; transpose: +90deg after mirroring Y
+    FSGN  R6
+    MOV   R8, 1.5707964
+    MOV   R9, 1
+    JMP   _tic80_spr_or_done
+_tic80_spr_or5:                 ; +90deg (clockwise on screen)
+    MOV   R8, 1.5707964
+    MOV   R9, 1
+    MOV   R3, R4
+    JMP   _tic80_spr_or_done
+_tic80_spr_or6:                 ; -90deg
+    MOV   R8, -1.5707964
+    MOV   R9, 1
+    MOV   R13, R4
+    JMP   _tic80_spr_or_done
+_tic80_spr_or7:                 ; anti-transpose: +90deg after mirroring X
+    FSGN  R5
+    MOV   R8, 1.5707964
+    MOV   R9, 1
+    MOV   R3, R4
+    MOV   R13, R4
+_tic80_spr_or_done:
+    OUT   GPU_DrawingScaleX, R5
+    OUT   GPU_DrawingScaleY, R6
+    OUT   GPU_DrawingAngle, R8
+    MOV   [BP-14], R3
+    MOV   [BP-15], R13
+    MOV   [BP-16], R9
+
+    ;; --- w, h, id, base position ---
     MOV   R5, [BP+9]
     CFI   R5                  ; w
     MOV   R6, [BP+10]
@@ -298,59 +407,140 @@ _tic80_spr_sy:
     FLR   R9
     CFI   R9                  ; base y
 
-    MOV   R4, 0               ; row
-_tic80_spr_row_loop_start:
-    MOV   R1, R4
-    IGE   R1, R6
-    JT    R1, _tic80_spr_end
-    MOV   R3, 0               ; col
-_tic80_spr_col_loop_start:
+    MOV   R3, 0               ; i (column)
+_tic80_spr_i_loop:
     MOV   R1, R3
     IGE   R1, R5
-    JT    R1, _tic80_spr_row_loop_end
-
+    JT    R1, _tic80_spr_end
+    MOV   R4, 0               ; j (row)
+_tic80_spr_j_loop:
     MOV   R1, R4
-    IMUL  R1, 16
-    IADD  R1, R3
-    IADD  R1, R7
-    OUT   GPU_SelectedRegion, R1
+    IGE   R1, R6
+    JT    R1, _tic80_spr_i_next
 
-    ;; x = base + col*tile, or base + (w - col)*tile when flipped
-    MOV   R1, R3
-    JF    R12, _tic80_spr_x_plain
+    ;; source tile (R2 = mx, R0 = my)
+    MOV   R2, R3
+    MOV   R0, R4
+    MOV   R11, [BP-17]        ; flip
+    MOV   R12, [BP-18]        ; rotate
+    MOV   R1, R11
+    OR    R1, R12
+    JF    R1, _tic80_spr_src_done   ; no flip, no rotation: tile (i, j)
+    MOV   R1, R11
+    AND   R1, 1
+    JF    R1, _tic80_spr_nfx
     MOV   R1, R5
-    ISUB  R1, R3
-_tic80_spr_x_plain:
-    CIF   R1
-    FMUL  R1, R10
-    FADD  R1, 0.5
-    FLR   R1
-    CFI   R1
-    IADD  R1, R8
-    OUT   GPU_DrawingPointX, R1
-
-    MOV   R1, R4
-    JF    R13, _tic80_spr_y_plain
+    ISUB  R1, 1
+    ISUB  R1, R2
+    MOV   R2, R1              ; mx = w-1-mx
+_tic80_spr_nfx:
+    MOV   R1, R11
+    AND   R1, 2
+    JF    R1, _tic80_spr_nfy
     MOV   R1, R6
-    ISUB  R1, R4
-_tic80_spr_y_plain:
-    CIF   R1
-    FMUL  R1, R10
-    FADD  R1, 0.5
-    FLR   R1
-    CFI   R1
-    IADD  R1, R9
-    OUT   GPU_DrawingPointY, R1
+    ISUB  R1, 1
+    ISUB  R1, R0
+    MOV   R0, R1              ; my = h-1-my
+_tic80_spr_nfy:
+    ;; R13 = (flip == 0 or flip == 3)
+    MOV   R13, R11
+    IEQ   R13, 0
+    MOV   R1, R11
+    IEQ   R1, 3
+    OR    R13, R1
+    MOV   R1, R12
+    IEQ   R1, 2
+    JF    R1, _tic80_spr_nr2
+    MOV   R1, R5
+    ISUB  R1, 1
+    ISUB  R1, R2
+    MOV   R2, R1
+    MOV   R1, R6
+    ISUB  R1, 1
+    ISUB  R1, R0
+    MOV   R0, R1
+    JMP   _tic80_spr_src_done
+_tic80_spr_nr2:
+    MOV   R1, R12
+    IEQ   R1, 1
+    JF    R1, _tic80_spr_nr1
+    JF    R13, _tic80_spr_r1_mx
+    MOV   R1, R6              ; rotate 90, flip 0/3: my = h-1-my
+    ISUB  R1, 1
+    ISUB  R1, R0
+    MOV   R0, R1
+    JMP   _tic80_spr_src_done
+_tic80_spr_r1_mx:
+    MOV   R1, R5              ; rotate 90, flip 1/2: mx = w-1-mx
+    ISUB  R1, 1
+    ISUB  R1, R2
+    MOV   R2, R1
+    JMP   _tic80_spr_src_done
+_tic80_spr_nr1:
+    MOV   R1, R12
+    IEQ   R1, 3
+    JF    R1, _tic80_spr_src_done
+    JF    R13, _tic80_spr_r3_my
+    MOV   R1, R5              ; rotate 270, flip 0/3: mx = w-1-mx
+    ISUB  R1, 1
+    ISUB  R1, R2
+    MOV   R2, R1
+    JMP   _tic80_spr_src_done
+_tic80_spr_r3_my:
+    MOV   R1, R6              ; rotate 270, flip 1/2: my = h-1-my
+    ISUB  R1, 1
+    ISUB  R1, R0
+    MOV   R0, R1
+_tic80_spr_src_done:
+    IMUL  R0, 16
+    IADD  R0, R2
+    IADD  R0, R7
+    OUT   GPU_SelectedRegion, R0
 
+    ;; destination cell: (i, j), or (j, i) for rotate 90/270
+    MOV   R2, R3
+    MOV   R0, R4
+    MOV   R1, R12
+    AND   R1, 1
+    JF    R1, _tic80_spr_cell
+    MOV   R2, R4
+    MOV   R0, R3
+_tic80_spr_cell:
+    CIF   R2
+    FMUL  R2, R10
+    FADD  R2, 0.5
+    FLR   R2
+    CFI   R2
+    IADD  R2, R8
+    MOV   R1, [BP-14]
+    IADD  R2, R1
+    OUT   GPU_DrawingPointX, R2
+    CIF   R0
+    FMUL  R0, R10
+    FADD  R0, 0.5
+    FLR   R0
+    CFI   R0
+    IADD  R0, R9
+    MOV   R1, [BP-15]
+    IADD  R0, R1
+    OUT   GPU_DrawingPointY, R0
+
+    MOV   R1, [BP-16]
+    JT    R1, _tic80_spr_draw_rot
     OUT   GPU_Command, GPUCommand_DrawRegionZoomed
-
-    IADD  R3, 1
-    JMP   _tic80_spr_col_loop_start
-_tic80_spr_row_loop_end:
+    JMP   _tic80_spr_j_next
+_tic80_spr_draw_rot:
+    OUT   GPU_Command, GPUCommand_DrawRegionRotozoomed
+_tic80_spr_j_next:
     IADD  R4, 1
-    JMP   _tic80_spr_row_loop_start
+    JMP   _tic80_spr_j_loop
+_tic80_spr_i_next:
+    IADD  R3, 1
+    JMP   _tic80_spr_i_loop
 
 _tic80_spr_end:
+    MOV   R0, BOXED_NIL
+    IADD  SP, 5
     POP   R13
     POP   R12
     POP   R11
@@ -2566,4 +2756,295 @@ _tic80_memop_done:
     POP   R3
     MOV   SP, BP
     POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; TIC-80 SOUND (tic80_audio.c synthesizes the cart's sound at compile time)
+;;
+;; music(track, ...) plays the track's pre-mixed sound on SPU channel 0;
+;; sfx(id, note, ...) plays SFX id's render for that note on SPU channel
+;; 4 + channel, at the SPU speed giving the note's pitch. Tables:
+;;   __tic80_snd_loops  count, then (sound id, loops, loop start, loop end)
+;;   __tic80_tracks     8 x 20 words: sound id or -1, loops, tempo, speed,
+;;                      16 frame offsets in samples (-1: frame never played)
+;;   __tic80_sfx_map    64 x 97 x (sound id or -1, SPU speed as float);
+;;                      entry 96 = the SFX's own note
+;; TIC80_SFX_DURATION + c: frames left for sfx channel c (<= 0: unlimited),
+;; counted down by __builtin_tic80_sound_tick after every TIC().
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__tic80_audio_init:
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    MOV   R0, -1
+    MOV   R1, TIC80_SFX_DURATION
+    MOV   [R1], R0
+    MOV   [R1+1], R0
+    MOV   [R1+2], R0
+    MOV   [R1+3], R0
+    MOV   R1, __tic80_snd_loops
+    MOV   R2, [R1]                  ; count
+    IADD  R1, 1
+_tic80_audio_init_loop:
+    MOV   R0, R2
+    IGT   R0, 0
+    JF    R0, _tic80_audio_init_done
+    MOV   R0, [R1]
+    OUT   SPU_SelectedSound, R0
+    MOV   R0, [R1+1]
+    OUT   SPU_SoundPlayWithLoop, R0
+    JF    R0, _tic80_audio_init_next
+    MOV   R0, [R1+2]
+    OUT   SPU_SoundLoopStart, R0
+    MOV   R0, [R1+3]
+    OUT   SPU_SoundLoopEnd, R0
+_tic80_audio_init_next:
+    IADD  R1, 4
+    ISUB  R2, 1
+    JMP   _tic80_audio_init_loop
+_tic80_audio_init_done:
+    POP   R3
+    POP   R2
+    POP   R1
+    RET
+
+;; __tic80_arg_int (internal): R1 = boxed argument -> R1 = floored integer,
+;; or R2 (the default) when R1 is nil / not a number. Clobbers R0.
+__tic80_arg_int:
+    MOV   R0, R1
+    AND   R0, NAN_VALUE
+    IEQ   R0, NAN_VALUE
+    JF    R0, _tic80_arg_int_num
+    MOV   R1, R2
+    RET
+_tic80_arg_int_num:
+    FLR   R1
+    CFI   R1
+    RET
+
+;; __builtin_tic80_sfx(id, note, duration, channel, volume)
+;;   [BP+2] id  [BP+3] note  [BP+4] duration  [BP+5] channel  [BP+6] volume
+__builtin_tic80_sfx:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    ;; channel (default 0) -> R5 = SPU channel 4 + c
+    MOV   R1, [BP+5]
+    MOV   R2, 0
+    CALL  __tic80_arg_int
+    MOV   R0, R1
+    ILT   R0, 0
+    JT    R0, _tic80_sfx_done
+    MOV   R0, R1
+    IGT   R0, 3
+    JT    R0, _tic80_sfx_done
+    MOV   R4, R1                    ; R4 = TIC-80 channel
+    MOV   R5, R1
+    IADD  R5, 4
+    OUT   SPU_SelectedChannel, R5
+    OUT   SPU_Command, SPUCommand_StopSelectedChannel
+    MOV   R0, TIC80_SFX_DURATION
+    IADD  R0, R4
+    MOV   R2, -1
+    MOV   [R0], R2
+    ;; id (< 0: just stop)
+    MOV   R1, [BP+2]
+    MOV   R2, -1
+    CALL  __tic80_arg_int
+    MOV   R0, R1
+    ILT   R0, 0
+    JT    R0, _tic80_sfx_done
+    MOV   R0, R1
+    IGT   R0, 63
+    JT    R0, _tic80_sfx_done
+    MOV   R3, R1                    ; R3 = id
+    ;; note: nil / negative -> the SFX's own note (entry 96)
+    MOV   R1, [BP+3]
+    MOV   R2, 96
+    CALL  __tic80_arg_int
+    MOV   R0, R1
+    ILT   R0, 0
+    JF    R0, _tic80_sfx_note_hi
+    MOV   R1, 96
+_tic80_sfx_note_hi:
+    MOV   R0, R1
+    IGT   R0, 96
+    JF    R0, _tic80_sfx_note_ok
+    MOV   R1, 95
+_tic80_sfx_note_ok:
+    ;; entry = __tic80_sfx_map + (id * 97 + note) * 2
+    IMUL  R3, 97
+    IADD  R3, R1
+    SHL   R3, 1
+    MOV   R0, __tic80_sfx_map
+    IADD  R3, R0
+    MOV   R1, [R3]                  ; sound id
+    MOV   R0, R1
+    ILT   R0, 0
+    JT    R0, _tic80_sfx_done       ; not rendered (unused SFX)
+    OUT   SPU_ChannelAssignedSound, R1
+    MOV   R1, [R3+1]
+    OUT   SPU_ChannelSpeed, R1
+    ;; volume 0-15 (default 15)
+    MOV   R1, [BP+6]
+    MOV   R2, 15
+    CALL  __tic80_arg_int
+    CIF   R1
+    FDIV  R1, 15.0
+    OUT   SPU_ChannelVolume, R1
+    OUT   SPU_Command, SPUCommand_PlaySelectedChannel
+    ;; duration in frames (nil / negative: until replaced or stopped)
+    MOV   R1, [BP+4]
+    MOV   R2, -1
+    CALL  __tic80_arg_int
+    MOV   R0, R1
+    IEQ   R0, 0
+    JF    R0, _tic80_sfx_dur
+    OUT   SPU_Command, SPUCommand_StopSelectedChannel   ; duration 0: silent
+_tic80_sfx_dur:
+    MOV   R0, TIC80_SFX_DURATION
+    IADD  R0, R4
+    MOV   [R0], R1
+_tic80_sfx_done:
+    MOV   R0, BOXED_NIL
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; __builtin_tic80_music(track, frame, row, loop)
+;;   [BP+2] track  [BP+3] frame  [BP+4] row  [BP+5] loop
+;; music() / music(-1) stops. Starts at the frame's offset in the rendered
+;; track plus row2tick(row) ticks.
+__builtin_tic80_music:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    OUT   SPU_SelectedChannel, 0
+    OUT   SPU_Command, SPUCommand_StopSelectedChannel
+    MOV   R1, [BP+2]
+    MOV   R2, -1
+    CALL  __tic80_arg_int
+    MOV   R0, R1
+    ILT   R0, 0
+    JT    R0, _tic80_music_done
+    MOV   R0, R1
+    IGT   R0, 7
+    JT    R0, _tic80_music_done
+    IMUL  R1, 20
+    MOV   R0, __tic80_tracks
+    IADD  R1, R0
+    MOV   R3, R1                    ; R3 = track entry
+    MOV   R0, [R3]
+    MOV   R4, R0
+    ILT   R4, 0
+    JT    R4, _tic80_music_done     ; track not rendered
+    OUT   SPU_ChannelAssignedSound, R0
+    OUT   SPU_ChannelVolume, 1.0
+    OUT   SPU_ChannelSpeed, TIC80_AUDIO_SPEED
+    OUT   SPU_Command, SPUCommand_PlaySelectedChannel
+    ;; loop: nil / true -> the sound's own loop; false -> off
+    MOV   R0, [BP+5]
+    IEQ   R0, BOXED_FALSE
+    JF    R0, _tic80_music_pos
+    OUT   SPU_ChannelLoopEnabled, 0
+_tic80_music_pos:
+    ;; frame offset
+    MOV   R1, [BP+3]
+    MOV   R2, 0
+    CALL  __tic80_arg_int
+    MOV   R0, R1
+    ILT   R0, 0
+    JT    R0, _tic80_music_frame0
+    MOV   R0, R1
+    IGT   R0, 15
+    JT    R0, _tic80_music_frame0
+    MOV   R4, R3
+    IADD  R4, 4
+    IADD  R4, R1
+    MOV   R4, [R4]
+    MOV   R0, R4
+    ILT   R0, 0
+    JF    R0, _tic80_music_have_frame
+_tic80_music_frame0:
+    MOV   R4, 0
+_tic80_music_have_frame:
+    ;; + row: ticks = row * speed * 900 / tempo / 6 ; samples = ticks * RATE / 60
+    MOV   R1, [BP+4]
+    MOV   R2, 0
+    CALL  __tic80_arg_int
+    MOV   R0, R1
+    IGT   R0, 0
+    JF    R0, _tic80_music_setpos
+    MOV   R2, [R3+3]                ; speed
+    IMUL  R1, R2
+    IMUL  R1, 900
+    MOV   R2, [R3+2]                ; tempo
+    IDIV  R1, R2
+    IDIV  R1, 6
+    IMUL  R1, TIC80_AUDIO_RATE
+    IDIV  R1, 60
+    IADD  R4, R1
+_tic80_music_setpos:
+    MOV   R0, R4
+    IEQ   R0, 0
+    JT    R0, _tic80_music_done
+    OUT   SPU_ChannelPosition, R4
+_tic80_music_done:
+    MOV   R0, BOXED_NIL
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; __builtin_tic80_sound_tick: once per TIC(): count sfx durations down and
+;; stop a channel when its duration runs out (as TIC-80's sfx() does).
+__builtin_tic80_sound_tick:
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    MOV   R1, 0
+_tic80_sound_tick_loop:
+    MOV   R0, R1
+    IEQ   R0, 4
+    JT    R0, _tic80_sound_tick_done
+    MOV   R2, TIC80_SFX_DURATION
+    IADD  R2, R1
+    MOV   R3, [R2]
+    MOV   R0, R3
+    IGT   R0, 0
+    JF    R0, _tic80_sound_tick_next
+    ISUB  R3, 1
+    MOV   [R2], R3
+    MOV   R0, R3
+    IEQ   R0, 0
+    JF    R0, _tic80_sound_tick_next
+    MOV   R0, R1
+    IADD  R0, 4
+    OUT   SPU_SelectedChannel, R0
+    OUT   SPU_Command, SPUCommand_StopSelectedChannel
+    MOV   R0, -1
+    MOV   [R2], R0
+_tic80_sound_tick_next:
+    IADD  R1, 1
+    JMP   _tic80_sound_tick_loop
+_tic80_sound_tick_done:
+    POP   R3
+    POP   R2
+    POP   R1
     RET

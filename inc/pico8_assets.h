@@ -36,7 +36,7 @@ extern int   pico8_sfx_base_id;
 bool         register_pico8_sfx_sounds (void);
 void         emit_pico8_audio_tables   (FILE *);
 extern long  pico8_audio_bytes;
-extern int   pico8_audio_rate;
+extern int   synth_audio_rate;
 
 char        *pico8_append_prelude   (char *);
 

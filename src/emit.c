@@ -581,6 +581,13 @@ int   emit_variable_map (void)
         fprintf (out(), "%%define  TIC80_SPRITE_COUNT       0x00000200\n");
         fprintf (out(), "%%define  TIC80_FLAGS_PER_SPRITE   0x00000008\n");
         fprintf (out(), "%%define  TIC80_FLAG_BUFFER_WORDS  0x00000080\n");
+        // synthesized sound (tic80_audio.c): rate, base SPU speed, and the
+        // remaining duration (frames, -1 = none) of each sfx() channel 0-3
+        fprintf (out(), "%%define  TIC80_AUDIO_RATE         %d\n", tic80_audio_rate ());
+        fprintf (out(), "%%define  TIC80_AUDIO_SPEED        %.6f\n", tic80_audio_rate () / 44100.0);
+        fprintf (out(), "%%define  TIC80_SFX_DURATION       0x%.8X\n", next_ram_address);
+        next_ram_address = next_ram_address + 4;
+        lines_printed += 3;
     }
 
     if (runtime_req.needs_pico8)
@@ -599,8 +606,8 @@ int   emit_variable_map (void)
         fprintf (out(), "%%define  PICO8_SFX_NEXT           0x%.8X\n", (next_ram_address + 9));
         // SFX sound ids start here (-1: the cart plays no synthesized sound)
         fprintf (out(), "%%define  PICO8_SFX_BASE           %d\n", pico8_sfx_base_id);
-        fprintf (out(), "%%define  PICO8_AUDIO_RATE         %d\n", pico8_audio_rate);
-        fprintf (out(), "%%define  PICO8_AUDIO_SPEED        %.4f\n", pico8_audio_rate / 44100.0);
+        fprintf (out(), "%%define  PICO8_AUDIO_RATE         %d\n", synth_audio_rate);
+        fprintf (out(), "%%define  PICO8_AUDIO_SPEED        %.4f\n", synth_audio_rate / 44100.0);
         // camera x, y (floats), pen (int), tick frame, draw start frame /
         // cycle, last draw's cost in cycles, music sequencer state (current
         // pattern, frame it ends on), next auto sfx channel
@@ -848,6 +855,7 @@ void  emit_runtime_library (void)
         emit_tic80_ram_rom (out());
 
         emit_tic80_map_data (out());
+        emit_tic80_audio_tables (out());
     }
 
     if (runtime_req.needs_vircon32)

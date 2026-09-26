@@ -2410,6 +2410,7 @@ _pico8_init_flags_loop:
 __builtin_pico8_flip:
     PUSH  R1
     CALL  __builtin_pico8_present
+    CALL  __builtin_pico8_pause_check
     MOV   R1, PICO8_FRAME_STEP
 _pico8_flip_wait:
     WAIT
@@ -2422,4 +2423,83 @@ _pico8_flip_wait:
     JT    R0, _pico8_flip_wait
     MOV   R0, BOXED_NIL
     POP   R1
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_pico8_pause_check: the TIC-80 layer's pause, for PICO-8 carts.
+;; Called once per PICO-8 tick (and by flip()). If gamepad 1's Start was just
+;; pressed: pause every SPU channel, darken the last frame with a translucent
+;; black overlay, print "- PAUSED -", and wait (drawing nothing, so the
+;; darkened frame stays up) until Start is pressed again. Then resume the
+;; channels and push the music sequencer's pattern-end frame forward by the
+;; time spent paused, so the song carries on where it stopped instead of
+;; skipping ahead. The cart's own code does not run while paused.
+;; Preserves registers (R0 clobbered).
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+__builtin_pico8_pause_check:
+    IN    R0, INP_SelectedGamepad
+    PUSH  R0
+    OUT   INP_SelectedGamepad, 0
+    IN    R0, INP_GamepadButtonStart
+    IEQ   R0, 1                          ; pressed on this very frame
+    JT    R0, _pico8_pause_enter
+    POP   R0
+    OUT   INP_SelectedGamepad, R0
+    RET
+_pico8_pause_enter:
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    IN    R1, TIM_FrameCounter           ; R1 = frame the pause began
+    OUT   SPU_Command, SPUCommand_PauseAllChannels
+
+    ;; darken: the black swatch stretched over the whole screen at ~60%
+    IN    R2, GPU_MultiplyColor
+    IN    R3, GPU_SelectedTexture
+    PUSH  R3
+    OUT   GPU_SelectedTexture, 0
+    MOV   R0, PICO8_SWATCH_REGION_BASE   ; color 0 = black
+    OUT   GPU_SelectedRegion, R0
+    OUT   GPU_DrawingPointX, 0
+    OUT   GPU_DrawingPointY, 0
+    MOV   R0, 214.0                      ; 3px swatch * 214 >= 640
+    OUT   GPU_DrawingScaleX, R0
+    MOV   R0, 120.0                      ; 3px * 120 = 360
+    OUT   GPU_DrawingScaleY, R0
+    MOV   R0, 0x99FFFFFF                 ; alpha 0x99
+    OUT   GPU_MultiplyColor, R0
+    OUT   GPU_Command, GPUCommand_DrawRegionZoomed
+    MOV   R0, 0xFFFFFFFF
+    OUT   GPU_MultiplyColor, R0
+    MOV   R0, 270
+    PUSH  R0
+    MOV   R0, 172
+    PUSH  R0
+    MOV   R0, __const_str_pause
+    OR    R0, BOXED_ROMSTRING
+    PUSH  R0
+    CALL  __builtin_print
+    IADD  SP, 3
+    OUT   GPU_MultiplyColor, R2
+    POP   R3
+    OUT   GPU_SelectedTexture, R3
+
+_pico8_pause_wait:
+    WAIT
+    OUT   INP_SelectedGamepad, 0
+    IN    R0, INP_GamepadButtonStart
+    IEQ   R0, 1
+    JF    R0, _pico8_pause_wait
+
+    OUT   SPU_Command, SPUCommand_ResumeAllChannels
+    IN    R0, TIM_FrameCounter
+    ISUB  R0, R1                         ; frames spent paused
+    MOV   R2, [PICO8_MUSIC_END]
+    IADD  R2, R0
+    MOV   [PICO8_MUSIC_END], R2
+    POP   R3
+    POP   R2
+    POP   R1
+    POP   R0
+    OUT   INP_SelectedGamepad, R0
     RET

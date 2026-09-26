@@ -15,9 +15,9 @@ Vircon32 ones.
 
 Nothing in the cart has to be edited: a `.p8` selects the PICO-8 layer by
 itself, and the hints have command-line equivalents that take precedence
-over them — `--api pico8`, `--title "..."`, `--p8rate N`:
+over them — `--api pico8`, `--title "..."`, `--rate N`:
 
-    v32lua celeste.p8 --title "celeste" --p8rate 11025
+    v32lua celeste.p8 --title "celeste" --rate 11025
 
 Without `--title` (or a `--#title` hint) the title is the cart's first
 comment line (PICO-8 shows it as the cart's name), else the file name,
@@ -80,6 +80,14 @@ before `_init()`; the map and flags are already loaded then.
 | `_ENV[name]` | Reads or writes the global called `name` (only globals the program uses by name exist). |
 | `pal`, `palt` | Accepted as no-ops (one warning): sprite colors are baked into the texture. |
 
+## Pause
+
+Start (on gamepad 1) pauses the game, as on the TIC-80 layer: the cart's
+code stops, the SPU channels pause, the last frame stays on screen darkened
+with "- PAUSED -" over it, and Start again resumes. Music picks up where it
+stopped (the sequencer's clock is moved forward by the time spent paused).
+`flip()` loops check for the pause too.
+
 ## Syntax
 
 With `--#api pico8` (or a `.p8`): `!=`, `+= -= *= /= %= ..= ^= \=`, `a\b`
@@ -117,10 +125,11 @@ sound at the end of the frame, so the next pattern starts exactly where
 the previous one ends. A game update that runs past the frame a pattern
 ends on starts the next one late, at the position it would have reached.
 
-Sample rate (`--p8rate N` on the command line, or `--#p8rate` at the top of
-the file with `--#api`/`--#p8`):
+Sample rate (`--rate N` on the command line, or `--#rate` at the top of
+the file with `--#api`/`--#p8`; `--p8rate`/`--#p8rate` are the old names,
+still accepted). The same setting applies to TIC-80 carts:
 
-| `--#p8rate` | Celeste's sound data | Notes |
+| `--rate` | Celeste's sound data | Notes |
 |---|---|---|
 | `22050` (default) | 18 MB | PICO-8's own rate |
 | `11025` | 9 MB | lo-fi: the SPU plays samples without interpolation, so a quarter-speed sound has audible images around 10 kHz |

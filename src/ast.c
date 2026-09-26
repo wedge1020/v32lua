@@ -5,7 +5,7 @@ char          cart_version[64]    = "1.0";
 char          cart_title[128]     = "Vircon32 Program";
 bool          cart_title_was_set  = false;
 bool          g_cli_api_set       = false;
-bool          g_cli_p8rate_set    = false;
+bool          g_cli_rate_set    = false;
 bool          g_cli_title_set     = false;
 
 // Switches the compiler into one API mode: shared by the --#api hint, the
@@ -173,15 +173,16 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
         }
         node->as.cart_hint.value = strdup(path);
     }
-    else if (strcmp(action, "p8rate") == 0 && tokens >= 2) {
-        // --#p8rate 11025 | 22050 | 44100 -- sample rate of the sounds
-        // synthesized from the cart's __sfx__ (see pico8_audio.c)
+    else if ((strcmp(action, "rate") == 0 || strcmp(action, "p8rate") == 0) && tokens >= 2) {
+        // --#rate 11025 | 22050 | 44100 -- sample rate of the sounds
+        // synthesized from a PICO-8 cart's __sfx__ (pico8_audio.c) or a
+        // TIC-80 cart's <SFX>/<WAVES> (tic80_audio.c). --#p8rate: old name.
         int rate = atoi(param1[0] == '"' ? param1 + 1 : param1);
         if (rate != 11025 && rate != 22050 && rate != 44100) {
-            compiler_error(ERR_SEMANTIC, yylineno, "--#p8rate: use 11025, 22050 or 44100 (got '%s')", param1);
+            compiler_error(ERR_SEMANTIC, yylineno, "--#%s: use 11025, 22050 or 44100 (got '%s')", action, param1);
         }
-        if (!g_cli_p8rate_set) {      // --p8rate on the command line wins
-            pico8_audio_rate = rate;
+        if (!g_cli_rate_set) {      // --rate on the command line wins
+            synth_audio_rate = rate;
         }
         node->as.cart_hint.value = strdup(param1);
     }

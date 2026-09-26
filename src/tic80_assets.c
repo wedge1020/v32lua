@@ -202,13 +202,9 @@ void process_all_tic80_sections(void)
     // ========================================================================
     // Generate VSND from sound sections - NEW
     // ========================================================================
-    if (tic80_has_waves || tic80_has_sfx || tic80_has_tracks) {
-        // Generate VSND file from accumulated sound data
-        generate_vsnd_from_tic80_sounds("tic80_sounds.vsnd");
-
-        cart_resource_append (&sounds_head, &sounds_tail,
-                              next_sound_id++, "tic80_sounds", "tic80_sounds.vsnd");
-    }
+    // (Sound sections are synthesized by register_tic80_audio(), called
+    // from main() -- the old placeholder wrote an empty tic80_sounds.vsnd
+    // into the working directory and registered it twice.)
 }
 
 // ============================================================================
@@ -308,9 +304,14 @@ void process_tic80_section(const char *section, TIC80AssetData *assets)
     // ========================================================================
     else if (strcmp(section, "WAVES") == 0) {
         for (TIC80AssetData *item = assets; item != NULL; item = item->next) {
-            parse_tic80_wave(item->index, item->hex_data);
+            tic80_audio_store_row(section, item->index, item->hex_data);
         }
         tic80_has_waves = true;
+    }
+    else if (strcmp(section, "PATTERNS") == 0) {
+        for (TIC80AssetData *item = assets; item != NULL; item = item->next) {
+            tic80_audio_store_row(section, item->index, item->hex_data);
+        }
     }
     // ========================================================================
     // SFX SECTION - NEW
@@ -320,7 +321,7 @@ void process_tic80_section(const char *section, TIC80AssetData *assets)
     // ========================================================================
     else if (strcmp(section, "SFX") == 0) {
         for (TIC80AssetData *item = assets; item != NULL; item = item->next) {
-            parse_tic80_sfx(item->index, item->hex_data);
+            tic80_audio_store_row(section, item->index, item->hex_data);
         }
         tic80_has_sfx = true;
     }
@@ -332,7 +333,7 @@ void process_tic80_section(const char *section, TIC80AssetData *assets)
     // ========================================================================
     else if (strcmp(section, "TRACKS") == 0) {
         for (TIC80AssetData *item = assets; item != NULL; item = item->next) {
-            parse_tic80_track(item->index, item->hex_data);
+            tic80_audio_store_row(section, item->index, item->hex_data);
         }
         tic80_has_tracks = true;
     }

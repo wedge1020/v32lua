@@ -1,7 +1,6 @@
---#title "[PICO8] celeste"
 --#api pico8
 --#p8 "celeste.p8"
---#p8rate 11025
+--#rate 11025
 -- ~celeste~
 -- matt thorson + noel berry
 

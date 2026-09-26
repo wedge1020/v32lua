@@ -199,11 +199,12 @@ works):
   hint, else the cart's own title (TIC-80's `-- title:` metadata, PICO-8's
   first comment line) or the file name — prefixed with `[PICO8] ` or
   `[TIC80] ` in those API modes.
-* `--p8rate 11025|22050|44100`: Sample rate of PICO-8 sounds synthesized
-  from the cart (default 22050; see [doc/PICO8.md](doc/PICO8.md)).
+* `--rate 11025|22050|44100`: Sample rate of the sound synthesized from a
+  PICO-8 or TIC-80 cart (default 22050; see [doc/PICO8.md](doc/PICO8.md#sound)
+  and [doc/TIC80.md](doc/TIC80.md#sound)). `--p8rate` is the old name.
 
 ```bash
-$ v32lua celeste.p8 --title "celeste" --p8rate 11025   # API detected from .p8
+$ v32lua celeste.p8 --title "celeste" --rate 11025     # API detected from .p8
 $ v32lua game.tic                                        # TIC-80 binary cart
 ```
 
@@ -233,8 +234,11 @@ present):
   functions, and the fantasy-console-style asset sections) compiled down to
   native Vircon32 instructions, including the coordinate scaling needed to
   map TIC-80's 240×136 logical screen onto Vircon32's physical resolution.
-  `sfx()`/`music()` play from the same generated placeholder tone bank as
-  the PICO-8 layer; `print()` honours its color and returns the text width.
+  `sfx()`/`music()` play the cart's own `WAVES`/`SFX`/`PATTERNS`/`TRACKS`,
+  synthesized at compile time by a port of TIC-80's sound engine (see
+  [doc/TIC80.md](doc/TIC80.md)); `spr()` rotates; Start pauses the game (as
+  on the PICO-8 layer). `print()` honours its color and returns the text
+  width.
   `map()` takes all of TIC-80's optional arguments including `scale`
   (not the remap callback); `fget()` returns a boolean and `fset()` takes
   one. `peek`/`peek1`/`peek2`/`peek4`, `poke`/`poke1`/`poke2`/`poke4`,
@@ -282,7 +286,7 @@ Supported hints:
 | `--#title "TITLE"` | Sets the cart title. |
 | `--#api "tic80"` / `--#api "pico8"` | Selects a compatibility API layer (see above). |
 | `--#p8 "cart.p8"` | PICO-8: take the sprite sheet, sprite flags and map from a `.p8` cart (implies `--#api pico8`). |
-| `--#p8rate 11025` \| `22050` \| `44100` | PICO-8: sample rate of the sounds synthesized from the cart's `__sfx__` (default 22050; see [doc/PICO8.md](doc/PICO8.md#sound)). |
+| `--#rate 11025` \| `22050` \| `44100` | Sample rate of the sound synthesized from a PICO-8 or TIC-80 cart (default 22050; `--#p8rate` is the old name; see [doc/PICO8.md](doc/PICO8.md#sound)). |
 | `--#texture NAME "path/image.png"` | Registers a texture resource and binds it to a compile-time constant `NAME`. |
 | `--#sound NAME "path/sound.vsnd"` | Registers a sound resource and binds it to a compile-time constant `NAME`. |
 | `--#tilemap NAME "path/map.csv"` | Registers a tilemap from a CSV file, embedded directly into the ROM image (see [doc/API.md](doc/API.md#tilemap-tilemap)). |
@@ -875,9 +879,10 @@ decision:
   `peek`/`poke` and the `@ % $` peek shorthands, `cartdata`/`dget`/`dset`,
   real `stat` values, fractional `spr` widths; the SFX editor's filter
   switches in synthesized sound
-* TIC-80: `tri`/`trib`, `elli`/`ellib`, `clip`, `mouse`, `font`, `spr`
-  rotation, `map()`'s remap callback, and synthesis of a cart's own
-  `WAVES`/`SFX`/`MUSIC` data (placeholder tones are used). `peek`/`poke`
+* TIC-80: `tri`/`trib`, `elli`/`ellib`, `clip`, `mouse`, `font`,
+  `map()`'s remap callback; the `sfx()` speed argument and `music()`'s
+  tempo/speed/sustain arguments (see [doc/TIC80.md](doc/TIC80.md#sound)).
+  `peek`/`poke`
   work on an emulated RAM, but writing the screen, palette, tiles or sound
   registers has no visible or audible effect. `key`/`keyp` always report
   no key (there is no keyboard); `trace` does nothing.

@@ -991,6 +991,7 @@ void generate_program (ASTNode *head)
         emit_asm ("MOV  R0, 0\n");
         emit_asm ("MOV  [PICO8_DRAW_COST], R0 ; RAM isn't clean after the BIOS\n");
         emit_asm ("__start:\n");
+        emit_asm ("CALL __builtin_pico8_pause_check ; Start pauses, as on the TIC-80 layer\n");
         emit_asm ("IN   R0, TIM_FrameCounter\n");
         emit_asm ("MOV  [PICO8_TICK_FRAME], R0 ; frame this tick started on\n");
         if (has_update)
@@ -1091,6 +1092,7 @@ void generate_program (ASTNode *head)
             emit_asm ("IEQ R1, 0\n");
             emit_asm ("JF R1, __just_wait ; If paused, skip TIC\n");
             emit_asm ("CALL __function_TIC\n");
+            emit_asm ("CALL __builtin_tic80_sound_tick ; sfx() durations\n");
             emit_asm ("__just_wait:");
             emit_asm ("WAIT\n");
 
@@ -1109,6 +1111,7 @@ void generate_program (ASTNode *head)
 
             // PAUSE: dim, render one frame, print, set flag
             emit_asm ("__do_pause:\n");
+            emit_asm ("OUT SPU_Command, SPUCommand_PauseAllChannels ; music and sfx hold while paused\n");
             emit_asm ("MOV R1, var_TIC80_COLOR_MULTIPLY\n");
             emit_asm ("IN R2, GPU_MultiplyColor\n");
             emit_asm ("MOV [R1], R2 ; Save current multiply\n");
@@ -1134,6 +1137,7 @@ void generate_program (ASTNode *head)
 
             // UNPAUSE: restore color, clear flag
             emit_asm ("__do_unpause:\n");
+            emit_asm ("OUT SPU_Command, SPUCommand_ResumeAllChannels\n");
             emit_asm ("MOV R1, var_TIC80_COLOR_MULTIPLY\n");
             emit_asm ("MOV R2, [R1]\n");
             emit_asm ("OUT GPU_MultiplyColor, R2 ; Restore\n");

@@ -13,7 +13,7 @@ v32lua \- compile a subset of Lua to Vircon32 assembly and cartridge XML
 .IR api ]
 .RB [ \-\-title
 .IR title ]
-.RB [ \-\-p8rate
+.RB [ \-\-rate
 .IR hz ]
 .IR input.lua " | " cart.p8 " | " cart.tic
 .br
@@ -155,15 +155,19 @@ or
 .B [TIC80]
 in those API modes.
 .TP
-.BI \-\-p8rate " hz"
-Sample rate of PICO-8 sounds synthesized from the cart:
+.BI \-\-rate " hz"
+Sample rate of the sound synthesized from a PICO-8 or TIC-80 cart:
 .BR 11025 ,
 .B 22050
 (default) or
 .BR 44100 .
 Overrides a
-.B \-\-#p8rate
+.B \-\-#rate
 hint.
+.B \-\-p8rate
+and
+.B \-\-#p8rate
+are the old names and still work.
 .TP
 .B \-\-version
 Print version, author, and project URL information, and exit
@@ -218,7 +222,7 @@ chosen title and lo-fi sound, and a TIC-80 binary cart:
 .PP
 .RS
 .nf
-v32lua celeste.p8 \-\-title "celeste" \-\-p8rate 11025
+v32lua celeste.p8 \-\-title "celeste" \-\-rate 11025
 v32lua game.tic
 .fi
 .RE
@@ -381,7 +385,7 @@ Cartridge metadata and resources are declared with
 line comments, parsed by the preprocessor stage and used to generate
 the companion XML file:
 .BR \-\-#version ", " \-\-#title ", " \-\-#api ", " \-\-#texture ,
-.BR \-\-#sound ", " \-\-#tilemap ", " \-\-#p8 ", " \-\-#p8rate ", and " \-\-#include .
+.BR \-\-#sound ", " \-\-#tilemap ", " \-\-#p8 ", " \-\-#rate ", and " \-\-#include .
 A
 .B \-\-#texture
 or
@@ -411,13 +415,17 @@ Generated next to the output for PICO-8 carts: the sprite sheet (plus
 color swatches), and the cart's 64
 .B __sfx__
 entries synthesized into sounds (22050 Hz by default, see
-.BR \-\-#p8rate ).
+.BR \-\-rate ).
 .BR music()
 is sequenced from them at run time.
 .TP
+.IR *_trackN.vsnd ", " *_sfxNN_nMM.vsnd
+Generated next to the output for TIC-80 carts with sound data: each music
+track the program can play, pre-mixed and looping, and each SFX rendered at
+the notes the program plays it at.
+.TP
 .IR pico8_tone0.vsnd " .. " pico8_tone7.vsnd
-Placeholder tones for PICO-8 programs without sound data, and for TIC-80
-carts that use
+Placeholder tones for PICO-8 and TIC-80 programs without sound data that use
 .BR sfx() / music()
 (an existing file of the same name is kept).
 .TP

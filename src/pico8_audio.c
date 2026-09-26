@@ -13,9 +13,9 @@
 //
 // Size: sounds are rendered at 22050 Hz -- PICO-8's own output rate -- and
 // played at channel speed 0.5 (the SPU's native rate is 44100 Hz), which
-// halves the data at no loss relative to PICO-8. --#p8rate 11025 halves it
+// halves the data at no loss relative to PICO-8. --#rate 11025 halves it
 // again (lo-fi: the SPU plays samples without interpolation, so a quarter-
-// speed sound carries audible images near 10 kHz); --#p8rate 44100 doubles
+// speed sound carries audible images near 10 kHz); --#rate 44100 doubles
 // it for the cleanest playback.
 //
 // Timing: PICO-8's tick is 183 samples at 22050 Hz (1/120.5 s). Here it is
@@ -38,10 +38,10 @@
 // ============================================================================
 
 // Sample rate of the rendered sounds: 22050 (default), or 11025 / 44100
-// with --#p8rate. They play at channel speed rate / 44100.
-int pico8_audio_rate = 22050;
-#define P8A_RATE        pico8_audio_rate
-#define P8A_TICK        (pico8_audio_rate / 120.0)   // samples per tick = half a frame
+// with --rate / --#rate. They play at channel speed rate / 44100.
+int synth_audio_rate = 22050;
+#define P8A_RATE        synth_audio_rate
+#define P8A_TICK        (synth_audio_rate / 120.0)   // samples per tick = half a frame
 #define P8A_MAX_SECONDS 300                 // safety cap per rendered sound
 
 int pico8_sfx_base_id = -1;

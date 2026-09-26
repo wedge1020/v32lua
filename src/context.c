@@ -959,3 +959,27 @@ int count_max_return_values (ASTNode *node)
     }
     return max_count;
 }
+
+// ============================================================================
+// settle_return_counts: `function vector(l, a) return rotate(0, -l, a) end`
+// forwards rotate()'s 2 values, but when vector is defined BEFORE rotate the
+// prepass counted it while rotate was still unknown (return_count 1), so
+// `local x, y = vector(...)` read y from stale R2 (warm_wheels: every car's
+// velocity became NaN on the first frame). Recount every global function
+// until nothing changes -- counts only grow and are bounded, so this ends.
+// ============================================================================
+void settle_return_counts (void)
+{
+    bool changed = true;
+    for (int pass = 0; changed && pass < 64; pass++) {
+        changed = false;
+        for (SymbolNode *s = global_scope ? global_scope->symbols : NULL; s; s = s->next) {
+            if (!s->is_function || s->def_node == NULL || s->def_node->type != NODE_FUNCTION_DEF) continue;
+            int n = count_max_return_values (s->def_node->as.function_def.body);
+            if (n > s->return_count) {
+                s->return_count = n;
+                changed = true;
+            }
+        }
+    }
+}

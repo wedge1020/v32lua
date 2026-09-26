@@ -5,6 +5,8 @@
 // names), so this unrolls into target_count straight-line fetch blocks
 // rather than needing a runtime loop or the generic multi-return
 // register/global protocol.
+static void store_assignment_target(ASTNode *tgt, int val_reg, bool is_local);
+
 static void emit_multiple_assignment_table_unpack(ASTNode *targets_head, ASTNode *call_node, bool is_local)
 {
     int target_count = 0;
@@ -21,15 +23,50 @@ static void emit_multiple_assignment_table_unpack(ASTNode *targets_head, ASTNode
         int val_reg = allocate_register();
         emit_table_unpack_fetch_element(t_name, i_name, j_name, k, val_reg);
 
-        if (curr_tgt->type == NODE_IDENTIFIER) {
-            if (is_local) {
-                SymbolNode *sym = register_local(curr_tgt->as.id.name);
-                emit_initialize_local(sym, val_reg);
-            } else {
-                emit_store_variable(curr_tgt->as.id.name, val_reg);
-            }
-        }
+        store_assignment_target(curr_tgt, val_reg, is_local);
         unlock_register(val_reg);
+    }
+}
+
+// Stores val_reg into one assignment target: a variable (local declaration
+// or plain store) or a table field / index (t.k = v, t[i] = v). Shared by the
+// ordinary path and the multi-return path, so both handle the same targets.
+static void store_assignment_target(ASTNode *tgt, int val_reg, bool is_local)
+{
+    if (tgt->type == NODE_IDENTIFIER) {
+        if (is_local) {
+            SymbolNode *sym = register_local(tgt->as.id.name);
+            emit_initialize_local(sym, val_reg);
+        } else {
+            emit_store_variable(tgt->as.id.name, val_reg);
+        }
+    }
+    else if (tgt->type == NODE_TABLE_GET)
+    {
+        // The table and key expressions may themselves CALL (f().x = v,
+        // t[g()] = v), which clobbers every register -- keep the value on
+        // the stack while they are evaluated.
+        emit_asm("PUSH R%d ; hold value while the target table/key are evaluated", val_reg);
+
+        int table_reg = allocate_pinned_register();
+        int key_reg   = allocate_pinned_register();
+
+        generate_asm(tgt->as.table_get.table_expr, table_reg);
+        ensure_in_register(table_reg);
+        emit_asm("PUSH R%d ; hold table while the key is evaluated", table_reg);
+        generate_asm(tgt->as.table_get.key, key_reg);
+        ensure_in_register(key_reg);
+        emit_asm("POP R%d", table_reg);
+        emit_asm("POP R%d ; value", val_reg);
+
+        emit_asm("PUSH R%d ; Push Table Pointer", table_reg);
+        emit_asm("PUSH R%d ; Push Key", key_reg);
+        emit_asm("PUSH R%d ; Push Value", val_reg);
+        emit_asm("CALL __builtin_table_set");
+        emit_asm("IADD SP, 3 ; Clean up stack");
+
+        unlock_pinned_register(table_reg);
+        unlock_pinned_register(key_reg);
     }
 }
 
@@ -179,56 +216,46 @@ void node_multiple_assignment(ASTNode *node)
             }
 
             // -----------------------------------------------------------------
-            // PASS 2: Every return value is now safely parked in its own
-            // protected register, in order. Storing can no longer clobber a
-            // still-pending return value -- there isn't one anymore.
+            // PASS 2: every return value is parked in its own register. Push
+            // one value per TARGET (nil past the last return value), then pop
+            // them back in reverse and store through the same target code as
+            // the ordinary path -- identifiers AND table fields. Table-field
+            // targets (`o.vx, o.vy = rotate(...)`) used to be skipped here
+            // entirely, silently leaving the fields unchanged; parking the
+            // values on the stack first also keeps them safe across the
+            // __builtin_table_set CALLs.
             // -----------------------------------------------------------------
-            int reg_index = 0;
-            while (curr_tgt != NULL && reg_index < extract_count) {
-                if (curr_tgt->type == NODE_IDENTIFIER) {
-                    int tmp_reg = tmp_regs[reg_index];
-
-                    if (node->as.mult_assign.is_local) {
-                        SymbolNode *sym = register_local(curr_tgt->as.id.name);
-                        emit_initialize_local(sym, tmp_reg);   // may allocate a box
-                    } else {
-                        emit_store_variable(curr_tgt->as.id.name, tmp_reg);   // writes through the box if boxed
-                    }
-
-                    unlock_register(tmp_reg);
+            ASTNode *mr_targets[64];
+            int      mr_n = 0;
+            for (ASTNode *t = curr_tgt; t != NULL; t = t->next) {
+                if (mr_n >= 64) {
+                    compiler_error(ERR_INTERNAL, -1,
+                        "Multiple assignment exceeds 64-target internal limit");
                 }
-
-                curr_tgt = curr_tgt->next;
-                reg_index++;
+                mr_targets[mr_n++] = t;
             }
 
-            // Unlock any extracted values that had no matching target
-            // (more return values than targets on the LHS).
-            for (int i = reg_index; i < extract_count; i++) {
+            for (int i = 0; i < mr_n; i++) {
+                if (i < extract_count) {
+                    emit_asm("PUSH R%d ; park return value %d for target #%d", tmp_regs[i], i, i);
+                } else {
+                    int pad = allocate_register();
+                    emit_asm("MOV R%d, BOXED_NIL ; Pad missing return value with Nil", pad);
+                    emit_asm("PUSH R%d", pad);
+                    unlock_register(pad);
+                }
+            }
+            for (int i = 0; i < extract_count; i++) {
                 unlock_register(tmp_regs[i]);
             }
-
             free(tmp_regs);
 
-            // -----------------------------------------------------------------
-            // Pad remaining targets with NIL.
-            // -----------------------------------------------------------------
-            while (curr_tgt != NULL) {
-                if (curr_tgt->type == NODE_IDENTIFIER) {
-                    int temp_reg = allocate_register();
-                    emit_asm("MOV R%d, BOXED_NIL ; Pad missing return value with Nil", temp_reg);
-
-                    if (node->as.mult_assign.is_local) {
-                        SymbolNode *sym = register_local(curr_tgt->as.id.name);
-                        emit_initialize_local(sym, temp_reg);
-                    } else {
-                        emit_store_variable(curr_tgt->as.id.name, temp_reg);
-                    }
-
-                    unlock_register(temp_reg);
-                }
-
-                curr_tgt = curr_tgt->next;
+            for (int i = mr_n - 1; i >= 0; i--) {
+                int v = allocate_pinned_register();
+                mark_register_live(v, 1);
+                emit_asm("POP R%d ; value for target #%d", v, i);
+                store_assignment_target(mr_targets[i], v, node->as.mult_assign.is_local);
+                unlock_pinned_register(v);
             }
 
             return;  // Early exit - we handled all assignments
@@ -318,47 +345,17 @@ void node_multiple_assignment(ASTNode *node)
             mark_register_live(val_reg, 1);
             emit_asm("POP R%d ; Pass 2: retrieve evaluated RHS value for target #%d", val_reg, i);
 
-            if (tgt->type == NODE_IDENTIFIER) {
-                if (node->as.mult_assign.is_local) {
-                    SymbolNode *sym = register_local(tgt->as.id.name);
-                    ASTNode    *v   = values_arr[i];
-                    if (sym->type != SYM_GLOBAL) {   // top-level 'local' is a RAM global
-                        sym->fn_alias = (v != NULL && v->type == NODE_FUNCTION_POINTER &&
-                                         v->as.func_ptr.func_def != NULL)
-                                      ? v->as.func_ptr.mangled_name : NULL;
-                    }
-
-                    if (g_verbose_debug) {
-                        fprintf(stderr, "[debug] node_multiple_assignment() Declaring local: %s (val_reg=R%d, boxed=%d)\n",
-                                tgt->as.id.name, val_reg, sym->is_boxed);
-                    }
-
-                    emit_initialize_local(sym, val_reg);
-                } else {
-                    if (g_verbose_debug) {
-                        fprintf(stderr, "[debug] node_multiple_assignment() Assigning: %s (val_reg=R%d)\n",
-                                tgt->as.id.name, val_reg);
-                    }
-
-                    emit_store_variable(tgt->as.id.name, val_reg);
+            if (tgt->type == NODE_IDENTIFIER && node->as.mult_assign.is_local) {
+                SymbolNode *sym = register_local(tgt->as.id.name);
+                ASTNode    *v   = values_arr[i];
+                if (sym->type != SYM_GLOBAL) {   // top-level 'local' is a RAM global
+                    sym->fn_alias = (v != NULL && v->type == NODE_FUNCTION_POINTER &&
+                                     v->as.func_ptr.func_def != NULL)
+                                  ? v->as.func_ptr.mangled_name : NULL;
                 }
-            }
-            else if (tgt->type == NODE_TABLE_GET)
-            {
-                int table_reg = allocate_pinned_register();
-                int key_reg   = allocate_pinned_register();
-
-                generate_asm(tgt->as.table_get.table_expr, table_reg);
-                generate_asm(tgt->as.table_get.key, key_reg);
-
-                emit_asm("PUSH R%d ; Push Table Pointer", table_reg);
-                emit_asm("PUSH R%d ; Push Key", key_reg);
-                emit_asm("PUSH R%d ; Push Value", val_reg);
-                emit_asm("CALL __builtin_table_set");
-                emit_asm("IADD SP, 3 ; Clean up stack");
-
-                unlock_pinned_register(table_reg);
-                unlock_pinned_register(key_reg);
+                emit_initialize_local(sym, val_reg);
+            } else {
+                store_assignment_target(tgt, val_reg, node->as.mult_assign.is_local);
             }
 
             unlock_pinned_register(val_reg);

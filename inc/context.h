@@ -135,6 +135,7 @@ void        init_global_scope            (void);
 SymbolNode *resolve_symbol               (const char *);
 int         add_string_literal           (const char *);
 void        register_all_globals_prepass (ASTNode    *);
+void        settle_return_counts (void);
 SymbolNode *register_global              (const char *);
 SymbolNode *register_local               (const char *);
 SymbolNode *register_parameter           (const char *, int);
