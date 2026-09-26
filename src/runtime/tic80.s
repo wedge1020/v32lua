@@ -1846,8 +1846,21 @@ __builtin_tic80_line:
     MOV   R11, 0.5
     POW   R10, R11            ; R10 = length in TIC-80 pixels
 
-    ;; angle = atan2(dy, dx)   -- destructive: R9 = atan2(R9, R8)
+    ;; angle = atan2(dy, dx)   -- destructive: R9 = atan2(R9, R8).
+    ;; ATAN2 with both operands zero is a Vircon32 hardware error: a
+    ;; zero-length line(x, y, x, y) is TIC-80's single pixel instead.
+    MOV   R11, R8
+    FEQ   R11, 0.0
+    MOV   R1, R9
+    FEQ   R1, 0.0
+    AND   R11, R1
+    JF    R11, _tic80_line_angle
+    MOV   R9, 0.0
+    MOV   R10, 1.0                ; one pixel
+    JMP   _tic80_line_have_angle
+_tic80_line_angle:
     ATAN2 R9, R8               ; R9 = angle (radians)
+_tic80_line_have_angle:
 
     ;; select swatch region for this color, set hotspot-left mode via
     ;; scale/position, then rotate+stretch

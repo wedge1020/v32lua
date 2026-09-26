@@ -187,6 +187,8 @@ __builtin_sqrt:
     MOV  R0, [BP+2]           ; R0 = x
 
     ;; --- Compute sqrt(x) = x^0.5 using POW ---
+    MOV  R1, 0.0
+    FMAX R0, R1              ; sqrt(negative) = 0: POW would raise PowerError
     MOV  R1, 0.5
     POW  R0, R1              ; R0 = x^0.5 = sqrt(x)
 
@@ -389,7 +391,12 @@ __builtin_acos:
     ;; --- Load x from stack ---
     MOV  R0, [BP+2]           ; R0 = x
 
-    ;; --- Compute acos(x) using native instruction ---
+    ;; --- Compute acos(x); clamp to [-1, 1] first (ACOS raises
+    ;; ArcCosineError outside it, e.g. on a rounded 1.0000001) ---
+    MOV  R1, -1.0
+    FMAX R0, R1
+    MOV  R1, 1.0
+    FMIN R0, R1
     ACOS R0                  ; R0 = acos(x)
 
     ;; --- Return result ---
@@ -619,11 +626,13 @@ __builtin_log:
     JT   R1, _builtin_log_zero
 
     ; x < 0: return NaN
-    MOV  R0, 0x7FC00000
+    MOV  R0, [__const_math_huge] ; -huge: NaN/-inf would clash with NaN-boxing
+    FSGN R0
     JMP  _builtin_log_done
 
 _builtin_log_zero:
-    MOV  R0, 0xFF800000
+    MOV  R0, [__const_math_huge] ; -huge (math.log(0) == -math.huge)
+    FSGN R0
     JMP  _builtin_log_done
 
 _builtin_log_positive:
@@ -671,7 +680,14 @@ __builtin_log10:
     ;; --- Load x from stack ---
     MOV  R0, [BP+2]           ; R0 = x
 
-    ;; --- Compute log(x) ---
+    ;; --- Compute log(x); x <= 0 -> -huge (LOG raises LogarithmError) ---
+    MOV  R1, R0
+    FLE  R1, 0.0
+    JF   R1, _builtin_log10_ok
+    MOV  R0, [__const_math_huge]
+    FSGN R0
+    JMP  _builtin_log10_done
+_builtin_log10_ok:
     LOG  R0                  ; R0 = ln(x)
 
     ;; --- Compute log(10) ---
@@ -682,6 +698,7 @@ __builtin_log10:
     FDIV R0, R1              ; R0 = ln(x) / ln(10) = log10(x)
 
     ;; --- Return result ---
+_builtin_log10_done:
     MOV  SP, BP
     POP  BP
     RET
@@ -710,8 +727,8 @@ __builtin_pow:
     MOV  R0, [BP+2]           ; R0 = x (base)
     MOV  R1, [BP+3]           ; R1 = y (exponent)
 
-    ;; --- Compute x^y using native instruction ---
-    POW  R0, R1              ; R0 = x^y
+    ;; --- Compute x^y (no PowerError: see __safe_pow) ---
+    CALL __safe_pow          ; R0 = x^y
 
     ;; --- Return result ---
     MOV  SP, BP
@@ -883,8 +900,16 @@ __builtin_fmod:
     MOV  R0, [BP+2]           ; R0 = x
     MOV  R1, [BP+3]           ; R1 = y
 
-    ;; --- Compute fmod(x, y) using native instruction ---
+    ;; --- Compute fmod(x, y); fmod(x, 0) = 0 (FMOD would raise
+    ;; DivisionError, and Lua's NaN can't be NaN-boxed) ---
+    MOV  R2, R1
+    FEQ  R2, 0.0
+    JF   R2, _builtin_fmod_ok
+    MOV  R0, 0.0
+    JMP  _builtin_fmod_done
+_builtin_fmod_ok:
     FMOD R0, R1              ; R0 = fmod(x, y)
+_builtin_fmod_done:
 
     ;; --- Return result ---
     MOV  SP, BP
@@ -1152,12 +1177,14 @@ __mathfn_log:
     JT   R1, _log_zero
 
     ; x < 0: return NaN
-    MOV  R0, 0x7FC00000
+    MOV  R0, [__const_math_huge] ; -huge: NaN/-inf would clash with NaN-boxing
+    FSGN R0
     JMP  _log_done
 
 _log_zero:
     ; x == 0: return -inf
-    MOV  R0, 0xFF800000
+    MOV  R0, [__const_math_huge] ; -huge (math.log(0) == -math.huge)
+    FSGN R0
     JMP  _log_done
 
 _log_positive:
@@ -1454,7 +1481,7 @@ __mathfn_pow:
     MOV   BP, SP
     MOV   R0, [BP+2]
     MOV   R1, [BP+3]
-    POW   R0, R1
+    CALL  __safe_pow
     MOV   SP, BP
     POP   BP
     RET
@@ -1468,4 +1495,24 @@ __mathfn_ceil:
     FSGN  R0                    ; ceil(x) = -floor(-x)
     MOV   SP, BP
     POP   BP
+    RET
+
+;; ===========================================================================
+;; __safe_pow: R0 = R0 ^ R1, without the CPU's PowerError (raised for a
+;; negative base with a non-integer exponent). The real result there is NaN,
+;; which NaN-boxing can't carry, so it's 0 instead.
+;; Clobbers: R2
+;; ===========================================================================
+__safe_pow:
+    MOV   R2, R0
+    FLT   R2, 0.0
+    JF    R2, _safe_pow_ok
+    MOV   R2, R1
+    FLR   R2
+    FEQ   R2, R1
+    JT    R2, _safe_pow_ok
+    MOV   R0, 0.0
+    RET
+_safe_pow_ok:
+    POW   R0, R1
     RET

@@ -1247,6 +1247,14 @@ bool emit_pico8_rect_intrinsic (ASTNode *node, int dest_reg)
                               "rect() expects at least 4 arguments: rect(x0, y0, x1, y1 [, color])");
 }
 
+// atan2(dx, dy) -- PICO-8's: turns, screen space, atan2(0, 0) = 0.25
+bool emit_pico8_atan2_intrinsic (ASTNode *node, int dest_reg)
+{
+    static const char *names[2] = { "dx", "dy" };
+    return pico8_simple_call (node, dest_reg, 2, names, 0, "__builtin_pico8_atan2",
+                              "atan2() takes 2 arguments: atan2(dx, dy)");
+}
+
 // pset(x, y [, col])
 bool emit_pico8_pset_intrinsic (ASTNode *node, int dest_reg)
 {

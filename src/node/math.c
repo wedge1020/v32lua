@@ -186,11 +186,23 @@ void  node_mod (ASTNode *node, int  dest_reg)
     int quot_reg = allocate_register ();
     mark_register_live (quot_reg, 1);
 
+    // FDIV by zero is a Vircon32 hardware error (DivisionError). a % 0 is
+    // 0: PICO-8's answer, and for Lua (NaN) the only safe one -- a NaN
+    // bit pattern here would read as a boxed value (see node_div()).
+    int         mod_id  = get_next_label ();
+    const char *mod_ctx = get_current_function_name ();
+    emit_asm ("MOV R%d, 0.0\n", quot_reg);
+    emit_asm ("FEQ R%d, R%d ; is divisor zero?\n", quot_reg, right_reg);
+    emit_asm ("JF  R%d, __%s_mod_ok_%d\n", quot_reg, mod_ctx, mod_id);
+    emit_asm ("MOV R%d, 0.0 ; a %% 0 = 0\n", dest_reg);
+    emit_asm ("JMP __%s_mod_done_%d\n", mod_ctx, mod_id);
+    emit_asm ("__%s_mod_ok_%d:\n", mod_ctx, mod_id);
     emit_asm ("MOV R%d, R%d ; quot = a\n", quot_reg, dest_reg);
     emit_asm ("FDIV R%d, R%d ; quot = a / b\n", quot_reg, right_reg);
     emit_asm ("FLR  R%d ; quot = floor(a / b)\n", quot_reg);
     emit_asm ("FMUL R%d, R%d ; quot = floor(a / b) * b\n", quot_reg, right_reg);
     emit_asm ("FSUB R%d, R%d ; dest = a - floor(a / b) * b\n", dest_reg, quot_reg);
+    emit_asm ("__%s_mod_done_%d:\n", mod_ctx, mod_id);
 
     unlock_register (quot_reg);
     unlock_register (right_reg);
@@ -210,9 +222,26 @@ void node_floordiv (ASTNode *node, int  dest_reg)
 
     emit_asm ("POP R%d ; reload spilled left operand\n", dest_reg);
 
-    // Use float division, then floor - matches Lua // semantics
+    // Use float division, then floor - matches Lua // semantics. FDIV by
+    // zero is a Vircon32 hardware error: a // 0 is floor(a / 0), with the
+    // same saturated +-huge node_div() gives a / 0.
+    int         fd_id  = get_next_label ();
+    const char *fd_ctx = get_current_function_name ();
+    int         z_reg  = allocate_register ();
+    emit_asm ("MOV R%d, 0.0\n", z_reg);
+    emit_asm ("FEQ R%d, R%d ; is divisor zero?\n", z_reg, right_reg);
+    emit_asm ("JF  R%d, __%s_fdiv_ok_%d\n", z_reg, fd_ctx, fd_id);
+    emit_asm ("MOV R%d, R%d\n", z_reg, dest_reg);
+    emit_asm ("MOV R%d, [__const_math_huge]\n", dest_reg);
+    emit_asm ("FLT R%d, 0.0 ; negative dividend: -huge\n", z_reg);
+    emit_asm ("JF  R%d, __%s_fdiv_done_%d\n", z_reg, fd_ctx, fd_id);
+    emit_asm ("FSGN R%d\n", dest_reg);
+    emit_asm ("JMP __%s_fdiv_done_%d\n", fd_ctx, fd_id);
+    emit_asm ("__%s_fdiv_ok_%d:\n", fd_ctx, fd_id);
     emit_asm ("FDIV R%d, R%d\n", dest_reg, right_reg);
     emit_asm ("FLR R%d\n", dest_reg);  // Floor the result
+    emit_asm ("__%s_fdiv_done_%d:\n", fd_ctx, fd_id);
+    unlock_register (z_reg);
 
     unlock_register (right_reg);
 }
@@ -242,6 +271,38 @@ void node_floordiv (ASTNode *node, int  dest_reg)
     unlock_register (right_reg);
 }*/
 
+/*
+ * x_reg = x_reg ^ y_reg, without the CPU's PowerError: POW raises a
+ * hardware error for a negative base with a non-integer exponent. The real
+ * answer is NaN, which NaN-boxing can't carry (it would read back as a boxed
+ * value, see node_div()), so the result is 0 -- as PICO-8's sqrt() of a
+ * negative. y_is_int: the exponent is a known integer, so no guard needed.
+ */
+void emit_safe_pow (int x_reg, int y_reg, bool y_is_int)
+{
+    if (y_is_int)
+    {
+        emit_asm ("POW R%d, R%d\n", x_reg, y_reg);
+        return;
+    }
+    int         id  = get_next_label ();
+    const char *ctx = get_current_function_name ();
+    int         t   = allocate_register ();
+    emit_asm ("MOV R%d, R%d\n", t, x_reg);
+    emit_asm ("FLT R%d, 0.0 ; negative base?\n", t);
+    emit_asm ("JF  R%d, __%s_pow_ok_%d\n", t, ctx, id);
+    emit_asm ("MOV R%d, R%d\n", t, y_reg);
+    emit_asm ("FLR R%d\n", t);
+    emit_asm ("FEQ R%d, R%d ; integer exponent?\n", t, y_reg);
+    emit_asm ("JT  R%d, __%s_pow_ok_%d\n", t, ctx, id);
+    emit_asm ("MOV R%d, 0.0 ; no real result: 0, not a PowerError\n", x_reg);
+    emit_asm ("JMP __%s_pow_done_%d\n", ctx, id);
+    emit_asm ("__%s_pow_ok_%d:\n", ctx, id);
+    emit_asm ("POW R%d, R%d\n", x_reg, y_reg);
+    emit_asm ("__%s_pow_done_%d:\n", ctx, id);
+    unlock_register (t);
+}
+
 void node_pow (ASTNode *node, int dest_reg)
 {
     generate_asm (node -> as.binary.left, dest_reg);
@@ -256,6 +317,8 @@ void node_pow (ASTNode *node, int dest_reg)
 
     emit_asm ("POP R%d ; reload spilled left operand\n", dest_reg);
 
-    emit_asm ("POW R%d, R%d\n", dest_reg, right_reg);
+    ASTNode *r = node -> as.binary.right;
+    emit_safe_pow (dest_reg, right_reg,
+                   r -> type == NODE_NUMBER && r -> as.number.val == (double) (long long) r -> as.number.val);
     unlock_register (right_reg);
 }

@@ -64,6 +64,10 @@ bool emit_math_sqrt_intrinsic(ASTNode *node, int dest_reg)
     generate_asm(arg, arg_reg);
 
     // Compute sqrt(x) = x^0.5
+    // POW of a negative base by 0.5 is a hardware PowerError; the real
+    // answer (NaN) can't be NaN-boxed, so sqrt(negative) = 0.
+    emit_asm("MOV R%d, 0.0\n", tmp_reg);
+    emit_asm("FMAX R%d, R%d ; sqrt(negative) = 0, not a PowerError\n", arg_reg, tmp_reg);
     emit_asm("MOV R%d, 0.5 ; Load exponent\n", tmp_reg);
     emit_asm("POW R%d, R%d ; Compute x^0.5\n", arg_reg, tmp_reg);
 
@@ -183,6 +187,16 @@ bool emit_math_acos_intrinsic(ASTNode *node, int dest_reg)
 
     int arg_reg = allocate_register();
     generate_asm(arg, arg_reg);
+    // ACOS outside [-1, 1] is a hardware ArcCosineError: clamp (float
+    // rounding in e.g. acos(dot / (|a| * |b|)) lands just outside).
+    {
+        int t = allocate_register();
+        emit_asm("MOV  R%d, -1.0\n", t);
+        emit_asm("FMAX R%d, R%d\n", arg_reg, t);
+        emit_asm("MOV  R%d, 1.0\n", t);
+        emit_asm("FMIN R%d, R%d ; clamp to [-1, 1]: no ArcCosineError\n", arg_reg, t);
+        unlock_register(t);
+    }
     emit_asm("ACOS R%d ; Arc cosine\n", arg_reg);
 
     if (dest_reg != 0) {
@@ -211,7 +225,23 @@ bool emit_math_log_intrinsic(ASTNode *node, int dest_reg)
 
     int arg_reg = allocate_register();
     generate_asm(arg, arg_reg);
-    emit_asm("LOG R%d ; Natural log\n", arg_reg);
+    // LOG of x <= 0 is a hardware LogarithmError; log(0) = -inf in Lua
+    // (saturated to -huge here, as x / 0 is), log(negative) = NaN -> -huge.
+    {
+        int         id  = get_next_label();
+        const char *ctx = get_current_function_name();
+        int         t   = allocate_register();
+        emit_asm("MOV  R%d, R%d\n", t, arg_reg);
+        emit_asm("FLE  R%d, 0.0 ; x <= 0?\n", t);
+        emit_asm("JF   R%d, __%s_log_ok_%d\n", t, ctx, id);
+        emit_asm("MOV  R%d, [__const_math_huge]\n", arg_reg);
+        emit_asm("FSGN R%d ; log(x <= 0) = -huge, not a LogarithmError\n", arg_reg);
+        emit_asm("JMP  __%s_log_done_%d\n", ctx, id);
+        emit_asm("__%s_log_ok_%d:\n", ctx, id);
+        emit_asm("LOG  R%d ; Natural log\n", arg_reg);
+        emit_asm("__%s_log_done_%d:\n", ctx, id);
+        unlock_register(t);
+    }
 
     if (dest_reg != 0) {
         emit_asm("MOV R%d, R%d ; Transfer result to dest_reg\n", dest_reg, arg_reg);
@@ -247,7 +277,7 @@ bool emit_math_pow_intrinsic(ASTNode *node, int dest_reg)
     generate_asm(arg, x_reg);
     generate_asm(arg->next, y_reg);
 
-    emit_asm("POW R%d, R%d ; R%d = R%d ^ R%d\n", x_reg, y_reg, x_reg, x_reg, y_reg);
+    emit_safe_pow(x_reg, y_reg, false);
 
     if (dest_reg != 0) {
         emit_asm("MOV R%d, R%d ; Transfer result to dest_reg\n", dest_reg, x_reg);
@@ -560,7 +590,22 @@ bool emit_math_fmod_intrinsic(ASTNode *node, int dest_reg)
     generate_asm(arg, x_reg);
     generate_asm(arg->next, y_reg);
 
-    emit_asm("FMOD R%d, R%d ; R%d = fmod(R%d, R%d)\n", x_reg, y_reg, x_reg, x_reg, y_reg);
+    // FMOD by zero is a hardware DivisionError; fmod(x, 0) = 0 (NaN in
+    // Lua, which NaN-boxing can't carry).
+    {
+        int         id  = get_next_label();
+        const char *ctx = get_current_function_name();
+        int         t   = allocate_register();
+        emit_asm("MOV  R%d, 0.0\n", t);
+        emit_asm("FEQ  R%d, R%d ; zero divisor?\n", t, y_reg);
+        emit_asm("JF   R%d, __%s_fmod_ok_%d\n", t, ctx, id);
+        emit_asm("MOV  R%d, 0.0 ; fmod(x, 0) = 0\n", x_reg);
+        emit_asm("JMP  __%s_fmod_done_%d\n", ctx, id);
+        emit_asm("__%s_fmod_ok_%d:\n", ctx, id);
+        emit_asm("FMOD R%d, R%d ; R%d = fmod(R%d, R%d)\n", x_reg, y_reg, x_reg, x_reg, y_reg);
+        emit_asm("__%s_fmod_done_%d:\n", ctx, id);
+        unlock_register(t);
+    }
 
     if (dest_reg != 0) {
         emit_asm("    MOV R%d, R%d ; Transfer result to dest_reg\n", dest_reg, x_reg);

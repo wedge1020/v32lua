@@ -1905,7 +1905,19 @@ __builtin_pico8_line:
     FDIV  R1, 3.0                 ; 1 PICO-8 px thick
     OUT   GPU_DrawingScaleY, R1
 
-    ATAN2 R4, R3                  ; angle = atan2(dy, dx)
+    ;; angle = atan2(dy, dx) -- but ATAN2 with both operands zero is a
+    ;; Vircon32 hardware error, and line(x, y, x, y) (one pixel) is common
+    MOV   R1, R3
+    FEQ   R1, 0.0
+    MOV   R2, R4
+    FEQ   R2, 0.0
+    AND   R1, R2
+    JF    R1, _pico8_line_angle
+    MOV   R4, 0.0                 ; zero length: any angle, the 1-pixel swatch
+    JMP   _pico8_line_have_angle
+_pico8_line_angle:
+    ATAN2 R4, R3
+_pico8_line_have_angle:
     OUT   GPU_DrawingAngle, R4
 
     MOV   R1, [BP+2]
@@ -4126,4 +4138,64 @@ __pico8_dslot:
     IADD  R1, 0x5E00
     MOV   R0, 1
 _pico8_dslot_done:
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; atan2(dx, dy): [BP+2] = dx, [BP+3] = dy -> R0 = the direction in turns,
+;; 0 <= a < 1, in screen space (y down, angles anticlockwise), as PICO-8:
+;; atan2(1, 0) = 0, atan2(0, -1) = 0.25, atan2(-1, 0) = 0.5,
+;; atan2(0, 1) = 0.75. With dx = 0 the result is 0.75 if dy > 0 and 0.25
+;; otherwise, so atan2(0, 0) = 0.25 -- PICO-8's own rule (z8lua's
+;; pico8_atan2), which also keeps both operands of the CPU's ATAN2 from
+;; being zero: that raises a Vircon32 hardware error (ArcTangent2Error).
+;; A nil / non-number argument counts as 0.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+__builtin_pico8_atan2:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    MOV   R1, [BP+3]              ; dy
+    MOV   R0, R1
+    AND   R0, NAN_VALUE
+    IEQ   R0, NAN_VALUE
+    JF    R0, _pico8_atan2_dy
+    MOV   R1, 0.0
+_pico8_atan2_dy:
+    MOV   R2, [BP+2]              ; dx
+    MOV   R0, R2
+    AND   R0, NAN_VALUE
+    IEQ   R0, NAN_VALUE
+    JF    R0, _pico8_atan2_dx
+    MOV   R2, 0.0
+_pico8_atan2_dx:
+    MOV   R0, R2
+    FEQ   R0, 0.0                 ; (also true for -0.0)
+    JF    R0, _pico8_atan2_general
+    MOV   R0, 0.25                ; straight up, or dx = dy = 0
+    FGT   R1, 0.0
+    JF    R1, _pico8_atan2_done
+    MOV   R0, 0.75                ; straight down
+    JMP   _pico8_atan2_done
+_pico8_atan2_general:
+    FSGN  R1                      ; screen y points down
+    ATAN2 R1, R2                  ; dx != 0 here, so never ATAN2(0, 0)
+    FDIV  R1, 6.2831855           ; radians -> turns
+    MOV   R0, R1
+    FLT   R0, 0.0
+    JF    R0, _pico8_atan2_wrapped
+    FADD  R1, 1.0
+_pico8_atan2_wrapped:
+    MOV   R0, R1
+    FGE   R0, 1.0                 ; (-tiny + 1 can round up to 1)
+    JF    R0, _pico8_atan2_in_range
+    MOV   R1, 0.0
+_pico8_atan2_in_range:
+    FADD  R1, 0.0                 ; -0 -> 0
+    MOV   R0, R1
+_pico8_atan2_done:
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
     RET

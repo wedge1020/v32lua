@@ -604,6 +604,12 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
             return (emit_pico8_cos_intrinsic (node, dest_reg));
         }
 
+        // atan2(dx, dy) -- PICO-8 turns-based, screen space
+        if (strcmp (func_name, "atan2") == 0)
+        {
+            return (emit_pico8_atan2_intrinsic (node, dest_reg));
+        }
+
         // tan() -- PICO-8 turns-based, inverted via sin/cos
         if (strcmp (func_name, "tan") == 0)
         {
@@ -1515,6 +1521,9 @@ int  try_emit_table_get_intrinsic (ASTNode *table_expr, ASTNode *key_expr, int d
         else if (strcmp (key, "abs")    == 0) label = "__builtin_abs";
         else if (strcmp (key, "pow")    == 0) label = "__mathfn_pow";
         else if (strcmp (key, "ceil")   == 0) label = "__mathfn_ceil";
+        else if (strcmp (key, "fmod")   == 0) label = "__builtin_fmod";
+        else if (strcmp (key, "acos")   == 0) label = "__builtin_acos";
+        else if (strcmp (key, "log10")  == 0) label = "__builtin_log10";
 
         if (label != NULL) {
             runtime_req.needs_math = true;

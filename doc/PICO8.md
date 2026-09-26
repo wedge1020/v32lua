@@ -75,12 +75,12 @@ before `_init()`; the map and flags are already loaded then.
 | `mget(x, y)`, `mset(x, y, v)` | 128×64 map; out-of-range reads 0, writes are ignored. |
 | `fget(n [, f])`, `fset(n, [f,] v)` | From `__gff__`; writable at runtime. |
 | `cls([c])`, `color([c])` | |
-| `rectfill`, `rect`, `circfill`, `circ`, `line`, `pset` | Corners in any order. An omitted color uses the pen; a given color becomes the pen (PICO-8 rule). Circles are PICO-8's own pixels (see [Circles](#circles)). |
+| `rectfill`, `rect`, `circfill`, `circ`, `line`, `pset` | Corners in any order. A zero-length `line(x, y, x, y)` draws one pixel. An omitted color uses the pen; a given color becomes the pen (PICO-8 rule). Circles are PICO-8's own pixels (see [Circles](#circles)). |
 | `print(s [, x, y [, c]])` | BIOS font tinted with the palette color (the letters are the BIOS font's, not PICO-8's 3×5 font). PICO-8's glyph characters 128–153 (button glyphs, arrows, ♥, ★, ● …) are drawn as 7×5 icons, two characters wide; `\n` starts a new line. |
 | `camera([x, y])` | |
 | `btn([i [, p]])`, `btnp([i [, p]])` | 0 left, 1 right, 2 up, 3 down, 4 O (→ A), 5 X (→ B). No `i` → bitfield. `btnp`: first frame of a press, then from frame 15 every 4 frames. |
 | `add`, `del`, `count`, `foreach`, `for v in all(t)` | `del` uses full `==` (string contents compare). `foreach`/`all` follow PICO-8's rule that deleting the current element is safe. `count(t, v)` isn't supported. |
-| `flr`, `ceil`, `abs`, `min`, `max`, `mid`, `sgn`, `rnd`, `srand`, `sin`, `cos`, `tan`, `sqrt`, `sub` | `sin`/`cos`/`tan` take turns; `sin` is inverted (PICO-8 convention). `sqrt` of a negative number is 0. The RNG is seeded from the clock at boot. |
+| `flr`, `ceil`, `abs`, `min`, `max`, `mid`, `sgn`, `rnd`, `srand`, `sin`, `cos`, `tan`, `atan2`, `sqrt`, `sub` | `sin`/`cos`/`tan` take turns; `sin` is inverted (PICO-8 convention). `atan2(dx, dy)` returns turns in [0, 1) in screen space (y down), so `atan2(cos(a), sin(a)) == a`; `atan2(0, 0)` is 0.25, as in PICO-8. `sqrt` of a negative number is 0. The RNG is seeded from the clock at boot. |
 | `band`, `bor`, `bxor`, `bnot`, `shl`, `shr`, `lshr`, `rotl`, `rotr` | 16.16 fixed point, like the operators (below). Real functions, so usable as values. |
 | `flip()` | Shows the frame drawn so far and waits one PICO-8 frame (1/30 s, or 1/60 s with `_update60`), keeping music on time — for carts that run their own loop. |
 | `sspr(sx, sy, sw, sh, dx, dy [, dw, dh [, flip_x, flip_y]])` | Stretched blit from the sprite sheet. |
