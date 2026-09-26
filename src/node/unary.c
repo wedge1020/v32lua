@@ -2,6 +2,11 @@
 
 void  node_unary (ASTNode *node, int  dest_reg)
 {
+    if (node->as.unary.operator == OP_NOT) {
+        generate_bool_value (node, dest_reg);   // see node/cond.c
+        return;
+    }
+
     // Evaluate the operand into dest_reg
     generate_asm(node->as.unary.operand, dest_reg);
     

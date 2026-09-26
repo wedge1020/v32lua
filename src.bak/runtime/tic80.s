@@ -1,0 +1,2059 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; SECTION: TIC-80 API LAYER
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; __builtin_tic80_init (initialize 512 regions of 8x8 pixels for ALL 17 textures)
+;;
+;; Creates 512 regions (0-511) arranged in a 16-column × 32-row grid
+;; Each region is exactly 8×8 pixels with hotspot at TOP-LEFT (texture coords)
+;;
+;; This must be called for EACH texture (0-16) since regions are per-texture
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_init:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; Save callee-saved registers we'll use
+    PUSH  R13
+
+    ;; Outer loop: iterate through all 17 textures (0-16)
+    ;; Using R13 for texture index (R14=BP, R15=SP are reserved)
+    MOV   R13, 0             ; R13 = current texture index
+
+_tic80_init_texture_loop:
+    ;; Exit when all 17 textures are initialized
+    MOV   R0, R13
+    IEQ   R0, 17
+    JT    R0, _tic80_init_done
+
+    ;; Select current texture
+    OUT   GPU_SelectedTexture, R13
+
+    ;; Inner loop: initialize all 512 regions for this texture
+    MOV   R1, 0             ; R1 = region ID (0 to 511)
+    MOV   R2, 0             ; R2 = x position in texture (0 to 127)
+    MOV   R3, 0             ; R3 = y position in texture (0 to 255)
+
+_tic80_init_loop:
+    ;; Exit when all 512 regions are initialized for this texture
+    MOV   R0, R1
+    IEQ   R0, 512
+    JT    R0, _tic80_init_next_texture
+
+    ;; Select current region
+    OUT   GPU_SelectedRegion, R1
+
+    ;; Set region bounds: 8x8 pixels
+    OUT   GPU_RegionMinX, R2
+    OUT   GPU_RegionMinY, R3
+
+    ;; Hotspot at TOP-LEFT of region in TEXTURE coordinates
+    OUT   GPU_RegionHotspotX, R2
+    OUT   GPU_RegionHotspotY, R3
+
+    ;; MaxX = MinX + 7, MaxY = MinY + 7 (8 pixels total)
+    MOV   R4, R2
+    IADD  R4, 7
+    OUT   GPU_RegionMaxX, R4
+
+    MOV   R4, R3
+    IADD  R4, 7
+    OUT   GPU_RegionMaxY, R4
+
+    ;; Advance to next region
+    IADD  R1, 1
+    IADD  R2, 8              ; Move x by 8 pixels (next column)
+
+    ;; Check if x reached 128 (16 regions × 8 pixels = 128)
+    MOV   R0, R2
+    IEQ   R0, 128
+    JF    R0, _tic80_init_loop
+
+    ;; Wrap to next row: reset x to 0, advance y by 8 pixels
+    MOV   R2, 0
+    IADD  R3, 8
+    JMP   _tic80_init_loop
+
+_tic80_init_next_texture:
+    ;; Register the 16 solid-color palette swatches (regions 512-527) for
+    ;; THIS texture too. Every colorkey variant (0-16) carries the same
+    ;; swatch bank at the same region IDs, so pix()/rect()/rectb()/line()
+    ;; never need to touch GPU_SelectedTexture -- they draw on whatever
+    ;; texture the caller currently has selected.
+    MOV   R1, 512              ; region id
+    MOV   R2, 0                 ; color index / column counter
+
+_tic80_init_swatch_loop:
+    MOV   R0, R2
+    IEQ   R0, 16
+    JT    R0, _tic80_init_swatch_done
+
+    OUT   GPU_SelectedRegion, R1
+
+    MOV   R3, R2
+    IMUL  R3, 4                ; x = color * 4  (3px swatch + 1px gap)
+    OUT   GPU_RegionMinX, R3
+    OUT   GPU_RegionMinY, 256
+
+    OUT   GPU_RegionHotspotX, R3
+    OUT   GPU_RegionHotspotY, 256          ; top-left; line() overrides Y per-draw
+
+    MOV   R4, R3
+    IADD  R4, 2                 ; MaxX = MinX + 2 (3px wide)
+    OUT   GPU_RegionMaxX, R4
+    OUT   GPU_RegionMaxY, 258   ; MinY + 2 (3px tall)
+
+    IADD  R1, 1
+    IADD  R2, 1
+    JMP   _tic80_init_swatch_loop
+
+_tic80_init_swatch_done:
+    ;; Move to next texture
+    IADD  R13, 1
+    JMP   _tic80_init_texture_loop
+
+_tic80_init_done:
+_tic80_init_textures_done:
+    ;; Initialize map buffer after textures
+    CALL  __builtin_tic80_init_map
+
+    ;; Initialize sprite flags buffer
+    CALL  __builtin_tic80_init_flags
+
+    ;; Restore callee-saved register
+    POP   R13
+
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; __builtin_tic80_init_flags: Initialize Sprite Flag Buffer
+;;
+;; Allocates and zero-initializes 512 bytes (128 words) for sprite flags
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_init_flags:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; Allocate flag buffer (128 words = 512 bytes)
+    MOV   R0, TIC80_FLAG_BUFFER_WORDS
+    PUSH  R0
+    CALL  __malloc
+    IADD  SP, 1
+
+    ;; Store pointer globally
+    MOV   R1, var_TIC80_SPRITE_FLAGS_PTR
+    MOV   [R1], R0
+    MOV   R12, R0            ; R12 = flag buffer pointer
+
+    ;; Zero-initialize the flag buffer (128 words)
+    MOV   R2, 0             ; word index
+
+_tic80_init_flags_zero_loop:
+    MOV   R8, R2
+    ILT   R8, TIC80_FLAG_BUFFER_WORDS
+    JF    R8, _tic80_init_flags_done
+    MOV   R8, R2
+
+    MOV   R1, R12
+    IADD  R1, R2
+    MOV   R8, 0
+    MOV   [R1], R8
+
+    IADD  R2, 1
+    JMP   _tic80_init_flags_zero_loop
+
+_tic80_init_flags_done:
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; __builtin_tic80_spr (Multi-Tile Loop & Flip/Rotate/Scale Support)
+;;
+;; Stack layout relative to BP:
+;; [BP+2]:  id        (Sprite ID 0-511)
+;; [BP+3]:  x         (Screen X position in TIC-80 pixels)
+;; [BP+4]:  y         (Screen Y position in TIC-80 pixels)
+;; [BP+5]:  colorkey  (Transparent color index: 16=opaque, 0-15=transparent)
+;; [BP+6]:  scale     (TIC-80 scale: 1.0 = 2.625 on Vircon32)
+;; [BP+7]:  flip      (0=none, 1=horizontal, 2=vertical, 3=both)
+;; [BP+8]:  rotate    (0=0°, 1=90°, 2=180°, 3=270°) - IGNORED
+;; [BP+9]:  w         (Grid Width in sprites)
+;; [BP+10]: h         (Grid Height in sprites)
+;;
+;; Texture mapping:
+;;   colorkey = 16   -> texture 16 (all opaque)
+;;   colorkey = 0-15 -> texture 0-15 (that palette color transparent)
+;;
+;; FIXES APPLIED:
+;;   - Base x/y positions are now scaled by 2.625 and rounded
+;;   - All coordinate calculations use rounding (FADD 0.5) before CFI
+;;     to eliminate sub-pixel gaps that caused thin black grid lines
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_spr:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
+    PUSH  R7
+    PUSH  R8
+    PUSH  R9
+    PUSH  R10
+    PUSH  R11
+    PUSH  R12
+    PUSH  R13
+
+    ;; AUDIT FIXES (2026-09, verified in a headless run of the real CPU):
+    ;;  - colorkey went straight to GPU_SelectedTexture: the extremely common
+    ;;    explicit spr(id, x, y, -1) selected texture -1 (the BIOS font), and
+    ;;    every later swatch primitive inherited it. Anything outside 0-15
+    ;;    now means "no transparency" = texture 16.
+    ;;  - the flip tests ANDed into an UNINITIALIZED register (AND R3, R2 /
+    ;;    AND R11, R1), so flipping depended on leftover register contents.
+    ;;  - a flipped tile spans [pt - 8*scale, pt] (negative GPU scale), so it
+    ;;    belongs at base + (w - col)*8*scale, not (w - 1 - col) -- flipped
+    ;;    sprites were drawn one full tile to the left/up.
+    ;;  - positions are floored (FADD 0.5 + CFI truncated toward zero, so
+    ;;    sprites partly off the left/top edge landed a pixel off).
+    ;;  - all registers are preserved.
+
+    ;; --- colorkey -> texture ---
+    MOV   R1, [BP+5]
+    FLR   R1
+    CFI   R1
+    MOV   R2, R1
+    ILT   R2, 0
+    JT    R2, _tic80_spr_opaque
+    MOV   R2, R1
+    IGT   R2, 15
+    JF    R2, _tic80_spr_tex
+_tic80_spr_opaque:
+    MOV   R1, 16
+_tic80_spr_tex:
+    OUT   GPU_SelectedTexture, R1
+
+    ;; --- scale (TIC-80 scale * 2.625) and flip flags ---
+    MOV   R1, [BP+6]
+    FMUL  R1, 2.625
+    MOV   R10, R1
+    FMUL  R10, 8.0            ; R10 = tile size in screen px
+
+    MOV   R2, [BP+7]
+    FLR   R2
+    CFI   R2
+    MOV   R12, R2
+    AND   R12, 1              ; R12 = flip x (0/1)
+    MOV   R13, R2
+    AND   R13, 2
+    SHL   R13, -1             ; R13 = flip y (0/1)
+
+    MOV   R2, R1
+    JF    R12, _tic80_spr_sx
+    FSGN  R2
+_tic80_spr_sx:
+    OUT   GPU_DrawingScaleX, R2
+    MOV   R2, R1
+    JF    R13, _tic80_spr_sy
+    FSGN  R2
+_tic80_spr_sy:
+    OUT   GPU_DrawingScaleY, R2
+
+    ;; --- loop limits / base ---
+    MOV   R5, [BP+9]
+    CFI   R5                  ; w
+    MOV   R6, [BP+10]
+    CFI   R6                  ; h
+    MOV   R7, [BP+2]
+    FLR   R7
+    CFI   R7                  ; id
+
+    MOV   R8, [BP+3]
+    FMUL  R8, 2.625
+    FADD  R8, 0.5
+    FLR   R8
+    CFI   R8                  ; base x (screen px)
+    MOV   R9, [BP+4]
+    FMUL  R9, 2.625
+    FADD  R9, 0.5
+    FLR   R9
+    CFI   R9                  ; base y
+
+    MOV   R4, 0               ; row
+_tic80_spr_row_loop_start:
+    MOV   R1, R4
+    IGE   R1, R6
+    JT    R1, _tic80_spr_end
+    MOV   R3, 0               ; col
+_tic80_spr_col_loop_start:
+    MOV   R1, R3
+    IGE   R1, R5
+    JT    R1, _tic80_spr_row_loop_end
+
+    MOV   R1, R4
+    IMUL  R1, 16
+    IADD  R1, R3
+    IADD  R1, R7
+    OUT   GPU_SelectedRegion, R1
+
+    ;; x = base + col*tile, or base + (w - col)*tile when flipped
+    MOV   R1, R3
+    JF    R12, _tic80_spr_x_plain
+    MOV   R1, R5
+    ISUB  R1, R3
+_tic80_spr_x_plain:
+    CIF   R1
+    FMUL  R1, R10
+    FADD  R1, 0.5
+    FLR   R1
+    CFI   R1
+    IADD  R1, R8
+    OUT   GPU_DrawingPointX, R1
+
+    MOV   R1, R4
+    JF    R13, _tic80_spr_y_plain
+    MOV   R1, R6
+    ISUB  R1, R4
+_tic80_spr_y_plain:
+    CIF   R1
+    FMUL  R1, R10
+    FADD  R1, 0.5
+    FLR   R1
+    CFI   R1
+    IADD  R1, R9
+    OUT   GPU_DrawingPointY, R1
+
+    OUT   GPU_Command, GPUCommand_DrawRegionZoomed
+
+    IADD  R3, 1
+    JMP   _tic80_spr_col_loop_start
+_tic80_spr_row_loop_end:
+    IADD  R4, 1
+    JMP   _tic80_spr_row_loop_start
+
+_tic80_spr_end:
+    POP   R13
+    POP   R12
+    POP   R11
+    POP   R10
+    POP   R9
+    POP   R8
+    POP   R7
+    POP   R6
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; __builtin_btn: approximating the TIC-80 'btn()' function
+;;
+;; Stack layout relative to BP:
+;; [BP+2]: id (Button ID 0-31)
+;;
+;; Returns BOXED_TRUE or BOXED_FALSE in R0
+;;
+;; TIC-80 Button Mapping (first 8 match PICO-8 for compatibility):
+;; 0 = Up, 1 = Down, 2 = Left, 3 = Right, 4 = A, 5 = B, 6 = X, 7 = Y
+;; 8-31 = Additional TIC-80 buttons
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_btn:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; --- 1. Get Button ID ---
+    MOV   R2, [BP+2]
+    CFI   R2 ; convert button ID to int
+
+    ;; --- isolate gamepad #, distill R2 to the button 0-7 id on gamepad
+    MOV   R3, R2
+    IDIV  R3, 8  ; R3 will contain gamepad id
+    OUT   INP_SelectedGamepad, R3
+    IMOD  R2, 8  ; R2 now just contains button id on gamepad (0-7)
+
+    ;; If invalid button ID (gamepad id > 3), return false
+    IGT   R3, 3
+    JT    R3, _tic80_btn_false
+
+    ;; Compare and jump to specific hardware port read
+    ;; TIC-80 uses a unified button mapping, but we'll map to Vircon32 gamepad
+    MOV   R1, R2
+    IEQ   R1, 0
+    JT    R1, _tic80_btn_up
+    MOV   R1, R2
+    IEQ   R1, 1
+    JT    R1, _tic80_btn_down
+    MOV   R1, R2
+    IEQ   R1, 2
+    JT    R1, _tic80_btn_left
+    MOV   R1, R2
+    IEQ   R1, 3
+    JT    R1, _tic80_btn_right
+    MOV   R1, R2
+    IEQ   R1, 4
+    JT    R1, _tic80_btn_a
+    MOV   R1, R2
+    IEQ   R1, 5
+    JT    R1, _tic80_btn_b
+    MOV   R1, R2
+    IEQ   R1, 6
+    JT    R1, _tic80_btn_x
+    MOV   R1, R2
+    IEQ   R1, 7
+    JT    R1, _tic80_btn_y
+
+    JMP   _tic80_btn_false ; in the unlikely event we reach this, return false
+
+_tic80_btn_up:
+    IN    R2, INP_GamepadUp
+    JMP   _tic80_btn_eval
+_tic80_btn_down:
+    IN    R2, INP_GamepadDown
+    JMP   _tic80_btn_eval
+_tic80_btn_left:
+    IN    R2, INP_GamepadLeft
+    JMP   _tic80_btn_eval
+_tic80_btn_right:
+    IN    R2, INP_GamepadRight
+    JMP   _tic80_btn_eval
+_tic80_btn_a:
+    IN    R2, INP_GamepadButtonA
+    JMP   _tic80_btn_eval
+_tic80_btn_b:
+    IN    R2, INP_GamepadButtonB
+    JMP   _tic80_btn_eval
+_tic80_btn_x:
+    IN    R2, INP_GamepadButtonX
+    JMP   _tic80_btn_eval
+_tic80_btn_y:
+    IN    R2, INP_GamepadButtonY
+
+_tic80_btn_eval:
+    ;; Vircon32 returns 1 for pressed, 0 for not pressed
+    IGE   R2, 1
+    JT    R2, _tic80_btn_true
+
+_tic80_btn_false:
+    MOV   R0, BOXED_FALSE
+    JMP   _tic80_btn_end
+
+_tic80_btn_true:
+    MOV   R0, BOXED_TRUE
+
+_tic80_btn_end:
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; __builtin_btnp: approximating the TIC-80 'btnp()' function
+;;
+;; Stack layout relative to BP:
+;; [BP+2]: id (Button ID 0-31)
+;; [BP+3]: hold (Frames to hold before autorepeat, -1 for default)
+;; [BP+4]: period (Frames between autorepeat, -1 for default)
+;;
+;; Returns BOXED_TRUE or BOXED_FALSE in R0
+;;
+;; TIC-80 btnp behavior:
+;; - Returns true only if button was pressed since last frame
+;; - With hold/period: returns true after 'hold' frames, then every 'period' frames
+;; - Default TIC-80 behavior: hold=6, period=4 (different from PICO-8's 15,4)
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_btnp:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; --- 1. Evaluate Button ID ---
+    MOV   R2, [BP+2]
+    CFI   R2
+
+    ;; --- isolate gamepad #, distill R2 to the button 0-7 id on gamepad
+    MOV   R3, R2
+    IDIV  R3, 8  ; R3 will contain gamepad id
+    OUT   INP_SelectedGamepad, R3
+    IMOD  R2, 8  ; R2 now just contains button id on gamepad (0-7)
+
+    ;; If invalid button ID (gamepad id > 3), return false
+    IGT   R3, 3
+    JT    R3, _tic80_btnp_false
+
+    ;; Compare and jump to specific hardware port read
+    MOV   R1, R2
+    IEQ   R1, 0
+    JT    R1, _tic80_btnp_up
+    MOV   R1, R2
+    IEQ   R1, 1
+    JT    R1, _tic80_btnp_down
+    MOV   R1, R2
+    IEQ   R1, 2
+    JT    R1, _tic80_btnp_left
+    MOV   R1, R2
+    IEQ   R1, 3
+    JT    R1, _tic80_btnp_right
+    MOV   R1, R2
+    IEQ   R1, 4
+    JT    R1, _tic80_btnp_a
+    MOV   R1, R2
+    IEQ   R1, 5
+    JT    R1, _tic80_btnp_b
+    MOV   R1, R2
+    IEQ   R1, 6
+    JT    R1, _tic80_btnp_x
+    MOV   R1, R2
+    IEQ   R1, 7
+    JT    R1, _tic80_btnp_y
+
+    JMP   _tic80_btnp_false
+
+_tic80_btnp_up:
+    IN    R2, INP_GamepadUp
+    JMP   _tic80_btnp_eval
+_tic80_btnp_down:
+    IN    R2, INP_GamepadDown
+    JMP   _tic80_btnp_eval
+_tic80_btnp_left:
+    IN    R2, INP_GamepadLeft
+    JMP   _tic80_btnp_eval
+_tic80_btnp_right:
+    IN    R2, INP_GamepadRight
+    JMP   _tic80_btnp_eval
+_tic80_btnp_a:
+    IN    R2, INP_GamepadButtonA
+    JMP   _tic80_btnp_eval
+_tic80_btnp_b:
+    IN    R2, INP_GamepadButtonB
+    JMP   _tic80_btnp_eval
+_tic80_btnp_x:
+    IN    R2, INP_GamepadButtonX
+    JMP   _tic80_btnp_eval
+_tic80_btnp_y:
+    IN    R2, INP_GamepadButtonY
+
+_tic80_btnp_eval:
+    ;; R2 now contains Frames Held (>0) or Frames Released (<=0)
+
+    ;; Load hold and period parameters (with defaults)
+    MOV   R3, [BP+3]        ; hold parameter
+    CFI   R3
+    ;; If hold is -1, use TIC-80 default of 6
+    IEQ   R3, -1
+    JT    R3, _tic80_btnp_use_default_hold
+    JMP   _tic80_btnp_check_hold
+_tic80_btnp_use_default_hold:
+    MOV   R3, 6             ; TIC-80 default hold frames
+
+_tic80_btnp_check_hold:
+    MOV   R4, [BP+4]        ; period parameter
+    CFI   R4
+    ;; If period is -1, use TIC-80 default of 4
+    IEQ   R4, -1
+    JT    R4, _tic80_btnp_use_default_period
+    JMP   _tic80_btnp_check_period
+_tic80_btnp_use_default_period:
+    MOV   R4, 4             ; TIC-80 default period frames
+
+_tic80_btnp_check_period:
+    ;; Condition A: Is button not pressed?
+    MOV   R1, R2
+    ILT   R1, 1
+    JT    R1, _tic80_btnp_false   ; If < 1, return false
+
+    ;; Condition B: Initial Press (Frame 1)
+    MOV   R1, R2
+    IEQ   R1, 1
+    JT    R1, _tic80_btnp_true    ; If exactly 1, return true
+
+    ;; Condition C: Hold Phase (Frames 2 to hold-1)
+    MOV   R1, R2
+    ILT   R1, R3            ; Compare with hold parameter
+    JT    R1, _tic80_btnp_false   ; If < hold (and > 1), return false
+
+    ;; Condition D: Autorepeat Phase (Frames >= hold)
+    ;; Logic: (FramesHeld - hold) % period == 0
+    MOV   R1, R2
+    ISUB  R1, R3            ; Subtract hold frames
+    IMOD  R1, R4            ; Modulo period
+    IEQ   R1, 0             ; Is remainder 0?
+    JT    R1, _tic80_btnp_true    ; If yes, return true
+
+_tic80_btnp_false:
+    MOV   R0, BOXED_FALSE
+    JMP   _tic80_btnp_end
+
+_tic80_btnp_true:
+    MOV   R0, BOXED_TRUE
+
+_tic80_btnp_end:
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; __builtin_tic80_cls: Clear screen to color
+;;
+;; Stack: [BP+2] = color (palette index 0-15 or 32-bit RGBA value)
+;; Uses: R1-R4
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_cls:
+    PUSH  BP
+    MOV   BP, SP
+
+    MOV   R1, [BP+2]        ; Load color argument
+
+    ;; If color is a small integer (0-15), map to palette
+    MOV   R2, R1
+    CFI   R2                ; Convert to integer in R2
+
+    ;; Check if 0 <= R2 < 16 (palette index range)
+    ILT   R2, 0
+    JT    R2, _tic80_cls_use_direct
+    IGE   R2, 16
+    JT    R2, _tic80_cls_use_direct
+
+    ;; Palette lookup: R2 is valid index 0-15
+    ;; Each palette entry is 4 bytes, so offset = R2 * 4
+    SHL   R2, 2            ; R2 = R2 * 4
+    MOV   R3, __tic80_palette
+    IADD  R3, R2
+    MOV   R1, [R3]        ; Load 32-bit color from palette
+
+_tic80_cls_use_direct:
+    ;; R1 now contains the 32-bit RGBA color
+    OUT   GPU_ClearColor, R1
+    OUT   GPU_Command, GPUCommand_ClearScreen
+
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; ===========================================================================
+;; TIC-80 MAP CONSTANTS
+;; ===========================================================================
+
+;; TIC-80 MAP CONSTANTS
+%define TIC80_MAP_MAX_WIDTH     240
+%define TIC80_MAP_MAX_HEIGHT    136
+%define TIC80_MAP_MAX_CELLS     32640   ; 240*136
+
+;; Default map dimensions (can be changed at runtime)
+%define TIC80_MAP_ACTUAL_WIDTH  240
+%define TIC80_MAP_ACTUAL_HEIGHT 136
+
+;; Buffer size in words (64KB = 16384 words)
+%define TIC80_MAP_BUFFER_WORDS  16384
+
+;; ============================================================================
+;; TIC-80 Map Initialization with Static Data
+;; Allocates map buffer and copies parsed map data (if available)
+;; ============================================================================
+
+__builtin_tic80_init_map:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; Allocate map buffer (64KB)
+    MOV   R0, TIC80_MAP_BUFFER_WORDS
+    PUSH  R0
+    CALL  __malloc
+    IADD  SP, 1
+
+    ;; Store pointer globally
+    MOV   R1,   var_TIC80_MAP_BUFFER_PTR
+    MOV   [R1], R0
+    MOV   R12,  R0            ; R12 = buffer
+
+    ;; Initialize RAM variables with actual cartridge dimensions from ROM
+    MOV   R1, __tic80_map_static_width
+    MOV   R1, [R1]              ; Load static width (240) from ROM
+    MOV   R2, var_TIC80_MAP_WIDTH    ; RAM address 2
+    MOV   [R2], R1              ; Store width in RAM
+
+    MOV   R1, __tic80_map_static_height
+    MOV   R1, [R1]             ; Load static height (17) from ROM
+    MOV   R2, var_TIC80_MAP_HEIGHT   ; RAM address 3
+    MOV   [R2], R1              ; Store height in RAM
+
+    ;; Check for static map data (width > 0?)
+    MOV   R1, var_TIC80_MAP_WIDTH
+    MOV   R1, [R1]
+    IEQ   R1, 0
+    JT    R1, _tic80_init_map_zero_fill
+
+    ;; Copy loop
+    MOV   R2, 0                ; byte index
+    MOV   R3, var_TIC80_MAP_WIDTH
+    MOV   R3, [R3]
+    MOV   R6, var_TIC80_MAP_HEIGHT
+    MOV   R6, [R6]
+    IMUL  R3, R6              ; R3 = total bytes
+    MOV   R7, __tic80_map_static_data
+
+_tic80_init_map_copy_loop:
+    MOV   R8, R2
+    ILT   R8, R3
+    JT    R8, _tic80_copy_continue
+    JMP   _tic80_init_map_done
+
+_tic80_copy_continue:
+    MOV   R8, R7
+    IADD  R8, R2
+    MOV   R8, [R8]
+
+    MOV   R1, R12
+    IADD  R1, R2
+    MOV   [R1], R8
+
+    IADD  R2, 1
+    JMP   _tic80_init_map_copy_loop
+
+    ;; Zero-fill fallback
+_tic80_init_map_zero_fill:
+    MOV   R2, 0
+    MOV   R3, TIC80_MAP_BUFFER_WORDS
+    SHL   R3, 2              ; bytes = words * 4
+
+_tic80_init_map_zero_loop:
+    MOV   R8, R2
+    ILT   R8, R3
+    JT    R8, _tic80_zero_continue
+    JMP   _tic80_init_map_done
+
+_tic80_zero_continue:
+    MOV   R8, 0
+    MOV   R1, R12
+    IADD  R1, R2
+    MOV   [R1], R8
+
+    IADD  R2, 1
+    JMP   _tic80_init_map_zero_loop
+
+_tic80_init_map_done:
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; __builtin_tic80_mget: Get Tile from TIC-80 Map
+;;
+;; Stack: [BP+2] = x
+;;        [BP+3] = y
+;; Returns: R0 = tile index at (x,y) as boxed Lua number,
+;;               ... or BOXED_NIL if out of bounds
+;;
+;; Reads a single tile from the map buffer using actual cartridge dimensions
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_mget:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; Load buffer pointer
+    MOV   R1,  var_TIC80_MAP_BUFFER_PTR
+    MOV   R12, [R1]
+    IEQ   R12, 0
+    JT    R12, _tic80_mget_invalid
+
+    ;; Load arguments
+    MOV   R1, [BP+2]        ; x
+    MOV   R2, [BP+3]        ; y
+
+    ;; Snap to integer tile coordinates
+    FADD  R1, 0.5
+    CFI   R1                ; R1 = round(x)
+    FADD  R2, 0.5
+    CFI   R2                ; R2 = round(y)
+
+    ;; Snap to 0.1-pixel grid, then round to integer
+;   FMUL  R1, 10.0          ; x * 10 (float)
+;   FADD  R1, 0.5           ; + 0.5 (float)
+;   CFI   R1                ; → integer (round(x*10))
+;   IDIV  R1, 10            ; integer division: round(x*10) / 10
+
+    ;; Snap to 0.1-pixel grid, then round to integer
+;   FMUL  R2, 10.0          ; y * 10 (float)
+;   FADD  R2, 0.5           ; + 0.5 (float)
+;   CFI   R2                ; → integer (round(y*10))
+;   IDIV  R2, 10            ; integer division: round(y*10) / 10
+
+    ;; Load ACTUAL map dimensions for bounds checking
+    MOV   R3, var_TIC80_MAP_WIDTH
+    MOV   R3, [R3]          ; R3 = actual width
+    MOV   R4, var_TIC80_MAP_HEIGHT
+    MOV   R4, [R4]          ; R4 = actual height
+
+    ;; Bounds check: x
+    MOV   R5, R1
+    ILT   R5, 0
+    JT    R5, _tic80_mget_invalid
+    MOV   R5, R1
+    IGE   R5, R3
+    JT    R5, _tic80_mget_invalid
+
+    ;; Bounds check: y
+    MOV   R5, R2
+    ILT   R5, 0
+    JT    R5, _tic80_mget_invalid
+    MOV   R5, R2
+    IGE   R5, R4
+    JT    R5, _tic80_mget_invalid
+
+    ;; Calculate byte index: index = y * width + x
+    MOV   R5, R3
+    IMUL  R2, R5            ; R2 = y * width
+    IADD  R1, R2            ; R1 = byte index
+
+    ;; Load tile index directly (each word = one byte)
+    MOV   R12,  var_TIC80_MAP_BUFFER_PTR
+    MOV   R12,  [R12]
+    MOV   R0,   R12
+    IADD  R0,   R1
+    MOV   R0,   [R0]          ; R0 = tile index
+
+    ;; Return as boxed Lua number
+    CIF   R0
+    JMP   _tic80_mget_done
+
+_tic80_mget_invalid:
+    MOV   R0, BOXED_NIL
+
+_tic80_mget_done:
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; __builtin_tic80_mset: Set Tile in TIC-80 Map
+;;
+;; Stack: [BP+2] = x, [BP+3] = y, [BP+4] = value (tile index 0-255)
+;;
+;; Writes a tile to the map buffer at (x,y) using actual cartridge dimensions.
+;; Clamps value to 0-255 range. Returns the value as boxed Lua number.
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_mset:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; Load buffer pointer
+    MOV   R1,  var_TIC80_MAP_BUFFER_PTR
+    MOV   R12, [R1]
+    MOV   R2,  R12
+    IEQ   R2,  0
+    JT    R2,  _tic80_mset_done
+
+    ;; X: Load coordinate argument
+    MOV   R1, [BP+2]        ; x
+
+    ;; Snap to integer tile coordinates
+    FADD  R1, 0.5
+    CFI   R1                ; R1 = round(x)
+
+    ;; X: Snap to 0.1-pixel grid, then round to integer
+;   FMUL  R1, 10.0          ; x * 10 (float)
+;   FADD  R1, 0.5           ; + 0.5 (float)
+;   CFI   R1                ; → integer (round(x*10))
+;   IDIV  R1, 10            ; integer division: round(x*10) / 10
+
+    ;; Y: Load coordinate argument
+    MOV   R2, [BP+3]        ; y
+    FADD  R2, 0.5
+    CFI   R2                ; R2 = round(y)
+
+    ;; Y: Snap to 0.1-pixel grid, then round to integer
+;   FMUL  R2, 10.0          ; y * 10 (float)
+;   FADD  R2, 0.5           ; + 0.5 (float)
+;   CFI   R2                ; → integer (round(y*10))
+;   IDIV  R2, 10            ; integer division: round(y*10) / 10
+
+    ;; load value argument
+    MOV   R3, [BP+4]        ; value
+    CFI   R3
+
+    ;; Load ACTUAL map dimensions for bounds checking
+    MOV   R4, var_TIC80_MAP_WIDTH
+    MOV   R4, [R4]          ; R4 = actual width
+    MOV   R5, var_TIC80_MAP_HEIGHT
+    MOV   R5, [R5]          ; R5 = actual height
+
+    ;; Bounds check: x
+    MOV   R6, R1
+    ILT   R6, 0
+    JT    R6, _tic80_mset_done
+    MOV   R6, R1
+    IGE   R6, R4
+    JT    R6, _tic80_mset_done
+
+    ;; Bounds check: y
+    MOV   R6, R2
+    ILT   R6, 0
+    JT    R6, _tic80_mset_done
+    MOV   R6, R2
+    IGE   R6, R5
+    JT    R6, _tic80_mset_done
+
+    ;; Clamp value to 0-255 (TIC-80 uses 0-511 but 256 is enough for most cases)
+    MOV   R6, R3
+    ILT   R6, 0
+    JT    R6, _tic80_mset_clamp_zero
+    MOV   R6, R3
+    IGT   R6, 255
+    JT    R6, _tic80_mset_clamp_max
+    JMP   _tic80_mset_store
+
+_tic80_mset_clamp_zero:
+    MOV   R3, 0
+    JMP   _tic80_mset_store
+
+_tic80_mset_clamp_max:
+    MOV   R3, 255
+
+_tic80_mset_store:
+    ;; Calculate byte index: index = y * width + x
+    MOV   R6, R4
+    IMUL  R2, R6            ; R2 = y * width
+    IADD  R1, R2            ; R1 = byte index
+
+    ;; Store tile index directly (each word = one byte)
+    MOV   R2, R12
+    IADD  R2, R1
+    MOV   [R2], R3          ; Store tile index
+
+    ;; Return the value (boxed)
+    CIF   R3
+    MOV   R0, R3
+
+_tic80_mset_done:
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; __builtin_tic80_map: Draw TIC-80 Map Region to Screen
+;;
+;; Stack: [BP+2] = x (screen X)
+;;        [BP+3] = y (screen Y)
+;;        [BP+4] = w (width in tiles)
+;;        [BP+5] = h (height in tiles)
+;;        [BP+6] = sx (source X in map)
+;;        [BP+7] = sy (source Y in map)
+;;        [BP+8] = color_key (transparent color)
+;;
+;; Renders a w × h tile region from the map buffer to the screen at (x,y).
+;; Uses actual cartridge map dimensions from RAM (var_TIC80_MAP_WIDTH/HEIGHT)
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_map:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; Save callee-saved registers
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
+    PUSH  R7
+    PUSH  R8
+    PUSH  R9
+    PUSH  R10
+    PUSH  R11
+    PUSH  R12
+    PUSH  R13
+
+    ;; Load buffer pointer
+    ;; Buffer pointer: a register_global()'d word starts as BOXED_NIL (the
+    ;; nil-init sweep), not 0 -- test both before using it as an address.
+    MOV   R1,  var_TIC80_MAP_BUFFER_PTR
+    MOV   R12, [R1]
+    MOV   R0, R12
+    IEQ   R0, 0
+    JT    R0, _tic80_map_done
+    MOV   R0, R12
+    IEQ   R0, BOXED_NIL
+    JT    R0, _tic80_map_done
+
+    ;; Load arguments
+    MOV   R5, [BP+2]        ; sx (source X in map)  <-- Was R1
+    MOV   R6, [BP+3]        ; sy (source Y in map)  <-- Was R2
+    MOV   R1, [BP+6]        ; x (screen X)          <-- Was R5
+    MOV   R2, [BP+7]        ; y (screen Y)          <-- Was R6
+    ;MOV   R1, [BP+2]        ; x
+    ;MOV   R2, [BP+3]        ; y
+    MOV   R3, [BP+4]        ; w
+    MOV   R4, [BP+5]        ; h
+    ;MOV   R5, [BP+6]        ; sx
+    ;MOV   R6, [BP+7]        ; sy
+    CFI   R1
+    CFI   R2
+    CFI   R3
+    CFI   R4
+    CFI   R5
+    CFI   R6
+
+    ;; Load ACTUAL map dimensions
+    ;; (The old code CLAMPED the source origin so the whole w x h block fit
+    ;; inside the cart's stored map -- with h larger than the stored height
+    ;; that produced a NEGATIVE origin, and super_breakout's
+    ;; map(0,0,MAP_WIDTH,MAP_HEIGHT) read far outside the buffer. Its sy<0
+    ;; path also skipped initializing the row counter. Cells are now
+    ;; resolved one at a time below, TIC-80 style.)
+    MOV   R11, R3
+    ILT   R11, 1
+    JT    R11, _tic80_map_done
+    MOV   R11, R4
+    ILT   R11, 1
+    JT    R11, _tic80_map_done
+
+_tic80_map_row_loop_prestart:
+    MOV   R9, 0
+_tic80_map_row_loop_start:
+    MOV   R7, R9           ; Use R7 as scratch for condition check
+    IGE   R7, R4
+    JT    R7, _tic80_map_done
+
+    ;; Inner loop: columns (R10)
+    MOV   R10, 0
+_tic80_map_col_loop_start:
+    MOV   R7, R10          ; Use R7 as scratch for condition check
+    IGE   R7, R3
+    JT    R7, _tic80_map_row_loop_next
+
+    ;; Calculate map cell position: (sx + col, sy + row)
+    ;; Map cell = (x + col, y + row), wrapped into TIC-80's 240 x 136 map
+    ;; like TIC-80 does; cells the cart's MAP data doesn't cover read as 0.
+    MOV   R7, R5
+    IADD  R7, R10
+    IMOD  R7, 240
+    MOV   R11, R7
+    ILT   R11, 0
+    JF    R11, _tic80_map_x_wrapped
+    IADD  R7, 240
+_tic80_map_x_wrapped:
+    MOV   R8, R6
+    IADD  R8, R9
+    IMOD  R8, 136
+    MOV   R11, R8
+    ILT   R11, 0
+    JF    R11, _tic80_map_y_wrapped
+    IADD  R8, 136
+_tic80_map_y_wrapped:
+    MOV   R11, var_TIC80_MAP_WIDTH
+    MOV   R11, [R11]
+    MOV   R0, R7
+    IGE   R0, R11
+    JT    R0, _tic80_map_empty_cell      ; x beyond stored map
+    MOV   R0, var_TIC80_MAP_HEIGHT
+    MOV   R0, [R0]
+    ILE   R0, R8
+    JT    R0, _tic80_map_empty_cell      ; y beyond stored map
+    IMUL  R8, R11                        ; y * width
+    IADD  R7, R8                         ; cell index
+    MOV   R8, R12
+    IADD  R8, R7
+    MOV   R7, [R8]                       ; tile index
+    JMP   _tic80_map_have_cell
+_tic80_map_empty_cell:
+    MOV   R7, 0
+_tic80_map_have_cell:
+
+    PUSH  R1               ; x save
+    PUSH  R2               ; y save
+    PUSH  R3               ; w save
+    PUSH  R4               ; h save
+    PUSH  R5               ; sx save
+    PUSH  R6               ; sy save
+    PUSH  R7
+    PUSH  R8
+    PUSH  R9
+    PUSH  R10              ; column index save
+    PUSH  R11
+    PUSH  R12
+    PUSH  R13              ; color_key save
+    
+    ;; Push arguments for __builtin_tic80_spr (in reverse order)
+    MOV   R0, 1.0
+    PUSH  R0               ; h = 1.0
+    PUSH  R0               ; w = 1.0
+    MOV   R0, 0
+    PUSH  R0               ; rotate = 0
+    PUSH  R0               ; flip = 0
+    MOV   R0, 1.0
+    PUSH  R0               ; scale = 1.0
+
+    MOV   R0, [BP+8]       ; color_key
+    PUSH  R0               ; color_key (safely preserved!)
+    
+    ;; Calculate screen Y position: y + row*8
+    MOV   R0, R9           ; R0 = row
+    IMUL  R0, 8
+    IADD  R0, R2           ; R0 = screen_y + row*8
+    CIF   R0
+    PUSH  R0               ; y
+
+    MOV   R0, R10          ; R0 = col (loop counter)
+    IMUL  R0, 8            ; R0 = col * 8
+    IADD  R0, R1           ; R0 = x + col * 8 (screen coordinate)
+    CIF   R0
+    PUSH  R0               ; x
+    
+    MOV   R0, R7
+    CIF   R0
+    PUSH  R0               ; id
+
+    CALL  __builtin_tic80_spr
+
+    IADD  SP, 9
+
+    POP   R13              ; color_key restore
+    POP   R12
+    POP   R11
+    POP   R10              ; column index restore
+    POP   R9
+    POP   R8
+    POP   R7
+    POP   R6               ; sy restore
+    POP   R5               ; sx restore
+    POP   R4               ; h restore
+    POP   R3               ; w restore
+    POP   R2               ; y restore
+    POP   R1               ; x restore
+
+    ;; Next column
+    IADD  R10, 1           ; R10 has been clobbered by __builtin_tic80_spr
+    JMP   _tic80_map_col_loop_start
+
+_tic80_map_row_loop_next:
+    IADD  R9, 1
+    JMP   _tic80_map_row_loop_start
+
+_tic80_map_done:
+    ;; Restore registers
+    POP   R13
+    POP   R12
+    POP   R11
+    POP   R10
+    POP   R9
+    POP   R8
+    POP   R7
+    POP   R6
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; __builtin_tic80_pmem: Access TIC-80 Persistent Memory (mapped to Vircon32 MEMCARD)
+;;
+;; TIC-80 pmem() signature:
+;;   pmem(index)          -> returns byte value at index (read)
+;;   pmem(index, value)  -> writes byte value at index (write)
+;;
+;; Stack layout:
+;;   [BP+2] = index (0-65535 for TIC-80's 64KB)
+;;   [BP+3] = value (optional, for write)
+;;
+;; Returns: R0 = byte value (for read), or the value written (for write)
+;;
+;; Maps TIC-80's 64KB persistent memory to first 64KB of Vircon32 MEMCARD
+;; MEMCARD base: 0x30000000, size: 1MB (0x100000 bytes)
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_pmem:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; Check if this is a write operation (2 arguments)
+    ;; Stack has: [BP+0]=return addr, [BP+1]=old BP, [BP+2]=index, [BP+3]=value
+    MOV   R1, [BP+3]        ; Load potential value argument
+    MOV   R2, BOXED_NIL
+    IEQ   R1, R2
+    JT    R1, _tic80_pmem_read
+
+    ;; === WRITE OPERATION ===
+    ;; Convert index to integer
+    MOV   R1, [BP+2]        ; index
+    CFI   R1                ; R1 = integer index
+
+    ;; Bounds check: 0 <= index < 65536 (TIC-80 pmem limit)
+    MOV   R2, R1
+    ILT   R2, 0
+    JT    R2, _tic80_pmem_invalid
+    MOV   R2, R1
+    IGE   R2, 65536
+    JT    R2, _tic80_pmem_invalid
+
+    ;; Convert value to integer (byte)
+    MOV   R2, [BP+3]        ; value
+    CFI   R2
+    AND   R2, 0xFF         ; Clamp to byte (0-255)
+
+    ;; Calculate MEMCARD address: 0x30000000 + index
+    MOV   R3, 0x30000000
+    IADD  R3, R1           ; R3 = MEMCARD address
+
+    ;; Write byte to MEMCARD
+    MOV   [R3], R2
+
+    ;; Return the value written (as boxed Lua number)
+    CIF   R2
+    MOV   R0, R2
+    JMP   _tic80_pmem_done
+
+_tic80_pmem_read:
+    ;; === READ OPERATION ===
+    MOV   R1, [BP+2]        ; index
+    CFI   R1                ; R1 = integer index
+
+    ;; Bounds check
+    MOV   R0, R1
+    ILT   R0, 0
+    JT    R0, _tic80_pmem_invalid
+    MOV   R0, R1
+    IGE   R0, 65536
+    JT    R0, _tic80_pmem_invalid
+
+    ;; Calculate MEMCARD address
+    MOV   R3, 0x30000000
+    IADD  R3, R1
+
+    ;; Read byte from MEMCARD
+    MOV   R0, [R3]
+    AND   R0, 0xFF         ; Ensure byte value
+
+    ;; Return as boxed Lua number
+    CIF   R0
+    JMP   _tic80_pmem_done
+
+_tic80_pmem_invalid:
+    MOV   R0, BOXED_NIL     ; Return nil for out-of-bounds
+
+_tic80_pmem_done:
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_tic80_fget: Get Flag Bit for a TIC-80 Sprite (bit-packed, 4/word)
+;; Stack: [BP+2] = sprite_id (0-511), [BP+3] = flag_bit (0-7)
+;; Returns: R0 = 0 or 1 (boxed), or BOXED_NIL if invalid
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_fget:
+    PUSH  BP
+    MOV   BP, SP
+
+    MOV   R1, var_TIC80_SPRITE_FLAGS_PTR
+    MOV   R12, [R1]
+    IEQ   R12, 0              ; destructive -- R12 is now junk (0/1)
+    JT    R12, _tic80_fget_invalid
+
+    MOV   R1, [BP+2]          ; sprite_id
+    MOV   R2, [BP+3]          ; flag_bit
+    CFI   R1
+    CFI   R2
+
+    ;; Validate sprite_id: 0 <= id < 512
+    MOV   R3, R1
+    ILT   R3, 0
+    JT    R3, _tic80_fget_invalid
+    MOV   R3, R1
+    IGE   R3, 512
+    JT    R3, _tic80_fget_invalid
+
+    ;; Validate flag_bit: 0 <= bit < 8
+    MOV   R3, R2
+    ILT   R3, 0
+    JT    R3, _tic80_fget_invalid
+    MOV   R3, R2
+    IGE   R3, 8
+    JT    R3, _tic80_fget_invalid
+
+    ;; word_index = sprite_id >> 2 ; byte_offset = sprite_id & 3 (which of
+    ;; the 4 packed sprites in that word)
+    MOV   R3, R1
+    SHL   R3, -2               ; R3 = word index
+    MOV   R4, R1
+    AND   R4, 3                ; R4 = byte offset within word (0-3)
+
+    ;; Reload the buffer pointer fresh (R12 was clobbered by IEQ above)
+    MOV   R5, var_TIC80_SPRITE_FLAGS_PTR
+    MOV   R5, [R5]
+    IADD  R5, R3
+    MOV   R5, [R5]              ; R5 = word containing this sprite's flag byte
+
+    ;; Extract the byte at byte_offset
+    SHL   R4, 3                 ; R4 = bit-shift amount (0, 8, 16, 24)
+    MOV   R6, 0xFF
+    SHL   R6, R4
+    AND   R5, R6                 ; isolate the byte (still shifted up in place)
+    ISGN  R4
+    SHL   R5, R4                 ; shift back down -> R5 = this sprite's flag byte
+
+    ;; Extract the specific flag bit
+    MOV   R7, 1
+    SHL   R7, R2                 ; R7 = 1 << flag_bit
+    AND   R5, R7
+    IEQ   R5, 0
+    JT    R5, _tic80_fget_false
+
+    MOV   R0, 1
+    CIF   R0
+    JMP   _tic80_fget_done
+
+_tic80_fget_false:
+    MOV   R0, 0
+    CIF   R0
+
+_tic80_fget_done:
+    JMP   _tic80_fget_end
+
+_tic80_fget_invalid:
+    MOV   R0, BOXED_NIL
+
+_tic80_fget_end:
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_tic80_fset: Set Flag Bit for a TIC-80 Sprite (bit-packed, 4/word)
+;; Stack: [BP+2]=sprite_id [BP+3]=flag_bit [BP+4]=value (0/1)
+;; Returns: R0 = the value that was set (boxed), or BOXED_NIL if invalid
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_fset:
+    PUSH  BP
+    MOV   BP, SP
+
+    MOV   R1, var_TIC80_SPRITE_FLAGS_PTR
+    MOV   R12, [R1]
+    IEQ   R12, 0
+    JT    R12, _tic80_fset_done_nil
+
+    MOV   R1, [BP+2]           ; sprite_id
+    MOV   R2, [BP+3]           ; flag_bit
+    MOV   R3, [BP+4]           ; value
+    CFI   R1
+    CFI   R2
+    CFI   R3
+    AND   R3, 1                 ; clamp value to 0/1
+
+    ;; Validate sprite_id
+    MOV   R4, R1
+    ILT   R4, 0
+    JT    R4, _tic80_fset_done_nil
+    MOV   R4, R1
+    IGE   R4, 512
+    JT    R4, _tic80_fset_done_nil
+
+    ;; Validate flag_bit
+    MOV   R4, R2
+    ILT   R4, 0
+    JT    R4, _tic80_fset_done_nil
+    MOV   R4, R2
+    IGE   R4, 8
+    JT    R4, _tic80_fset_done_nil
+
+    ;; word_index = sprite_id >> 2 ; byte_offset = sprite_id & 3
+    MOV   R4, R1
+    SHL   R4, -2                ; R4 = word index (kept alive to the store)
+    MOV   R8, R1
+    AND   R8, 3                  ; R8 = byte offset within word (0-3)
+
+    MOV   R5, var_TIC80_SPRITE_FLAGS_PTR
+    MOV   R5, [R5]
+    IADD  R5, R4                  ; R5 = address of the packed word
+    MOV   R6, [R5]                ; R6 = current packed word
+
+    ;; Build a mask for this sprite's bit, positioned within the word:
+    ;; (1 << flag_bit) << (byte_offset * 8)
+    MOV   R7, R8
+    SHL   R7, 3                   ; R7 = byte-position shift (0,8,16,24)
+    MOV   R9, 1
+    SHL   R9, R2                   ; R9 = 1 << flag_bit
+    SHL   R9, R7                   ; R9 = mask positioned in the packed word
+
+    MOV   R10, R3                  ; copy value so R3 survives for the return
+    IEQ   R10, 0
+    JT    R10, _tic80_fset_clear
+
+_tic80_fset_set:
+    OR    R6, R9
+    JMP   _tic80_fset_store
+
+_tic80_fset_clear:
+    NOT   R9
+    AND   R6, R9
+
+_tic80_fset_store:
+    ;; R5 still points at the packed word (untouched since the load above);
+    ;; reloaded defensively anyway to match the rest of this file's style.
+    MOV   R5, var_TIC80_SPRITE_FLAGS_PTR
+    MOV   R5, [R5]
+    IADD  R5, R4
+    MOV   [R5], R6
+
+    MOV   R0, R3
+    CIF   R0
+    JMP   _tic80_fset_done
+
+_tic80_fset_done_nil:
+    MOV   R0, BOXED_NIL
+
+_tic80_fset_done:
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __tic80_draw_swatch (internal helper -- not Lua-callable)
+;; In: R1=x R2=y R3=w R4=h (TIC-80 pixels, top-left, w/h >= 1), R5=color (0-15)
+;; Destroys R1-R4. Draws on whatever texture is currently selected.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __tic80_draw_swatch (internal helper -- not Lua-callable)
+;; In: R1=x R2=y R3=w R4=h (already valid Lua floats, TIC-80 pixels,
+;;     top-left, w/h >= 1), R5=color (0-15)
+;; Destroys R1-R4. Draws on whatever texture is currently selected.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__tic80_draw_swatch:
+    ;; Select the texture explicitly (swatches are opaque on every sheet;
+    ;; line() already uses texture 0). Relying on "whatever is selected"
+    ;; drew rect/pix/circ from the BIOS font after any spr(..., -1).
+    OUT   GPU_SelectedTexture, 0
+    MOV   R8, R5
+    IADD  R8, 512
+    OUT   GPU_SelectedRegion, R8
+
+    FMUL  R3, 2.625
+    FMUL  R3, 0.333333333       ; scale = (size * 2.625) / 3
+    OUT   GPU_DrawingScaleX, R3
+
+    FMUL  R4, 2.625
+    FMUL  R4, 0.333333333
+    OUT   GPU_DrawingScaleY, R4
+
+    FMUL  R1, 2.625
+    FADD  R1, 0.5
+    FLR   R1
+    CFI   R1
+    OUT   GPU_DrawingPointX, R1
+
+    FMUL  R2, 2.625
+    FADD  R2, 0.5
+    FLR   R2
+    CFI   R2
+    OUT   GPU_DrawingPointY, R2
+
+    OUT   GPU_Command, GPUCommand_DrawRegionZoomed
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_tic80_pix -- pix(x, y, color)
+;; Stack: [BP+2]=x [BP+3]=y [BP+4]=color
+;; Returns: R0 = color (boxed) that was drawn.
+;; NOTE: write-only. TIC-80's pix(x,y) read form (no color arg) can't be
+;; supported -- there is no GPU pixel-readback port on this console. If you
+;; need reads, you'd need a parallel CPU-side shadow buffer updated on every
+;; pix/line/rect/rectb/spr call, which is a real perf/complexity tradeoff --
+;; happy to design that separately if you actually need it (e.g. collision).
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_pix:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R6                 ; callee-saved, we use it as scratch below
+
+    MOV   R1, [BP+2]
+    MOV   R2, [BP+3]
+    MOV   R5, [BP+4]
+    CFI   R5
+    AND   R5, 15              ; clamp to valid swatch 0-15
+
+    MOV   R6, R5
+    MOV   R3, 1.0        ; was: MOV R3, 1
+    MOV   R4, 1.0        ; was: MOV R4, 1
+    CALL  __tic80_draw_swatch
+
+    MOV   R0, R6
+    CIF   R0
+
+    POP   R6
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_tic80_line -- line(x0, y0, x1, y1, color)
+;; Drawn as one rotozoomed stretch of the swatch: length = |P1-P0|,
+;; angle = atan2(dy,dx), hotspot at swatch's left-center (0,1) so it
+;; pivots/extends from (x0,y0) toward (x1,y1). Thickness = 1 TIC-80 px.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_line:
+    PUSH  BP
+    MOV   BP, SP
+
+    IN    R6, GPU_SelectedTexture
+    IN    R7, GPU_SelectedRegion
+
+    MOV   R1, [BP+2]         ; x0
+    MOV   R2, [BP+3]         ; y0
+    MOV   R3, [BP+4]         ; x1
+    MOV   R4, [BP+5]         ; y1
+    MOV   R5, [BP+6]         ; color
+    CFI   R5
+    AND   R5, 15
+
+    ;; dx, dy (float, TIC-80 pixel units)
+    MOV   R8, R3
+    FSUB  R8, R1              ; R8 = dx
+    MOV   R9, R4
+    FSUB  R9, R2              ; R9 = dy
+
+    ;; length = sqrt(dx*dx + dy*dy)
+    MOV   R10, R8
+    FMUL  R10, R8
+    MOV   R11, R9
+    FMUL  R11, R9
+    FADD  R10, R11
+    MOV   R11, 0.5
+    POW   R10, R11            ; R10 = length in TIC-80 pixels
+
+    ;; angle = atan2(dy, dx)   -- destructive: R9 = atan2(R9, R8)
+    ATAN2 R9, R8               ; R9 = angle (radians)
+
+    ;; select swatch region for this color, set hotspot-left mode via
+    ;; scale/position, then rotate+stretch
+    OUT   GPU_SelectedTexture, 0
+    MOV   R1, R5
+    IADD  R1, 512
+    OUT   GPU_SelectedRegion, R1
+
+    ;; scale X stretches the swatch along its own local axis to `length`;
+    ;; scale Y stays at 1 TIC-80 pixel thick.
+    MOV   R1, R10
+    FMUL  R1, 2.625
+    FMUL  R1, 0.333333333
+    OUT   GPU_DrawingScaleX, R1
+
+    MOV   R1, 2.625
+    FMUL  R1, 0.333333333
+    OUT   GPU_DrawingScaleY, R1
+
+    OUT   GPU_DrawingAngle, R9
+
+    ;; position at (x0, y0), converted to Vircon32 pixels
+    MOV   R1, [BP+2]
+    FMUL  R1, 2.625
+    FADD  R1, 0.5
+    CFI   R1
+    OUT   GPU_DrawingPointX, R1
+
+    MOV   R1, [BP+3]
+    FMUL  R1, 2.625
+    FADD  R1, 0.5
+    CFI   R1
+    OUT   GPU_DrawingPointY, R1
+
+    OUT   GPU_Command, GPUCommand_DrawRegionRotozoomed
+
+    OUT   GPU_SelectedTexture, R6
+    OUT   GPU_SelectedRegion,  R7
+
+    MOV   R0, R5
+    CIF   R0
+
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_tic80_rect -- rect(x, y, w, h, color)  [filled]
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_rect:
+    PUSH  BP
+    MOV   BP, SP
+
+    MOV   R1, [BP+2]         ; x
+    MOV   R2, [BP+3]         ; y
+    MOV   R3, [BP+4]         ; w
+    MOV   R4, [BP+5]         ; h
+    MOV   R5, [BP+6]         ; color
+    CFI   R5
+    AND   R5, 15
+
+    CALL  __tic80_draw_swatch
+
+    MOV   R0, R5
+    CIF   R0
+
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_tic80_rectb -- rectb(x, y, w, h, color)  [1px border only]
+;; Drawn as 4 filled strips via __tic80_draw_swatch: top, bottom, left, right.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_rectb:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R10                ; callee-saved scratch for x,y,w,h,color
+    PUSH  R11
+    PUSH  R12
+    PUSH  R13
+
+    MOV   R10, [BP+2]        ; x  (float)
+    MOV   R11, [BP+3]        ; y  (float)
+    MOV   R12, [BP+4]        ; w  (float)
+    MOV   R13, [BP+5]        ; h  (float)
+    MOV   R5,  [BP+6]        ; color
+    CFI   R5
+    AND   R5, 15
+
+    ;; top strip: (x, y, w, 1)
+    MOV   R1, R10
+    MOV   R2, R11
+    MOV   R3, R12
+    MOV   R4, 1.0
+    CALL  __tic80_draw_swatch
+
+    ;; bottom strip: (x, y+h-1, w, 1)
+    MOV   R1, R10
+    MOV   R2, R11
+    FADD  R2, R13
+    FSUB  R2, 1.0
+    MOV   R3, R12
+    MOV   R4, 1.0
+    CALL  __tic80_draw_swatch
+
+    ;; left strip: (x, y, 1, h)
+    MOV   R1, R10
+    MOV   R2, R11
+    MOV   R3, 1.0
+    MOV   R4, R13
+    CALL  __tic80_draw_swatch
+
+    ;; right strip: (x+w-1, y, 1, h)
+    MOV   R1, R10
+    FADD  R1, R12
+    FSUB  R1, 1.0
+    MOV   R2, R11
+    MOV   R3, 1.0
+    MOV   R4, R13
+    CALL  __tic80_draw_swatch
+
+    MOV   R0, R5
+    CIF   R0
+
+    POP   R13
+    POP   R12
+    POP   R11
+    POP   R10
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __tic80_circ_plot_point (internal helper -- not Lua-callable)
+;; In: R1=x (int), R2=y (int), R5=color (int 0-15). Destroys R1-R4, R8.
+;; Stamps a single 1x1 swatch -- the same primitive pix() uses for one point.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__tic80_circ_plot_point:
+    CIF   R1
+    CIF   R2
+    MOV   R3, 1.0
+    MOV   R4, 1.0
+    CALL  __tic80_draw_swatch
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __tic80_circ_draw_hspan (internal helper -- not Lua-callable)
+;; In: R1=x_left (int), R2=y (int), R3=width in TIC-80 pixels (int, >=1),
+;;     R5=color (int 0-15). Destroys R1-R4, R8.
+;; A 1-pixel-tall horizontal strip -- how circ() fills each scanline.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__tic80_circ_draw_hspan:
+    CIF   R1
+    CIF   R2
+    CIF   R3
+    MOV   R4, 1.0
+    CALL  __tic80_draw_swatch
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_tic80_circ -- circ(x, y, radius, color)  [filled]
+;; Standard integer midpoint (Bresenham) circle algorithm. Instead of
+;; plotting 8 individual points per step (which would leave gaps once
+;; filled), each step draws 4 horizontal spans connecting the symmetric
+;; x-extents for its two rows -- the usual "filled circle via spans"
+;; decomposition of the same algorithm circb() uses for the outline.
+;; The span at py==0 and the span at px==py get drawn twice (once from
+;; each pair) -- harmless: same color, same pixels, just a couple of
+;; redundant swatch stamps at the poles/diagonal.
+;; Stack: [BP+2]=x [BP+3]=y [BP+4]=radius [BP+5]=color
+;; Returns: R0 = color (boxed) that was drawn.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_circ:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R6                 ; err (midpoint decision variable)
+    PUSH  R7                 ; py  (algorithm y, starts at 0)
+    PUSH  R10                ; cx  (int)
+    PUSH  R11                ; cy  (int)
+    PUSH  R12                ; color (int, clamped 0-15)
+    PUSH  R13                ; px  (algorithm x, starts at radius)
+
+    MOV   R10, [BP+2]        ; x (float)
+    CFI   R10                ; cx (int)
+    MOV   R11, [BP+3]        ; y (float)
+    CFI   R11                ; cy (int)
+    MOV   R13, [BP+4]        ; radius (float)
+    CFI   R13                ; px = radius (int)
+    MOV   R12, [BP+5]        ; color (float)
+    CFI   R12
+    AND   R12, 15            ; clamp to valid swatch 0-15
+
+    MOV   R7, 0               ; py = 0
+    MOV   R6, 0               ; err = 0
+
+__circ_loop:
+    MOV   R1, R13
+    IGE   R1, R7              ; px >= py ? (destructive -- R13 read via copy)
+    JF    R1, __circ_done
+
+    ;; --- Span A: row cy+py, from cx-px to cx+px  (width = 2*px+1) ---
+    MOV   R1, R10
+    ISUB  R1, R13
+    MOV   R2, R11
+    IADD  R2, R7
+    MOV   R3, R13
+    IMUL  R3, 2
+    IADD  R3, 1
+    MOV   R5, R12
+    CALL  __tic80_circ_draw_hspan
+
+    ;; --- Span B: row cy-py, from cx-px to cx+px  (width = 2*px+1) ---
+    MOV   R1, R10
+    ISUB  R1, R13
+    MOV   R2, R11
+    ISUB  R2, R7
+    MOV   R3, R13
+    IMUL  R3, 2
+    IADD  R3, 1
+    MOV   R5, R12
+    CALL  __tic80_circ_draw_hspan
+
+    ;; --- Span C: row cy+px, from cx-py to cx+py  (width = 2*py+1) ---
+    MOV   R1, R10
+    ISUB  R1, R7
+    MOV   R2, R11
+    IADD  R2, R13
+    MOV   R3, R7
+    IMUL  R3, 2
+    IADD  R3, 1
+    MOV   R5, R12
+    CALL  __tic80_circ_draw_hspan
+
+    ;; --- Span D: row cy-px, from cx-py to cx+py  (width = 2*py+1) ---
+    MOV   R1, R10
+    ISUB  R1, R7
+    MOV   R2, R11
+    ISUB  R2, R13
+    MOV   R3, R7
+    IMUL  R3, 2
+    IADD  R3, 1
+    MOV   R5, R12
+    CALL  __tic80_circ_draw_hspan
+
+    ;; --- Advance the midpoint decision variable ---
+    IADD  R7, 1                ; py += 1
+    MOV   R1, R7
+    IMUL  R1, 2
+    IADD  R1, 1
+    IADD  R6, R1               ; err += 1 + 2*py
+
+    MOV   R2, R6
+    ISUB  R2, R13               ; err - px
+    IMUL  R2, 2
+    IADD  R2, 1                 ; 2*(err-px) + 1
+    MOV   R3, R2
+    IGT   R3, 0                 ; > 0 ?
+    JF    R3, __circ_loop
+
+    ISUB  R13, 1                ; px -= 1
+    MOV   R1, R13
+    IMUL  R1, 2
+    MOV   R2, 1
+    ISUB  R2, R1
+    IADD  R6, R2                ; err += 1 - 2*px
+
+    JMP   __circ_loop
+
+__circ_done:
+    MOV   R0, R12
+    CIF   R0
+
+    POP   R13
+    POP   R12
+    POP   R11
+    POP   R10
+    POP   R7
+    POP   R6
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_tic80_circb -- circb(x, y, radius, color)  [1px outline only]
+;; Same midpoint algorithm as circ(), but plots the 8 symmetric points per
+;; step directly as single 1x1 stamps instead of connecting them into spans
+;; -- an unfilled outline rather than a solid disc.
+;; Stack: [BP+2]=x [BP+3]=y [BP+4]=radius [BP+5]=color
+;; Returns: R0 = color (boxed) that was drawn.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_tic80_circb:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R6                 ; err
+    PUSH  R7                 ; py
+    PUSH  R10                ; cx (int)
+    PUSH  R11                ; cy (int)
+    PUSH  R12                ; color (int, clamped)
+    PUSH  R13                ; px (starts at radius)
+
+    MOV   R10, [BP+2]
+    CFI   R10
+    MOV   R11, [BP+3]
+    CFI   R11
+    MOV   R13, [BP+4]
+    CFI   R13
+    MOV   R12, [BP+5]
+    CFI   R12
+    AND   R12, 15
+
+    MOV   R7, 0
+    MOV   R6, 0
+
+__circb_loop:
+    MOV   R1, R13
+    IGE   R1, R7
+    JF    R1, __circb_done
+
+    ;; --- Point 1: (cx+px, cy+py) ---
+    MOV   R1, R10
+    IADD  R1, R13
+    MOV   R2, R11
+    IADD  R2, R7
+    MOV   R5, R12
+    CALL  __tic80_circ_plot_point
+
+    ;; --- Point 2: (cx+py, cy+px) ---
+    MOV   R1, R10
+    IADD  R1, R7
+    MOV   R2, R11
+    IADD  R2, R13
+    MOV   R5, R12
+    CALL  __tic80_circ_plot_point
+
+    ;; --- Point 3: (cx-py, cy+px) ---
+    MOV   R1, R10
+    ISUB  R1, R7
+    MOV   R2, R11
+    IADD  R2, R13
+    MOV   R5, R12
+    CALL  __tic80_circ_plot_point
+
+    ;; --- Point 4: (cx-px, cy+py) ---
+    MOV   R1, R10
+    ISUB  R1, R13
+    MOV   R2, R11
+    IADD  R2, R7
+    MOV   R5, R12
+    CALL  __tic80_circ_plot_point
+
+    ;; --- Point 5: (cx-px, cy-py) ---
+    MOV   R1, R10
+    ISUB  R1, R13
+    MOV   R2, R11
+    ISUB  R2, R7
+    MOV   R5, R12
+    CALL  __tic80_circ_plot_point
+
+    ;; --- Point 6: (cx-py, cy-px) ---
+    MOV   R1, R10
+    ISUB  R1, R7
+    MOV   R2, R11
+    ISUB  R2, R13
+    MOV   R5, R12
+    CALL  __tic80_circ_plot_point
+
+    ;; --- Point 7: (cx+py, cy-px) ---
+    MOV   R1, R10
+    IADD  R1, R7
+    MOV   R2, R11
+    ISUB  R2, R13
+    MOV   R5, R12
+    CALL  __tic80_circ_plot_point
+
+    ;; --- Point 8: (cx+px, cy-py) ---
+    MOV   R1, R10
+    IADD  R1, R13
+    MOV   R2, R11
+    ISUB  R2, R7
+    MOV   R5, R12
+    CALL  __tic80_circ_plot_point
+
+    ;; --- Advance the midpoint decision variable ---
+    IADD  R7, 1
+    MOV   R1, R7
+    IMUL  R1, 2
+    IADD  R1, 1
+    IADD  R6, R1
+
+    MOV   R2, R6
+    ISUB  R2, R13
+    IMUL  R2, 2
+    IADD  R2, 1
+    MOV   R3, R2
+    IGT   R3, 0
+    JF    R3, __circb_loop
+
+    ISUB  R13, 1
+    MOV   R1, R13
+    IMUL  R1, 2
+    MOV   R2, 1
+    ISUB  R2, R1
+    IADD  R6, R2
+
+    JMP   __circb_loop
+
+__circb_done:
+    MOV   R0, R12
+    CIF   R0
+
+    POP   R13
+    POP   R12
+    POP   R11
+    POP   R10
+    POP   R7
+    POP   R6
+    MOV   SP, BP
+    POP   BP
+    RET
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_tic80_print(text, x, y, color)
+;; [BP+5] = text, [BP+4] = x, [BP+3] = y, [BP+2] = color (TIC-80 px / index)
+;; Returns R0 = width in TIC-80 px (#text * 6) as a float.
+;; Color is applied as a GPU multiply over the white BIOS font; the current
+;; multiply color (e.g. the pause-screen dim) is saved and restored.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+__builtin_tic80_print:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+
+    IN    R3, GPU_MultiplyColor          ; saved multiply (kept on the stack:
+    PUSH  R3                             ; __builtin_print clobbers R3)
+
+    MOV   R1, [BP+2]
+    FLR   R1
+    CFI   R1
+    AND   R1, 15
+    MOV   R2, __tic80_palette
+    IADD  R1, R2
+    MOV   R1, [R1]
+    OUT   GPU_MultiplyColor, R1
+
+    MOV   R1, [BP+4]                     ; x
+    FMUL  R1, 2.625
+    FADD  R1, 0.5
+    FLR   R1
+    CFI   R1
+    MOV   R2, [BP+3]                     ; y
+    FMUL  R2, 2.625
+    FADD  R2, 0.5
+    FLR   R2
+    CFI   R2
+
+    ;; __builtin_print ABI: [BP+4] = x, [BP+3] = y, [BP+2] = value
+    PUSH  R1
+    PUSH  R2
+    MOV   R1, [BP+5]
+    PUSH  R1
+    CALL  __builtin_print
+    IADD  SP, 3
+
+    POP   R3
+    OUT   GPU_MultiplyColor, R3
+
+    MOV   R1, [BP+5]
+    PUSH  R1
+    CALL  __builtin_len                  ; 0 for non-strings
+    IADD  SP, 1
+    FMUL  R0, 6.0
+
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET

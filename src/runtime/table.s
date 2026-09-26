@@ -250,7 +250,8 @@ __builtin_table_getk:
     PUSH R2
     PUSH R3
     PUSH R4
-    MOV  R1, [SP+6]          ; table (SP: 4 saved regs + return address)
+    PUSH R5
+    MOV  R1, [SP+7]          ; table (SP: 5 saved regs + return address)
     MOV  R2, R1
     AND  R2, BOXED_DATA
     IEQ  R2, BOXED_TABLE
@@ -260,7 +261,7 @@ __builtin_table_getk:
     MOV  R2, R1
     IEQ  R2, 0
     JT   R2, __table_getk_nil
-    MOV  R3, [SP+5]          ; key (pooled literal)
+    MOV  R3, [SP+6]          ; key (pooled literal)
     MOV  R2, R3
     AND  R2, BOXED_PAYLOAD
     OR   R2, V32_CART_PAGE
@@ -269,69 +270,65 @@ __builtin_table_getk:
     MOV  R4, [R1]
     ISUB R4, 1               ; mask
     AND  R2, R4
+    ;; R1 = block, R2 = slot index, R3 = key, R4 = mask; R0 = slot - 2
 __table_getk_probe:
     MOV  R0, R2
     SHL  R0, 1
     IADD R0, R1
-    IADD R0, 2               ; slot
-    PUSH R0
-    MOV  R0, [R0]            ; stored key
-    IEQ  R0, R3
-    JT   R0, __table_getk_hit
-    MOV  R0, [SP]
-    MOV  R0, [R0]
-    IEQ  R0, BOXED_NIL
-    JT   R0, __table_getk_miss
-    ;; a string key that isn't a pooled literal could still be equal by
-    ;; content: let the general routine decide
-    MOV  R0, [SP]
-    MOV  R0, [R0]
-    AND  R0, 0x7FC00000
-    IEQ  R0, 0x7FC00000
-    JF   R0, __table_getk_next
-    MOV  R0, [SP]
-    MOV  R0, [R0]
-    AND  R0, BOXED_CATEGORY
-    JT   R0, __table_getk_slow_pop           ; RAM string
-    MOV  R0, [SP]
-    MOV  R0, [R0]
-    AND  R0, BOXED_PAYLOAD
-    OR   R0, V32_CART_PAGE
-    PUSH R1
-    MOV  R1, __string_pool_start
-    IGT  R1, R0
-    JT   R1, __table_getk_slow_pop2
-    MOV  R1, __string_pool_end
-    IGT  R1, R0
-    JF   R1, __table_getk_slow_pop2
-    POP  R1                  ; another pooled literal: different string
+    MOV  R5, [R0+2]          ; stored key
+    IEQ  R5, R3
+    JT   R5, __table_getk_hit
+    MOV  R5, [R0+2]
+    IEQ  R5, BOXED_NIL
+    JT   R5, __table_getk_nil ; empty slot: absent
+    MOV  R5, [R0+2]
+    AND  R5, BOXED_DATA
+    IEQ  R5, BOXED_ROMSTRING
+    JF   R5, __table_getk_not_rom
+    ;; a ROM string: another pooled literal is a different string; a ROM
+    ;; string from outside the pool (type() names, ...) may be equal by
+    ;; content -> general routine
+    MOV  R5, [R0+2]
+    AND  R5, BOXED_PAYLOAD
+    OR   R5, V32_CART_PAGE
+    MOV  R0, __string_pool_start
+    IGT  R0, R5
+    JT   R0, __table_getk_slow
+    MOV  R0, __string_pool_end
+    IGT  R0, R5
+    JF   R0, __table_getk_slow
 __table_getk_next:
-    POP  R0
     IADD R2, 1
     AND  R2, R4
     JMP  __table_getk_probe
+__table_getk_not_rom:
+    ;; tables, functions, numbers, booleans: a different key. A run-time
+    ;; string (RAM, payload >= 4) may be equal by content -> general routine
+    MOV  R5, [R0+2]
+    AND  R5, BOXED_DATA
+    IEQ  R5, BOXED_RAMSTRING
+    JF   R5, __table_getk_next
+    MOV  R5, [R0+2]
+    AND  R5, BOXED_PAYLOAD
+    ILT  R5, 4
+    JT   R5, __table_getk_next
+    JMP  __table_getk_slow
 __table_getk_hit:
-    POP  R0
-    MOV  R0, [R0+1]
+    MOV  R0, [R0+3]
     JMP  __table_getk_done
-__table_getk_miss:
-    POP  R0
 __table_getk_nil:
     MOV  R0, BOXED_NIL
 __table_getk_done:
+    POP  R5
     POP  R4
     POP  R3
     POP  R2
     POP  R1
     RET
-__table_getk_slow_pop2:
-    POP  R1
-__table_getk_slow_pop:
-    POP  R0
 __table_getk_slow:
-    MOV  R0, [SP+6]
+    MOV  R0, [SP+7]
     PUSH R0
-    MOV  R0, [SP+6]          ; key (one more word on the stack now)
+    MOV  R0, [SP+7]          ; key (one more word on the stack now)
     PUSH R0
     CALL __builtin_table_get
     IADD SP, 2
@@ -381,7 +378,7 @@ __table_rawget_int_slow:
 ;; in the hash part are moved into it, so a key is never in both parts.
 ;;
 ;; HASH PART: open addressing, linear probing, power-of-two capacity, kept
-;; at most 3/4 full. Block: [0] capacity, [1] used slots, then capacity
+;; at most 1/2 full. Block: [0] capacity, [1] used slots, then capacity
 ;; (key, value) pairs; an empty slot's key is BOXED_NIL (nil is never a
 ;; key). Deleting stores a nil value and leaves the key in place (keeps
 ;; probe chains intact); growing drops those.
@@ -617,12 +614,13 @@ __table_hash_store_insert:
     MOV  R4, R6
     IEQ  R4, BOXED_NIL       ; absent key set to nil: nothing to do
     JT   R4, __table_hash_store_done
-    ;; keep the block at most 3/4 full: (used + 1) * 4 > capacity * 3 -> grow
+    ;; keep the block at most 1/2 full: (used + 1) * 2 > capacity -> grow.
+    ;; (3/4 made linear-probe chains long: a lookup of an absent field,
+    ;; e.g. `o.solid_obj` on objects without one, averaged ~8 probes.)
     MOV  R4, [R5+1]
     IADD R4, 1
-    SHL  R4, 2
+    SHL  R4, 1
     MOV  R0, [R5]
-    IMUL R0, 3
     IGT  R4, R0
     JF   R4, __table_hash_store_put
     CALL __table_hash_grow

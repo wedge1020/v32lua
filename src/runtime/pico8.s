@@ -917,11 +917,15 @@ _pico8_btn_done:
 __builtin_pico8_all_step:
     ;; [BP+2] = t, [BP+3] = i (raw int), [BP+4] = prev.
     ;; Returns R0 = element (nil when done), R2 = its index.
+    ;; Elements in the array part are read directly (R5 = capacity,
+    ;; R6 = data); anything else goes through __table_rawget_int.
     PUSH  BP
     MOV   BP, SP
     PUSH  R1
     PUSH  R3
     PUSH  R4
+    PUSH  R5
+    PUSH  R6
 
     MOV   R1, [BP+2]
     MOV   R4, R1
@@ -930,10 +934,26 @@ __builtin_pico8_all_step:
     JF    R4, __runtime_error_not_table
     AND   R1, BOXED_PAYLOAD      ; raw header
     MOV   R4, [R1+1]             ; n = #t
+    MOV   R5, [R1]
+    AND   R5, TABLE_ARRAYSIZE    ; array capacity
+    MOV   R6, [R1+2]
+    ISUB  R6, 1                  ; data - 1: t[i] at [R6 + i]
     MOV   R3, [BP+3]             ; i
 
     ;; if t[i] == prev then i += 1 (the current element survived)
+    MOV   R0, R3
+    ILT   R0, 1
+    JT    R0, _pico8_all_cur_slow
+    MOV   R0, R3
+    IGT   R0, R5
+    JT    R0, _pico8_all_cur_slow
+    MOV   R0, R6
+    IADD  R0, R3
+    MOV   R0, [R0]
+    JMP   _pico8_all_cur
+_pico8_all_cur_slow:
     CALL  __table_rawget_int
+_pico8_all_cur:
     MOV   R2, [BP+4]
     IEQ   R0, R2
     JF    R0, _pico8_all_skip
@@ -944,7 +964,19 @@ _pico8_all_skip:
     MOV   R2, R3
     IGT   R2, R4
     JT    R2, _pico8_all_end
+    MOV   R0, R3
+    ILT   R0, 1
+    JT    R0, _pico8_all_next_slow
+    MOV   R0, R3
+    IGT   R0, R5
+    JT    R0, _pico8_all_next_slow
+    MOV   R0, R6
+    IADD  R0, R3
+    MOV   R0, [R0]
+    JMP   _pico8_all_next
+_pico8_all_next_slow:
     CALL  __table_rawget_int
+_pico8_all_next:
     MOV   R2, R0
     IEQ   R2, BOXED_NIL
     JF    R2, _pico8_all_found
@@ -955,6 +987,8 @@ _pico8_all_end:
     MOV   R0, BOXED_NIL
 _pico8_all_found:
     MOV   R2, R3
+    POP   R6
+    POP   R5
     POP   R4
     POP   R3
     POP   R1
@@ -1020,13 +1054,8 @@ _pico8_foreach_done:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-;; __builtin_pico8_count(t): [BP+2] = t -> R0 = number of non-nil values
-;; at positive integer keys (the array part, plus integer keys the table
-;; parked in the hash part). String/other keys are NOT counted -- the old
-;; version counted every hash pair, so count({1,2,x=5}) returned 3.
-;;
-;; (Table layout: see "TABLE STORAGE" in table.s.)
-;; PairCount (key, value) word pairs from offset 2.
+;; __builtin_pico8_count(t): [BP+2] = t -> R0 = #t (PICO-8 0.2+:
+;; count(tbl) is the table's length), read from the table header.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 __builtin_pico8_count:
     PUSH  BP
@@ -1046,59 +1075,11 @@ __builtin_pico8_count:
     JF    R2, __runtime_error_not_table
     AND   R1, BOXED_PAYLOAD       ; raw table header
 
-    MOV   R7, 0                   ; count
-
-    ;; --- array part: every slot 1..capacity holding a value ---
-    MOV   R3, [R1+2]
-    MOV   R4, [R1]
-    AND   R4, TABLE_ARRAYSIZE
-    IADD  R4, R3
-_pico8_count_array_loop:
-    MOV   R2, R3
-    IEQ   R2, R4
-    JT    R2, _pico8_count_hash
-    MOV   R2, [R3]
-    IEQ   R2, BOXED_NIL
-    JT    R2, _pico8_count_array_next
-    IADD  R7, 1
-_pico8_count_array_next:
-    IADD  R3, 1
-    JMP   _pico8_count_array_loop
-
-    ;; --- hash part: only keys that are whole numbers >= 1 ---
-_pico8_count_hash:
-    MOV   R3, [R1+3]
-    MOV   R2, R3
-    IEQ   R2, 0
-    JT    R2, _pico8_count_done
-    MOV   R6, [R3]                ; capacity
-    SHL   R6, 1
-    MOV   R4, R3
-    IADD  R4, 2                   ; first slot
-    IADD  R6, R4                  ; end of slots
-_pico8_count_pair_loop:
-    MOV   R2, R4
-    IEQ   R2, R6
-    JT    R2, _pico8_count_done
-    MOV   R2, [R4+1]              ; value
-    IEQ   R2, BOXED_NIL
-    JT    R2, _pico8_count_pair_next
-    MOV   R5, [R4]                ; key (BOXED_NIL = empty slot: fails below)
-    MOV   R2, R5
-    AND   R2, NAN_VALUE
-    IEQ   R2, NAN_VALUE           ; boxed (string/table/bool/...) key?
-    JT    R2, _pico8_count_pair_next
-    MOV   R2, R5
-    FLT   R2, 1.0                 ; key < 1 ?
-    JT    R2, _pico8_count_pair_next
-    MOV   R2, R5
-    FLR   R2
-    FEQ   R2, R5                  ; whole number?
-    JF    R2, _pico8_count_pair_next
-    IADD  R7, 1
-_pico8_count_pair_next:
-    IADD  R4, 2
-    JMP   _pico8_count_pair_loop
+    ;; PICO-8 0.2+: count(t) is #t. The table keeps that length (the
+    ;; border) in its header, so this is O(1); it used to walk every slot,
+    ;; and celeste calls count(objects) once per collision check.
+    MOV   R7, [R1+1]
+    JMP   _pico8_count_done
 
 _pico8_count_done:
     MOV   R0, R7

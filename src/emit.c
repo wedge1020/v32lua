@@ -515,50 +515,28 @@ void  emit_cart_xml (const char *input_filename, int  verbose)
     free (vbin_path);
 }
 
-// Emits Vircon32 assembly to jump to target_label if reg is TRUTHY!
-// (i.e., NOT Nil and NOT False). Uses scratch register.
-void emit_truthy_jump(int reg, const char *target_label)
+// Jump to target_label if reg is truthy (not nil, not false) / falsy.
+// nil = 0xFFC00000 and false = 0xFFC00001, so falsy <=> (v & ~1) == nil:
+// one test instead of two. (The scratch is a real allocated register:
+// callers such as the for-in loop still need R0 after this.)
+static void emit_truthiness_jump (int reg, bool when_true, const char *target_label)
 {
-    int check_id = get_next_label();
-    const char *ctx = get_current_function_name(); // Fetch context
-    char eval_right_label[EMIT_BUFFER_SIZE];
-    snprintf(eval_right_label, sizeof(eval_right_label), "__%s_truthy_fail_%d", ctx, check_id); // Prefix added
-    int  scratch_reg  = allocate_register ();
-
-    // 1. If it IS Nil, it's not truthy -> jump to evaluate right operand
-    emit_asm("MOV R%d, R%d ; Copy to scratch register\n", scratch_reg, reg);
-    emit_asm("IEQ R%d, BOXED_NIL ; Is it Nil?\n", scratch_reg);
-    emit_asm("JT R%d, %s ; If Nil, do not short-circuit\n", scratch_reg, eval_right_label);
-
-    // 2. If it IS False, it's not truthy -> jump to evaluate right operand
-    emit_asm("MOV R%d, R%d ; Copy to scratch register\n", scratch_reg, reg);
-    emit_asm("IEQ R%d, BOXED_FALSE ; Is it False?\n", scratch_reg);
-    emit_asm("JT R%d, %s ; If False, do not short-circuit\n", scratch_reg, eval_right_label);
-
-    // 3. If we survived both checks, the value is TRUTHY! Short-circuit!
-    emit_asm("JMP %s ; Value is truthy -> short-circuit!\n", target_label);
-
-    emit_asm("%s:\n", eval_right_label);
-
-    unlock_register (scratch_reg);
+    int scratch = allocate_register ();
+    emit_asm("MOV  R%d, R%d\n", scratch, reg);
+    emit_asm("AND  R%d, 0xFFFFFFFE\n", scratch);
+    emit_asm("IEQ  R%d, BOXED_NIL ; 1 if nil or false\n", scratch);
+    emit_asm("%s   R%d, %s\n", when_true ? "JF" : "JT", scratch, target_label);
+    unlock_register (scratch);
 }
 
-// Emits Vircon32 assembly to jump to target_label if reg holds Nil or False.
-// Uses scratch register to prevent destructive comparison bugs!
+void emit_truthy_jump (int reg, const char *target_label)
+{
+    emit_truthiness_jump (reg, true, target_label);
+}
+
 void  emit_falsy_jump (int  reg, const char *target_label)
 {
-    int  scratch_reg  = allocate_register ();
-    // 1. Test against canonical Nil (BOXED_NIL)
-    emit_asm("MOV R%d, R%d ; Copy condition to scratch register\n", scratch_reg, reg);
-    emit_asm("IEQ R%d, BOXED_NIL ; Destructive test: Is it Nil?\n", scratch_reg);
-    emit_asm("JT R%d, %s ; If Nil (falsy), jump to target\n", scratch_reg, target_label);
-
-    // 2. Test against Boolean False (BOXED_FALSE)
-    emit_asm("MOV R%d, R%d ; Copy condition to scratch register\n", scratch_reg, reg);
-    emit_asm("IEQ R%d, BOXED_FALSE ; Destructive test: Is it False?\n", scratch_reg);
-    emit_asm("JT R%d, %s ; If False (falsy), jump to target\n", scratch_reg, target_label);
-
-    unlock_register (scratch_reg);
+    emit_truthiness_jump (reg, false, target_label);
 }
 
 int   emit_variable_map (void)
@@ -601,7 +579,12 @@ int   emit_variable_map (void)
         fprintf (out(), "%%define  PICO8_CAMERA_Y           0x%.8X\n", (next_ram_address + 1));
         fprintf (out(), "%%define  PICO8_PEN                0x%.8X\n", (next_ram_address + 2));
         fprintf (out(), "%%define  PICO8_TICK_FRAME         0x%.8X\n", (next_ram_address + 3));
-        next_ram_address    = next_ram_address + 4; // camera x, y (floats), pen (int), tick frame
+        fprintf (out(), "%%define  PICO8_DRAW_FRAME         0x%.8X\n", (next_ram_address + 4));
+        fprintf (out(), "%%define  PICO8_DRAW_CYCLE         0x%.8X\n", (next_ram_address + 5));
+        fprintf (out(), "%%define  PICO8_DRAW_COST          0x%.8X\n", (next_ram_address + 6));
+        // camera x, y (floats), pen (int), tick frame, draw start frame /
+        // cycle, last draw's cost in cycles
+        next_ram_address    = next_ram_address + 7;
         fprintf (out(), "%%define  PICO8_FLAGS_RAM          0x%.8X\n", next_ram_address);
         next_ram_address    = next_ram_address + 256;
         fprintf (out(), "%%define  PICO8_MAP_RAM            0x%.8X\n", next_ram_address);
@@ -1264,4 +1247,22 @@ void emit_env_table (FILE *f)
 "    MOV   SP, BP\n"
 "    POP   BP\n"
 "    RET\n", f);
+}
+
+
+// __globals_to_nil: stores nil into every global variable's RAM word
+// (called from __global_scope_initialization before any top-level code).
+// Emitted after all code generation, so it covers every global.
+void  emit_globals_to_nil (void)
+{
+    fprintf (out(), "\n;; --- every global starts as nil ---\n");
+    fprintf (out(), "__globals_to_nil:\n");
+    fprintf (out(), "    MOV  R0, BOXED_NIL\n");
+    SymbolNode *curr = global_scope ? global_scope->symbols : NULL;
+    for (; curr != NULL; curr = curr->next)
+    {
+        if (curr->type != SYM_GLOBAL || curr->is_function) continue;
+        fprintf (out(), "    MOV  [var_%s], R0\n", curr->name);
+    }
+    fprintf (out(), "    RET\n");
 }

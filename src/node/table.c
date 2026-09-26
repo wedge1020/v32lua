@@ -316,7 +316,48 @@ void  node_table_get (ASTNode *node, int  dest_reg)
         return;
     }
 
-    // 2. Fallback: Dynamic heap table lookup.
+    // 2. t.field (string-literal key): inline first probe
+    if (node->as.table_get.key != NULL && node->as.table_get.key->type == NODE_STRING && dest_reg != 0)
+    {
+        int t_reg = allocate_register ();
+        mark_register_live (t_reg, 3);
+        generate_asm (node->as.table_get.table_expr, t_reg);
+        ensure_in_register (t_reg);
+        int k_reg = allocate_register ();          // literal: a MOV, no CALL
+        mark_register_live (k_reg, 2);
+        generate_asm (node->as.table_get.key, k_reg);
+        ensure_in_register (k_reg);
+        ensure_in_register (t_reg);
+        emit_getk_lookup (t_reg, k_reg, node->as.table_get.key, dest_reg);
+        unlock_register (k_reg);
+        unlock_register (t_reg);
+        return;
+    }
+
+    // 3. t[k] where k's evaluation can't CALL (a variable or literal):
+    //    array part read inline when k is a whole number in 1..capacity
+    if (dest_reg != 0 && expr_is_simple_load (node->as.table_get.key))
+    {
+        int t_reg = allocate_register ();
+        mark_register_live (t_reg, 3);
+        generate_asm (node->as.table_get.table_expr, t_reg);
+        ensure_in_register (t_reg);
+        int k_reg = allocate_register ();
+        mark_register_live (k_reg, 2);
+        if (k_reg != t_reg)
+        {
+            generate_asm (node->as.table_get.key, k_reg);
+            ensure_in_register (k_reg);
+            emit_index_lookup (t_reg, k_reg, node->as.table_get.key, dest_reg);
+            unlock_register (k_reg);
+            unlock_register (t_reg);
+            return;
+        }
+        unlock_register (k_reg);
+        unlock_register (t_reg);
+    }
+
+    // 4. Fallback: Dynamic heap table lookup.
     // Each operand is pushed as soon as it is computed, so the table value
     // never has to survive the key expression in a register (the key may
     // CALL, and the allocator could hand the same register out twice).
@@ -343,4 +384,151 @@ void  node_table_get (ASTNode *node, int  dest_reg)
         emit_asm ("CALL __builtin_table_get");
     emit_asm ("IADD SP, 2 ; Clean up stack");
     emit_asm ("MOV R%d, R0 ; Store result in destination register", dest_reg);
+}
+
+
+// ---------------------------------------------------------------------------
+// t.field with a string-literal key, first probe inline.
+//
+// The literal's content hash is known at compile time (the same FNV-1a the
+// string pool stores in front of each literal, see emit.c), and pooled
+// literals are unique per content, so the lookup is: check it's a table
+// with a hash part, index the slot, compare the stored key with the literal
+// box. That hits in ~20 instructions; anything else (not a table, empty
+// hash part, a different key in the slot -- a collision, or a run-time
+// string equal by content) goes to __builtin_table_getk as before.
+// table_reg and key_reg hold the table and the boxed literal and are left
+// untouched; the value lands in dest_reg.
+// ---------------------------------------------------------------------------
+void emit_getk_lookup (int table_reg, int key_reg, ASTNode *key, int dest_reg)
+{
+    uint32_t h = 0x811C9DC5u;
+    for (const unsigned char *c = (const unsigned char *) key->as.string_val.value; *c; c++) {
+        h ^= (uint32_t)(*c & 0xFF);
+        h *= 16777619u;
+    }
+    const char *ctx = get_current_function_name ();
+    int id = get_next_label ();
+    int a  = allocate_register ();
+    mark_register_live (a, 1);
+
+    emit_asm ("MOV  R0, R%d ; inline t.%s\n", table_reg, key->as.string_val.value);
+    emit_asm ("AND  R0, BOXED_DATA\n");
+    emit_asm ("IEQ  R0, BOXED_TABLE\n");
+    emit_asm ("JF   R0, __%s_getk_slow_%d\n", ctx, id);
+    emit_asm ("MOV  R0, R%d\n", table_reg);
+    emit_asm ("AND  R0, BOXED_PAYLOAD\n");
+    emit_asm ("MOV  R%d, [R0+3] ; hash block\n", a);
+    emit_asm ("MOV  R0, R%d\n", a);
+    emit_asm ("IEQ  R0, 0\n");
+    emit_asm ("JT   R0, __%s_getk_slow_%d\n", ctx, id);
+    emit_asm ("MOV  R0, [R%d] ; capacity (power of two)\n", a);
+    emit_asm ("ISUB R0, 1\n");
+    emit_asm ("AND  R0, 0x%08X ; key hash\n", h);
+    emit_asm ("SHL  R0, 1\n");
+    emit_asm ("IADD R0, R%d ; slot - 2\n", a);
+    emit_asm ("MOV  R%d, [R0+2] ; stored key\n", a);
+    emit_asm ("IEQ  R%d, R%d\n", a, key_reg);
+    emit_asm ("JF   R%d, __%s_getk_slow_%d\n", a, ctx, id);
+    emit_asm ("MOV  R%d, [R0+3] ; value\n", dest_reg);
+    emit_asm ("JMP  __%s_getk_done_%d\n", ctx, id);
+    emit_asm ("__%s_getk_slow_%d:\n", ctx, id);
+    emit_asm ("PUSH R%d\n", table_reg);
+    emit_asm ("PUSH R%d\n", key_reg);
+    emit_asm ("CALL __builtin_table_getk\n");
+    emit_asm ("IADD SP, 2\n");
+    emit_asm ("MOV  R%d, R0\n", dest_reg);
+    emit_asm ("__%s_getk_done_%d:\n", ctx, id);
+    unlock_register (a);
+}
+
+
+// ---------------------------------------------------------------------------
+// t[k], array part inline: when t is a table and k a whole number in
+// 1..capacity, read the slot directly (a nil there is the answer: a key is
+// never in both parts). Anything else calls __builtin_table_get. A numeric
+// literal key skips the run-time integer checks.
+// ---------------------------------------------------------------------------
+void emit_index_lookup (int table_reg, int key_reg, ASTNode *key, int dest_reg)
+{
+    const char *ctx = get_current_function_name ();
+    int id = get_next_label ();
+    bool lit = (key->type == NODE_NUMBER);
+    if (lit)
+    {
+        double v = key->as.number.val;
+        if (v < 1 || v > 65535 || v != (double)(int) v) lit = false;
+        if (!lit) goto general;   // not an array index at all: no fast path
+    }
+    else if (key->type != NODE_IDENTIFIER)
+        goto general;             // string/nil/boolean literal: hash part
+    {
+        int a = allocate_register ();
+        mark_register_live (a, 1);
+        emit_asm ("MOV  R0, R%d ; inline t[i]\n", table_reg);
+        emit_asm ("AND  R0, BOXED_DATA\n");
+        emit_asm ("IEQ  R0, BOXED_TABLE\n");
+        emit_asm ("JF   R0, __%s_idx_slow_%d\n", ctx, id);
+        if (lit)
+        {
+            emit_asm ("MOV  R%d, %d\n", a, (int) key->as.number.val);
+        }
+        else
+        {
+            emit_asm ("MOV  R0, R%d\n", key_reg);
+            emit_asm ("AND  R0, NAN_VALUE\n");
+            emit_asm ("IEQ  R0, NAN_VALUE\n");
+            emit_asm ("JT   R0, __%s_idx_slow_%d ; not a number\n", ctx, id);
+            emit_asm ("MOV  R%d, R%d\n", a, key_reg);
+            emit_asm ("CFI  R%d\n", a);
+            emit_asm ("MOV  R0, R%d\n", a);
+            emit_asm ("CIF  R0\n");
+            emit_asm ("IEQ  R0, R%d\n", key_reg);
+            emit_asm ("JF   R0, __%s_idx_slow_%d ; not a whole number (or -0)\n", ctx, id);
+            emit_asm ("MOV  R0, R%d\n", a);
+            emit_asm ("ILT  R0, 1\n");
+            emit_asm ("JT   R0, __%s_idx_slow_%d\n", ctx, id);
+        }
+        emit_asm ("MOV  R0, R%d\n", table_reg);
+        emit_asm ("AND  R0, BOXED_PAYLOAD\n");
+        emit_asm ("MOV  R0, [R0] ; flags: array capacity in the low 16 bits\n");
+        emit_asm ("AND  R0, TABLE_ARRAYSIZE\n");
+        emit_asm ("ILT  R0, R%d ; capacity < i ?\n", a);
+        emit_asm ("JT   R0, __%s_idx_slow_%d\n", ctx, id);
+        emit_asm ("MOV  R0, R%d\n", table_reg);
+        emit_asm ("AND  R0, BOXED_PAYLOAD\n");
+        emit_asm ("MOV  R0, [R0+2] ; array data\n");
+        emit_asm ("IADD R0, R%d\n", a);
+        emit_asm ("ISUB R0, 1\n");
+        emit_asm ("MOV  R%d, [R0]\n", dest_reg);
+        emit_asm ("JMP  __%s_idx_done_%d\n", ctx, id);
+        unlock_register (a);
+    }
+    emit_asm ("__%s_idx_slow_%d:\n", ctx, id);
+general:
+    emit_asm ("PUSH R%d\n", table_reg);
+    emit_asm ("PUSH R%d\n", key_reg);
+    emit_asm ("CALL __builtin_table_get\n");
+    emit_asm ("IADD SP, 2\n");
+    emit_asm ("MOV  R%d, R0\n", dest_reg);
+    emit_asm ("__%s_idx_done_%d:\n", ctx, id);
+}
+
+// A variable or literal: loading it is a MOV (or two), never a CALL.
+bool expr_is_simple_load (ASTNode *n)
+{
+    if (n == NULL) return false;
+    switch (n->type)
+    {
+        case NODE_NUMBER: case NODE_STRING: case NODE_NIL: case NODE_BOOLEAN:
+            return true;
+        case NODE_IDENTIFIER: {
+            if (n->as.id.name == NULL || is_intrinsic_alias (n->as.id.name)) return false;
+            if (strcmp (n->as.id.name, "self") == 0 || strcmp (n->as.id.name, "_ENV") == 0) return false;
+            SymbolNode *sym = resolve_symbol (n->as.id.name);
+            return !(sym != NULL && sym->is_function);
+        }
+        default:
+            return false;
+    }
 }

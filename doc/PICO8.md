@@ -34,11 +34,12 @@ clips everything to its screen. Palette index 0 is transparent in sprites.
 present. `_update()` runs at 30 fps (two Vircon32 frames per tick),
 `_update60()` at 60 fps; ticks are paced by the frame counter, so a tick
 that runs long only slows the game once it exceeds its frames. `_draw()`
-always starts on a fresh frame (at 30 fps `_update` gets the tick's first
-frame and `_draw` the second): the GPU draws straight into the displayed
-image, so a draw that crosses a frame boundary would show half-drawn. A
-cart too heavy for its frames drops to 15 (or 20, ...) fps cleanly, like
-PICO-8. At least
+never crosses a frame boundary: the GPU draws straight into the displayed
+image, so a frame that ends mid-draw would show half-drawn. Before each
+`_draw()` the loop checks, with the timer's cycle counter and the previous
+draw's cost, whether the draw fits in what is left of the current frame,
+and otherwise starts it on the next one. A cart too heavy for its frames
+drops to 20 or 15 fps cleanly, like PICO-8. At least
 one of `_update`, `_update60`, `_draw` must exist. Top-level code runs before `_init()`; the map and flags are
 already loaded then.
 

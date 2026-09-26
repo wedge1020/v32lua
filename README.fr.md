@@ -866,6 +866,12 @@ attente d'une décision de conception :
 * Les opérateurs bit à bit (`&`, `|`, `~`, `<<`, `>>`) et les `band`/
   `bor`/... de PICO-8 ; `string.format` comme méthode
   (`("%d"):format(x)`) — utilisez `string.format(...)`.
+* Un audio PICO-8 synthétisé plus léger : `__sfx__`/`__music__` deviennent
+  du PCM stéréo 16 bits à 44,1 kHz (Celeste : ~66 Mo de `.vsnd` ; c'est le seul format que lit le SPU). Pistes : stocker à une
+  fréquence plus basse et relire avec le réglage de vitesse du canal, rendre chaque SFX une
+  seule fois et assembler les morceaux à l'exécution (un canal du SPU par
+  canal de musique) au lieu de pré-mixer des chansons entières, et partager
+  les motifs identiques.
 * Le ramasse-miettes : le tas est un allocateur linéaire, donc chaque
   table, fermeture et chaîne créée à l'exécution vit jusqu'à la
   réinitialisation. Les jeux qui tournent longtemps devraient réutiliser

@@ -716,6 +716,12 @@ void generate_global_setup (ASTNode *node)
     // (reserving nil/false/true) lives in emit_variable_map() now.
     emit_asm ("MOV R0, HEAP_START ; heap start (see variable map)");
     emit_asm ("MOV [HEAP_POINTER], R0");
+    // Every global starts as nil. Their RAM words used to be left as they
+    // were: 0.0 (a truthy number) in a freshly reset machine, and whatever
+    // the BIOS left there on hardware -- so `if pause_player then return
+    // end` with pause_player never assigned always returned (evercore's
+    // player never moved).
+    emit_asm ("CALL __globals_to_nil");
 
     // NEW: FTOA_SCRATCH_PTR_A/B MUST start at 0 -- their lazy-allocate
     // check in __builtin_ftoa_scratch_a/b treats "nonzero" as "a real
@@ -973,6 +979,8 @@ void generate_program (ASTNode *head)
         // PICO-8 frame: _update THEN _draw (the old order was reversed),
         // at 30 fps for _update (two Vircon32 frames per tick -- the old
         // loop ran every cart at double speed) or 60 fps for _update60.
+        emit_asm ("MOV  R0, 0\n");
+        emit_asm ("MOV  [PICO8_DRAW_COST], R0 ; RAM isn't clean after the BIOS\n");
         emit_asm ("__start:\n");
         emit_asm ("IN   R0, TIM_FrameCounter\n");
         emit_asm ("MOV  [PICO8_TICK_FRAME], R0 ; frame this tick started on\n");
@@ -984,27 +992,41 @@ void generate_program (ASTNode *head)
         }
         if (has_main)
         {
-            // Start _draw() on a frame boundary. The GPU draws straight into
-            // the displayed frame, so a _draw() that is still running when a
-            // frame ends shows up half-drawn (background without sprites):
-            // flicker in heavy rooms. At 30 fps the tick has two frames
-            // anyway, so _update gets the first and _draw the second; at
-            // 60 fps only wait if _update ran past its frame.
-            if (has_update && pico8_frame_step >= 2)
+            // Don't let _draw() cross a frame boundary: the GPU draws
+            // straight into the displayed image, so a frame that ends
+            // mid-draw is shown half-drawn (background without sprites --
+            // the flicker in celeste's 400m room). Draw now if the rest of
+            // this frame can hold it (judged by the last draw's cost plus
+            // 1/8), otherwise start it on a fresh frame. A tick whose
+            // update + draw fit its frames still costs no extra frame.
+            if (has_update)
             {
-                emit_asm ("WAIT ; _draw() gets a frame of its own\n");
-            }
-            else if (has_update)
-            {
-                emit_asm ("IN   R0, TIM_FrameCounter\n");
-                emit_asm ("MOV  R1, [PICO8_TICK_FRAME]\n");
-                emit_asm ("IEQ  R0, R1\n");
-                emit_asm ("JT   R0, __pico8_draw_now\n");
-                emit_asm ("WAIT ; _update60() overran: start _draw() on a fresh frame\n");
+                emit_asm ("IN   R0, TIM_CycleCounter ; cycles used this frame\n");
+                emit_asm ("MOV  R1, [PICO8_DRAW_COST]\n");
+                emit_asm ("IADD R0, R1\n");
+                emit_asm ("SHL  R1, -3\n");
+                emit_asm ("IADD R0, R1 ; + 1/8 margin\n");
+                emit_asm ("IGT  R0, 250000 ; would the draw run past the frame?\n");
+                emit_asm ("JF   R0, __pico8_draw_now\n");
+                emit_asm ("WAIT ; start _draw() on a fresh frame\n");
                 emit_asm ("__pico8_draw_now:\n");
             }
+            emit_asm ("IN   R0, TIM_FrameCounter\n");
+            emit_asm ("MOV  [PICO8_DRAW_FRAME], R0\n");
+            emit_asm ("IN   R0, TIM_CycleCounter\n");
+            emit_asm ("MOV  [PICO8_DRAW_CYCLE], R0\n");
             emit_asm ("CALL __function__draw   ; Execute _draw()\n");
             emit_asm ("CALL __builtin_pico8_present ; mask off-canvas drawing (PICO-8 clips to 128x128)\n");
+            // cost = (frames elapsed) * 250000 + cycle now - cycle at start
+            emit_asm ("IN   R0, TIM_FrameCounter\n");
+            emit_asm ("MOV  R1, [PICO8_DRAW_FRAME]\n");
+            emit_asm ("ISUB R0, R1\n");
+            emit_asm ("IMUL R0, 250000\n");
+            emit_asm ("IN   R1, TIM_CycleCounter\n");
+            emit_asm ("IADD R0, R1\n");
+            emit_asm ("MOV  R1, [PICO8_DRAW_CYCLE]\n");
+            emit_asm ("ISUB R0, R1\n");
+            emit_asm ("MOV  [PICO8_DRAW_COST], R0\n");
         }
         // Pace by the frame counter, not a fixed number of WAITs: a tick
         // that runs past one frame then costs no extra frame, so _update
@@ -1073,7 +1095,7 @@ void generate_program (ASTNode *head)
             emit_asm ("MOV R1, var_TIC80_COLOR_MULTIPLY\n");
             emit_asm ("IN R2, GPU_MultiplyColor\n");
             emit_asm ("MOV [R1], R2 ; Save current multiply\n");
-            emit_asm ("MOV R2, 0xFF404040 ; 50% gray\n");
+            emit_asm ("MOV R2, 0xFF404040 ; 50%% gray\n");
             emit_asm ("OUT GPU_MultiplyColor, R2\n");
             emit_asm ("CALL __function_TIC ; Render ONE dimmed frame\n");
             emit_asm ("MOV R1, 0xFFFFFFFF ; Restore for text\n");
@@ -1145,6 +1167,7 @@ void generate_program (ASTNode *head)
     fclose (temp_asm_stream);
 
     emit_runtime_library ();
+    emit_globals_to_nil ();
     emit_string_data_section ();
 
     // --- GENERATE DEBUG FILE ---

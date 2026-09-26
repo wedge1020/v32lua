@@ -36,7 +36,12 @@ void  node_identifier (ASTNode *node, int  dest_reg)
 
 void  node_number (ASTNode *node, int  dest_reg)
 {
-    emit_asm ("MOV R%d, %f\n", dest_reg, node -> as.number.val);
+    // The float's exact bits: "%f" printed 6 decimals, so 1e-7 became 0
+    // and 0.70710678 lost precision.
+    float    f = (float) node -> as.number.val;
+    uint32_t bits;
+    memcpy (&bits, &f, 4);
+    emit_asm ("MOV R%d, 0x%08X ; %.9g\n", dest_reg, bits, node -> as.number.val);
 }
 
 void  node_string (ASTNode *node, int  dest_reg)

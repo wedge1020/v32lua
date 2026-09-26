@@ -1,0 +1,424 @@
+#include "v32lua.h"
+
+// Global state for XML generation
+char          cart_version[64]    = "1.0";
+char          cart_title[128]     = "Vircon32 Program";
+bool          cart_title_was_set  = false;
+CARTresource *textures_head       = NULL;
+CARTresource *sounds_head         = NULL;
+CARTresource *textures_tail       = NULL;
+CARTresource *sounds_tail         = NULL;
+int           next_texture_id     = 0;
+int           next_sound_id       = 0;
+
+ASTNode *make_node (NodeType type)
+{
+    ASTNode* n = (ASTNode*)calloc(1, sizeof(ASTNode));
+    n->type = type;
+    n->next = NULL;
+    n->line_number = yylineno;
+    return n;
+}
+
+ASTNode *make_node_ident (const char* name)
+{
+    ASTNode* node = make_node(NODE_IDENTIFIER);
+    // Use strdup to ensure the AST owns the memory for the string,
+    // protecting it from being overwritten by the lexer's buffer.
+    node->as.id.name = strdup(name);
+
+    return node;
+}
+
+ASTNode *make_node_string (const char* str_value)
+{
+    ASTNode* node = make_node(NODE_STRING);
+    // strdup protects the string from being overwritten by the lexer
+    node->as.string_val.value = strdup(str_value);
+    return node;
+}
+
+/*
+void handle_compiler_directive(const char *line) {
+    // 1. Manual user override: --#config FFI_RAM_RESERVE 262144
+    if (sscanf(line, "--#config FFI_RAM_RESERVE %d", &o_config.ffi_ram_reserve_words) == 1) {
+        return;
+    }
+
+    // 2. Auto-generated toolchain header: ;;FFI_MAX_MEM 4096
+    int detected_addr = 0;
+    if (sscanf(line, ";;FFI_MAX_MEM %d", &detected_addr) == 1) {
+        if (detected_addr > o_config.ffi_max_mem_detected) {
+            o_config.ffi_max_mem_detected = detected_addr;
+        }
+    }
+}*/
+
+// Append one resource, keeping id == list position == XML position.
+// Returns the new node, or NULL if allocation failed.
+CARTresource *cart_resource_append (CARTresource **head, CARTresource **tail,
+                                    int id, const char *var_name, const char *filename)
+{
+    CARTresource *res = (CARTresource *) malloc (sizeof (CARTresource));
+
+    if (res == NULL) {
+        compiler_error (ERR_INTERNAL, -1,
+                        "Memory allocation failed registering cart resource '%s'",
+                        (var_name != NULL) ? var_name : "<unnamed>");
+        return NULL;
+    }
+
+    res->id       = id;
+    res->var_name = (var_name != NULL) ? strdup (var_name) : NULL;
+    res->filename = (filename != NULL) ? strdup (filename) : NULL;
+    res->next     = NULL;
+
+    if (*tail != NULL) {
+        (*tail)->next = res;
+    } else {
+        *head = res;
+    }
+    *tail = res;
+
+    return res;
+}
+
+ASTNode *make_node_cart_hint (const char *raw_hint)
+{
+    ASTNode* node = make_node(NODE_CART_HINT);
+
+    char action[64] = {0};
+    char param1[128] = {0};
+    char param2[256] = {0};
+
+    // Parse commands like: texture background "filename.png"
+    int tokens = sscanf(raw_hint, "%63s %127s \"%255[^\"]\"", action, param1, param2);
+
+    node->as.cart_hint.action = strdup(action);
+    node->as.cart_hint.resource_id = -1;
+
+    // Handle API selection hint
+    if (strcmp(action, "api") == 0 && tokens >= 2) {
+        // Strip surrounding quotes from param1 if present
+        char api_name[128];
+        size_t param1_len = strlen(param1);
+
+        if (param1_len >= 2 && param1[0] == '"' && param1[param1_len-1] == '"') {
+            // Copy without quotes
+            strncpy(api_name, param1 + 1, param1_len - 2);
+            api_name[param1_len - 2] = '\0';
+        } else {
+            strncpy(api_name, param1, sizeof(api_name) - 1);
+            api_name[sizeof(api_name) - 1] = '\0';
+        }
+
+        if (strcmp(api_name, "pico8")        == 0) {
+            runtime_req.needs_pico8           = true;
+            runtime_req.needs_tic80           = false;
+            runtime_req.needs_vircon32        = false;
+            runtime_req.needs_tables          = true;
+            // PICO-8's bare math globals (rnd/flr/min/max/tan/...) alias onto
+            // math.* emitters that CALL __builtin_* routines in math.s, but
+            // needs_math is otherwise only set for a literal "math." prefix
+            // -- tan()/rnd() in a PICO-8 cart failed to assemble without it.
+            runtime_req.needs_math            = true;
+        } else if (strcmp(api_name, "tic80") == 0) {
+            runtime_req.needs_tic80           = true;
+            runtime_req.needs_pico8           = false;
+            runtime_req.needs_vircon32        = false;
+            runtime_req.needs_tables          = true;
+        } else {
+            compiler_error(ERR_SEMANTIC, -1, "Unknown API: %s. Use 'pico8' or 'tic80'", api_name);
+        }
+        node->as.cart_hint.value = strdup(api_name);
+    }
+    else if (strcmp(action, "p8") == 0 && tokens >= 2) {
+        // --#p8 "cart.p8" -- take __gfx__/__gff__/__map__ from a .p8 file
+        // (a stripped .lua export carries none of them). Implies pico8.
+        char path[128];
+        size_t n = strlen(param1);
+        if (n >= 2 && param1[0] == '"' && param1[n-1] == '"') {
+            snprintf(path, sizeof(path), "%.*s", (int)(n - 2), param1 + 1);
+        } else {
+            snprintf(path, sizeof(path), "%s", param1);
+        }
+        if (!pico8_load_cart_assets(path, g_lua_filename)) {
+            compiler_error(ERR_SEMANTIC, yylineno, "--#p8: cannot read cartridge '%s'", path);
+        }
+        // same effect as --#api pico8 (put this hint first, like --#api,
+        // so PICO-8-only syntax later in the file is recognised)
+        runtime_req.needs_pico8    = true;
+        runtime_req.needs_tic80    = false;
+        runtime_req.needs_vircon32 = false;
+        runtime_req.needs_tables   = true;
+        runtime_req.needs_math     = true;
+        node->as.cart_hint.value = strdup(path);
+    }
+    else if (strcmp(action, "version") == 0 && tokens >= 2) {
+        // e.g., --#version 1.1
+        strncpy(cart_version, param1, sizeof(cart_version) - 1);
+        node->as.cart_hint.value = strdup(param1);
+    }
+    else if (strcmp(action, "title") == 0) {
+        // e.g., --#title "My Awesome Game"
+        char title_buf[128] = {0};
+        if (sscanf(raw_hint, "%*s \"%127[^\"]\"", title_buf) == 1) {
+            cart_title_was_set = true;
+            strncpy(cart_title, title_buf, sizeof(cart_title) - 1);
+            node->as.cart_hint.value = strdup(title_buf);
+        }
+    }
+    else if (strcmp(action, "texture") == 0 && tokens == 3) {
+        // e.g., --#texture background "filename.png"
+        int assigned_id = next_texture_id++;
+
+        node->as.cart_hint.name = strdup(param1);        // Variable name: background
+        node->as.cart_hint.value = strdup(param2);       // Filename: filename.png
+        node->as.cart_hint.resource_id = assigned_id;    // ID: 0, 1, 2...
+
+        // Register in our XML linked list
+        cart_resource_append (&textures_head, &textures_tail,
+                              assigned_id, param1, param2);
+    }
+    // In make_node_cart_hint(), after texture handling:
+    else if (strcmp (action, "sound") == 0 && tokens == 3) {
+        int  assigned_id                  = next_sound_id++;
+
+        node -> as.cart_hint.name         = strdup (param1); // Variable name
+        node -> as.cart_hint.value        = strdup (param2); // Filename (e.g., "explosion.vsnd")
+        node -> as.cart_hint.resource_id  = assigned_id;
+
+        // Register in sound linked list
+        cart_resource_append (&sounds_head, &sounds_tail,
+                              assigned_id, param1, param2);
+    }
+    else if (strcmp (action, "tilemap") == 0 && tokens == 3) {
+        for (TilemapAsset *existing = tilemaps_head; existing != NULL; existing = existing->next) {
+            if (strcmp (existing->name, param1) == 0) {
+                compiler_error (ERR_SEMANTIC, yylineno,
+                                "--#tilemap '%s' is declared more than once", param1);
+            }
+        }
+
+        TilemapAsset *asset = parse_tilemap_csv (param2, param1);
+        if (tilemaps_tail != NULL) { tilemaps_tail->next = asset; } else { tilemaps_head = asset; }
+        tilemaps_tail = asset;
+
+        // Reserve this tilemap's RAM promotion-pointer word now, through the
+        // compiler's own global allocator -- same mechanism as
+        // TIC80_MAP_BUFFER_PTR. 0 == not yet promoted; nonzero == a __malloc'd
+        // RAM pointer, written the first time tilemap.set() runs.
+        char ram_ptr_name[160];
+        snprintf (ram_ptr_name, sizeof (ram_ptr_name),
+                  "VIRCON32_TILEMAP_%s_RAM_PTR", param1);
+        register_global (ram_ptr_name);
+
+        // No node->as.cart_hint.name/.resource_id set -- NAME stays a
+        // compile-time-only token, never a Lua-visible value.
+    }
+
+    return node;
+}
+
+ASTNode *make_node_do_block (ASTNode *body)
+{
+    ASTNode *node = make_node (NODE_DO_BLOCK);
+    node -> as.do_block.body = body;
+    return node;
+}
+
+ASTNode *make_node_function_def (const char *name, ASTNode *params, ASTNode *body)
+{
+    ASTNode *node = make_node(NODE_FUNCTION_DEF);
+    node->as.function_def.name = strdup(name);
+    node->as.function_def.params = params;
+    node->as.function_def.body = body;
+    return node;
+}
+
+ASTNode *make_node_method_def (ASTNode *table_expr, const char *method_name, int is_colon, ASTNode *params, ASTNode *body)
+{
+    // 1. Resolve a static base path for name mangling (e.g., "Player" + "move" -> "Player_move")
+    char base_path[256] = "table";
+    resolve_static_path(table_expr, base_path);
+    
+    char mangled_name[512];
+    snprintf(mangled_name, sizeof(mangled_name), "%s_%s", base_path, method_name);
+
+    // 2. If colon syntax was used (Table:method), inject implicit 'self' as the first parameter
+    if (is_colon) {
+        ASTNode *self_param = make_node_ident("self");
+        self_param->next = params;
+        params = self_param;
+    }
+
+    // 3. Create the underlying assembly subroutine definition node
+    ASTNode *func_def = make_node_function_def(mangled_name, params, body);
+
+    // 4. Create a function pointer node targeting the mangled assembly label
+    ASTNode *func_ptr = make_node(NODE_FUNCTION_POINTER);
+    func_ptr->as.func_ptr.mangled_name = strdup(mangled_name);
+
+    // 5. Create the table assignment: table_expr["method_name"] = func_ptr
+    ASTNode *key_str   = make_node_string(method_name);
+    ASTNode *table_set = make_node_table_set(table_expr, key_str, func_ptr);
+
+    // 6. Chain the nodes together:
+    // Pass 1 of generate_program() will compile func_def and ignore table_set.
+    // Pass 2 of generate_program() (in generate_global_setup) will ignore func_def and execute table_set!
+    func_def->next = table_set;
+
+    return func_def;
+}
+
+ASTNode *make_node_unary (Operator  op, ASTNode *operand)
+{
+    ASTNode* node = malloc(sizeof(ASTNode));
+    node->type = NODE_UNARY;
+    node->next = NULL;
+    node->as.unary.operator = op;
+    node->as.unary.operand = operand;
+    return node;
+}
+
+void generate_binary_op (ASTNode* node)
+{
+    if (node->type == NODE_CONCAT) {
+        // --- Step 1: Evaluate Left Operand ---
+        // Generates assembly for left child and leaves result in R0 (register index 0)
+        generate_asm(node->as.binary.left, 0);
+
+        // Push left operand to stack (Sits at SP+1 relative to call)
+        emit_asm ("PUSH R0             ; Save left string operand");
+
+        // --- Step 2: Evaluate Right Operand ---
+        // Generates assembly for right child and leaves result in R0 (register index 0)
+        generate_asm(node->as.binary.right, 0);
+
+        // Push right operand to stack (Sits at SP+0 relative to call)
+        emit_asm ("PUSH R0             ; Save right string operand");
+
+        // --- Step 3: Invoke Built-in ---
+        emit_asm ("CALL __builtin_strcat ; Execute NaN-boxed string concatenation");
+
+        // --- Step 4: Stack Cleanup ---
+        emit_asm ("IADD SP, 2          ; Pop concatenation arguments");
+        return;
+    }
+
+    // ... handle other binary operators (+, -, *, /) using node->as.binary.operator ...
+}
+
+ASTNode *make_node_binary (NodeType  type, ASTNode *left, ASTNode *right)
+{
+    // 1. Allocate memory for the new node
+    ASTNode* node = (ASTNode*)malloc(sizeof(ASTNode));
+    if (node == NULL) {
+        fprintf(stderr, "Compiler Error: Out of memory during AST node allocation.\n");
+        exit(1);
+    }
+
+    // 2. Set the node type (e.g., NODE_ADD, NODE_AND, NODE_OR)
+    node->type = type;
+
+    // 3. Assign the left and right child expressions
+    node->as.binary.left = left;
+    node->as.binary.right = right;
+    node->as.binary.operator = 0; // Default/unused unless using NODE_RELATIONAL
+
+    // 4. CRITICAL: Always explicitly initialize the sibling pointer to NULL.
+    // If left uninitialized, it will contain garbage data and trigger segfaults
+    // during code generation traversals!
+    node->next = NULL;
+
+    return node;
+}
+
+ASTNode *make_node_table_constructor (ASTNode *initializers_head)
+{
+    ASTNode *node                                   = (ASTNode *) malloc (sizeof (ASTNode));
+    node -> type                                    = NODE_TABLE_CONSTRUCTOR;
+    node -> next                                    = NULL;
+    node -> as.table_constructor.initializers_head  = initializers_head;
+    return (node);
+}
+
+ASTNode *make_node_table_get (ASTNode *table_expr, ASTNode *key_expr)
+{
+    ASTNode* node = malloc(sizeof(ASTNode));
+    node->type = NODE_TABLE_GET;
+    node->next = NULL;
+    node->as.table_get.table_expr = table_expr;
+    node->as.table_get.key = key_expr;
+    return node;
+}
+
+ASTNode *make_node_table_set (ASTNode *table_expr, ASTNode *key_expr, ASTNode *value_expr)
+{
+    ASTNode* node = malloc(sizeof(ASTNode));
+    node->type = NODE_TABLE_SET;
+    node->next = NULL;
+    node->as.table_set.table_expr = table_expr;
+    node->as.table_set.key = key_expr;
+    node->as.table_set.value = value_expr;
+    return node;
+}
+
+ASTNode *make_node_boolean (bool  value)
+{
+    ASTNode *node           = make_node (NODE_BOOLEAN);
+    node -> as.boolean.val  = value;
+    return (node);
+}
+
+ASTNode *make_node_nil (void)
+{
+    return (make_node (NODE_NIL));
+}
+
+// Returns true if the node is a compile-time literal that can be used as an immediate operand.
+bool try_get_immediate_operand(ASTNode *node, char *imm_buffer, size_t buf_size)
+{
+    if (node == NULL) return false;
+
+    // CASE 1: The node is a function call like hex("0xFF000000")
+    if (node->type == NODE_FUNCTION_CALL)
+    {
+        // 1. Verify the target is an identifier named "hex"
+        if (node->as.call.target != NULL &&
+            node->as.call.target->type == NODE_IDENTIFIER &&
+            strcmp(node->as.call.target->as.id.name, "hex") == 0)
+        {
+            // 2. Step inside the call's argument list to get the actual literal
+            ASTNode *arg = node->as.call.args_head;
+
+            if (arg != NULL && arg->type == NODE_STRING)
+            {
+                // Correctly extract from the ARGUMENT's string union!
+                snprintf(imm_buffer, buf_size, "%s", arg->as.string_val.value);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // CASE 2: The node is already a raw string AST node
+    if (node->type == NODE_STRING && is_raw_integer_expression(node))
+    {
+        snprintf(imm_buffer, buf_size, "%s", node->as.string_val.value);
+        return true;
+    }
+
+    // CASE 3: BONUS! Fold whole integer number literals (e.g., ioports.gpu.clear = 0)
+    // If your Vircon32 hardware ports accept plain integer immediates:
+    if (node->type == NODE_NUMBER)
+    {
+        // Check if the float has no fractional component (e.g., 0.0, 1.0, 255.0)
+        if (node->as.number.val == (int)node->as.number.val) {
+            snprintf(imm_buffer, buf_size, "%d", (int)node->as.number.val);
+            return true;
+        }
+    }
+
+    return false;
+}

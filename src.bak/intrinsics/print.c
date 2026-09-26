@@ -1,0 +1,148 @@
+#include "v32lua.h"
+
+// ============================================================================
+// --- Static Helper Functions for Complex Calls ---
+// ============================================================================
+
+void emit_print_intrinsic(ASTNode *node)
+{
+    // 1. Extract the 3 positional arguments from the argument linked list
+    ASTNode *arg_x   = node->as.call.args_head;
+    ASTNode *arg_y   = (arg_x != NULL) ? arg_x->next : NULL;
+    ASTNode *arg_val = (arg_y != NULL) ? arg_y->next : NULL;
+
+    // Basic semantic validation to protect against malformed user scripts
+    if (arg_x == NULL || arg_y == NULL || arg_val == NULL) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+                       "print() intrinsic requires 3 arguments: print(x, y, value)");
+    }
+
+    emit_asm ("    ;; --- Intrinsic: print(x, y, value) ---\n");
+
+    // -----------------------------------------------------------------
+    // FIX: previously this allocated reg_x, reg_y, AND reg_val up front,
+    // computed arg_x into reg_x, then computed arg_y into reg_y, and only
+    // pushed reg_x/reg_y AFTER both were computed. A register handed out
+    // by allocate_register() starts with use_distance == 0 and nothing
+    // here ever raised it (no mark_register_live(), no immediate push) --
+    // so while arg_y was being evaluated, reg_x sat around looking "dead"
+    // to allocate_register()'s Phase 2, which is free to hand a dead
+    // register straight back out as scratch space for anything arg_y's
+    // OWN evaluation needs (e.g. `print(xreset, yreset - 22, index)` --
+    // the subtraction needs a temp register, and reg_x was sitting right
+    // there looking free). That silently clobbered the X coordinate
+    // before it was ever pushed.
+    //
+    // Fix: push each coordinate to the stack the INSTANT it's computed,
+    // the same "protect across possible nested allocation" idiom already
+    // used throughout this file (see node_div/node_mod spilling their
+    // left operand before evaluating the right). Once a value is on the
+    // stack it's completely out of the register allocator's reach, so
+    // there's no window left for it to get reassigned out from under us.
+    // -----------------------------------------------------------------
+
+    // X coordinate: compute, convert, push, release -- all before
+    // anything else gets a chance to allocate a register.
+    int reg_x = allocate_register();
+    generate_asm (arg_x, reg_x);
+    emit_asm ("CFI R%d ; Convert X to hardware integer\n", reg_x);
+    emit_asm ("PUSH R%d ; Save X coordinate\n", reg_x);
+    unlock_register(reg_x);
+
+    // Y coordinate: same discipline. arg_y may itself be an arbitrary
+    // expression (as in `yreset - 22`), so reg_x above MUST already be
+    // safely on the stack by the time this runs.
+    int reg_y = allocate_register();
+    generate_asm (arg_y, reg_y);
+    emit_asm ("CFI R%d ; Convert Y to hardware integer\n", reg_y);
+    emit_asm ("PUSH R%d ; Save Y coordinate\n", reg_y);
+    unlock_register(reg_y);
+
+    // Value: X and Y are both safely on the stack now, so it's fine for
+    // this evaluation to call __builtin_tostring/__builtin_strcat or
+    // anything else that needs registers -- there's nothing left in a
+    // register for it to accidentally clobber.
+    int reg_val = allocate_register();
+    generate_asm (arg_val, reg_val);
+
+    // Coerce the value to a string pointer
+    emit_asm ("PUSH R%d ; Push raw value to convert\n", reg_val);
+    emit_asm ("CALL __builtin_tostring\n");
+    emit_asm ("MOV [SP], R0 ; overwrite raw value with the string pointer\n");
+    unlock_register(reg_val);
+
+    // Fire the printing routine and tear down the stack frame
+    emit_asm("CALL __builtin_print\n");
+    emit_asm("IADD SP, 3 ; Clean up x, y, and string from the stack\n");
+}
+
+// Returns true if the node was successfully intercepted and processed as a printf intrinsic.
+bool emit_printf_intrinsic(ASTNode *node, int dest_reg)
+{
+    // 1. Validate that this is a function call node[cite: 8]
+    if (node == NULL || node->type != NODE_FUNCTION_CALL) {
+        return false;
+    }
+
+    // 2. Verify the target is specifically an identifier named "printf"[cite: 8]
+    if (node->as.call.target == NULL ||
+        node->as.call.target->type != NODE_IDENTIFIER ||
+        strcmp(node->as.call.target->as.id.name, "printf") != 0)
+    {
+        return false;
+    }
+
+    emit_asm("    ;; --- Intrinsic: printf ---");
+
+    // 3. Count the provided explicit arguments[cite: 8]
+    int explicit_arg_count = 0;
+    ASTNode *curr = node->as.call.args_head;
+    while (curr != NULL) {
+        explicit_arg_count++;
+        curr = curr->next;
+    }
+
+    if (explicit_arg_count > 0) {
+        // 4. Buffer arguments into an array for Right-to-Left traversal (Standard C ABI)[cite: 8]
+        ASTNode **arg_array = (ASTNode **)malloc(sizeof(ASTNode *) * explicit_arg_count);
+        if (arg_array == NULL) {
+            compiler_error(ERR_INTERNAL, -1, "Out of memory allocating printf argument buffer");
+        }
+
+        curr = node->as.call.args_head;
+        for (int i = 0; i < explicit_arg_count; i++) {
+            arg_array[i] = curr;
+            curr = curr->next;
+        }
+
+        emit_asm("    ; --- Pushing printf arguments Right-to-Left ---");
+
+        // 5. Evaluate and push arguments in reverse order[cite: 8]
+        for (int i = explicit_arg_count - 1; i >= 0; i--) {
+            int arg_reg = allocate_register();
+
+            // Generate assembly for the argument and leave the result in arg_reg[cite: 8]
+            generate_asm(arg_array[i], arg_reg);
+
+            emit_asm("PUSH R%d ; Push argument", arg_reg);
+            unlock_register(arg_reg);
+        }
+
+        free(arg_array);
+    }
+
+    // 6. Invoke the runtime library's variadic builtin routine[cite: 8]
+    emit_asm("CALL __builtin_printf");
+
+    // 7. Clean up the stack frame (Caller cleanup)[cite: 8]
+    if (explicit_arg_count > 0) {
+        emit_asm("IADD SP, %d ; Clean up printf arguments", explicit_arg_count);
+    }
+
+    // 8. Capture the return value if the expression requires it[cite: 8]
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R0 ; Store return value", dest_reg);
+    }
+
+    return true;
+}

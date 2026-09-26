@@ -848,6 +848,13 @@ una decisión de diseño:
 * Operadores a nivel de bits (`&`, `|`, `~`, `<<`, `>>`) y los `band`/
   `bor`/... de PICO-8; `string.format` como método (`("%d"):format(x)`) —
   use `string.format(...)`.
+* Audio PICO-8 sintetizado más pequeño: `__sfx__`/`__music__` se
+  convierten en PCM estéreo de 16 bits a 44,1 kHz (Celeste: ~66 MB de
+  `.vsnd`; es el único formato que reproduce el SPU). A explorar: guardar a
+  menor frecuencia y reproducir con el ajuste de velocidad del canal,
+  renderizar cada SFX una vez y montar las canciones con esas piezas en
+  tiempo de ejecución (un canal del SPU por canal de música) en lugar de
+  premezclar canciones completas, y compartir patrones idénticos.
 * Recolección de basura: el heap es un asignador lineal, así que cada
   tabla, clausura y cadena en tiempo de ejecución vive hasta el reinicio.
   Los juegos de larga duración deberían reutilizar tablas en lugar de

@@ -1,0 +1,81 @@
+# --- Toolchain ---
+# You can freely change this to: CC = clang
+CC = gcc
+LEX = flex
+YACC = bison
+
+# --- Flags ---
+CFLAGS = -Wall -Wextra -g -I ../inc -DYYDEBUG=1
+CLIBS = -lm
+
+# --- Output Executable ---
+TARGET = ../bin/v32lua
+
+# --- Object Files ---
+
+# Core sources
+CORE_SRCS = parser.o lexer.o main.o context.o ffi.o closures.o generator.o ast.o emit.o internals.o register.o table.o tilemap.o pico8_assets.o pico8_audio.o pico8_prelude.o tic80_assets.o vtex_generator.o vsnd_generator.o runtime_embed.o
+
+# generate cases - automatically include all .c files in generate/
+NODE_DIR = node
+NODE_SRCS := $(wildcard $(NODE_DIR)/*.c)
+NODE_OBJS := $(NODE_SRCS:$(NODE_DIR)/%.c=$(NODE_DIR)/%.o)
+
+# intrinsics - automatically include all .c files in intrinsics
+INTRINSICS_DIR = intrinsics
+INTRINSICS_SRCS := $(wildcard $(INTRINSICS_DIR)/*.c)
+INTRINSICS_OBJS := $(INTRINSICS_SRCS:$(INTRINSICS_DIR)/%.c=$(INTRINSICS_DIR)/%.o)
+
+# All sources
+SRCS = $(CORE_SRCS) $(NODE_SRCS) $(INTRINSICS_SRCS)
+OBJS = $(SRCS:.c=.o)
+
+# --- Build Rules ---
+all: $(TARGET)
+
+$(TARGET): $(OBJS)
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -o $@ $^ $(CLIBS)
+
+parser.c ../inc/parser.h: parser.y
+	$(YACC) -v --output=parser.c --defines=../inc/parser.h parser.y -t
+
+lexer.c: lexer.l ../inc/parser.h
+	$(LEX) --outfile=lexer.c lexer.l
+
+# Rule for standard C files
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# Rule for Assembly files (instructs assembler to disable executable stack requirement)
+%.o: %.S
+	#$(CC) $(CFLAGS) -Wa,--noexecstack -c $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# runtime_embed.S .incbin's every runtime unit, so those sources are real
+# prerequisites -- without this, editing runtime/*.s alone leaves a stale
+# runtime_embed.o in place and the change silently never reaches the build.
+runtime_embed.o: runtime_embed.S $(wildcard runtime/*.s)
+
+context:
+	@cp -v runtime/memory.s   runtime/memory.s.txt
+	@cp -v runtime/datetime.s runtime/datetime.s.txt
+	@cp -v runtime/exec.s     runtime/exec.s.txt
+	@cp -v runtime/table.s    runtime/table.s.txt
+	@cp -v runtime/math.s     runtime/math.s.txt
+	@cp -v runtime/string.s   runtime/string.s.txt
+	@cp -v runtime/print.s    runtime/print.s.txt
+	@cp -v runtime/iters.s    runtime/iters.s.txt
+	@cp -v runtime/pico8.s    runtime/pico8.s.txt
+	@cp -v runtime/tic80.s    runtime/tic80.s.txt
+	@cp -v runtime/vircon32.s runtime/vircon32.s.txt
+	@cp -v runtime/constant.s runtime/constant.s.txt
+	@cp -v Makefile           Makefile.txt
+	@cp -v lexer.l            lexer.l.txt
+	@cp -v parser.y           parser.y.txt
+	@cp -v runtime_embed.S    runtime_embed.S.txt
+
+clean:
+	rm -f $(TARGET) $(OBJS) ../monolithic_source.c *.txt runtime/*.txt intrinsics/*.txt node/*.txt *.output
+
+.PHONY: all clean monorule

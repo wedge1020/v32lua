@@ -2,7 +2,6 @@
 
 void  node_while (ASTNode *node)
 {
-    int  cond_reg    = allocate_register ();
     int  label_id    = get_next_label ();
     const char *ctx  = get_current_function_name ();
     char end_label[128];
@@ -12,14 +11,7 @@ void  node_while (ASTNode *node)
 
     emit_asm ("__%s_while_start_%d:\n", ctx, label_id);
 
-    // ✅ Used for condition check
-    mark_register_live (cond_reg, 2);
-    
-    generate_asm (node -> as.while_loop.condition, cond_reg);
-    
-    // AUDITED: Replaced hardware JF with NaN-box falsy check!
-    emit_falsy_jump (cond_reg, end_label);
-    unlock_register (cond_reg);
+    generate_cond_jump (node -> as.while_loop.condition, false, end_label);
     
     push_scope (); 
     generate_block (node -> as.while_loop.body);
@@ -795,18 +787,15 @@ void  node_repeat (ASTNode *node)
     push_scope ();
     generate_block (node -> as.repeat_loop.body);
 
-    int  cond_reg = allocate_register ();
-    mark_register_live (cond_reg, 2);
-    generate_asm (node -> as.repeat_loop.condition, cond_reg);
+    // the condition sees the body's locals, so it is generated before
+    // pop_scope()
+    generate_cond_jump (node -> as.repeat_loop.condition, true, end_label);
 
     pop_scope ();
 
     // Loop again if the condition is falsy; stop (fall through to
     // end_label) if it's truthy -- the inverse of while's falsy-jump,
     // matching repeat/until's inverted "stop when true" semantics.
-    emit_truthy_jump (cond_reg, end_label);
-    unlock_register (cond_reg);
-
     emit_asm ("JMP %s\n", start_label);
     emit_asm ("%s:\n", end_label);
 

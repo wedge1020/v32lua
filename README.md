@@ -805,6 +805,13 @@ decision:
 * Garbage collection: the heap is a bump allocator, so every table,
   closure and runtime string lives until reset. Long-running games should
   reuse tables rather than create them per frame.
+* Smaller synthesized PICO-8 audio: `__sfx__`/`__music__` become 16-bit
+  stereo PCM at 44.1 kHz, the only format the SPU plays (Celeste: ~66 MB
+  of `.vsnd`). To explore: storing at a lower rate and playing it back
+  with the channel speed setting, rendering each SFX once and
+  building songs from those pieces at run time (one SPU channel per music
+  channel, loop points per SFX) instead of pre-mixing whole songs, and
+  sharing identical patterns.
 * PICO-8: `pal`/`palt` (compile to no-ops with a warning), `clip`,
   `peek`/`poke`, `cartdata`/`dget`/`dset`, real `stat` values, fractional
   `spr` widths; the SFX editor's filter switches in synthesized sound
