@@ -49,9 +49,10 @@ image, so a frame that ends mid-draw would show half-drawn. Before each
 `_draw()` the loop checks, with the timer's cycle counter and the previous
 draw's cost, whether the draw fits in what is left of the current frame,
 and otherwise starts it on the next one. A cart too heavy for its frames
-drops to 20 or 15 fps cleanly, like PICO-8. At least
-one of `_update`, `_update60`, `_draw` must exist. Top-level code runs before `_init()`; the map and flags are
-already loaded then.
+drops to 20 or 15 fps cleanly, like PICO-8. A cart may also have none
+of `_update`, `_update60`, `_draw`: top-level code or an `_init()` that runs
+its own `while true do ... flip() end` loop works too. Top-level code runs
+before `_init()`; the map and flags are already loaded then.
 
 ## API
 
@@ -67,7 +68,9 @@ already loaded then.
 | `camera([x, y])` | |
 | `btn([i [, p]])`, `btnp([i [, p]])` | 0 left, 1 right, 2 up, 3 down, 4 O (→ A), 5 X (→ B). No `i` → bitfield. `btnp`: first frame of a press, then from frame 15 every 4 frames. |
 | `add`, `del`, `count`, `foreach`, `for v in all(t)` | `del` uses full `==` (string contents compare). `foreach`/`all` follow PICO-8's rule that deleting the current element is safe. `count(t, v)` isn't supported. |
-| `flr`, `ceil`, `abs`, `min`, `max`, `mid`, `sgn`, `rnd`, `srand`, `sin`, `cos`, `tan`, `sub` | `sin`/`cos`/`tan` take turns; `sin` is inverted (PICO-8 convention). The RNG is seeded from the clock at boot. |
+| `flr`, `ceil`, `abs`, `min`, `max`, `mid`, `sgn`, `rnd`, `srand`, `sin`, `cos`, `tan`, `sqrt`, `sub` | `sin`/`cos`/`tan` take turns; `sin` is inverted (PICO-8 convention). `sqrt` of a negative number is 0. The RNG is seeded from the clock at boot. |
+| `band`, `bor`, `bxor`, `bnot`, `shl`, `shr`, `lshr`, `rotl`, `rotr` | 16.16 fixed point, like the operators (below). Real functions, so usable as values. |
+| `flip()` | Shows the frame drawn so far and waits one PICO-8 frame (1/30 s, or 1/60 s with `_update60`), keeping music on time — for carts that run their own loop. |
 | `sspr(sx, sy, sw, sh, dx, dy [, dw, dh [, flip_x, flip_y]])` | Stretched blit from the sprite sheet. |
 | `sfx(n [, channel])`, `music(n)` | The cart's own `__sfx__`/`__music__`, synthesized at compile time (below). Without that data: a placeholder tone bank — see [PICO8_SFX_SOUND_BANK.md](PICO8_SFX_SOUND_BANK.md). |
 | `split(s [, sep [, convert]])`, `unpack(t [, i])` | `unpack` returns up to 8 values. |
@@ -85,6 +88,13 @@ glyphs ⬅️ ➡️ ⬆️ ⬇️ 🅾️ ❎ as the numbers 0–5, `f"str"` an
 (standard Lua), and numeric strings wherever a builtin expects a number
 (`rnd"128"`, `sfx"38"`, `music"-1"`). `unpack(split"72,32,56")` as the
 last argument of a builtin is expanded at compile time.
+
+Bitwise operators work on PICO-8's 16.16 fixed-point representation, as in
+PICO-8: `& | ~` (or `^^`) `<< >> >>> <<> >><` and unary `~`, with the
+compound forms `&= |= ^^= <<= >>= >>>= <<>= >><=`. `>>` is arithmetic,
+`>>>` logical; fractions take part (`0.5 | 1 == 1.5`). Binary literals
+(`0b1010`, `0b1.1`) and hex fractions (`0x0.8`) are accepted, and hex
+literals `0x8000`–`0xffff.ffff` are negative (`0xffff == -1`).
 
 ## Sound
 
@@ -135,8 +145,8 @@ times per object per frame, run at about a third of full speed.
 
 ## Not supported (yet)
 
-`clip`, `peek`/`poke`/`memcpy`/`memset`, `cartdata`/`dget`/`dset`, real
-`stat` values, `menuitem`, `band`/`bor`/`shl`/..., the text cursor
+`clip`, `peek`/`poke`/`memcpy`/`memset` and the `@ % $` peek shorthands,
+`cartdata`/`dget`/`dset`, real `stat` values, `menuitem`, the text cursor
 (`print` without coordinates prints at 0,0), palette remapping,
 fractional `spr` widths (`spr(n, x, y, 0.5)`), and `reload` with
 arguments.

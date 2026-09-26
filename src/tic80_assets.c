@@ -451,7 +451,7 @@ void parse_tic80_map_row(int row_index, const char *hex_data) {
 // TIC-80 Sound Constants
 // ============================================================================
 #define TIC80_NUM_WAVES    32    // Maximum waveforms
-#define TIC80_NUM_SFX      32    // Maximum sound effects
+#define TIC80_NUM_SFX      64    // TIC-80 has 64 SFX slots (SFX_COUNT)
 #define TIC80_NUM_TRACKS   8     // Maximum music tracks
 #define TIC80_WAVE_SIZE    32    // Waveform size in bytes
 

@@ -95,12 +95,18 @@ extern int yydebug;
     TOKEN_FALSE = 296,             /* TOKEN_FALSE  */
     TOKEN_NIL = 297,               /* TOKEN_NIL  */
     TOKEN_FLOORDIV = 298,          /* TOKEN_FLOORDIV  */
-    TOKEN_DOTS = 299,              /* TOKEN_DOTS  */
-    TOKEN_REPEAT = 300,            /* TOKEN_REPEAT  */
-    TOKEN_UNTIL = 301,             /* TOKEN_UNTIL  */
-    TOKEN_GOTO = 302,              /* TOKEN_GOTO  */
-    TOKEN_DBCOLON = 303,           /* TOKEN_DBCOLON  */
-    TOKEN_PRINT_SHORT = 304        /* TOKEN_PRINT_SHORT  */
+    TOKEN_BXOR = 299,              /* TOKEN_BXOR  */
+    TOKEN_SHL = 300,               /* TOKEN_SHL  */
+    TOKEN_SHR = 301,               /* TOKEN_SHR  */
+    TOKEN_LSHR = 302,              /* TOKEN_LSHR  */
+    TOKEN_ROTL = 303,              /* TOKEN_ROTL  */
+    TOKEN_ROTR = 304,              /* TOKEN_ROTR  */
+    TOKEN_DOTS = 305,              /* TOKEN_DOTS  */
+    TOKEN_REPEAT = 306,            /* TOKEN_REPEAT  */
+    TOKEN_UNTIL = 307,             /* TOKEN_UNTIL  */
+    TOKEN_GOTO = 308,              /* TOKEN_GOTO  */
+    TOKEN_DBCOLON = 309,           /* TOKEN_DBCOLON  */
+    TOKEN_PRINT_SHORT = 310        /* TOKEN_PRINT_SHORT  */
   };
   typedef enum yytokentype yytoken_kind_t;
 #endif
@@ -115,7 +121,7 @@ union YYSTYPE
     char    *string_val;
     ASTNode *ast_node;
 
-#line 119 "../inc/parser.h"
+#line 125 "../inc/parser.h"
 
 };
 typedef union YYSTYPE YYSTYPE;

@@ -74,6 +74,17 @@ static const PreludeFunc prelude[] = {
       "function ord(s, i) if i == nil then i = 1 end return string.byte(s, i) end\n" },
     { "chr", NULL,
       "function chr(n) return string.char(n) end\n" },
+    // Function forms of the bitwise operators (node/bitops.c): same 16.16
+    // results as the operators, and usable as values.
+    { "band", NULL, "function band(a, b) return a & b end\n" },
+    { "bor",  NULL, "function bor(a, b) return a | b end\n" },
+    { "bxor", NULL, "function bxor(a, b) return a ^^ b end\n" },
+    { "bnot", NULL, "function bnot(a) return ~a end\n" },
+    { "shl",  NULL, "function shl(a, n) return a << n end\n" },
+    { "shr",  NULL, "function shr(a, n) return a >> n end\n" },
+    { "lshr", NULL, "function lshr(a, n) return a >>> n end\n" },
+    { "rotl", NULL, "function rotl(a, n) return a <<> n end\n" },
+    { "rotr", NULL, "function rotr(a, n) return a >>< n end\n" },
     { NULL, NULL, NULL }
 };
 

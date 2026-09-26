@@ -239,6 +239,8 @@ int check_needs_stack (ASTNode *node)
         case NODE_FOR_NUMERIC:
         case NODE_FOR_GENERIC:
         case NODE_CONCAT:
+        case NODE_BAND: case NODE_BOR: case NODE_BXOR: case NODE_SHL: case NODE_SHR:
+        case NODE_LSHR: case NODE_ROTL: case NODE_ROTR:
         case NODE_TABLE_SET:
         case NODE_TABLE_GET:
         case NODE_ASM:
@@ -567,6 +569,11 @@ void  generate_asm (ASTNode *node, int  dest_reg)
 
             case NODE_FLOORDIV:
                 node_floordiv (node, dest_reg);
+                break;
+
+            case NODE_BAND: case NODE_BOR: case NODE_BXOR: case NODE_SHL:
+            case NODE_SHR:  case NODE_LSHR: case NODE_ROTL: case NODE_ROTR:
+                node_bitop (node, dest_reg);
                 break;
 
             case NODE_BOOLEAN:
@@ -919,10 +926,12 @@ void generate_program (ASTNode *head)
         compiler_error(ERR_SEMANTIC, -1, 
             "Compilation failed: Your program must declare a 'TIC()' function.");
     }
-    else if (runtime_req.needs_pico8 && !has_update && !has_main)
+    else if (runtime_req.needs_pico8)
     {
-        compiler_error(ERR_SEMANTIC, -1, 
-            "Compilation failed: Your program must declare _update(), _update60() or _draw().");
+        // Nothing to require: a PICO-8 cart may be all top-level code or an
+        // _init() running its own `while true do ... flip() end` loop. With
+        // no _update/_draw the frame loop below just keeps time (and music)
+        // once that code returns, as PICO-8 idles on the last frame.
     }
     else if (!has_update && !has_main)
     {

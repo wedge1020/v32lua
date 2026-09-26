@@ -1323,3 +1323,43 @@ bool emit_pico8_sspr_intrinsic (ASTNode *node, int dest_reg)
     return pico8_simple_call (node, dest_reg, 10, names, 6, "__builtin_pico8_sspr",
         "sspr() expects at least 6 arguments: sspr(sx, sy, sw, sh, dx, dy [, dw, dh [, flip_x, flip_y]])");
 }
+
+/**
+ * PICO-8 sqrt(x): like math.sqrt, but a negative x gives 0 (as in PICO-8)
+ * rather than NaN -- which here would be read back as a boxed value.
+ */
+bool emit_pico8_sqrt_intrinsic(ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+    if (arg == NULL || arg->next != NULL) {
+        compiler_error(ERR_SEMANTIC, node->line_number, "PICO-8 sqrt() expects 1 argument");
+        return false;
+    }
+    emit_asm("    ;; --- PICO-8 sqrt(x) Intrinsic ---\n");
+    int x_reg = (dest_reg != 0) ? dest_reg : allocate_register();
+    generate_asm(arg, x_reg);
+    ensure_in_register(x_reg);
+    int t_reg = allocate_register();
+    mark_register_live(t_reg, 1);
+    emit_asm("MOV  R%d, 0.0\n", t_reg);
+    emit_asm("FMAX R%d, R%d ; sqrt(negative) = 0, as in PICO-8\n", x_reg, t_reg);
+    emit_asm("MOV  R%d, 0.5\n", t_reg);
+    emit_asm("POW  R%d, R%d\n", x_reg, t_reg);
+    unlock_register(t_reg);
+    if (dest_reg == 0) unlock_register(x_reg);
+    return true;
+}
+
+/**
+ * PICO-8 flip(): show the frame drawn so far and wait for the next one
+ * (1/30 s, or 1/60 s in an _update60 cart). Carts that run their own loop
+ * (`while true do ... flip() end`, typically from _init) depend on it.
+ */
+bool emit_pico8_flip_intrinsic(ASTNode *node, int dest_reg)
+{
+    (void) node;
+    emit_asm("    ;; --- PICO-8 flip() ---\n");
+    emit_asm("CALL __builtin_pico8_flip\n");
+    if (dest_reg != 0) emit_asm("MOV R%d, BOXED_NIL\n", dest_reg);
+    return true;
+}

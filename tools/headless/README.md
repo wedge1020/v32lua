@@ -28,6 +28,7 @@ stands in for it).
 | `profile.py prog.vbin.debug prof.txt [N]` | Cycles per routine from a `-P` profile. |
 | `trap prog LABEL` | Run until an asm label is reached; print trail and call stack. |
 | `where.py prog.vbin.debug prog.asm ADDR...` | Map addresses to asm lines. |
+| `V32_FIXED_TIME=1` | Start the clock at a fixed date and time. Carts seed their RNG from the clock (`math.random`, PICO-8 `rnd`), so this makes runs repeatable: compare two builds' `-g`/`-s` logs for the same pad script. For a cart that overruns its frames, compare with no pad script (input is frame-indexed, so a timing change moves it). |
 | `V32_CFI=arm` / `V32_CFI_LOG=1` | The emulator's float→int conversion of NaN or out-of-range values is host-dependent (0x80000000 on x86-64; 0 or saturated on ARM64). Pick the ARM behaviour, or log every such conversion. |
 | `difftest.py test.lua` | Compare `R_*` globals against reference Lua 5.4 (`$LUA54`). |
 | `unittest.py [-v] testing/*/NN_*.lua` | Run the `testing/` unit tests headless, with `run_tests.sh`'s contract (scrape `number_`/`string_`/`boolean_`/`hex_` globals, compare with the `=== EXPECTED OUTPUT ===` block, v32sim's `%.4f` / `"\xHH"` formats). Compares by name, so one missing value doesn't cascade. Tests that read the SPU or RNG (`v32stdapi/09-11`, `math/07`) can't pass here: the SPU is a logging stand-in, and the RNG is the official core's, which returns the seed on the first read after `srand()` (the expected values came from v32sim). |

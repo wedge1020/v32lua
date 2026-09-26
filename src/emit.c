@@ -845,6 +845,8 @@ void  emit_runtime_library (void)
                      word, (w % 8 == 7) ? "\n" : ", ");
         }
 
+        emit_tic80_ram_rom (out());
+
         emit_tic80_map_data (out());
     }
 

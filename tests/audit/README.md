@@ -21,6 +21,7 @@ Results at the end of the audit:
 |---|---|---|
 | c1_expr | 68/69 | arithmetic on a numeric string (`"10" + 5`) is not coerced |
 | c2_strargs, c3_strmeth, hk, ts, fl, ch, g1, ty, pl, tables2, tables3, tables_insrem, closures, conds, index | all pass | |
+| bitops (added 2026-09-26) | all pass | Lua 5.4 bitwise operators, plus `x ^ y` inside a closure (used to lose its upvalue). `pico8/bitops.lua`, `pico8/flip.lua` and `tic80/mem.lua` cover the PICO-8 16.16 operators, `sqrt`/`flip`, and TIC-80 `peek`/`poke`/`memcpy`/`memset`. |
 | c4_funcs | 38/41 | `{f()}` / `g(f())` keep only the first return value |
 | c5_tables | 33/34 | `type(print)` (print is an intrinsic, not a function value) |
 | c6_misc | 22/24 | number→string formatting (6 significant digits vs Lua's 14) |

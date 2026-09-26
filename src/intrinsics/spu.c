@@ -508,6 +508,8 @@ static bool spu_name_is_rebound (ASTNode *node, const char *name)
             case NODE_FLOORDIV: case NODE_MOD: case NODE_POW:
             case NODE_AND:  case NODE_OR:   case NODE_RELATIONAL:
             case NODE_CONCAT:
+            case NODE_BAND: case NODE_BOR: case NODE_BXOR: case NODE_SHL: case NODE_SHR:
+            case NODE_LSHR: case NODE_ROTL: case NODE_ROTR:
                 if (spu_name_is_rebound(node->as.binary.left,  name)) return true;
                 if (spu_name_is_rebound(node->as.binary.right, name)) return true;
                 break;

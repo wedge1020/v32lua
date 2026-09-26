@@ -275,17 +275,42 @@ bool emit_math_atan2_intrinsic(ASTNode *node, int dest_reg)
     emit_asm("    ;; --- Intrinsic: math.atan2(y, x) ---\n");
 
     int y_reg = allocate_register();
-    int x_reg = allocate_register();
-
+    register_pinned[y_reg] = 1;
     generate_asm(arg, y_reg);      // First arg = y
-    generate_asm(arg->next, x_reg); // Second arg = x
+    ensure_in_register(y_reg);
+    emit_asm("PUSH R%d ; spill y across x's evaluation\n", y_reg);
 
+    int x_reg = allocate_register();
+    register_pinned[x_reg] = 1;
+    generate_asm(arg->next, x_reg); // Second arg = x
+    ensure_in_register(x_reg);
+    emit_asm("POP R%d\n", y_reg);
+
+    // ATAN2 with both operands zero is a Vircon32 HARDWARE ERROR (the CPU
+    // halts); Lua gives 0. warm_wheels' angle() hit it on its first lap.
+    int t_reg = allocate_register();
+    int u_reg = allocate_register();
+    int id = get_next_label();
+    emit_asm("MOV  R%d, R%d\n", t_reg, y_reg);
+    emit_asm("FEQ  R%d, 0.0\n", t_reg);
+    emit_asm("MOV  R%d, R%d\n", u_reg, x_reg);
+    emit_asm("FEQ  R%d, 0.0\n", u_reg);
+    emit_asm("AND  R%d, R%d\n", t_reg, u_reg);
+    emit_asm("JF   R%d, __atan2_ok_%d\n", t_reg, id);
+    emit_asm("MOV  R%d, 0.0 ; atan2(0, 0) = 0\n", y_reg);
+    emit_asm("JMP  __atan2_done_%d\n", id);
+    emit_asm("__atan2_ok_%d:\n", id);
     emit_asm("ATAN2 R%d, R%d ; R%d = atan2(R%d, R%d)\n", y_reg, x_reg, y_reg, y_reg, x_reg);
+    emit_asm("__atan2_done_%d:\n", id);
 
     if (dest_reg != 0) {
         emit_asm("MOV R%d, R%d ; Transfer result to dest_reg\n", dest_reg, y_reg);
     }
 
+    unlock_register(t_reg);
+    unlock_register(u_reg);
+    register_pinned[y_reg] = 0;
+    register_pinned[x_reg] = 0;
     unlock_register(y_reg);
     unlock_register(x_reg);
     return true;

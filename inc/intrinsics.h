@@ -62,6 +62,8 @@ bool  emit_pico8_mget_intrinsic     (ASTNode *, int);
 bool  emit_pico8_mset_intrinsic     (ASTNode *, int);
 bool  emit_pico8_map_intrinsic      (ASTNode *, int);
 bool  emit_pico8_rnd_intrinsic      (ASTNode *, int);
+bool  emit_pico8_sqrt_intrinsic     (ASTNode *, int);
+bool  emit_pico8_flip_intrinsic     (ASTNode *, int);
 bool  emit_pico8_sgn_intrinsic      (ASTNode *, int);
 bool  emit_pico8_mid_intrinsic      (ASTNode *, int);
 bool  emit_pico8_foreach_intrinsic  (ASTNode *, int);
@@ -108,6 +110,10 @@ bool  emit_tic80_sfx_intrinsic   (ASTNode *, int);
 bool  emit_tic80_music_intrinsic (ASTNode *, int);
 // TIC-80 pmem
 bool  emit_tic80_pmem_intrinsic  (ASTNode *, int);
+bool  emit_tic80_memory_intrinsic (ASTNode *, const char *, int);   // peek/poke/memcpy/memset
+void  emit_tic80_ram_rom          (FILE *);
+bool  emit_tic80_stub_intrinsic   (ASTNode *, const char *, int);   // trace/key/keyp
+extern bool tic80_uses_memory;
 // TIC-80 Sprite Flag Functions
 bool  emit_tic80_fget_intrinsic  (ASTNode *, int);
 bool  emit_tic80_fset_intrinsic  (ASTNode *, int);

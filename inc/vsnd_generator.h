@@ -14,7 +14,7 @@ typedef struct
 
 // TIC-80 Sound Constants
 #define  TIC80_NUM_WAVES    32
-#define  TIC80_NUM_SFX      32
+#define  TIC80_NUM_SFX      64   // TIC-80 SFX_COUNT
 #define  TIC80_NUM_TRACKS   8
 #define  TIC80_WAVE_SIZE    32
 

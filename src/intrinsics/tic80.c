@@ -451,46 +451,41 @@ bool emit_tic80_mset_intrinsic(ASTNode *node, int dest_reg) {
 bool emit_tic80_map_intrinsic(ASTNode *node) {
     emit_asm("    ;; --- TIC-80 map() Intrinsic ---\n");
 
-    // Collect up to 7 arguments
+    // map([x=0], [y=0], [w=30], [h=17], [sx=0], [sy=0], [colorkey=-1],
+    //     [scale=1], [remap]) -- every argument is optional in TIC-80
+    // (`map()` draws the first screen of the map). The remap callback is
+    // not supported.
     int arg_count = 0;
-    ASTNode *curr = node->as.call.args_head;
-    ASTNode *args[7] = { NULL }; // Now supports 7 arguments
-    while (curr != NULL && arg_count < 7) {
+    ASTNode *args[9] = { NULL };
+    for (ASTNode *curr = node->as.call.args_head; curr != NULL && arg_count < 9; curr = curr->next) {
         args[arg_count++] = curr;
-        curr = curr->next;
+    }
+    if (arg_count >= 9) {
+        compiler_warning(ERR_SEMANTIC, node->line_number,
+                         "map(): the remap callback is not supported and is ignored");
     }
 
-    if (arg_count < 6) {
-        compiler_error(ERR_SEMANTIC, node->line_number,
-                      "TIC-80 map() requires at least 6 arguments: map(x, y, w, h, sx, sy)");
-        return false;
-    }
+    static const char *defaults[8] = { "0.0", "0.0", "30.0", "17.0", "0.0", "0.0",
+                                       "16.0", /* colorkey: none (opaque) */ "1.0" };
+    static const char *names[8]    = { "x", "y", "w", "h", "sx", "sy", "color_key", "scale" };
 
-    // Push arguments right-to-left: color_key (or default), sy, sx, h, w, y, x
-    // If color_key is not provided, push 16 (opaque) as default
-    if (arg_count >= 7) {
+    // Push right-to-left: scale, color_key, sy, sx, h, w, y, x
+    for (int i = 7; i >= 0; i--) {
         int reg = allocate_register();
-        generate_asm(args[6], reg);  // color_key
-        emit_asm("PUSH R%d ; Arg 7: color_key\n", reg);
-        unlock_register(reg);
-    } else {
-        emit_asm("MOV R0, 16.000000 ; Default color_key (opaque)\n");
-        emit_asm("PUSH R0 ; Arg 7: color_key (default)\n");
-    }
-
-    // Push the 6 required arguments (sy, sx, h, w, y, x)
-    for (int i = 5; i >= 0; i--) {
-        int reg = allocate_register();
-        generate_asm(args[i], reg);
-        emit_asm("PUSH R%d ; Arg %d: %s\n", reg, i+1,
-                 i == 0 ? "x" : (i == 1 ? "y" : (i == 2 ? "w" :
-                 (i == 3 ? "h" : (i == 4 ? "sx" : "sy")))));
+        register_pinned[reg] = 1;
+        if (i < arg_count) {
+            generate_asm(args[i], reg);
+            ensure_in_register(reg);
+        } else {
+            emit_asm("MOV R%d, %s ; default\n", reg, defaults[i]);
+        }
+        emit_asm("PUSH R%d ; Arg %d: %s\n", reg, i + 1, names[i]);
+        register_pinned[reg] = 0;
         unlock_register(reg);
     }
 
-    // Call runtime subroutine
     emit_asm("CALL __builtin_tic80_map\n");
-    emit_asm("IADD SP, 7 ; Clean up map() arguments (now 7 total)\n");
+    emit_asm("IADD SP, 8 ; Clean up map() arguments\n");
 
     return true;
 }
@@ -1182,5 +1177,180 @@ bool emit_tic80_exit_intrinsic(ASTNode *node, int dest_reg) {
         emit_asm("MOV R%d, BOXED_NIL ; exit() has no meaningful return value\n", dest_reg);
     }
 
+    return true;
+}
+
+// ============================================================================
+// TIC-80 memory: peek/peek1/peek2/peek4, poke/poke1/poke2/poke4, memcpy,
+// memset -- on an emulated 96 KB RAM (see runtime/tic80.s). The first use
+// sets tic80_uses_memory, which makes emit.c put the RAM's initial contents
+// (palette, tiles, sprites, map) in the cart.
+// ============================================================================
+bool tic80_uses_memory = false;
+
+// Pushes `count` call arguments right to left; a missing one is `fill`
+// (a literal number) or nil when fill is NULL.
+static void push_mem_args (ASTNode *node, int count, const char *fill)
+{
+    ASTNode *args[3] = { NULL, NULL, NULL };
+    int n = 0;
+    for (ASTNode *a = node->as.call.args_head; a != NULL && n < 3; a = a->next) args[n++] = a;
+
+    for (int i = count - 1; i >= 0; i--) {
+        int reg = allocate_register();
+        register_pinned[reg] = 1;
+        if (i < n && args[i] != NULL) {
+            generate_asm(args[i], reg);
+            ensure_in_register(reg);
+        } else if (fill != NULL) {
+            emit_asm("MOV R%d, %s\n", reg, fill);
+        } else {
+            emit_asm("MOV R%d, BOXED_NIL\n", reg);
+        }
+        emit_asm("PUSH R%d ; arg %d\n", reg, i + 1);
+        register_pinned[reg] = 0;
+        unlock_register(reg);
+    }
+}
+
+bool emit_tic80_memory_intrinsic (ASTNode *node, const char *func_name, int dest_reg)
+{
+    int         min_args = 1, pushed = 0;
+    const char *routine  = NULL;
+    const char *bits     = NULL;   // fixed width for peekN/pokeN
+
+    if      (strcmp(func_name, "peek")  == 0) { routine = "__builtin_tic80_peek"; }
+    else if (strcmp(func_name, "peek1") == 0) { routine = "__builtin_tic80_peek"; bits = "1.0"; }
+    else if (strcmp(func_name, "peek2") == 0) { routine = "__builtin_tic80_peek"; bits = "2.0"; }
+    else if (strcmp(func_name, "peek4") == 0) { routine = "__builtin_tic80_peek"; bits = "4.0"; }
+    else if (strcmp(func_name, "poke")  == 0) { routine = "__builtin_tic80_poke"; min_args = 2; }
+    else if (strcmp(func_name, "poke1") == 0) { routine = "__builtin_tic80_poke"; min_args = 2; bits = "1.0"; }
+    else if (strcmp(func_name, "poke2") == 0) { routine = "__builtin_tic80_poke"; min_args = 2; bits = "2.0"; }
+    else if (strcmp(func_name, "poke4") == 0) { routine = "__builtin_tic80_poke"; min_args = 2; bits = "4.0"; }
+    else if (strcmp(func_name, "memcpy") == 0) { routine = "__builtin_tic80_memcpy"; min_args = 3; }
+    else if (strcmp(func_name, "memset") == 0) { routine = "__builtin_tic80_memset"; min_args = 3; }
+    else return false;
+
+    int argc = 0;
+    for (ASTNode *a = node->as.call.args_head; a != NULL; a = a->next) argc++;
+    if (argc < min_args) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+                       "TIC-80 %s() needs at least %d argument%s", func_name, min_args,
+                       min_args == 1 ? "" : "s");
+        return false;
+    }
+
+    tic80_uses_memory = true;
+    emit_asm("    ;; --- TIC-80 %s() ---\n", func_name);
+
+    if (strcmp(routine, "__builtin_tic80_peek") == 0) {
+        if (bits != NULL) {
+            // peekN(addr): [BP+3] = N, [BP+2] = addr
+            int reg = allocate_register();
+            emit_asm("MOV R%d, %s\n", reg, bits);
+            emit_asm("PUSH R%d ; bits\n", reg);
+            unlock_register(reg);
+            push_mem_args(node, 1, NULL);
+            pushed = 2;
+        } else {
+            push_mem_args(node, 2, NULL);      // peek(addr [, bits])
+            pushed = 2;
+        }
+    } else if (strcmp(routine, "__builtin_tic80_poke") == 0) {
+        if (bits != NULL) {
+            int reg = allocate_register();
+            emit_asm("MOV R%d, %s\n", reg, bits);
+            emit_asm("PUSH R%d ; bits\n", reg);
+            unlock_register(reg);
+            push_mem_args(node, 2, NULL);
+        } else {
+            push_mem_args(node, 3, NULL);      // poke(addr, value [, bits])
+        }
+        pushed = 3;
+    } else {
+        push_mem_args(node, 3, NULL);          // memcpy / memset
+        pushed = 3;
+    }
+
+    emit_asm("CALL %s\n", routine);
+    emit_asm("IADD SP, %d\n", pushed);
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R0\n", dest_reg);
+    }
+    return true;
+}
+
+// The RAM image's initial contents, as segments: start, byte count, bytes
+// packed 4 per word (low byte first); the list ends with -1. Only a cart
+// that uses peek/poke gets them.
+static void emit_ram_segment (FILE *f, int start, const uint8_t *bytes, int count)
+{
+    fprintf(f, "    integer %d, %d\n", start, count);
+    for (int i = 0; i < count; i += 4) {
+        uint32_t w = 0;
+        for (int k = 0; k < 4 && i + k < count; k++) w |= (uint32_t) bytes[i + k] << (8 * k);
+        fprintf(f, "%s0x%08X%s", (i / 4) % 8 == 0 ? "    integer " : "", w,
+                ((i / 4) % 8 == 7 || i + 4 >= count) ? "\n" : ", ");
+    }
+}
+
+void emit_tic80_ram_rom (FILE *f)
+{
+    fprintf(f, "\n;; --- TIC-80 RAM image for peek/poke (%s) ---\n__tic80_ram_rom:\n",
+            tic80_uses_memory ? "palette, tiles, sprites, map" : "unused");
+    if (tic80_uses_memory) {
+        uint8_t pal[56];
+        for (int i = 0; i < 16; i++) {
+            uint32_t c = tic80_get_palette_color(i);          // AABBGGRR
+            pal[i * 3]     = c & 0xFF;
+            pal[i * 3 + 1] = (c >> 8) & 0xFF;
+            pal[i * 3 + 2] = (c >> 16) & 0xFF;
+        }
+        for (int i = 0; i < 8; i++) pal[48 + i] = (uint8_t) ((2 * i) | ((2 * i + 1) << 4)); // palette map: identity
+        emit_ram_segment(f, 0x3FC0, pal, 56);
+
+        static uint8_t sheet[16384];     // tiles 0x4000 + sprites 0x6000: 32 bytes per 8x8
+        for (int t = 0; t < 512; t++) {
+            for (int k = 0; k < 32; k++) {
+                int i0 = k * 2, i1 = k * 2 + 1;
+                int x0 = (t % 16) * 8 + i0 % 8, y0 = (t / 16) * 8 + i0 / 8;
+                int x1 = (t % 16) * 8 + i1 % 8, y1 = (t / 16) * 8 + i1 / 8;
+                sheet[t * 32 + k] = (uint8_t) ((get_tic80_tile_pixel(x0, y0) & 15) |
+                                               ((get_tic80_tile_pixel(x1, y1) & 15) << 4));
+            }
+        }
+        emit_ram_segment(f, 0x4000, sheet, 16384);
+
+        if (tic80_has_map && tic80_map_width > 0 && tic80_map_width <= 240) {
+            static uint8_t map[240 * 136];
+            memset(map, 0, sizeof map);
+            for (int y = 0; y < tic80_map_height && y < 136; y++)
+                for (int x = 0; x < tic80_map_width; x++)
+                    map[y * 240 + x] = tic80_map_data[y * tic80_map_width + x];
+            emit_ram_segment(f, 0x8000, map, 240 * 136);
+        }
+    }
+    fprintf(f, "    integer -1\n");
+}
+
+// TIC-80 functions with nothing to act on here: trace() (debug console
+// output), key()/keyp() (keyboard -- Vircon32 has gamepads only, so no key
+// is ever down). Arguments are still evaluated, for their side effects.
+bool emit_tic80_stub_intrinsic (ASTNode *node, const char *func_name, int dest_reg)
+{
+    const char *result;
+    if      (strcmp(func_name, "trace") == 0) result = "BOXED_NIL";
+    else if (strcmp(func_name, "key")   == 0) result = "BOXED_FALSE";
+    else if (strcmp(func_name, "keyp")  == 0) result = "BOXED_FALSE";
+    else return false;
+
+    emit_asm("    ;; --- TIC-80 %s(): no-op on Vircon32 ---\n", func_name);
+    for (ASTNode *a = node->as.call.args_head; a != NULL; a = a->next) {
+        if (a->type == NODE_NUMBER || a->type == NODE_STRING || a->type == NODE_IDENTIFIER) continue;
+        int reg = allocate_register();
+        generate_asm(a, reg);
+        unlock_register(reg);
+    }
+    if (dest_reg != 0) emit_asm("MOV R%d, %s\n", dest_reg, result);
     return true;
 }

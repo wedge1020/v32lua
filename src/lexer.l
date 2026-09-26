@@ -1,5 +1,6 @@
 %{
 #include "v32lua.h"
+#include <ctype.h>
 #include "parser.h"  // Generated automatically by Bison
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wsign-compare"
@@ -57,6 +58,15 @@ char *process_string_literal (const char *text, int  len)
 // NODE_MUL/NODE_DIV/NODE_MOD) -- parser.y casts it back and feeds it straight
 // into the same make_node_binary() every plain '+'/'-'/'*'/'/'/'%' expr
 // already uses, so the arithmetic itself needed no new codegen.
+// PICO-8-only operator spellings (^^ >>> <<> >>< and their compound forms)
+static void require_pico8 (const char *what)
+{
+    if (!runtime_req.needs_pico8) {
+        compiler_error (ERR_LEXICAL, yylineno,
+            "'%s' is a PICO-8 operator; add --#api pico8 (or --api pico8) to use it", what);
+    }
+}
+
 static int compound_assign_token (NodeType op)
 {
     if (!runtime_req.needs_pico8) {
@@ -181,6 +191,27 @@ static int compound_assign_token (NodeType op)
 
 "=="                    { return TOKEN_EQ;       }
 "~="                    { return TOKEN_NEQ;      }
+    /* Bitwise operators (node/bitops.c). Lua 5.3+: & | ~ << >> (and unary
+       ~). PICO-8 additionally: ^^ (xor), >>> (logical right shift),
+       <<> and >>< (rotate left/right); its >> is arithmetic. The longer
+       spellings come first; flex's longest match would pick them anyway. */
+">>>="                  { require_pico8 (">>>="); return compound_assign_token(NODE_LSHR); }
+"<<>="                  { require_pico8 ("<<>="); return compound_assign_token(NODE_ROTL); }
+">><="                  { require_pico8 (">><="); return compound_assign_token(NODE_ROTR); }
+"^^="                   { require_pico8 ("^^=");  return compound_assign_token(NODE_BXOR); }
+"<<="                   { return compound_assign_token(NODE_SHL); }
+">>="                   { return compound_assign_token(NODE_SHR); }
+"&="                    { return compound_assign_token(NODE_BAND); }
+"|="                    { return compound_assign_token(NODE_BOR); }
+">>>"                   { require_pico8 (">>>"); return TOKEN_LSHR; }
+"<<>"                   { require_pico8 ("<<>"); return TOKEN_ROTL; }
+">><"                   { require_pico8 (">><"); return TOKEN_ROTR; }
+"^^"                    { require_pico8 ("^^");  return TOKEN_BXOR; }
+"<<"                    { return TOKEN_SHL;      }
+">>"                    { return TOKEN_SHR;      }
+"&"                     { return '&';            }
+"|"                     { return '|';            }
+"~"                     { return TOKEN_BXOR;     }
     /* PICO-8 alias for ~= (C-style "not equal"). Real Lua only ever has
        ~=; this is PICO-8-specific sugar, same category as += and the
        then-less if, so it's gated the same way -- checked here rather
@@ -266,11 +297,40 @@ static int compound_assign_token (NodeType op)
                             return (TOKEN_IDENTIFIER); 
                         }
 
-0x[0-9a-fA-F]+          {
-                            // Parse hex string as 32-bit unsigned integer
-                            unsigned long val = strtoul(yytext, NULL, 16);
-                            // Store in your existing double AST payload
-                            yylval.number_val = (double) val;
+0[xX][0-9a-fA-F]+(\.[0-9a-fA-F]+)?  {
+                            // Hex, with an optional hex fraction (0x1.8 ==
+                            // 1.5 -- valid Lua, and PICO-8's 0x0.4 style)
+                            char *dot = strchr (yytext, '.');
+                            double val = (double) strtoul (yytext, NULL, 16);
+                            if (dot != NULL) {
+                                double scale = 1.0 / 16.0;
+                                for (char *p = dot + 1; *p; p++, scale /= 16.0) {
+                                    int d = isdigit ((unsigned char) *p) ? *p - '0'
+                                          : (tolower ((unsigned char) *p) - 'a' + 10);
+                                    val += d * scale;
+                                }
+                            }
+                            // PICO-8 numbers are signed 16.16: 0x8000..0xffff.ffff
+                            // are negative there (0xffff == -1).
+                            if (runtime_req.needs_pico8 && val >= 32768.0 && val < 65536.0) {
+                                val -= 65536.0;
+                            }
+                            yylval.number_val = val;
+                            return (TOKEN_NUMBER);
+                        }
+
+0[bB][01]+(\.[01]+)?     {
+                            // PICO-8 binary literal (0b1010, 0b0101.1)
+                            require_pico8 ("0b");
+                            double val = 0.0;
+                            char *p = yytext + 2;
+                            for (; *p && *p != '.'; p++) val = val * 2 + (*p - '0');
+                            if (*p == '.') {
+                                double scale = 0.5;
+                                for (p++; *p; p++, scale /= 2) val += (*p - '0') * scale;
+                            }
+                            if (val >= 32768.0 && val < 65536.0) val -= 65536.0;
+                            yylval.number_val = val;
                             return (TOKEN_NUMBER);
                         }
 

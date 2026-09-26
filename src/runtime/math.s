@@ -1189,3 +1189,283 @@ __mathfn_atan2:
     POP   BP
     RET
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; __builtin_bitop: bitwise operators (see node/bitops.c for the model;
+;; bitop_eval() there is the C twin of this routine -- keep them in step).
+;;
+;; Stack: [BP+2] = b, [BP+3] = a, [BP+4] = op, [BP+5] = mode
+;;   op:   0 and, 1 or, 2 xor, 3 not (a only), 4 shl, 5 shr (logical),
+;;         6 sar (arithmetic), 7 rotl, 8 rotr
+;;   mode: 0 = Lua integers, 1 = PICO-8 16.16 fixed point
+;; Returns: R0 = result (float). Preserves R1-R7.
+;;
+;; Integer mode keeps, next to the 32-bit word, a flag for "the full
+;; (64-bit, as in real Lua) value is negative", so -1 & 0xFF is 255 and
+;; 0xFF << 24 is 4278190080 rather than a negative number.
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_bitop:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
+    PUSH  R7
+
+    MOV   R7, [BP+5]            ; mode
+    MOV   R6, [BP+4]            ; op
+    MOV   R1, [BP+3]            ; a
+    CALL  __bit_in
+    MOV   R4, R1                ; R4 = a word
+    MOV   R5, R2                ; R5 = a negative flag
+
+    MOV   R3, R6
+    IGE   R3, 4
+    JT    R3, __bitop_shift
+    MOV   R3, R6
+    IEQ   R3, 3
+    JT    R3, __bitop_not
+
+    MOV   R1, [BP+2]            ; b
+    CALL  __bit_in              ; R1 = b word, R2 = b negative flag
+    MOV   R3, R6
+    IEQ   R3, 0
+    JT    R3, __bitop_and
+    MOV   R3, R6
+    IEQ   R3, 1
+    JT    R3, __bitop_or
+    XOR   R4, R1
+    XOR   R5, R2
+    JMP   __bitop_out
+__bitop_and:
+    AND   R4, R1
+    AND   R5, R2
+    JMP   __bitop_out
+__bitop_or:
+    OR    R4, R1
+    OR    R5, R2
+    JMP   __bitop_out
+__bitop_not:
+    NOT   R4
+    BNOT  R5
+    JMP   __bitop_out
+
+    ;; --- shifts / rotates: b is a plain integer count in both modes ---
+__bitop_shift:
+    MOV   R1, [BP+2]
+    MOV   R3, R1
+    FEQ   R3, R1                ; NaN (nil)?  -> count 0
+    JT    R3, __bitop_count_ok
+    MOV   R1, 0.0
+__bitop_count_ok:
+    FLR   R1
+    MOV   R3, R1
+    FGT   R3, 64.0
+    JF    R3, __bitop_count_lo
+    MOV   R1, 64.0
+__bitop_count_lo:
+    MOV   R3, R1
+    FLT   R3, -64.0
+    JF    R3, __bitop_count_cvt
+    MOV   R1, -64.0
+__bitop_count_cvt:
+    CFI   R1                    ; R1 = n
+    MOV   R3, R1
+    ILT   R3, 0
+    JF    R3, __bitop_count_pos
+    ;; negative count: shift / rotate the other way
+    ISGN  R1
+    MOV   R3, R6
+    IEQ   R3, 4
+    JF    R3, __bitop_neg_not_shl
+    MOV   R6, 5                 ; shl -> shr (Lua) / sar (PICO-8)
+    IADD  R6, R7
+    JMP   __bitop_count_pos
+__bitop_neg_not_shl:
+    MOV   R3, R6
+    IEQ   R3, 7
+    JF    R3, __bitop_neg_not_rotl
+    MOV   R6, 8
+    JMP   __bitop_count_pos
+__bitop_neg_not_rotl:
+    MOV   R3, R6
+    IEQ   R3, 8
+    JF    R3, __bitop_neg_shr
+    MOV   R6, 7
+    JMP   __bitop_count_pos
+__bitop_neg_shr:
+    MOV   R6, 4                 ; shr / sar -> shl
+__bitop_count_pos:
+    MOV   R3, R6
+    IGE   R3, 7
+    JT    R3, __bitop_rotate
+    MOV   R3, R1
+    IGE   R3, 32
+    JT    R3, __bitop_shift_all
+    MOV   R3, R6
+    IEQ   R3, 4
+    JT    R3, __bitop_shl
+    MOV   R3, R6
+    IEQ   R3, 5
+    JT    R3, __bitop_shr
+    ;; sar: logical shift of the complement for negative words
+    MOV   R3, R4
+    ILT   R3, 0
+    ISGN  R1
+    JF    R3, __bitop_sar_pos
+    NOT   R4
+    SHL   R4, R1
+    NOT   R4
+    JMP   __bitop_out
+__bitop_sar_pos:
+    SHL   R4, R1
+    JMP   __bitop_out
+__bitop_shl:
+    SHL   R4, R1
+    JMP   __bitop_out
+__bitop_shr:
+    MOV   R3, R1
+    IEQ   R3, 0
+    JT    R3, __bitop_out       ; >> 0: unchanged, sign kept
+    ISGN  R1
+    SHL   R4, R1
+    MOV   R5, 0
+    JMP   __bitop_out
+
+    ;; count >= 32: shl / shr give 0, sar gives the sign
+__bitop_shift_all:
+    MOV   R3, R6
+    IEQ   R3, 6
+    JT    R3, __bitop_sar_all
+    MOV   R4, 0
+    MOV   R5, 0
+    JMP   __bitop_out
+__bitop_sar_all:
+    MOV   R3, R4
+    ILT   R3, 0
+    MOV   R4, 0
+    JF    R3, __bitop_out
+    MOV   R4, -1
+    JMP   __bitop_out
+
+__bitop_rotate:
+    AND   R1, 31
+    MOV   R3, R1
+    IEQ   R3, 0
+    JT    R3, __bitop_out
+    MOV   R3, R6
+    IEQ   R3, 7
+    JT    R3, __bitop_rotl
+    ISGN  R1                    ; rotr n == rotl (32 - n)
+    IADD  R1, 32
+__bitop_rotl:
+    MOV   R2, R4                ; R2 = x >> (32 - n)
+    MOV   R3, R1
+    ISUB  R3, 32                ; negative: logical right by 32 - n
+    SHL   R2, R3
+    SHL   R4, R1
+    OR    R4, R2
+
+    ;; --- word (R4) + negative flag (R5) -> number, by mode (R7) ---
+__bitop_out:
+    MOV   R0, R4
+    CIF   R0                    ; the word as a signed integer
+    MOV   R3, R7
+    JF    R3, __bitop_out_int
+    FMUL  R0, 0.0000152587890625 ; PICO-8: / 65536
+    JMP   __bitop_done
+__bitop_out_int:
+    MOV   R3, R4
+    ILT   R3, 0                 ; R3 = bit 31
+    MOV   R2, R3
+    IEQ   R2, R5
+    JT    R2, __bitop_done      ; sign of word == sign of value
+    JF    R3, __bitop_out_neg
+    FADD  R0, 4294967296.0      ; bit 31 set, value positive
+    JMP   __bitop_done
+__bitop_out_neg:
+    FSUB  R0, 4294967296.0      ; bit 31 clear, value negative
+__bitop_done:
+    POP   R7
+    POP   R6
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; __bit_in: R1 = number, R7 = mode -> R1 = 32-bit word, R2 = 1 if the
+;; number is negative. Floors, then wraps modulo 2^32 (saturating beyond
+;; one wrap). PICO-8 mode scales by 65536 first. Uses R3.
+__bit_in:
+    MOV   R3, R1
+    FEQ   R3, R1                ; NaN (nil, a boxed value) -> 0
+    JT    R3, __bit_in_num
+    MOV   R1, 0
+    MOV   R2, 0
+    RET
+__bit_in_num:
+    MOV   R2, R1
+    FLT   R2, 0.0
+    MOV   R3, R7
+    JF    R3, __bit_in_floor
+    FMUL  R1, 65536.0
+__bit_in_floor:
+    FLR   R1
+    MOV   R3, R1
+    FGE   R3, 2147483648.0
+    JF    R3, __bit_in_low
+    MOV   R3, R1
+    FGE   R3, 4294967296.0
+    JT    R3, __bit_in_max
+    FSUB  R1, 4294967296.0
+    JMP   __bit_in_cvt
+__bit_in_low:
+    MOV   R3, R1
+    FLT   R3, -2147483648.0
+    JF    R3, __bit_in_cvt
+    MOV   R3, R1
+    FLT   R3, -4294967296.0
+    JT    R3, __bit_in_min
+    FADD  R1, 4294967296.0
+__bit_in_cvt:
+    CFI   R1
+    RET
+__bit_in_max:
+    MOV   R1, -1
+    RET
+__bit_in_min:
+    MOV   R1, 0x80000000
+    RET
+
+;; math.pow / math.ceil as function VALUES (`pow = math.pow`, as TIC-80
+;; carts written for Lua 5.3's compat math library do).
+__mathfn_pow:
+    PUSH  BP
+    MOV   BP, SP
+    MOV   R0, [BP+2]
+    MOV   R1, [BP+3]
+    POW   R0, R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+__mathfn_ceil:
+    PUSH  BP
+    MOV   BP, SP
+    MOV   R0, [BP+2]
+    FSGN  R0
+    FLR   R0
+    FSGN  R0                    ; ceil(x) = -floor(-x)
+    MOV   SP, BP
+    POP   BP
+    RET

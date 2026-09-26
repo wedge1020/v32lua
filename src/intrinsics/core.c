@@ -289,6 +289,17 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         if (aliased != NULL) {
             snprintf(func_name, sizeof(func_name), "%s", aliased);
         }
+        // A function the program defines itself shadows the built-in of
+        // the same name, as in Lua: witchem_up.lua defines its own fget(),
+        // fset() and pal(), and PICO-8/TIC-80 carts routinely redefine
+        // helpers like these. So does a local of that name.
+        else if (strchr(func_name, '.') == NULL) {
+            SymbolNode *own = resolve_function_symbol(func_name);
+            if (own != NULL && ((own->is_function && own->def_node != NULL && !own->is_c_native) ||
+                                own->type != SYM_GLOBAL)) {
+                return 0;
+            }
+        }
     }
 
     // =========================================================================
@@ -529,6 +540,17 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         if (strcmp (func_name, "abs")   == 0)
         {
             return (emit_math_abs_intrinsic (node, dest_reg));
+        }
+
+        if (strcmp (func_name, "sqrt")  == 0)
+        {
+            runtime_req.needs_math = true;
+            return (emit_pico8_sqrt_intrinsic (node, dest_reg));
+        }
+
+        if (strcmp (func_name, "flip")  == 0)
+        {
+            return (emit_pico8_flip_intrinsic (node, dest_reg));
         }
 
         // PICO-8 treats a missing min()/max() argument as 0: max(x) == max(x, 0)
@@ -784,6 +806,19 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         if (strcmp (func_name, "music") == 0)
         {
             return (emit_tic80_music_intrinsic (node, dest_reg));
+        }
+
+        if (strcmp (func_name, "trace") == 0 || strcmp (func_name, "key") == 0 ||
+            strcmp (func_name, "keyp") == 0)
+        {
+            return emit_tic80_stub_intrinsic (node, func_name, dest_reg);
+        }
+
+        // peek/poke family, memcpy, memset -- emulated 96 KB RAM
+        if (strncmp (func_name, "peek", 4) == 0 || strncmp (func_name, "poke", 4) == 0 ||
+            strcmp (func_name, "memcpy") == 0 || strcmp (func_name, "memset") == 0)
+        {
+            if (emit_tic80_memory_intrinsic (node, func_name, dest_reg)) return true;
         }
 
         // pmem() - persistent memory
@@ -1474,6 +1509,8 @@ int  try_emit_table_get_intrinsic (ASTNode *table_expr, ASTNode *key_expr, int d
         else if (strcmp (key, "random") == 0) label = "__builtin_random";
         else if (strcmp (key, "floor")  == 0) label = "__builtin_floor";
         else if (strcmp (key, "abs")    == 0) label = "__builtin_abs";
+        else if (strcmp (key, "pow")    == 0) label = "__mathfn_pow";
+        else if (strcmp (key, "ceil")   == 0) label = "__mathfn_ceil";
 
         if (label != NULL) {
             runtime_req.needs_math = true;

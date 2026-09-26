@@ -48,6 +48,9 @@ void  node_nil                 (int);
 void  node_number              (ASTNode *, int);
 void  node_or                  (ASTNode *, int);
 void  node_pow                 (ASTNode *, int);
+void  node_bitop               (ASTNode *, int);   // node/bitops.c
+void  node_bnot                (ASTNode *, int);
+double bitop_eval              (NodeType, double, double);
 void  node_relational          (ASTNode *, int);
 void  generate_cond_jump       (ASTNode *, bool when_true, const char *label);
 void  generate_bool_value      (ASTNode *, int);

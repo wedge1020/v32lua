@@ -74,7 +74,9 @@ void analyze_expr (ASTNode *node, FuncAnalysisFrame *frame)
 
         case NODE_ADD: case NODE_SUB: case NODE_MUL: case NODE_DIV:
         case NODE_FLOORDIV: case NODE_MOD: case NODE_AND: case NODE_OR:
-        case NODE_RELATIONAL: case NODE_CONCAT:
+        case NODE_RELATIONAL: case NODE_CONCAT: case NODE_POW:
+        case NODE_BAND: case NODE_BOR: case NODE_BXOR: case NODE_SHL: case NODE_SHR:
+        case NODE_LSHR: case NODE_ROTL: case NODE_ROTR:
             analyze_expr(node->as.binary.left, frame);
             analyze_expr(node->as.binary.right, frame);
             break;

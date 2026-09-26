@@ -1029,6 +1029,14 @@ __builtin_tic80_map:
     CFI   R4
     CFI   R5
     CFI   R6
+    MOV   R13, [BP+9]       ; scale (whole number, at least 1)
+    CFI   R13
+    MOV   R0, R13
+    ILT   R0, 1
+    JF    R0, _tic80_map_scale_ok
+    MOV   R13, 1
+_tic80_map_scale_ok:
+    IMUL  R13, 8            ; R13 = on-screen cell size
 
     ;; Load ACTUAL map dimensions
     ;; (The old code CLAMPED the source origin so the whole w x h block fit
@@ -1117,21 +1125,21 @@ _tic80_map_have_cell:
     MOV   R0, 0
     PUSH  R0               ; rotate = 0
     PUSH  R0               ; flip = 0
-    MOV   R0, 1.0
-    PUSH  R0               ; scale = 1.0
+    MOV   R0, [BP+9]
+    PUSH  R0               ; scale
 
     MOV   R0, [BP+8]       ; color_key
     PUSH  R0               ; color_key (safely preserved!)
     
     ;; Calculate screen Y position: y + row*8
     MOV   R0, R9           ; R0 = row
-    IMUL  R0, 8
+    IMUL  R0, R13          ; row * cell size
     IADD  R0, R2           ; R0 = screen_y + row*8
     CIF   R0
     PUSH  R0               ; y
 
     MOV   R0, R10          ; R0 = col (loop counter)
-    IMUL  R0, 8            ; R0 = col * 8
+    IMUL  R0, R13          ; R0 = col * cell size
     IADD  R0, R1           ; R0 = x + col * 8 (screen coordinate)
     CIF   R0
     PUSH  R0               ; x
@@ -1282,7 +1290,7 @@ _tic80_pmem_done:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; __builtin_tic80_fget: Get Flag Bit for a TIC-80 Sprite (bit-packed, 4/word)
 ;; Stack: [BP+2] = sprite_id (0-511), [BP+3] = flag_bit (0-7)
-;; Returns: R0 = 0 or 1 (boxed), or BOXED_NIL if invalid
+;; Returns: R0 = true / false, or BOXED_NIL if invalid
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 __builtin_tic80_fget:
@@ -1343,13 +1351,13 @@ __builtin_tic80_fget:
     IEQ   R5, 0
     JT    R5, _tic80_fget_false
 
-    MOV   R0, 1
-    CIF   R0
+    ;; TIC-80's fget() returns a boolean. It used to return 1.0 / 0.0,
+    ;; and 0 is TRUE in Lua: `if fget(tile, flag) then` was always taken.
+    MOV   R0, BOXED_TRUE
     JMP   _tic80_fget_done
 
 _tic80_fget_false:
-    MOV   R0, 0
-    CIF   R0
+    MOV   R0, BOXED_FALSE
 
 _tic80_fget_done:
     JMP   _tic80_fget_end
@@ -1379,11 +1387,28 @@ __builtin_tic80_fset:
 
     MOV   R1, [BP+2]           ; sprite_id
     MOV   R2, [BP+3]           ; flag_bit
-    MOV   R3, [BP+4]           ; value
+    MOV   R3, [BP+4]           ; value: true/false (TIC-80), or a number
     CFI   R1
     CFI   R2
-    CFI   R3
-    AND   R3, 1                 ; clamp value to 0/1
+    ;; value -> 0/1. It used to be CFI'd directly, but true/false are boxed
+    ;; NaN patterns, not numbers: fset(n, f, true) cleared the flag.
+    MOV   R4, R3
+    IEQ   R4, BOXED_TRUE
+    JT    R4, _tic80_fset_one
+    MOV   R4, R3
+    AND   R4, 0xFFFFFFFE
+    IEQ   R4, BOXED_NIL         ; nil or false
+    JT    R4, _tic80_fset_zero
+    MOV   R4, R3
+    FNE   R4, 0.0               ; a number: nonzero = set
+    MOV   R3, R4
+    JMP   _tic80_fset_value_ok
+_tic80_fset_one:
+    MOV   R3, 1
+    JMP   _tic80_fset_value_ok
+_tic80_fset_zero:
+    MOV   R3, 0
+_tic80_fset_value_ok:
 
     ;; Validate sprite_id
     MOV   R4, R1
@@ -2056,6 +2081,489 @@ __builtin_tic80_print:
     POP   R3
     POP   R2
     POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; TIC-80 memory: peek/poke (1, 2, 4 and 8 bits), memcpy, memset.
+;;
+;; TIC-80 programs address a 96 KB RAM. It is emulated here as 0x18000
+;; words, one byte per word, created on first use and filled from
+;; __tic80_ram_rom (the cart's palette, palette map, tiles, sprites and
+;; map; emitted by emit.c). Three regions are live views instead:
+;;   0x08000-0x0FF7F map     -> the mget()/mset() map buffer (and RAM)
+;;   0x0FF80-0x0FF83 gamepads -> the current buttons (read only)
+;;   0x14404-0x14603 flags   -> the fget()/fset() flag buffer
+;; Everything else is plain storage: writing the screen, palette, tiles or
+;; sound registers has no visible or audible effect (drawing happens on the
+;; GPU from textures built at compile time).
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; __tic80_ram (internal): R0 = base of the emulated RAM. Preserves R1-R13.
+__tic80_ram:
+    MOV   R0, [var_TIC80_RAM_PTR]
+    PUSH  R1
+    MOV   R1, R0
+    IEQ   R1, BOXED_NIL
+    JT    R1, _tic80_ram_create
+    POP   R1
+    RET
+_tic80_ram_create:
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
+    PUSH  R11
+    PUSH  R12
+    PUSH  R13
+    MOV   R0, 98304
+    PUSH  R0
+    CALL  __malloc
+    IADD  SP, 1
+    MOV   [var_TIC80_RAM_PTR], R0
+    MOV   R13, R0               ; zero-fill: SETS writes R12 to [R13], R11 times
+    MOV   R12, 0
+    MOV   R11, 98304
+    SETS
+    ;; ROM segments: start, byte count, bytes packed 4 per word (low byte
+    ;; first); the list ends with -1
+    MOV   R1, __tic80_ram_rom
+_tic80_ram_seg:
+    MOV   R2, [R1]
+    MOV   R3, R2
+    ILT   R3, 0
+    JT    R3, _tic80_ram_ready
+    MOV   R3, [R1+1]            ; byte count
+    IADD  R1, 2
+    MOV   R4, [var_TIC80_RAM_PTR]
+    IADD  R4, R2                ; destination
+_tic80_ram_word:
+    MOV   R5, R3
+    IGT   R5, 0
+    JF    R5, _tic80_ram_seg
+    MOV   R5, [R1]
+    IADD  R1, 1
+    MOV   R2, 4
+_tic80_ram_byte:
+    MOV   R6, R5
+    AND   R6, 255
+    MOV   [R4], R6
+    IADD  R4, 1
+    SHL   R5, -8
+    ISUB  R3, 1
+    MOV   R6, R3
+    IGT   R6, 0
+    JF    R6, _tic80_ram_seg
+    ISUB  R2, 1
+    MOV   R6, R2
+    IGT   R6, 0
+    JT    R6, _tic80_ram_byte
+    JMP   _tic80_ram_word
+_tic80_ram_ready:
+    POP   R13
+    POP   R12
+    POP   R11
+    POP   R6
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   R0, [var_TIC80_RAM_PTR]
+    RET
+
+;; __tic80_map_cell (internal): R1 = byte address in the map region ->
+;; R2 = address of that cell in the map buffer, or -1 if the buffer has
+;; no such cell. Uses R3-R6.
+__tic80_map_cell:
+    MOV   R2, -1
+    MOV   R3, R1
+    ISUB  R3, 0x8000            ; offset into the 240 x 136 map
+    MOV   R4, R3
+    IGE   R4, 32640
+    JT    R4, _tic80_map_cell_done
+    MOV   R5, [var_TIC80_MAP_BUFFER_PTR]
+    MOV   R4, R5
+    IEQ   R4, 0
+    JT    R4, _tic80_map_cell_done
+    MOV   R4, R5
+    IEQ   R4, BOXED_NIL
+    JT    R4, _tic80_map_cell_done
+    MOV   R4, R3
+    IMOD  R4, 240               ; x
+    IDIV  R3, 240               ; y
+    MOV   R6, [var_TIC80_MAP_WIDTH]
+    MOV   R2, R4
+    IGE   R2, R6
+    JT    R2, _tic80_map_cell_none
+    MOV   R2, [var_TIC80_MAP_HEIGHT]
+    ILE   R2, R3                ; height <= y: no such row
+    JT    R2, _tic80_map_cell_none
+    IMUL  R3, R6
+    IADD  R3, R4
+    IADD  R3, R5
+    MOV   R2, R3
+    RET
+_tic80_map_cell_none:
+    MOV   R2, -1
+_tic80_map_cell_done:
+    RET
+
+;; __tic80_rd (internal): R1 = byte address -> R0 = byte. Preserves R1-R13.
+__tic80_rd:
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
+    MOV   R0, 0
+    MOV   R2, R1
+    ILT   R2, 0
+    JT    R2, _tic80_rd_done
+    MOV   R2, R1
+    IGE   R2, 98304
+    JT    R2, _tic80_rd_done
+    MOV   R2, R1
+    IGE   R2, 0xFF80
+    JT    R2, _tic80_rd_high
+    MOV   R2, R1
+    IGE   R2, 0x8000
+    JF    R2, _tic80_rd_ram
+    CALL  __tic80_map_cell
+    MOV   R3, R2
+    ILT   R3, 0
+    JT    R3, _tic80_rd_ram
+    MOV   R0, [R2]
+    JMP   _tic80_rd_done
+_tic80_rd_high:
+    MOV   R2, R1
+    ILT   R2, 0xFF84
+    JT    R2, _tic80_rd_pad
+    MOV   R2, R1
+    IGE   R2, 0x14404
+    JF    R2, _tic80_rd_ram
+    MOV   R2, R1
+    ILT   R2, 0x14604
+    JF    R2, _tic80_rd_ram
+    ;; sprite flags, packed 4 per word (sprite n at bits 8 * (n % 4))
+    MOV   R2, R1
+    ISUB  R2, 0x14404
+    MOV   R3, R2
+    SHL   R3, -2
+    MOV   R4, [var_TIC80_SPRITE_FLAGS_PTR]
+    IADD  R3, R4
+    MOV   R0, [R3]
+    AND   R2, 3
+    SHL   R2, 3
+    ISGN  R2
+    SHL   R0, R2
+    AND   R0, 255
+    JMP   _tic80_rd_done
+_tic80_rd_pad:
+    ;; gamepad byte: bit i = btn(8 * pad + i)
+    MOV   R3, R1
+    ISUB  R3, 0xFF80
+    IMUL  R3, 8                 ; first button id
+    MOV   R4, 0                 ; byte
+    MOV   R5, 0                 ; bit
+_tic80_rd_pad_loop:
+    MOV   R6, R3
+    IADD  R6, R5
+    CIF   R6
+    PUSH  R1
+    PUSH  R3
+    PUSH  R6
+    CALL  __builtin_tic80_btn
+    IADD  SP, 1
+    POP   R3
+    POP   R1
+    IEQ   R0, BOXED_TRUE
+    JF    R0, _tic80_rd_pad_next
+    MOV   R6, 1
+    SHL   R6, R5
+    OR    R4, R6
+_tic80_rd_pad_next:
+    IADD  R5, 1
+    MOV   R6, R5
+    ILT   R6, 8
+    JT    R6, _tic80_rd_pad_loop
+    MOV   R0, R4
+    JMP   _tic80_rd_done
+_tic80_rd_ram:
+    CALL  __tic80_ram
+    IADD  R0, R1
+    MOV   R0, [R0]
+_tic80_rd_done:
+    POP   R6
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    RET
+
+;; __tic80_wr (internal): R1 = byte address, R2 = byte. Preserves R0-R13.
+__tic80_wr:
+    PUSH  R0
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
+    PUSH  R7
+    MOV   R7, R2
+    AND   R7, 255
+    MOV   R3, R1
+    ILT   R3, 0
+    JT    R3, _tic80_wr_done
+    MOV   R3, R1
+    IGE   R3, 98304
+    JT    R3, _tic80_wr_done
+    MOV   R3, R1
+    IGE   R3, 0x14404
+    JF    R3, _tic80_wr_not_flags
+    MOV   R3, R1
+    ILT   R3, 0x14604
+    JF    R3, _tic80_wr_ram
+    MOV   R2, R1                ; sprite flags: replace byte n % 4 of word n / 4
+    ISUB  R2, 0x14404
+    MOV   R3, R2
+    SHL   R3, -2
+    MOV   R4, [var_TIC80_SPRITE_FLAGS_PTR]
+    IADD  R3, R4
+    AND   R2, 3
+    SHL   R2, 3
+    MOV   R4, 255
+    SHL   R4, R2
+    NOT   R4
+    MOV   R5, [R3]
+    AND   R5, R4
+    MOV   R6, R7
+    SHL   R6, R2
+    OR    R5, R6
+    MOV   [R3], R5
+    JMP   _tic80_wr_done
+_tic80_wr_not_flags:
+    MOV   R3, R1
+    IGE   R3, 0xFF80
+    JT    R3, _tic80_wr_ram
+    MOV   R3, R1
+    IGE   R3, 0x8000
+    JF    R3, _tic80_wr_ram
+    CALL  __tic80_map_cell      ; the map buffer too, so mget()/map() see it
+    MOV   R3, R2
+    ILT   R3, 0
+    JT    R3, _tic80_wr_ram
+    MOV   [R2], R7
+_tic80_wr_ram:
+    CALL  __tic80_ram
+    IADD  R0, R1
+    MOV   [R0], R7
+_tic80_wr_done:
+    POP   R7
+    POP   R6
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R0
+    RET
+
+;; __tic80_mem_addr (internal): R1 = address (number), R2 = bits (number or
+;; nil = 8) -> R1 = byte address, R3 = bit position in the byte, R4 = bits,
+;; R5 = field mask. Uses R6.
+__tic80_mem_addr:
+    MOV   R4, 8
+    MOV   R6, R2
+    IEQ   R6, BOXED_NIL
+    JT    R6, _tic80_mem_bits_ok
+    MOV   R4, R2
+    CFI   R4
+    MOV   R6, R4                ; only 1, 2, 4 or 8
+    IEQ   R6, 1
+    JT    R6, _tic80_mem_bits_ok
+    MOV   R6, R4
+    IEQ   R6, 2
+    JT    R6, _tic80_mem_bits_ok
+    MOV   R6, R4
+    IEQ   R6, 4
+    JT    R6, _tic80_mem_bits_ok
+    MOV   R4, 8
+_tic80_mem_bits_ok:
+    MOV   R6, R1
+    FEQ   R6, R1
+    JT    R6, _tic80_mem_addr_num
+    MOV   R1, -1.0              ; nil address: out of range
+_tic80_mem_addr_num:
+    FLR   R1
+    CFI   R1
+    ;; per-byte fields: 8 / bits = 1, 2, 4 or 8 -> shift 0, 1, 2, 3
+    MOV   R6, 0
+    MOV   R5, R4
+_tic80_mem_shift:
+    MOV   R3, R5
+    IGE   R3, 8
+    JT    R3, _tic80_mem_shift_done
+    SHL   R5, 1
+    IADD  R6, 1
+    JMP   _tic80_mem_shift
+_tic80_mem_shift_done:
+    MOV   R3, 1
+    SHL   R3, R6
+    ISUB  R3, 1
+    AND   R3, R1                ; field index within the byte
+    IMUL  R3, R4                ; -> bit position
+    MOV   R5, R1
+    ILT   R5, 0
+    ISGN  R6
+    SHL   R1, R6                ; byte address (logical shift)
+    JF    R5, _tic80_mem_addr_mask
+    MOV   R1, -1                ; negative address stays out of range
+_tic80_mem_addr_mask:
+    MOV   R5, 1
+    SHL   R5, R4
+    ISUB  R5, 1
+    RET
+
+;; __builtin_tic80_peek: [BP+2] = address, [BP+3] = bits (nil = 8)
+;; -> R0 = value (0 outside the 96 KB)
+__builtin_tic80_peek:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
+    MOV   R1, [BP+2]
+    MOV   R2, [BP+3]
+    CALL  __tic80_mem_addr
+    CALL  __tic80_rd
+    ISGN  R3
+    SHL   R0, R3
+    AND   R0, R5
+    CIF   R0
+    POP   R6
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; __builtin_tic80_poke: [BP+2] = address, [BP+3] = value, [BP+4] = bits
+;; (nil = 8). R0 = nil.
+__builtin_tic80_poke:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
+    PUSH  R7
+    MOV   R1, [BP+2]
+    MOV   R2, [BP+4]
+    CALL  __tic80_mem_addr
+    MOV   R7, [BP+3]            ; value -> integer field
+    MOV   R6, R7
+    FEQ   R6, R7
+    JT    R6, _tic80_poke_num
+    MOV   R7, 0.0
+_tic80_poke_num:
+    FLR   R7
+    MOV   R6, R7                ; clamp before CFI (out-of-range CFI is host-dependent)
+    FLT   R6, -2147483648.0
+    JF    R6, _tic80_poke_lo_ok
+    MOV   R7, 0.0
+_tic80_poke_lo_ok:
+    MOV   R6, R7
+    FGE   R6, 2147483648.0
+    JF    R6, _tic80_poke_hi_ok
+    MOV   R7, 0.0
+_tic80_poke_hi_ok:
+    CFI   R7
+    AND   R7, R5
+    SHL   R7, R3
+    CALL  __tic80_rd            ; read-modify-write the byte
+    SHL   R5, R3
+    NOT   R5
+    AND   R0, R5
+    OR    R0, R7
+    MOV   R2, R0
+    CALL  __tic80_wr
+    MOV   R0, BOXED_NIL
+    POP   R7
+    POP   R6
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; __builtin_tic80_memcpy: [BP+2] = dest, [BP+3] = src, [BP+4] = size (bytes)
+;; __builtin_tic80_memset: [BP+2] = dest, [BP+3] = value, [BP+4] = size
+;; R0 = nil. Copies forward (overlapping ranges: use a lower dest).
+__builtin_tic80_memcpy:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R3
+    MOV   R3, 1                 ; mode: copy
+    JMP   _tic80_memop
+__builtin_tic80_memset:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R3
+    MOV   R3, 0                 ; mode: fill
+_tic80_memop:
+    PUSH  R1
+    PUSH  R2
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
+    MOV   R4, [BP+2]
+    FLR   R4
+    CFI   R4                    ; dest
+    MOV   R5, [BP+3]
+    FLR   R5
+    CFI   R5                    ; src, or the fill byte
+    MOV   R6, [BP+4]
+    FLR   R6
+    CFI   R6                    ; count
+    MOV   R2, R5                ; fill byte
+_tic80_memop_loop:
+    MOV   R1, R6
+    IGT   R1, 0
+    JF    R1, _tic80_memop_done
+    JF    R3, _tic80_memop_put
+    MOV   R1, R5
+    CALL  __tic80_rd
+    MOV   R2, R0
+    IADD  R5, 1
+_tic80_memop_put:
+    MOV   R1, R4
+    CALL  __tic80_wr
+    IADD  R4, 1
+    ISUB  R6, 1
+    JMP   _tic80_memop_loop
+_tic80_memop_done:
+    MOV   R0, BOXED_NIL
+    POP   R6
+    POP   R5
+    POP   R4
+    POP   R2
+    POP   R1
+    POP   R3
     MOV   SP, BP
     POP   BP
     RET

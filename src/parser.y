@@ -93,6 +93,7 @@ static ASTNode *make_method_function_assignment (ASTNode *func_def, char *table,
 %token TOKEN_EQ TOKEN_NEQ TOKEN_LE TOKEN_GE TOKEN_LT TOKEN_GT TOKEN_CONCAT
 %token TOKEN_LOCAL TOKEN_IN TOKEN_DO TOKEN_NOT TOKEN_LEN UNARY_MINUS
 %token TOKEN_TRUE TOKEN_FALSE TOKEN_NIL TOKEN_FLOORDIV
+%token TOKEN_BXOR TOKEN_SHL TOKEN_SHR TOKEN_LSHR TOKEN_ROTL TOKEN_ROTR
 %token TOKEN_DOTS
 %token TOKEN_REPEAT TOKEN_UNTIL
 %token TOKEN_GOTO TOKEN_DBCOLON TOKEN_PRINT_SHORT
@@ -107,6 +108,10 @@ static ASTNode *make_method_function_assignment (ASTNode *func_def, char *table,
 %left TOKEN_OR
 %left TOKEN_AND
 %left TOKEN_EQ TOKEN_NEQ TOKEN_LT TOKEN_GT TOKEN_LE TOKEN_GE
+%left '|'
+%left TOKEN_BXOR
+%left '&'
+%left TOKEN_SHL TOKEN_SHR TOKEN_LSHR TOKEN_ROTL TOKEN_ROTR
 %right TOKEN_CONCAT
 %left '+' '-'
 %left '*' '/' '%' TOKEN_FLOORDIV
@@ -858,6 +863,15 @@ expr:
     | expr '/' expr     { $$ = make_node_binary (NODE_DIV, $1, $3); }
     | expr '%' expr     { $$ = make_node_binary (NODE_MOD, $1, $3); }
     | expr '^' expr     { $$ = make_node_binary (NODE_POW, $1, $3); }
+    | expr '&' expr         { $$ = make_node_binary (NODE_BAND, $1, $3); }
+    | expr '|' expr         { $$ = make_node_binary (NODE_BOR,  $1, $3); }
+    | expr TOKEN_BXOR expr  { $$ = make_node_binary (NODE_BXOR, $1, $3); }
+    | expr TOKEN_SHL expr   { $$ = make_node_binary (NODE_SHL,  $1, $3); }
+    | expr TOKEN_SHR expr   { $$ = make_node_binary (NODE_SHR,  $1, $3); }
+    | expr TOKEN_LSHR expr  { $$ = make_node_binary (NODE_LSHR, $1, $3); }
+    | expr TOKEN_ROTL expr  { $$ = make_node_binary (NODE_ROTL, $1, $3); }
+    | expr TOKEN_ROTR expr  { $$ = make_node_binary (NODE_ROTR, $1, $3); }
+    | TOKEN_BXOR expr %prec UNARY_MINUS { $$ = make_node_unary (OP_BNOT, $2); }
     | TOKEN_TRUE  { $$ = make_node_boolean (true);  }
     | TOKEN_FALSE { $$ = make_node_boolean (false); }
     | TOKEN_NIL   { $$ = make_node_nil ();          }
@@ -1000,13 +1014,18 @@ field_list:
     field {
         $$ = $1;
     }
-    | field_list ',' field {
+    | field_list field_sep field {
         // Chain fields together via next pointer
         ASTNode* curr = $1;
         while (curr->next) curr = curr->next;
         curr->next = $3;
         $$ = $1;
     }
+    ;
+
+    /* Lua allows ';' as well as ',' between table fields ({a=1; b=2}) */
+field_sep:
+    ',' | ';'
     ;
 
 table_constructor:
@@ -1016,7 +1035,7 @@ table_constructor:
     | '{' field_list '}' {
         $$ = make_node_table_constructor($2);
     }
-    | '{' field_list ',' '}' {
+    | '{' field_list field_sep '}' {
         // Trailing comma before the closing brace -- e.g.
         //   { [1] = a, [2] = b, }
         // Standard, idiomatic Lua; the parser previously had no

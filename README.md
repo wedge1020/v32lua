@@ -235,6 +235,16 @@ present):
   map TIC-80's 240×136 logical screen onto Vircon32's physical resolution.
   `sfx()`/`music()` play from the same generated placeholder tone bank as
   the PICO-8 layer; `print()` honours its color and returns the text width.
+  `map()` takes all of TIC-80's optional arguments including `scale`
+  (not the remap callback); `fget()` returns a boolean and `fset()` takes
+  one. `peek`/`peek1`/`peek2`/`peek4`, `poke`/`poke1`/`poke2`/`poke4`,
+  `memcpy` and `memset` work on an emulated 96 KB TIC-80 RAM, created on
+  first use with the cart's palette, tiles, sprites and map in it; the map
+  (0x08000), gamepad (0x0FF80) and sprite-flag (0x14404) areas are live
+  views of `mget`/`mset`, the buttons and `fget`/`fset`. Other writes are
+  stored but don't change the screen or sound. A function the program
+  defines itself (`function pal(...)`) replaces the built-in of that name,
+  as in Lua.
 * **PICO-8 compatibility layer** (`--#api "pico8"`) — the PICO-8-shaped
   equivalent: `spr`/`map`/`mget`/`mset`/`fget`/`fset`, `cls`, `rectfill`/
   `rect`/`circfill`/`circ`/`line`/`pset`/`print` (with color),
@@ -515,6 +525,30 @@ without requiring explicit user temporaries:
 local x, y, z = 10, 20, 30
 x, y = y, x -- Synthesizes temporary register chains to safely swap values
 ```
+
+**Bitwise operators**
+
+Lua 5.3/5.4's `&`, `|`, `~` (xor), `<<`, `>>` and unary `~` (not). Every
+number is a float32, so each operation takes its operands as 32-bit words
+and converts the result back:
+
+* **Native / TIC-80:** integers. Operands are floored and taken modulo
+  2^32, so `0xFFFFFFFF` and `-1` are the same word. The sign of the full
+  value is carried along, so `&`, `|`, `~` match 64-bit Lua for operands in
+  [-2^31, 2^32): `-1 & 0xFF` is 255, `~0` is -1, `0xFF << 24` is
+  4278190080. `>>` is logical; a shift of 32 or more gives 0.
+* **PICO-8:** 16.16 fixed point, exactly as PICO-8 does it — fractions take
+  part (`0.5 | 1` is 1.5, `~0` is -1/65536), `>>` is arithmetic, and
+  PICO-8's `^^` (xor), `>>>` (logical right), `<<>` / `>><` (rotate), the
+  compound forms (`&= |= ^^= <<= >>= >>>= <<>= >><=`), the `band`/`bor`/
+  `bxor`/`bnot`/`shl`/`shr`/`lshr`/`rotl`/`rotr` functions and `0b1010`
+  binary literals are all accepted. Hex literals `0x8000`–`0xffff` are
+  negative, as in PICO-8 (`0xffff == -1`).
+
+Limit: a float32 holds 24 significant bits, so a result such as
+`0xDEADBEEF` comes back rounded; masks and packed fields with fewer
+significant bits (`0xFF000000`, `0xF0F0`) are exact. Expressions of
+literals (`1 << 4`) are folded at compile time.
 
 **Object-Oriented Programming & Tables**
 
@@ -824,9 +858,12 @@ decision:
   carries no return count; this needs one.
 * Arithmetic on numeric strings (`"10" + 5`): Lua coerces the string; here
   the result is not a number. Convert with `tonumber()` first.
-* Bitwise operators (`&`, `|`, `~`, `<<`, `>>`) and PICO-8's
-  `band`/`bor`/...; `string.format` as a method (`("%d"):format(x)`) —
-  use `string.format(...)`.
+* Bitwise operators work on 32-bit words (numbers are float32): `x << 32`
+  and wider results, and `>>` of a negative number, differ from Lua's
+  64-bit integers, and a result with more than 24 significant bits
+  (`0xDEADBEEF`) is rounded. See **Bitwise operators** above.
+* `string.format` as a method (`("%d"):format(x)`) — use
+  `string.format(...)`.
 * Garbage collection: the heap is a bump allocator, so every table,
   closure and runtime string lives until reset. Long-running games should
   reuse tables rather than create them per frame.
@@ -835,11 +872,18 @@ decision:
   of whole SFX would roughly halve that again (about half of Celeste's
   notes repeat), at the cost of a note-level sequencer.
 * PICO-8: `pal`/`palt` (compile to no-ops with a warning), `clip`,
-  `peek`/`poke`, `cartdata`/`dget`/`dset`, real `stat` values, fractional
-  `spr` widths; the SFX editor's filter switches in synthesized sound
-* TIC-80: `peek`/`poke` family, `tri`/`trib`, `elli`/`ellib`, `clip`,
-  `key`/`keyp`, `mouse`, `font`, `spr` rotation, and synthesis of a cart's
-  own `WAVES`/`SFX`/`MUSIC` data (placeholder tones are used)
+  `peek`/`poke` and the `@ % $` peek shorthands, `cartdata`/`dget`/`dset`,
+  real `stat` values, fractional `spr` widths; the SFX editor's filter
+  switches in synthesized sound
+* TIC-80: `tri`/`trib`, `elli`/`ellib`, `clip`, `mouse`, `font`, `spr`
+  rotation, `map()`'s remap callback, and synthesis of a cart's own
+  `WAVES`/`SFX`/`MUSIC` data (placeholder tones are used). `peek`/`poke`
+  work on an emulated RAM, but writing the screen, palette, tiles or sound
+  registers has no visible or audible effect. `key`/`keyp` always report
+  no key (there is no keyboard); `trace` does nothing.
+* TIC-80 `circ`/`circb`/`rectb` draw one GPU quad per pixel: a cart that
+  draws many large outlines each frame (witchem_up's title screen) runs
+  below full speed
 * `tonumber(s, base)` — the two-argument, explicit-base form
 * A diagnostic (warn/error) for reading, from inside a function, a
   `local` declared in a block lexically outside any function at chunk

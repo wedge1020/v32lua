@@ -233,6 +233,10 @@ int main(int argc, char** argv)
     CB.Slaves[4] = &PAD; CB.Slaves[5] = &CAR; CB.Slaves[6] = &MEMC; CB.Slaves[7] = &NUL;
     MB.Master = &CPU; CB.Master = &CPU; CPU.MemoryBus = &MB; CPU.ControlBus = &CB;
     CPU.Reset(); TIM.Reset(); RNG.Reset();
+    // V32_FIXED_TIME=1: start the clock at a fixed date/time, so carts that
+    // seed their RNG from it (math.random, PICO-8 rnd) run identically every
+    // time -- for comparing two builds' GPU/SPU logs.
+    if (getenv("V32_FIXED_TIME")) { TIM.CurrentDate = (2026 << 16) | 100; TIM.CurrentTime = 12 * 3600; }
     if (dirty) {
         // -G: start the cart the way the real BIOS leaves the machine:
         // RAM NOT zeroed (the BIOS's globals and stack are left behind),

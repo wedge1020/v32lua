@@ -2401,3 +2401,25 @@ _pico8_init_flags_loop:
     POP   R2
     POP   R1
     RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_pico8_flip -- PICO-8 flip(): present what has been drawn (mask
+;; the margins, as after _draw()) and wait one PICO-8 frame: PICO8_FRAME_STEP
+;; hardware frames, keeping music sequencing on time. R0 = nil.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+__builtin_pico8_flip:
+    PUSH  R1
+    CALL  __builtin_pico8_present
+    MOV   R1, PICO8_FRAME_STEP
+_pico8_flip_wait:
+    WAIT
+    PUSH  R1
+    CALL  __builtin_pico8_music_tick
+    POP   R1
+    ISUB  R1, 1
+    MOV   R0, R1
+    IGT   R0, 0
+    JT    R0, _pico8_flip_wait
+    MOV   R0, BOXED_NIL
+    POP   R1
+    RET
