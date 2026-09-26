@@ -34,10 +34,9 @@ bool         pico8_has_audio        (void);
 // Real __sfx__/__music__ playback -- see pico8_audio.c
 extern int   pico8_sfx_base_id;
 bool         register_pico8_sfx_sounds (void);
-int          pico8_music_sound         (int pattern, int *loop_start, int *loop_end, bool *loops);
-extern bool  pico8_dynamic_music;
-void         pico8_register_all_songs  (void);
-void         emit_pico8_music_table    (FILE *);
+void         emit_pico8_audio_tables   (FILE *);
+extern long  pico8_audio_bytes;
+extern int   pico8_audio_rate;
 
 char        *pico8_append_prelude   (char *);
 

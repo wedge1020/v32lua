@@ -320,7 +320,7 @@ Cartridge metadata and resources are declared with
 line comments, parsed by the preprocessor stage and used to generate
 the companion XML file:
 .BR \-\-#version ", " \-\-#title ", " \-\-#api ", " \-\-#texture ,
-.BR \-\-#sound ", " \-\-#tilemap ", " \-\-#p8 ", and " \-\-#include .
+.BR \-\-#sound ", " \-\-#tilemap ", " \-\-#p8 ", " \-\-#p8rate ", and " \-\-#include .
 A
 .B \-\-#texture
 or
@@ -345,14 +345,14 @@ Input source, in the Lua subset this tool accepts.
 A PICO-8 cartridge, compiled directly (see
 .BR "LANGUAGE NOTES" ).
 .TP
-.IR *_pico8.vtex ", " *_sfxNN.vsnd ", " *_musicNN.vsnd
+.IR *_pico8.vtex ", " *_sfxNN.vsnd
 Generated next to the output for PICO-8 carts: the sprite sheet (plus
-color swatches), and the cart's
+color swatches), and the cart's 64
 .B __sfx__
-and
-.B __music__
-data synthesized into sounds for
-.BR sfx() " and " music() .
+entries synthesized into sounds (22050 Hz by default, see
+.BR \-\-#p8rate ).
+.BR music()
+is sequenced from them at run time.
 .TP
 .IR pico8_tone0.vsnd " .. " pico8_tone7.vsnd
 Placeholder tones for PICO-8 programs without sound data, and for TIC-80

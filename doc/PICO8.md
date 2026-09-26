@@ -79,23 +79,41 @@ last argument of a builtin is expanded at compile time.
 ## Sound
 
 When the cart's `__sfx__`/`__music__` sections are available (a `.p8` is
-compiled, or `--#p8 "cart.p8"` is given), the compiler synthesizes them:
+compiled, or `--#p8 "cart.p8"` is given), the compiler synthesizes the 64
+SFX into `<output>_sfxNN.vsnd`, and the runtime plays them:
 
-- every SFX becomes `<output>_sfxNN.vsnd` (64 files, one pass of the SFX
-  — `sfx()` doesn't loop);
-- every song that `music(n)` can start becomes `<output>_musicNN.vsnd`:
-  pattern `n` through the pattern with the loop-end or stop flag, with
-  the SPU loop point set to the loop-start pattern. A literal `n` renders
-  just that song; a computed `n` renders every song start in the cart.
+- `sfx(n [, channel])` plays on SPU channel 4 + `channel` (any free one of
+  4–7 when no channel is given). A looping SFX loops until stopped, as in
+  PICO-8; `sfx(-1 [, channel])` stops, `sfx(-2, channel)` lets a loop run
+  out.
+- `music(n)` is sequenced at run time from the SFX, pattern by pattern, on
+  SPU channels 0–3 (one per PICO-8 music channel), following the
+  loop-start / loop-end / stop flags. No song is pre-rendered, so music
+  costs no sound data beyond its SFX. A computed `n` works.
+
+Each pattern lasts a whole number of frames (the tick is 1/120 s, 0.4%
+slower than PICO-8's, which is inaudible), and the SPU mixes a frame's
+sound at the end of the frame, so the next pattern starts exactly where
+the previous one ends. A game update that runs past the frame a pattern
+ends on starts the next one late, at the position it would have reached.
+
+Sample rate (`--#p8rate`, at the top of the file with `--#api`/`--#p8`):
+
+| `--#p8rate` | Celeste's sound data | Notes |
+|---|---|---|
+| `22050` (default) | 18 MB | PICO-8's own rate |
+| `11025` | 9 MB | lo-fi: the SPU plays samples without interpolation, so a quarter-speed sound has audible images around 10 kHz |
+| `44100` | 36 MB | the cleanest playback |
+
+(The earlier approach, pre-rendered songs at 44.1 kHz, took 66 MB.)
 
 The synth follows PICO-8's documented model — 8 waveforms, the 8 effects
 (slide, vibrato, drop, fade in/out, fast/slow arpeggio), custom
-instruments, speed in ticks of 183/22050 s — with waveform shapes modeled
-on the zepto8 reimplementation. It is an approximation: the SFX editor's
-filter switches (noiz, buzz, detune, reverb, dampen) are ignored, and it
-hasn't been compared against PICO-8 by ear. Music plays on SPU channel 0;
-`music()`'s fade and channel-mask arguments are ignored. The files are
-44.1 kHz stereo, so a cart's sound can be tens of megabytes of ROM.
+instruments — with waveform shapes modeled on the zepto8
+reimplementation. It is an approximation: the SFX editor's filter
+switches (noiz, buzz, detune, reverb, dampen) are ignored, a slide doesn't
+carry across patterns, and it hasn't been compared against PICO-8 by ear.
+`music()`'s fade and channel-mask arguments are ignored.
 
 ## Performance
 

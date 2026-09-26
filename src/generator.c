@@ -989,6 +989,11 @@ void generate_program (ASTNode *head)
             emit_asm ("CALL %s ; Execute %s()\n",
                       (pico8_frame_step == 1) ? "__function__update60" : "__function__update",
                       (pico8_frame_step == 1) ? "_update60" : "_update");
+            // A pattern change is on time if it is issued anywhere within
+            // the frame it falls on (the SPU mixes at the frame's end); an
+            // _update() that ran into the next frame would otherwise make
+            // it one frame late.
+            emit_asm ("CALL __builtin_pico8_music_tick\n");
         }
         if (has_main)
         {
@@ -1009,6 +1014,7 @@ void generate_program (ASTNode *head)
                 emit_asm ("IGT  R0, 250000 ; would the draw run past the frame?\n");
                 emit_asm ("JF   R0, __pico8_draw_now\n");
                 emit_asm ("WAIT ; start _draw() on a fresh frame\n");
+                emit_asm ("CALL __builtin_pico8_music_tick\n");
                 emit_asm ("__pico8_draw_now:\n");
             }
             emit_asm ("IN   R0, TIM_FrameCounter\n");
@@ -1017,6 +1023,7 @@ void generate_program (ASTNode *head)
             emit_asm ("MOV  [PICO8_DRAW_CYCLE], R0\n");
             emit_asm ("CALL __function__draw   ; Execute _draw()\n");
             emit_asm ("CALL __builtin_pico8_present ; mask off-canvas drawing (PICO-8 clips to 128x128)\n");
+            emit_asm ("CALL __builtin_pico8_music_tick\n");
             // cost = (frames elapsed) * 250000 + cycle now - cycle at start
             emit_asm ("IN   R0, TIM_FrameCounter\n");
             emit_asm ("MOV  R1, [PICO8_DRAW_FRAME]\n");
@@ -1034,6 +1041,7 @@ void generate_program (ASTNode *head)
         // its PICO8_FRAME_STEP frames.
         emit_asm ("__pico8_pace:\n");
         emit_asm ("WAIT\n");
+        emit_asm ("CALL __builtin_pico8_music_tick ; start the next music pattern on time\n");
         emit_asm ("IN   R0, TIM_FrameCounter\n");
         emit_asm ("MOV  R1, [PICO8_TICK_FRAME]\n");
         emit_asm ("ISUB R0, R1\n");

@@ -603,9 +603,31 @@ bool emit_pico8_sfx_intrinsic (ASTNode *node, int dest_reg)
     }
 
     // A cart with __sfx__ data (a .p8, or --#p8) plays its own synthesized
-    // SFX; otherwise the placeholder tone bank stands in.
+    // SFX through __builtin_pico8_sfx (pico8.s): PICO-8 channel c is SPU
+    // channel 4 + c (0-3 belong to music), loops follow the SFX. Otherwise
+    // the placeholder tone bank stands in.
     bool real   = register_pico8_sfx_sounds ();
-    if (!real) register_pico8_tone_bank ();
+    if (real) {
+        runtime_req.needs_vircon32 = true;
+        if (args[1] != NULL) {
+            int reg = allocate_register ();
+            generate_asm (args[1], reg);
+            emit_asm ("PUSH R%d ; sfx(): channel\n", reg);
+            unlock_register (reg);
+        } else {
+            emit_asm ("MOV  R0, BOXED_NIL\n");
+            emit_asm ("PUSH R0 ; sfx(): channel omitted -> any free\n");
+        }
+        int reg = allocate_register ();
+        generate_asm (args[0], reg);
+        emit_asm ("PUSH R%d ; sfx(): n\n", reg);
+        unlock_register (reg);
+        emit_asm ("CALL __builtin_pico8_sfx\n");
+        emit_asm ("IADD SP, 2\n");
+        if (dest_reg != 0) emit_asm ("MOV  R%d, BOXED_NIL\n", dest_reg);
+        return true;
+    }
+    register_pico8_tone_bank ();
     int  base   = real ? pico8_sfx_base_id : pico8_tone_base_id;
     int  mask   = real ? 63 : PICO8_TONE_COUNT - 1;
     runtime_req.needs_vircon32 = true;
@@ -698,16 +720,9 @@ bool emit_pico8_music_intrinsic (ASTNode *node, int dest_reg)
 
     runtime_req.needs_vircon32 = true;
 
-    double n_val;
-    if (!spu_static_number (args[0], &n_val)) {
-        if (!pico8_has_audio ()) {
-            compiler_error (ERR_SEMANTIC, node->line_number,
-                             "music(): a computed track number needs the cart's __music__ "
-                             "data (compile the .p8, or add --#p8 \"cart.p8\")");
-            return false;
-        }
-        // Computed pattern: render every song start, look it up at runtime.
-        pico8_register_all_songs ();
+    // A cart with __music__ data: the runtime sequencer plays the song
+    // pattern by pattern from the SFX sounds (pico8_audio.c, pico8.s).
+    if (pico8_has_audio () && register_pico8_sfx_sounds ()) {
         int reg = allocate_register ();
         generate_asm (args[0], reg);
         emit_asm ("PUSH R%d ; music(): pattern\n", reg);
@@ -716,6 +731,14 @@ bool emit_pico8_music_intrinsic (ASTNode *node, int dest_reg)
         emit_asm ("IADD SP, 1\n");
         if (dest_reg != 0) emit_asm ("MOV  R%d, BOXED_NIL\n", dest_reg);
         return true;
+    }
+
+    double n_val;
+    if (!spu_static_number (args[0], &n_val)) {
+        compiler_error (ERR_SEMANTIC, node->line_number,
+                         "music(): a computed track number needs the cart's __music__ "
+                         "data (compile the .p8, or add --#p8 \"cart.p8\")");
+        return false;
     }
 
     if (n_val < 0) {
@@ -733,29 +756,10 @@ bool emit_pico8_music_intrinsic (ASTNode *node, int dest_reg)
         return emit_vircon32_channel_cmd_intrinsic (stop_node, dest_reg, "stop");
     }
 
-    // A cart with __music__ data: the whole song starting at pattern n is
-    // synthesized into one sound (pico8_audio.c); set its loop points so
-    // the SPU loops back to the song's loop-start pattern.
-    int  tone_id = -1, loop_start = 0, loop_end = 0;
+    // No cart data: loop a placeholder tone on channel 0.
     bool song_loops = true;
-    if (pico8_has_audio ()) {
-        tone_id = pico8_music_sound ((int) n_val, &loop_start, &loop_end, &song_loops);
-        if (tone_id < 0) {
-            // an empty pattern: PICO-8 plays silence, i.e. stops the music
-            ASTNode *chan0 = make_node (NODE_NUMBER);
-            chan0->as.number.val = 0.0;
-            ASTNode *stop_node = make_node (NODE_FUNCTION_CALL);
-            stop_node->line_number       = node->line_number;
-            stop_node->as.call.args_head = chan0;
-            return emit_vircon32_channel_cmd_intrinsic (stop_node, dest_reg, "stop");
-        }
-        emit_asm ("OUT  SPU_SelectedSound, %d ; music(%d): song loop points\n", tone_id, (int) n_val);
-        emit_asm ("OUT  SPU_SoundLoopStart, %d\n", loop_start);
-        emit_asm ("OUT  SPU_SoundLoopEnd, %d\n", loop_end);
-    } else {
-        register_pico8_tone_bank ();
-        tone_id = pico8_tone_base_id + (((int) n_val) & (PICO8_TONE_COUNT - 1));
-    }
+    register_pico8_tone_bank ();
+    int tone_id = pico8_tone_base_id + (((int) n_val) & (PICO8_TONE_COUNT - 1));
 
     ASTNode *sound_lit = make_node (NODE_NUMBER);
     sound_lit->as.number.val = (double) tone_id;
@@ -774,18 +778,13 @@ bool emit_pico8_music_intrinsic (ASTNode *node, int dest_reg)
 }
 
 // ============================================================================
-// PICO-8 count(t) -> number of non-nil elements in table t
+// PICO-8 count(t) -> #t
 // ============================================================================
-// Deliberately NOT an alias for #t / __builtin_table_len: PICO-8's count()
-// skips nil holes inside the tracked contiguous range (celeste's got_fruit
-// depends on this: 30 slots, only the collected fruits set to true), and
-// includes sparse positive-integer keys that table_set parked in the hash
-// part. __builtin_pico8_count walks both parts; see pico8.s.txt.
+// PICO-8 0.2+ defines count(tbl) as the table's length (#tbl); the runtime
+// reads it from the table header (__builtin_pico8_count, pico8.s).
 //
-// The 2-argument occurrence-counting form count(t, v) (PICO-8 0.2+) is a
-// compile error naming the limitation -- same policy as dynamic music()
-// track numbers: celeste.lua never uses it, and a boxed-word equality
-// check would silently mis-compare strings anyway.
+// The 2-argument occurrence-counting form count(t, v) is a compile error
+// naming the limitation.
 bool emit_pico8_count_intrinsic (ASTNode *node, int dest_reg)
 {
     int      arg_count = 0;

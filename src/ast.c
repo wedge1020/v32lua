@@ -154,6 +154,16 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
         runtime_req.needs_math     = true;
         node->as.cart_hint.value = strdup(path);
     }
+    else if (strcmp(action, "p8rate") == 0 && tokens >= 2) {
+        // --#p8rate 11025 | 22050 | 44100 -- sample rate of the sounds
+        // synthesized from the cart's __sfx__ (see pico8_audio.c)
+        int rate = atoi(param1[0] == '"' ? param1 + 1 : param1);
+        if (rate != 11025 && rate != 22050 && rate != 44100) {
+            compiler_error(ERR_SEMANTIC, yylineno, "--#p8rate: use 11025, 22050 or 44100 (got '%s')", param1);
+        }
+        pico8_audio_rate = rate;
+        node->as.cart_hint.value = strdup(param1);
+    }
     else if (strcmp(action, "version") == 0 && tokens >= 2) {
         // e.g., --#version 1.1
         strncpy(cart_version, param1, sizeof(cart_version) - 1);

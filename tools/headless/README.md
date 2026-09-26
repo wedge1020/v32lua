@@ -24,6 +24,7 @@ stands in for it).
 | | `-G` starts the cart the way the BIOS leaves the machine (RAM, registers and stack not clean). `-P prof.txt [frame]` writes a per-address cycle profile (summarize with `profile.py`), `-m addr,n` dumps memory, and a dumped table global (`-d`) shows its contents. The overrun count in `STATUS` is the number of frames that ran out of cycles before a `WAIT`. |
 | `padrand.py SEED FRAMES` | Random pad script for long soak runs: `runlua game.lua -f 3000 -q -p "$(padrand.py 1 3000)"`. Celeste's register-allocator bug only showed up this way. |
 | `render.py prog.run FRAME out.png tex0.vtex [tex1.vtex ...]` | Rebuild one frame as a PNG from a `-g` log (textures in cartridge order). Approximate: no rotation, BIOS font drawn as boxes. Only frames that drew something have content; the screen otherwise keeps the last image. |
+| `spu_render.py prog.run prog.xml out.wav [first last]` | Rebuild the audio from a `-s` log as a 44.1 kHz WAV, mixing like the SPU (nearest sample, speed, loop points, volumes). For listening, and for checking that sounds start and join where they should. Needs numpy. |
 | `profile.py prog.vbin.debug prof.txt [N]` | Cycles per routine from a `-P` profile. |
 | `trap prog LABEL` | Run until an asm label is reached; print trail and call stack. |
 | `where.py prog.vbin.debug prog.asm ADDR...` | Map addresses to asm lines. |

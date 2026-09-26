@@ -18,9 +18,14 @@ or speakers.
   buckets scanned linearly with a string compare per key.)
 - **PICO-8 `sfx()`/`music()` play the cart's own sound.** When a cart's
   `__sfx__`/`__music__` data is available (a `.p8`, or `--#p8`), the
-  compiler synthesizes it into `.vsnd` files: all 64 SFX, and each song
-  that `music()` can start, with the song's loop point. `music(n)` with a
-  computed `n` works too. See `doc/PICO8.md`.
+  compiler synthesizes the 64 SFX into `.vsnd` files, and the runtime
+  sequences `music()` from them pattern by pattern on SPU channels 0–3
+  (`sfx()` uses 4–7). Looping SFX loop until stopped, as in PICO-8;
+  `music(n)` with a computed `n` works. Sounds are 22050 Hz (PICO-8's own
+  rate) played at half speed; `--#p8rate 11025|22050|44100` picks another
+  rate. Celeste's sound: 18 MB (9 MB lo-fi), where pre-rendered 44.1 kHz
+  songs took 66 MB. Patterns are a whole number of frames long, so they
+  join seamlessly. See `doc/PICO8.md`.
 - PICO-8 dialect: `f"str"` / `f{...}` calls, `?` print shorthand, `\` and
   `\=` integer division, `..=`, `^=`, button glyphs (⬅️➡️⬆️⬇️🅾️❎),
   numeric strings in number arguments (`rnd"128"`, `sfx"38"`),

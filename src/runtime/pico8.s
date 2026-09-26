@@ -178,6 +178,7 @@ _pico8_init_state:
     OUT   GPU_ActiveBlending, GPUBlendingMode_Alpha
 
     CALL  __builtin_pico8_reload
+    CALL  __pico8_audio_init
 
     POP   R4
     POP   R3
@@ -1893,12 +1894,131 @@ __builtin_pico8_present:
     RET
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; __builtin_pico8_music(n): music() with a computed pattern number.
-;; [BP+2] = n. Looks n up in __pico8_music_table (4 words per pattern:
-;; sound id or -1, loop start, loop end, loop flag -- emitted by the
-;; compiler from the cart's __music__ data) and plays that song on SPU
-;; channel 0; n < 0, n > 63 or a pattern that starts no song stops it.
+;; PICO-8 SOUND (cart __sfx__/__music__ data; see pico8_audio.c)
+;;
+;; The cart's 64 SFX are sounds PICO8_SFX_BASE + n, recorded at
+;; PICO8_AUDIO_RATE Hz and played at channel speed PICO8_AUDIO_SPEED. SPU channels 0-3 play music (one per
+;; PICO-8 music channel), 4-7 play sfx() (PICO-8 channel c -> 4 + c).
+;; Music is sequenced here, pattern by pattern, from __pico8_patterns
+;; (6 words per pattern: ch0..ch3 sound id or -1, length in frames, next
+;; pattern or -1); __builtin_pico8_music_tick runs after every WAIT of the
+;; PICO-8 main loop and starts the next pattern on the frame the current
+;; one ends. (The SPU mixes a frame's audio at the end of the frame, and
+;; every pattern lasts a whole number of frames, so patterns join without
+;; a gap.) A tick that ran long starts the pattern late but at the right
+;; position, so the song never drifts.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; __pico8_audio_init (internal): music off; each SFX sound gets its loop
+;; points from __pico8_sfx_loops (3 words per SFX: loops, start, end).
+__pico8_audio_init:
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    MOV   R0, -1
+    MOV   [PICO8_MUSIC_PATTERN], R0
+    MOV   R0, 0
+    MOV   [PICO8_SFX_NEXT], R0
+    MOV   R1, PICO8_SFX_BASE
+    MOV   R0, R1
+    ILT   R0, 0
+    JT    R0, _pico8_audio_init_done   ; the cart plays no synthesized sound
+    MOV   R2, __pico8_sfx_loops
+    MOV   R3, 0
+_pico8_audio_init_loop:
+    MOV   R0, R3
+    IEQ   R0, 64
+    JT    R0, _pico8_audio_init_done
+    MOV   R4, R1
+    IADD  R4, R3
+    OUT   SPU_SelectedSound, R4
+    MOV   R0, [R2]
+    OUT   SPU_SoundPlayWithLoop, R0
+    JF    R0, _pico8_audio_init_next
+    MOV   R0, [R2+1]
+    OUT   SPU_SoundLoopStart, R0
+    MOV   R0, [R2+2]
+    OUT   SPU_SoundLoopEnd, R0
+_pico8_audio_init_next:
+    IADD  R2, 3
+    IADD  R3, 1
+    JMP   _pico8_audio_init_loop
+_pico8_audio_init_done:
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    RET
+
+;; __pico8_play_channel (internal): R1 = SPU channel, R2 = sound id (-1:
+;; stop the channel), R3 = start position in samples. Clobbers R0.
+__pico8_play_channel:
+    OUT   SPU_SelectedChannel, R1
+    MOV   R0, R2
+    ILT   R0, 0
+    JT    R0, _pico8_play_channel_stop
+    OUT   SPU_ChannelAssignedSound, R2
+    OUT   SPU_ChannelVolume, 1.0
+    OUT   SPU_ChannelSpeed, PICO8_AUDIO_SPEED ; sounds are PICO8_AUDIO_RATE Hz
+    OUT   SPU_Command, SPUCommand_PlaySelectedChannel
+    MOV   R0, R3
+    IEQ   R0, 0
+    JT    R0, _pico8_play_channel_done
+    OUT   SPU_ChannelPosition, R3         ; (play rewinds, so set it after)
+_pico8_play_channel_done:
+    RET
+_pico8_play_channel_stop:
+    OUT   SPU_Command, SPUCommand_StopSelectedChannel
+    RET
+
+;; __pico8_music_start (internal): R1 = pattern, R3 = frames late.
+;; Starts the pattern's four channels; sets PICO8_MUSIC_PATTERN.
+;; Clobbers R0-R3, R5.
+__pico8_music_start:
+    MOV   [PICO8_MUSIC_PATTERN], R1
+    MOV   R5, R1
+    IMUL  R5, 6
+    MOV   R0, __pico8_patterns
+    IADD  R5, R0                          ; R5 = pattern entry
+    IMUL  R3, PICO8_AUDIO_RATE
+    IDIV  R3, 60                          ; frames late -> samples
+    MOV   R1, 0
+    MOV   R2, [R5]
+    CALL  __pico8_play_channel
+    MOV   R1, 1
+    MOV   R2, [R5+1]
+    CALL  __pico8_play_channel
+    MOV   R1, 2
+    MOV   R2, [R5+2]
+    CALL  __pico8_play_channel
+    MOV   R1, 3
+    MOV   R2, [R5+3]
+    CALL  __pico8_play_channel
+    RET
+
+;; __pico8_music_stop (internal): stops channels 0-3; music off.
+__pico8_music_stop:
+    PUSH  R1
+    PUSH  R2
+    MOV   R0, -1
+    MOV   [PICO8_MUSIC_PATTERN], R0
+    MOV   R2, -1
+    MOV   R1, 0
+    CALL  __pico8_play_channel
+    MOV   R1, 1
+    CALL  __pico8_play_channel
+    MOV   R1, 2
+    CALL  __pico8_play_channel
+    MOV   R1, 3
+    CALL  __pico8_play_channel
+    POP   R2
+    POP   R1
+    RET
+
+;; __builtin_pico8_music(n): [BP+2] = n. Starts the song at pattern n now;
+;; n < 0, n > 63 or an empty pattern stops the music. (fade_len and
+;; channel_mask are not supported.)
 __builtin_pico8_music:
     PUSH  BP
     MOV   BP, SP
@@ -1906,46 +2026,198 @@ __builtin_pico8_music:
     PUSH  R2
     PUSH  R3
     PUSH  R4
+    PUSH  R5
+    MOV   R0, PICO8_SFX_BASE
+    ILT   R0, 0
+    JT    R0, _pico8_music_done
     MOV   R1, [BP+2]
     CALL  __pico8_to_int
-    MOV   R2, R1
-    ILT   R2, 0
-    JT    R2, _pico8_music_stop
-    MOV   R2, R1
-    IGT   R2, 63
-    JT    R2, _pico8_music_stop
-    MOV   R2, R1
-    SHL   R2, 2
-    MOV   R3, __pico8_music_table
-    IADD  R2, R3
-    MOV   R3, [R2]
-    MOV   R4, R3
-    ILT   R4, 0
-    JT    R4, _pico8_music_stop
-    OUT   SPU_SelectedSound, R3
-    MOV   R4, [R2+1]
-    OUT   SPU_SoundLoopStart, R4
-    MOV   R4, [R2+2]
-    OUT   SPU_SoundLoopEnd, R4
-    OUT   SPU_SelectedChannel, 0
-    OUT   SPU_Command, SPUCommand_StopSelectedChannel
-    OUT   SPU_ChannelAssignedSound, R3
-    OUT   SPU_ChannelVolume, 1.0
-    OUT   SPU_ChannelSpeed, 1.0
-    OUT   SPU_Command, SPUCommand_PlaySelectedChannel
-    MOV   R4, [R2+3]
-    OUT   SPU_ChannelLoopEnabled, R4
-    MOV   R4, [VIRCON32_MUSIC_CHANNEL_MASK]
-    OR    R4, 1
-    MOV   [VIRCON32_MUSIC_CHANNEL_MASK], R4
-    MOV   R4, [VIRCON32_SFX_CHANNEL_MASK]
-    AND   R4, 0xFFFFFFFE
-    MOV   [VIRCON32_SFX_CHANNEL_MASK], R4
+    MOV   R0, R1
+    ILT   R0, 0
+    JT    R0, _pico8_music_stop
+    MOV   R0, R1
+    IGT   R0, 63
+    JT    R0, _pico8_music_stop
+    MOV   R4, R1
+    IMUL  R4, 6
+    MOV   R0, __pico8_patterns
+    IADD  R4, R0
+    MOV   R4, [R4+4]                      ; length in frames
+    MOV   R0, R4
+    IEQ   R0, 0
+    JT    R0, _pico8_music_stop           ; empty pattern
+    MOV   R3, 0
+    CALL  __pico8_music_start
+    IN    R0, TIM_FrameCounter
+    IADD  R0, R4
+    MOV   [PICO8_MUSIC_END], R0
     JMP   _pico8_music_done
 _pico8_music_stop:
-    OUT   SPU_SelectedChannel, 0
-    OUT   SPU_Command, SPUCommand_StopSelectedChannel
+    CALL  __pico8_music_stop
 _pico8_music_done:
+    MOV   R0, BOXED_NIL
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; __builtin_pico8_music_tick: called by the PICO-8 main loop after every
+;; WAIT. When the current pattern's last frame has passed, starts the next
+;; one (late by however many frames the loop missed). Preserves registers.
+__builtin_pico8_music_tick:
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    MOV   R1, [PICO8_MUSIC_PATTERN]
+    MOV   R0, R1
+    ILT   R0, 0
+    JT    R0, _pico8_music_tick_done      ; no music
+    IN    R3, TIM_FrameCounter
+    MOV   R2, [PICO8_MUSIC_END]
+    MOV   R0, R3
+    ILT   R0, R2
+    JT    R0, _pico8_music_tick_done      ; pattern still playing
+    ISUB  R3, R2                          ; frames late
+    IMUL  R1, 6
+    MOV   R0, __pico8_patterns
+    IADD  R1, R0
+    MOV   R1, [R1+5]                      ; next pattern
+    MOV   R0, R1
+    ILT   R0, 0
+    JT    R0, _pico8_music_tick_stop
+    MOV   R4, R1
+    IMUL  R4, 6
+    MOV   R0, __pico8_patterns
+    IADD  R4, R0
+    MOV   R4, [R4+4]                      ; its length
+    MOV   R0, R4
+    IEQ   R0, 0
+    JT    R0, _pico8_music_tick_stop
+    CALL  __pico8_music_start
+    MOV   R0, [PICO8_MUSIC_END]
+    IADD  R0, R4
+    MOV   [PICO8_MUSIC_END], R0
+    JMP   _pico8_music_tick_done
+_pico8_music_tick_stop:
+    CALL  __pico8_music_stop
+_pico8_music_tick_done:
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    RET
+
+;; __builtin_pico8_sfx(n, channel): [BP+2] = n, [BP+3] = channel (nil or
+;; -1: any free sfx channel). n = -1 stops (that channel, or all sfx
+;; channels); n = -2 lets a looping sfx finish (loop released).
+__builtin_pico8_sfx:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    MOV   R0, PICO8_SFX_BASE
+    ILT   R0, 0
+    JT    R0, _pico8_sfx_done
+    ;; R4 = PICO-8 channel 0..3, or -1 for "any"
+    MOV   R4, -1
+    MOV   R1, [BP+3]
+    MOV   R0, R1
+    AND   R0, NAN_VALUE
+    IEQ   R0, NAN_VALUE
+    JT    R0, _pico8_sfx_have_channel     ; nil / not a number
+    CALL  __pico8_to_int
+    MOV   R0, R1
+    ILT   R0, 0
+    JT    R0, _pico8_sfx_have_channel
+    MOV   R0, R1
+    IGT   R0, 3
+    JT    R0, _pico8_sfx_have_channel
+    MOV   R4, R1
+_pico8_sfx_have_channel:
+    MOV   R1, [BP+2]
+    CALL  __pico8_to_int                  ; R1 = n
+    MOV   R0, R1
+    IEQ   R0, -1
+    JT    R0, _pico8_sfx_stop
+    MOV   R0, R1
+    IEQ   R0, -2
+    JT    R0, _pico8_sfx_release
+    MOV   R0, R1
+    ILT   R0, 0
+    JT    R0, _pico8_sfx_done
+    MOV   R0, R1
+    IGT   R0, 63
+    JT    R0, _pico8_sfx_done
+    MOV   R2, R1
+    IADD  R2, PICO8_SFX_BASE              ; R2 = sound id
+    MOV   R1, R4
+    ILT   R1, 0
+    JF    R1, _pico8_sfx_explicit
+    ;; any channel: the first of 4..7 not playing, else round robin
+    MOV   R1, 4
+_pico8_sfx_scan:
+    MOV   R0, R1
+    IEQ   R0, 8
+    JT    R0, _pico8_sfx_round_robin
+    OUT   SPU_SelectedChannel, R1
+    IN    R0, SPU_ChannelState
+    IEQ   R0, 0x42                        ; SPUChannelState_Playing
+    JF    R0, _pico8_sfx_play
+    IADD  R1, 1
+    JMP   _pico8_sfx_scan
+_pico8_sfx_round_robin:
+    MOV   R1, [PICO8_SFX_NEXT]
+    MOV   R0, R1
+    IADD  R0, 1
+    AND   R0, 3
+    MOV   [PICO8_SFX_NEXT], R0
+    IADD  R1, 4
+    JMP   _pico8_sfx_play
+_pico8_sfx_explicit:
+    MOV   R1, R4
+    IADD  R1, 4
+_pico8_sfx_play:
+    MOV   R3, 0
+    CALL  __pico8_play_channel
+    JMP   _pico8_sfx_done
+_pico8_sfx_stop:
+    MOV   R2, -1
+    MOV   R3, 0
+    MOV   R1, R4
+    ILT   R1, 0
+    JF    R1, _pico8_sfx_stop_one
+    MOV   R1, 4
+    CALL  __pico8_play_channel
+    MOV   R1, 5
+    CALL  __pico8_play_channel
+    MOV   R1, 6
+    CALL  __pico8_play_channel
+    MOV   R1, 7
+    CALL  __pico8_play_channel
+    JMP   _pico8_sfx_done
+_pico8_sfx_stop_one:
+    MOV   R1, R4
+    IADD  R1, 4
+    CALL  __pico8_play_channel
+    JMP   _pico8_sfx_done
+_pico8_sfx_release:
+    MOV   R1, R4
+    ILT   R1, 0
+    JT    R1, _pico8_sfx_done
+    MOV   R1, R4
+    IADD  R1, 4
+    OUT   SPU_SelectedChannel, R1
+    OUT   SPU_ChannelLoopEnabled, 0
+_pico8_sfx_done:
     MOV   R0, BOXED_NIL
     POP   R4
     POP   R3

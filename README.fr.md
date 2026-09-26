@@ -261,6 +261,7 @@ Indices pris en charge :
 | `--#title "TITRE"` | Définit le titre de la cartouche. |
 | `--#api "tic80"` / `--#api "pico8"` | Sélectionne une couche de compatibilité d'API (voir ci-dessus). |
 | `--#p8 "cart.p8"` | PICO-8 : prend la planche de sprites, les drapeaux de sprites et la carte d'une cartouche `.p8` (implique `--#api pico8`). |
+| `--#p8rate 11025` \| `22050` \| `44100` | PICO-8 : fréquence d'échantillonnage des sons synthétisés à partir du `__sfx__` de la cartouche (22050 par défaut ; voir [doc/PICO8.md](doc/PICO8.md#sound)). |
 | `--#texture NOM "chemin/image.png"` | Enregistre une ressource de texture et la lie à une constante `NOM` à la compilation. |
 | `--#sound NOM "chemin/son.vsnd"` | Enregistre une ressource sonore et la lie à une constante `NOM` à la compilation. |
 | `--#tilemap NOM "chemin/carte.csv"` | Enregistre une tilemap depuis un fichier CSV, intégrée directement dans l'image ROM (voir [doc/API.fr.md](doc/API.fr.md#tilemap--tilemap)). |
@@ -866,12 +867,11 @@ attente d'une décision de conception :
 * Les opérateurs bit à bit (`&`, `|`, `~`, `<<`, `>>`) et les `band`/
   `bor`/... de PICO-8 ; `string.format` comme méthode
   (`("%d"):format(x)`) — utilisez `string.format(...)`.
-* Un audio PICO-8 synthétisé plus léger : `__sfx__`/`__music__` deviennent
-  du PCM stéréo 16 bits à 44,1 kHz (Celeste : ~66 Mo de `.vsnd` ; c'est le seul format que lit le SPU). Pistes : stocker à une
-  fréquence plus basse et relire avec le réglage de vitesse du canal, rendre chaque SFX une
-  seule fois et assembler les morceaux à l'exécution (un canal du SPU par
-  canal de musique) au lieu de pré-mixer des chansons entières, et partager
-  les motifs identiques.
+* Un audio PICO-8 encore plus léger : le son d'une cartouche se limite
+  désormais à ses 64 SFX à 22050 Hz (Celeste : 18 Mo, contre 66 Mo).
+  Séquencer des notes isolées plutôt que des SFX entiers le réduirait
+  encore de moitié environ (près de la moitié des notes de Celeste se
+  répètent), au prix d'un séquenceur par note.
 * Le ramasse-miettes : le tas est un allocateur linéaire, donc chaque
   table, fermeture et chaîne créée à l'exécution vit jusqu'à la
   réinitialisation. Les jeux qui tournent longtemps devraient réutiliser

@@ -248,6 +248,7 @@ Supported hints:
 | `--#title "TITLE"` | Sets the cart title. |
 | `--#api "tic80"` / `--#api "pico8"` | Selects a compatibility API layer (see above). |
 | `--#p8 "cart.p8"` | PICO-8: take the sprite sheet, sprite flags and map from a `.p8` cart (implies `--#api pico8`). |
+| `--#p8rate 11025` \| `22050` \| `44100` | PICO-8: sample rate of the sounds synthesized from the cart's `__sfx__` (default 22050; see [doc/PICO8.md](doc/PICO8.md#sound)). |
 | `--#texture NAME "path/image.png"` | Registers a texture resource and binds it to a compile-time constant `NAME`. |
 | `--#sound NAME "path/sound.vsnd"` | Registers a sound resource and binds it to a compile-time constant `NAME`. |
 | `--#tilemap NAME "path/map.csv"` | Registers a tilemap from a CSV file, embedded directly into the ROM image (see [doc/API.md](doc/API.md#tilemap-tilemap)). |
@@ -805,13 +806,10 @@ decision:
 * Garbage collection: the heap is a bump allocator, so every table,
   closure and runtime string lives until reset. Long-running games should
   reuse tables rather than create them per frame.
-* Smaller synthesized PICO-8 audio: `__sfx__`/`__music__` become 16-bit
-  stereo PCM at 44.1 kHz, the only format the SPU plays (Celeste: ~66 MB
-  of `.vsnd`). To explore: storing at a lower rate and playing it back
-  with the channel speed setting, rendering each SFX once and
-  building songs from those pieces at run time (one SPU channel per music
-  channel, loop points per SFX) instead of pre-mixing whole songs, and
-  sharing identical patterns.
+* Smaller PICO-8 audio, further: a cart's sound is now its 64 SFX at
+  22050 Hz (Celeste: 18 MB, from 66 MB). Sequencing single notes instead
+  of whole SFX would roughly halve that again (about half of Celeste's
+  notes repeat), at the cost of a note-level sequencer.
 * PICO-8: `pal`/`palt` (compile to no-ops with a warning), `clip`,
   `peek`/`poke`, `cartdata`/`dget`/`dset`, real `stat` values, fractional
   `spr` widths; the SFX editor's filter switches in synthesized sound

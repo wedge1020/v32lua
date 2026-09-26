@@ -582,9 +582,17 @@ int   emit_variable_map (void)
         fprintf (out(), "%%define  PICO8_DRAW_FRAME         0x%.8X\n", (next_ram_address + 4));
         fprintf (out(), "%%define  PICO8_DRAW_CYCLE         0x%.8X\n", (next_ram_address + 5));
         fprintf (out(), "%%define  PICO8_DRAW_COST          0x%.8X\n", (next_ram_address + 6));
+        fprintf (out(), "%%define  PICO8_MUSIC_PATTERN      0x%.8X\n", (next_ram_address + 7));
+        fprintf (out(), "%%define  PICO8_MUSIC_END          0x%.8X\n", (next_ram_address + 8));
+        fprintf (out(), "%%define  PICO8_SFX_NEXT           0x%.8X\n", (next_ram_address + 9));
+        // SFX sound ids start here (-1: the cart plays no synthesized sound)
+        fprintf (out(), "%%define  PICO8_SFX_BASE           %d\n", pico8_sfx_base_id);
+        fprintf (out(), "%%define  PICO8_AUDIO_RATE         %d\n", pico8_audio_rate);
+        fprintf (out(), "%%define  PICO8_AUDIO_SPEED        %.4f\n", pico8_audio_rate / 44100.0);
         // camera x, y (floats), pen (int), tick frame, draw start frame /
-        // cycle, last draw's cost in cycles
-        next_ram_address    = next_ram_address + 7;
+        // cycle, last draw's cost in cycles, music sequencer state (current
+        // pattern, frame it ends on), next auto sfx channel
+        next_ram_address    = next_ram_address + 10;
         fprintf (out(), "%%define  PICO8_FLAGS_RAM          0x%.8X\n", next_ram_address);
         next_ram_address    = next_ram_address + 256;
         fprintf (out(), "%%define  PICO8_MAP_RAM            0x%.8X\n", next_ram_address);

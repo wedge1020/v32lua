@@ -438,7 +438,7 @@ void emit_pico8_cart_data (FILE *out)
             fprintf (out, "0x%08X%s", word, (w < PICO8_MAP_WIDTH / 4 - 1) ? ", " : "\n");
         }
     }
-    emit_pico8_music_table (out);
+    emit_pico8_audio_tables (out);
     fprintf (out, "__pico8_flags_rom:\n");
     for (int r = 0; r < 16; r++) {
         fprintf (out, "    integer ");

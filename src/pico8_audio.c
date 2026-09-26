@@ -4,26 +4,44 @@
 // PICO-8 __sfx__ / __music__ playback
 // ----------------------------------------------------------------------------
 // Vircon32's SPU plays sampled sounds; it has no synthesizer. So the cart's
-// tracker data is synthesized HERE, at compile time, into ordinary .vsnd
-// sound resources:
+// 64 SFX are synthesized HERE, at compile time, into ordinary .vsnd sound
+// resources (<out>_sfxNN.vsnd), registered as 64 contiguous sound ids
+// (pico8_sfx_base_id + n). Music is NOT pre-rendered: the runtime sequences
+// the cart's __music__ patterns itself, playing each pattern's SFX on SPU
+// channels 0-3 (one per PICO-8 music channel), so a song costs no sound
+// data beyond the SFX it is made of (see __builtin_pico8_music_tick).
 //
-//   * every one of the cart's 64 SFX -> <out>_sfxNN.vsnd, registered as 64
-//     contiguous sound ids (pico8_sfx_base_id + n), so sfx(n) with a
-//     dynamic n is still just base + n at runtime;
-//   * every music(n) start pattern the program uses -> <out>_musicNN.vsnd,
-//     the whole song from pattern n to its loop-end/stop pattern, with the
-//     loop-start pattern's sample offset returned so music() can set the
-//     sound's loop points and loop it on one SPU channel.
+// Size: sounds are rendered at 22050 Hz -- PICO-8's own output rate -- and
+// played at channel speed 0.5 (the SPU's native rate is 44100 Hz), which
+// halves the data at no loss relative to PICO-8. --#p8rate 11025 halves it
+// again (lo-fi: the SPU plays samples without interpolation, so a quarter-
+// speed sound carries audible images near 10 kHz); --#p8rate 44100 doubles
+// it for the cleanest playback.
+//
+// Timing: PICO-8's tick is 183 samples at 22050 Hz (1/120.5 s). Here it is
+// 1/120 s (183.75 samples at 22050) = exactly half a 60 Hz frame (0.4%
+// slower, inaudible), so
+// every note is a whole number of half-frames and every pattern a whole
+// number of frames. The SPU mixes a frame's audio at the end of the frame,
+// so a pattern started at the frame its predecessor ends follows it with
+// no gap and no overlap.
+//
+// Looping SFX carry their loop points in the sound (set once at startup
+// from __pico8_sfx_loops), so sfx(n) of a looping SFX loops until stopped,
+// as in PICO-8, and a looping SFX in a music pattern fills the pattern.
 //
 // The synth follows PICO-8's documented behavior (8 waveforms, 8 effects,
-// speed = ticks per note, 1 tick = 183 samples at 22050 Hz, A4 = pitch 33),
-// with waveform shapes modelled on the zepto8 reimplementation. It is an
-// approximation, not a bit-exact PICO-8: the SFX editor's filter switches
-// (noiz/buzz/detune/reverb/dampen) are ignored.
+// speed = ticks per note, A4 = pitch 33), with waveform shapes modelled on
+// the zepto8 reimplementation. It is an approximation, not a bit-exact
+// PICO-8: the SFX editor's filter switches (noiz/buzz/detune/reverb/
+// dampen) are ignored, and a note slide doesn't carry across patterns.
 // ============================================================================
 
-#define P8A_RATE        44100
-#define P8A_TICK        366                 // 183 samples @ 22050 Hz
+// Sample rate of the rendered sounds: 22050 (default), or 11025 / 44100
+// with --#p8rate. They play at channel speed rate / 44100.
+int pico8_audio_rate = 22050;
+#define P8A_RATE        pico8_audio_rate
+#define P8A_TICK        (pico8_audio_rate / 120.0)   // samples per tick = half a frame
 #define P8A_MAX_SECONDS 300                 // safety cap per rendered sound
 
 int pico8_sfx_base_id = -1;
@@ -145,8 +163,15 @@ static void p8a_play_sfx (float *out, long out_len, long start, long max_samples
                           int sfx_index, double pitch_shift, double vol_scale,
                           P8Voice *v, int depth);
 
-// Renders `notes_to_play` notes (following the SFX's own loop) starting at
-// sample `start`, never past `start + max_samples`.
+// Sample offset of the start of note `count` (counted through loops) for
+// an SFX of the given speed: notes sit on the half-frame tick grid.
+static long p8a_note_at (int speed, long count)
+{
+    return llround ((double) count * speed * P8A_TICK);
+}
+
+// Renders the SFX's notes (following its own loop) starting at sample
+// `start`, never past `start + max_samples`.
 static void p8a_play_sfx (float *out, long out_len, long start, long max_samples,
                           int sfx_index, double pitch_shift, double vol_scale,
                           P8Voice *v, int depth)
@@ -155,12 +180,14 @@ static void p8a_play_sfx (float *out, long out_len, long start, long max_samples
     if (!s->present) return;
     bool loops;
     int  end = p8a_sfx_notes (s, &loops);
-    long note_len = (long) s->speed * P8A_TICK;
-    long pos = start, limit = start + max_samples;
+    long limit = start + max_samples;
     if (limit > out_len) limit = out_len;
     int  i = 0;
+    long count = 0;
 
-    while (pos < limit) {
+    while (start + p8a_note_at (s->speed, count) < limit) {
+        long pos      = start + p8a_note_at (s->speed, count);
+        long note_len = p8a_note_at (s->speed, count + 1) - p8a_note_at (s->speed, count);
         const P8Note *n = &s->notes[i];
         double base_freq = p8a_freq (n->pitch + pitch_shift);
         double vol = n->vol / 7.0 * vol_scale;
@@ -194,21 +221,21 @@ static void p8a_play_sfx (float *out, long out_len, long start, long max_samples
                 case 6: case 7: {                                              // arpeggio
                         int ticks = (n->fx == 6 ? 2 : 4) * (s->speed <= 8 ? 1 : 2) / 2;
                         if (ticks < 1) ticks = 1;
-                        int step = (int)((k / P8A_TICK) / ticks) & 3;
+                        int step = (int)((long)(k / P8A_TICK) / ticks) & 3;
                         f = p8a_freq (s->notes[grp + step].pitch + pitch_shift);
                         break; }
                 }
                 v->phase += f / P8A_RATE;
                 double smp = p8a_wave (v, n->wave, f) * a;
                 // short ramps into/out of silence, to avoid clicks
-                if (k < 64 && prev_vol == 0) smp *= k / 64.0;
-                if (next_silent && note_len - 1 - k < 64) smp *= (note_len - 1 - k) / 64.0;
+                if (k < 32 && prev_vol == 0) smp *= k / 32.0;
+                if (next_silent && note_len - 1 - k < 32) smp *= (note_len - 1 - k) / 32.0;
                 out[pos + k] += (float) smp;
             }
         }
         v->last_freq = base_freq;
         v->last_vol  = n->vol > 0 ? vol : 0;
-        pos += note_len;
+        count++;
         i++;
         if (i >= end) {
             if (!loops) break;
@@ -240,40 +267,58 @@ static bool p8a_write_vsnd (const char *path, const float *buf, long len)
     fwrite ("V32-VSND", 1, 8, f);
     fwrite (&n, 4, 1, f);
     for (long i = 0; i < len; i++) {
+        // Each channel is scaled as the 4-channel mix used to be: the SPU
+        // sums the channels, so the overall level is unchanged.
         double x = buf ? buf[i] * 0.7 : 0.0;
         if (x > 1.0) x = 1.0;
         if (x < -1.0) x = -1.0;
         int16_t v = (int16_t) lrint (x * 32767.0);
-        fwrite (&v, 2, 1, f);
+        fwrite (&v, 2, 1, f);            // the format is stereo: L and R
         fwrite (&v, 2, 1, f);
     }
     fclose (f);
     return true;
 }
 
-// Renders SFX n as a one-shot: one pass up to its loop end (sfx() on
-// Vircon32 doesn't loop).
+// Per-SFX sound layout, filled by register_pico8_sfx_sounds().
+typedef struct { long length; bool loops; long loop_start, loop_end; } P8SfxSound;
+static P8SfxSound p8a_snd[64];
+long pico8_audio_bytes = 0;
+
+// Renders SFX n: a non-looping SFX once (trailing silence trimmed); a
+// looping one up to its loop end, with the loop section's sample range.
 static long p8a_render_sfx (int n, float **out)
 {
     const P8Sfx *s = &p8a_sfx[n];
+    P8SfxSound  *d = &p8a_snd[n];
+    memset (d, 0, sizeof (*d));
     *out = NULL;
     if (!s->present) return 0;
     bool loops;
     int  notes = p8a_sfx_notes (s, &loops);
-    long len = (long) notes * s->speed * P8A_TICK;
-    if (len > (long) P8A_MAX_SECONDS * P8A_RATE) len = (long) P8A_MAX_SECONDS * P8A_RATE;
-
-    // One pass only (sfx() doesn't loop on Vircon32); trim trailing silence.
-    {
+    if (loops) {
+        bool any = false;
+        for (int i = 0; i < notes; i++) if (s->notes[i].vol > 0) any = true;
+        if (!any) return 0;
+    } else {
         int last = notes - 1;
         while (last >= 0 && s->notes[last].vol == 0) last--;
         if (last < 0) return 0;
-        len = (long)(last + 1) * s->speed * P8A_TICK;
+        notes = last + 1;
     }
+    long len = p8a_note_at (s->speed, notes);
+    if (len > (long) P8A_MAX_SECONDS * P8A_RATE) len = (long) P8A_MAX_SECONDS * P8A_RATE;
     float *buf = calloc ((size_t) len, sizeof (float));
     if (buf == NULL) return 0;
     P8Voice v = { .rng = 0x1234567u + (uint32_t) n };
     p8a_play_sfx (buf, len, 0, len, n, 0.0, 1.0, &v, 0);
+    d->length = len;
+    if (loops) {
+        d->loops      = true;
+        d->loop_start = p8a_note_at (s->speed, s->loop_start);
+        d->loop_end   = len - 1;
+        if (d->loop_start > d->loop_end) d->loop_start = 0;
+    }
     *out = buf;
     return len;
 }
@@ -291,6 +336,7 @@ bool register_pico8_sfx_sounds (void)
         float *buf;
         long len = p8a_render_sfx (n, &buf);
         p8a_write_vsnd (path, buf, len);
+        pico8_audio_bytes += 12 + 4 * (len > 0 ? len : 1);
         free (buf);
 
         snprintf (name, sizeof (name), "__pico8_sfx%02d", n);
@@ -302,7 +348,7 @@ bool register_pico8_sfx_sounds (void)
 }
 
 // ---------------------------------------------------------------------------
-// Music
+// Music: pattern table for the runtime sequencer
 // ---------------------------------------------------------------------------
 typedef struct {
     int  flags;
@@ -318,14 +364,17 @@ static bool p8a_pattern (int p, P8Pattern *pat)
     for (int c = 0; c < 4; c++) {
         int b = p8a_hex (l[3 + c * 2]) * 16 + p8a_hex (l[4 + c * 2]);
         pat->ch[c] = (b & 0x40) ? -1 : (b & 0x3F);
+        if (pat->ch[c] >= 0 && !p8a_sfx[pat->ch[c]].present) pat->ch[c] = -1;
         if (pat->ch[c] >= 0) any = true;
     }
     return any;
 }
 
-// Pattern length in samples: the leftmost non-looping channel decides; if
-// every channel loops, the leftmost channel's loop length does.
-static long p8a_pattern_len (const P8Pattern *pat)
+// Pattern length in frames: the leftmost non-looping channel decides; if
+// every channel loops, the leftmost channel's loop length does. PICO-8
+// counts the full 32 notes (or the SFX's set length) here, silence
+// included.
+static int p8a_pattern_frames (const P8Pattern *pat)
 {
     int first = -1;
     for (int c = 0; c < 4; c++) {
@@ -333,142 +382,57 @@ static long p8a_pattern_len (const P8Pattern *pat)
         const P8Sfx *s = &p8a_sfx[pat->ch[c]];
         bool loops;
         int notes = p8a_sfx_notes (s, &loops);
-        if (!loops) return (long) notes * s->speed * P8A_TICK;
+        if (!loops) return (int) ceil ((double) notes * s->speed / 2.0);
         if (first < 0) first = c;
     }
     if (first < 0) return 0;
     const P8Sfx *s = &p8a_sfx[pat->ch[first]];
     bool loops;
-    return (long) p8a_sfx_notes (s, &loops) * s->speed * P8A_TICK;
+    return (int) ceil ((double) p8a_sfx_notes (s, &loops) * s->speed / 2.0);
 }
 
-typedef struct { int pattern, id; int loop_start, loop_end; bool loops; } P8Song;
-static P8Song p8a_songs[64];
-static int    p8a_song_count = 0;
-
-int pico8_music_sound (int start, int *loop_start, int *loop_end, bool *loops)
+// Pattern following p: loop-end (flag 2) jumps back to the nearest pattern
+// at or before p with loop-start (flag 1), else to 0; stop (flag 4) or a
+// following empty pattern ends the song (-1).
+static int p8a_next_pattern (int p, const P8Pattern *pat)
 {
-    for (int i = 0; i < p8a_song_count; i++) {
-        if (p8a_songs[i].pattern == start) {
-            *loop_start = p8a_songs[i].loop_start;
-            *loop_end   = p8a_songs[i].loop_end;
-            *loops      = p8a_songs[i].loops;
-            return p8a_songs[i].id;
+    if (pat->flags & 2) {
+        for (int q = p; q >= 0; q--) {
+            P8Pattern lp;
+            if (p8a_pattern (q, &lp) && (lp.flags & 1)) return q;
         }
+        return 0;
     }
-    if (!pico8_has_audio () || start < 0 || start > 63 || p8a_song_count >= 64) return -1;
-    p8a_parse ();
-
-    // Sequence: start .. the first pattern with loop-end (loops back to the
-    // nearest loop-start at or before it) or stop, or an empty pattern.
-    int  order[64], count = 0, loop_to = -1;
-    bool song_loops = false;
-    for (int p = start; p < 64 && count < 64; p++) {
-        P8Pattern pat;
-        if (!p8a_pattern (p, &pat)) break;
-        order[count++] = p;
-        if (pat.flags & 2) {
-            for (int q = p; q >= 0; q--) {
-                P8Pattern lp;
-                if (p8a_pattern (q, &lp) && (lp.flags & 1)) { loop_to = q; break; }
-                if (q == 0) loop_to = 0;
-            }
-            song_loops = loop_to >= 0;
-            break;
-        }
-        if (pat.flags & 4) break;
-    }
-    if (count == 0) return -1;
-
-    long total = 0, loop_ofs = 0;
-    long lens[64];
-    for (int i = 0; i < count; i++) {
-        P8Pattern pat;
-        p8a_pattern (order[i], &pat);
-        lens[i] = p8a_pattern_len (&pat);
-        if (song_loops && order[i] == loop_to) loop_ofs = total;
-        total += lens[i];
-    }
-    // A loop back to a pattern before `start`: loop the whole rendered song.
-    if (song_loops && loop_to < start) loop_ofs = 0;
-    if (total > (long) P8A_MAX_SECONDS * P8A_RATE) total = (long) P8A_MAX_SECONDS * P8A_RATE;
-
-    float *buf = calloc ((size_t)(total > 0 ? total : 1), sizeof (float));
-    if (buf == NULL) return -1;
-    P8Voice voice[4];
-    for (int c = 0; c < 4; c++) memset (&voice[c], 0, sizeof (P8Voice)), voice[c].rng = 0xBEEF + c;
-    long pos = 0;
-    for (int i = 0; i < count && pos < total; i++) {
-        P8Pattern pat;
-        p8a_pattern (order[i], &pat);
-        for (int c = 0; c < 4; c++) {
-            if (pat.ch[c] < 0) continue;
-            voice[c].last_freq = 0;
-            p8a_play_sfx (buf, total, pos, lens[i], pat.ch[c], 0.0, 1.0, &voice[c], 0);
-        }
-        pos += lens[i];
-    }
-
-    char path[1024], name[64], suffix[16];
-    snprintf (suffix, sizeof (suffix), "music%02d", start);
-    p8a_output_path (path, sizeof (path), suffix);
-    p8a_write_vsnd (path, buf, total);
-    free (buf);
-
-    snprintf (name, sizeof (name), "__pico8_music%02d", start);
-    int id = next_sound_id++;
-    cart_resource_append (&sounds_head, &sounds_tail, id, name, path);
-
-    P8Song *sg = &p8a_songs[p8a_song_count++];
-    sg->pattern    = start;
-    sg->id         = id;
-    sg->loops      = song_loops;
-    sg->loop_start = (int) loop_ofs;
-    sg->loop_end   = (int)(total - 1);
-    *loop_start = sg->loop_start;
-    *loop_end   = sg->loop_end;
-    *loops      = sg->loops;
-    return id;
+    if (pat->flags & 4) return -1;
+    P8Pattern nx;
+    if (p + 1 < 64 && p8a_pattern (p + 1, &nx)) return p + 1;
+    return -1;
 }
 
-// ---------------------------------------------------------------------------
-// Dynamic music(n): every pattern that can start a song is rendered, and a
-// 64-entry ROM table maps pattern -> (sound id, loop start, loop end, loop
-// flag); __builtin_pico8_music (pico8.s) reads it. Entries are -1 for
-// patterns that don't start a song.
-// ---------------------------------------------------------------------------
-bool pico8_dynamic_music = false;
-
-void pico8_register_all_songs (void)
+// ROM tables for pico8.s: 64 x (loops, loop start, loop end) and
+// 64 patterns x (ch0..ch3 sound id or -1, length in frames, next pattern).
+// A pattern with length 0 is empty. Always emitted (all empty without
+// cart audio) so the runtime never special-cases absence.
+void emit_pico8_audio_tables (FILE *out)
 {
-    if (pico8_dynamic_music || !pico8_has_audio ()) return;
-    pico8_dynamic_music = true;
-    p8a_parse ();
-    bool prev_ends = true;               // pattern 0 starts a song
+    bool have = pico8_sfx_base_id >= 0;
+    if (have) p8a_parse ();
+    fprintf (out, "__pico8_sfx_loops:\n");
+    for (int n = 0; n < 64; n++) {
+        const P8SfxSound *d = &p8a_snd[n];
+        fprintf (out, "    integer %d, %ld, %ld\n", have && d->loops ? 1 : 0,
+                 have ? d->loop_start : 0L, have ? d->loop_end : 0L);
+    }
+    fprintf (out, "__pico8_patterns:\n");
     for (int p = 0; p < 64; p++) {
         P8Pattern pat;
-        bool present = p8a_pattern (p, &pat);
-        if (present && (prev_ends || (pat.flags & 1))) {
-            int ls, le; bool lp;
-            pico8_music_sound (p, &ls, &le, &lp);
+        if (!have || !p8a_pattern (p, &pat)) {
+            fprintf (out, "    integer -1, -1, -1, -1, 0, -1\n");
+            continue;
         }
-        prev_ends = !present || (pat.flags & 6);
-    }
-}
-
-void emit_pico8_music_table (FILE *out)
-{
-    fprintf (out, "__pico8_music_table:\n");
-    for (int p = 0; p < 64; p++) {
-        int id = -1, ls = 0, le = 0, lp = 0;
-        if (pico8_dynamic_music) {
-            for (int i = 0; i < p8a_song_count; i++) {
-                if (p8a_songs[i].pattern == p) {
-                    id = p8a_songs[i].id; ls = p8a_songs[i].loop_start;
-                    le = p8a_songs[i].loop_end; lp = p8a_songs[i].loops ? 1 : 0;
-                }
-            }
-        }
-        fprintf (out, "    integer %d, %d, %d, %d\n", id, ls, le, lp);
+        int id[4];
+        for (int c = 0; c < 4; c++) id[c] = pat.ch[c] >= 0 ? pico8_sfx_base_id + pat.ch[c] : -1;
+        fprintf (out, "    integer %d, %d, %d, %d, %d, %d\n", id[0], id[1], id[2], id[3],
+                 p8a_pattern_frames (&pat), p8a_next_pattern (p, &pat));
     }
 }

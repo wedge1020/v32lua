@@ -257,6 +257,7 @@ Pistas soportadas:
 | `--#title "TÍTULO"` | Establece el título del cartucho. |
 | `--#api "tic80"` / `--#api "pico8"` | Selecciona una capa de compatibilidad de API (ver arriba). |
 | `--#p8 "cart.p8"` | PICO-8: toma la hoja de sprites, las banderas de sprites y el mapa de un cartucho `.p8` (implica `--#api pico8`). |
+| `--#p8rate 11025` \| `22050` \| `44100` | PICO-8: frecuencia de muestreo de los sonidos sintetizados a partir del `__sfx__` del cartucho (por defecto 22050; ver [doc/PICO8.md](doc/PICO8.md#sound)). |
 | `--#texture NOMBRE "ruta/imagen.png"` | Registra un recurso de textura y lo vincula a una constante `NOMBRE` en tiempo de compilación. |
 | `--#sound NOMBRE "ruta/sonido.vsnd"` | Registra un recurso de sonido y lo vincula a una constante `NOMBRE` en tiempo de compilación. |
 | `--#tilemap NOMBRE "ruta/mapa.csv"` | Registra un mapa de mosaicos desde un archivo CSV, incrustado directamente en la imagen ROM (ver [doc/API.es.md](doc/API.es.md#mapa-de-mosaicos-tilemap)). |
@@ -848,13 +849,11 @@ una decisión de diseño:
 * Operadores a nivel de bits (`&`, `|`, `~`, `<<`, `>>`) y los `band`/
   `bor`/... de PICO-8; `string.format` como método (`("%d"):format(x)`) —
   use `string.format(...)`.
-* Audio PICO-8 sintetizado más pequeño: `__sfx__`/`__music__` se
-  convierten en PCM estéreo de 16 bits a 44,1 kHz (Celeste: ~66 MB de
-  `.vsnd`; es el único formato que reproduce el SPU). A explorar: guardar a
-  menor frecuencia y reproducir con el ajuste de velocidad del canal,
-  renderizar cada SFX una vez y montar las canciones con esas piezas en
-  tiempo de ejecución (un canal del SPU por canal de música) en lugar de
-  premezclar canciones completas, y compartir patrones idénticos.
+* Audio PICO-8 aún más pequeño: el sonido de un cartucho son ahora sus 64
+  SFX a 22050 Hz (Celeste: 18 MB, antes 66 MB). Secuenciar notas sueltas
+  en lugar de SFX completos lo reduciría más o menos a la mitad (cerca de
+  la mitad de las notas de Celeste se repiten), a costa de un secuenciador
+  por notas.
 * Recolección de basura: el heap es un asignador lineal, así que cada
   tabla, clausura y cadena en tiempo de ejecución vive hasta el reinicio.
   Los juegos de larga duración deberían reutilizar tablas en lugar de
