@@ -104,8 +104,9 @@ void  node_function_def (ASTNode *node)
 
     push_function_scope();
 
+    // Captured upvalues arrive as hidden leading parameters ([BP+2]...),
+    // pushed by __builtin_exec from the closure record.
     int param_offset  = 2;
-    int upvalue_count = name_list_length(node->as.function_def.upvalues);
 
     for (NameList *up = node->as.function_def.upvalues; up != NULL; up = up->next) {
         register_upvalue(up->name, param_offset++);

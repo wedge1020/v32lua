@@ -1,3 +1,4 @@
+--#title "[PICO8] celeste"
 --#api pico8
 --#p8 "celeste.p8"
 --#rate 11025

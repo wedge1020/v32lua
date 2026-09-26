@@ -176,6 +176,8 @@ _pico8_init_state:
     MOV   R0, 0xFFFFFFFF
     OUT   GPU_MultiplyColor, R0
     OUT   GPU_ActiveBlending, GPUBlendingMode_Alpha
+    MOV   R0, 1                          ; treat Start as held until first released
+    MOV   [PICO8_START_PREV], R0
 
     CALL  __builtin_pico8_reload
     CALL  __pico8_audio_init
@@ -2427,36 +2429,70 @@ _pico8_flip_wait:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; __builtin_pico8_pause_check: the TIC-80 layer's pause, for PICO-8 carts.
-;; Called once per PICO-8 tick (and by flip()). If gamepad 1's Start was just
-;; pressed: pause every SPU channel, darken the last frame with a translucent
-;; black overlay, print "- PAUSED -", and wait (drawing nothing, so the
-;; darkened frame stays up) until Start is pressed again. Then resume the
-;; channels and push the music sequencer's pattern-end frame forward by the
-;; time spent paused, so the song carries on where it stopped instead of
-;; skipping ahead. The cart's own code does not run while paused.
-;; Preserves registers (R0 clobbered).
+;; Called once per PICO-8 tick (and by flip()). If gamepad 1's Start went
+;; down since the last check: pause every SPU channel, darken the last frame
+;; with a translucent black overlay, print "- PAUSED -", and wait (drawing
+;; nothing, so the darkened frame stays up) until Start is pressed again.
+;; Then resume the channels and push the music sequencer's pattern-end frame
+;; forward by the time spent paused. The cart's own code does not run while
+;; paused. Preserves all registers except R0.
+;;
+;; Start is edge-detected against PICO8_START_PREV (held at the previous
+;; check), not by the port reading exactly 1: a tick is 2 frames at 30 fps,
+;; so a press seen first on the frame between two checks was missed.
+;; Every piece of GPU state this touches -- including what __builtin_print
+;; changes -- is saved on the stack and restored: keeping the multiply color
+;; in a register across the print CALL restored it as 0x000000AC (alpha 0),
+;; so nothing the cart drew after unpausing was visible.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 __builtin_pico8_pause_check:
-    IN    R0, INP_SelectedGamepad
-    PUSH  R0
+    PUSH  R1
+    IN    R1, INP_SelectedGamepad
+    PUSH  R1
+    CALL  __pico8_start_edge
+    JT    R0, _pico8_pause_enter
+    POP   R1
+    OUT   INP_SelectedGamepad, R1
+    POP   R1
+    RET
+
+;; __pico8_start_edge (internal): R0 = 1 if gamepad 1's Start is down now
+;; and wasn't at the previous call. Updates PICO8_START_PREV. Clobbers R1.
+__pico8_start_edge:
     OUT   INP_SelectedGamepad, 0
     IN    R0, INP_GamepadButtonStart
-    IEQ   R0, 1                          ; pressed on this very frame
-    JT    R0, _pico8_pause_enter
-    POP   R0
-    OUT   INP_SelectedGamepad, R0
+    IGT   R0, 0                          ; 1 while held
+    MOV   R1, [PICO8_START_PREV]
+    MOV   [PICO8_START_PREV], R0
+    JF    R0, _pico8_start_edge_done
+    MOV   R0, R1
+    IEQ   R0, 0                          ; held now, not before
+_pico8_start_edge_done:
     RET
+
 _pico8_pause_enter:
-    PUSH  R1
     PUSH  R2
-    PUSH  R3
-    IN    R1, TIM_FrameCounter           ; R1 = frame the pause began
+    IN    R0, TIM_FrameCounter
+    PUSH  R0                             ; [SP] = frame the pause began
     OUT   SPU_Command, SPUCommand_PauseAllChannels
 
+    ;; save the GPU state (restored after the overlay and the text)
+    IN    R0, GPU_SelectedTexture
+    PUSH  R0
+    IN    R0, GPU_SelectedRegion
+    PUSH  R0
+    IN    R0, GPU_DrawingPointX
+    PUSH  R0
+    IN    R0, GPU_DrawingPointY
+    PUSH  R0
+    IN    R0, GPU_DrawingScaleX
+    PUSH  R0
+    IN    R0, GPU_DrawingScaleY
+    PUSH  R0
+    IN    R0, GPU_MultiplyColor
+    PUSH  R0
+
     ;; darken: the black swatch stretched over the whole screen at ~60%
-    IN    R2, GPU_MultiplyColor
-    IN    R3, GPU_SelectedTexture
-    PUSH  R3
     OUT   GPU_SelectedTexture, 0
     MOV   R0, PICO8_SWATCH_REGION_BASE   ; color 0 = black
     OUT   GPU_SelectedRegion, R0
@@ -2480,26 +2516,36 @@ _pico8_pause_enter:
     PUSH  R0
     CALL  __builtin_print
     IADD  SP, 3
-    OUT   GPU_MultiplyColor, R2
-    POP   R3
-    OUT   GPU_SelectedTexture, R3
+
+    POP   R0
+    OUT   GPU_MultiplyColor, R0
+    POP   R0
+    OUT   GPU_DrawingScaleY, R0
+    POP   R0
+    OUT   GPU_DrawingScaleX, R0
+    POP   R0
+    OUT   GPU_DrawingPointY, R0
+    POP   R0
+    OUT   GPU_DrawingPointX, R0
+    POP   R0
+    OUT   GPU_SelectedRegion, R0
+    POP   R0
+    OUT   GPU_SelectedTexture, R0
 
 _pico8_pause_wait:
     WAIT
-    OUT   INP_SelectedGamepad, 0
-    IN    R0, INP_GamepadButtonStart
-    IEQ   R0, 1
+    CALL  __pico8_start_edge
     JF    R0, _pico8_pause_wait
 
     OUT   SPU_Command, SPUCommand_ResumeAllChannels
     IN    R0, TIM_FrameCounter
-    ISUB  R0, R1                         ; frames spent paused
+    POP   R2                             ; frame the pause began
+    ISUB  R0, R2                         ; frames spent paused
     MOV   R2, [PICO8_MUSIC_END]
     IADD  R2, R0
     MOV   [PICO8_MUSIC_END], R2
-    POP   R3
     POP   R2
+    POP   R1                             ; caller's selected gamepad
+    OUT   INP_SelectedGamepad, R1
     POP   R1
-    POP   R0
-    OUT   INP_SelectedGamepad, R0
     RET

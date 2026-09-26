@@ -188,7 +188,7 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
     }
     else if (strcmp(action, "version") == 0 && tokens >= 2) {
         // e.g., --#version 1.1
-        strncpy(cart_version, param1, sizeof(cart_version) - 1);
+        snprintf(cart_version, sizeof(cart_version), "%.*s", (int) sizeof(cart_version) - 1, param1);
         node->as.cart_hint.value = strdup(param1);
     }
     else if (strcmp(action, "title") == 0) {
@@ -197,7 +197,7 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
         if (sscanf(raw_hint, "%*s \"%127[^\"]\"", title_buf) == 1) {
             if (!g_cli_title_set) {    // --title on the command line wins
                 cart_title_was_set = true;
-                strncpy(cart_title, title_buf, sizeof(cart_title) - 1);
+                snprintf(cart_title, sizeof(cart_title), "%.*s", (int) sizeof(cart_title) - 1, title_buf);
             }
             node->as.cart_hint.value = strdup(title_buf);
         }

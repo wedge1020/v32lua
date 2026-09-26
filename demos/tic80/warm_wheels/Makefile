@@ -1,6 +1,6 @@
 # --- Configuration ---
-DEMO          = celeste
-LUA_COMPILER  = v32lua --rate 11025
+DEMO          = warm_wheels
+LUA_COMPILER  = ../../../bin/v32lua --rate 11025
 ASSEMBLER     = assemble
 TEXTURE_TOOL  = png2vircon
 PACKER        = packrom
@@ -27,9 +27,9 @@ prep:
 # Compile Lua to Assembly
 asm: obj/$(DEMO).asm
 
-obj/$(DEMO).asm: $(DEMO).p8
+obj/$(DEMO).asm: $(DEMO).lua
 	@mkdir -p bin obj
-	$(LUA_COMPILER) $(DEBUG_FLAGS) -o obj/$(DEMO).asm $(DEMO).p8
+	$(LUA_COMPILER) $(DEBUG_FLAGS) -o obj/$(DEMO).asm $(DEMO).lua
 	mv obj/$(DEMO).xml .
 
 # Assemble Assembly to Binary

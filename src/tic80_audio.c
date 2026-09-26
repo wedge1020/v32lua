@@ -128,6 +128,12 @@ typedef struct { int note, param1, param2, command, sfx, octave; } T80Row;
 
 static void t80_row (int pattern, int row, T80Row *r)
 {
+    // A track's 6-bit pattern field can name patterns 61-63, which don't
+    // exist (TIC-80 has 60): read them as empty rather than past the table.
+    if (pattern < 0 || pattern >= 60 || row < 0 || row >= 64) {
+        memset (r, 0, sizeof *r);
+        return;
+    }
     const uint8_t *b = t80_patterns + pattern * 192 + row * 3;
     r->note    = b[0] & 15;
     r->param1  = b[0] >> 4;
@@ -144,7 +150,11 @@ static int t80_pattern_id (int track, int frame, int channel)
     return (v >> (channel * 6)) & 63;
 }
 static int t80_track_tempo (int t) { return (int8_t) t80_tracks[t * 51 + 48] + 150; }
-static int t80_track_rows  (int t) { return 64 - t80_tracks[t * 51 + 49]; }
+static int t80_track_rows  (int t)             // stored as 64 - rows; keep 1..64
+{
+    int rows = 64 - t80_tracks[t * 51 + 49];
+    return rows < 1 ? 1 : (rows > 64 ? 64 : rows);
+}
 static int t80_track_speed (int t) { return (int8_t) t80_tracks[t * 51 + 50] + 6; }
 
 static bool t80_track_present (int t)

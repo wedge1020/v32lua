@@ -73,6 +73,10 @@ int emit_system_date_intrinsic(ASTNode *node, int dest_reg)
     emit_asm("    MOV R2, R1 ; return value 2: year\n");
     // R0 already holds the formatted string: return value 1
 
+    // single-value context (`local s = system.X()`, an argument): the
+    // caller's dest_reg gets the string; multi-value sites pass 0.
+    if (dest_reg != 0) emit_asm("    MOV R%d, R0 ; first return value\n", dest_reg);
+
     return 4;
 }
 
@@ -137,6 +141,10 @@ int emit_system_time_intrinsic(ASTNode *node, int dest_reg)
     emit_asm("    MOV R3, R2 ; return value 3: minute\n");
     emit_asm("    MOV R2, R1 ; return value 2: hour\n");
     // R0 already holds the formatted string: return value 1
+
+    // single-value context (`local s = system.X()`, an argument): the
+    // caller's dest_reg gets the string; multi-value sites pass 0.
+    if (dest_reg != 0) emit_asm("    MOV R%d, R0 ; first return value\n", dest_reg);
 
     return 4;
 }

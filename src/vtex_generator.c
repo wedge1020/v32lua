@@ -98,10 +98,13 @@ void generate_all_tic80_colorkey_textures(const char *base_path) {
 void generate_vtex_from_tic80(const char *output_path) {
     // For backward compatibility, generate just the opaque version
     // Extract base path without extension
+    // (was an unterminated strncpy for a 256+ character path, and cut at a
+    // dot in a directory name)
     char base_path[256];
-    strncpy(base_path, output_path, sizeof(base_path));
+    snprintf(base_path, sizeof(base_path), "%.*s", (int) sizeof(base_path) - 1, output_path);
     char *last_dot = strrchr(base_path, '.');
-    if (last_dot) {
+    char *last_slash = strrchr(base_path, '/');
+    if (last_dot && (!last_slash || last_dot > last_slash)) {
         *last_dot = '\0';
     }
     generate_vtex_from_tic80_with_colorkey(output_path, 16);  // Opaque version

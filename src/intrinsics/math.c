@@ -905,10 +905,13 @@ int  emit_math_modf_intrinsic(ASTNode *node, int dest_reg)
     emit_asm("    CALL __builtin_modf\n");
     emit_asm("    IADD SP, 1\n");
 
-    // ✅ FIX: Store BOTH return values (R0=int, R1=frac) in spill slots
-    // We can't use dest_reg here because it's a single register.
-    // Instead, we'll let node_multiple_assignment handle the registers.
+    // Both results stay in the multi-return registers (R0 = integral part,
+    // R2 = fraction) for node_multiple_assignment(). In a single-value
+    // context (`math.modf(x) + 1`, an argument) the caller passes a real
+    // dest_reg and wants the FIRST value there -- it used to be left in R0,
+    // so the expression read whatever dest_reg happened to hold.
     unlock_register(arg_reg);
+    if (dest_reg != 0) emit_asm("    MOV R%d, R0 ; first return value\n", dest_reg);
 
     // Mark that this intrinsic produces multiple values
     return 2;  // ✅ Return 2 to indicate TWO return values
@@ -933,6 +936,8 @@ int  emit_math_frexp_intrinsic(ASTNode *node, int dest_reg)
     emit_asm("    CALL __builtin_frexp\n");
     emit_asm("    IADD SP, 1\n");
     unlock_register(arg_reg);
+    // single-value context: the mantissa (see math.modf above)
+    if (dest_reg != 0) emit_asm("    MOV R%d, R0 ; first return value\n", dest_reg);
 
     // ✅ Return 2 to indicate TWO return values
     return 2;

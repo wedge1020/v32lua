@@ -13,7 +13,6 @@
 #include "config.h"
 #include "enums.h"
 #include "vtex_generator.h"
-#include "vsnd_generator.h"
 #include "pico8_assets.h"
 #include "tic80_assets.h"
 #include "emit.h"

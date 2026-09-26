@@ -220,9 +220,13 @@ int  main (int  argc, char** argv)
 
     // Default output filename to input_filename.asm if not specified by -o
     if (output_filename[0] == '\0') {
+        // (-5 leaves room for ".asm"; the array is zero-filled, so the copy
+        // stays terminated.) Only a dot after the last '/' is an extension:
+        // `v32lua ../game` must not become "..asm".
         strncpy(output_filename, input_filename, sizeof(output_filename) - 5);
         char* last_dot = strrchr(output_filename, '.');
-        if (last_dot != NULL) {
+        char* last_slash = strrchr(output_filename, '/');
+        if (last_dot != NULL && (last_slash == NULL || last_dot > last_slash)) {
             strcpy(last_dot, ".asm");
         } else {
             strcat(output_filename, ".asm");
@@ -376,7 +380,10 @@ int  main (int  argc, char** argv)
         }
         if (base == NULL) base = derive_cart_title_from_filename (input_filename);
         if (strncmp (base, prefix, strlen (prefix)) == 0) prefix = "";
-        snprintf (cart_title, sizeof (cart_title), "%s%s", prefix, base);
+        // Long names are cut to fit cart_title (the XML title has no fixed
+        // limit; the memory-card label takes the first 20 characters anyway).
+        int room = (int) (sizeof (cart_title) - 1 - strlen (prefix));
+        snprintf (cart_title, sizeof (cart_title), "%s%.*s", prefix, room, base);
         cart_title_was_set = true;
     }
     if (verbose) {
@@ -404,15 +411,19 @@ int  main (int  argc, char** argv)
         // that no longer determines whether textures need to exist at all.
         log_stage(3, "tic80 assets parsing", verbose);
 
+        // Output name minus its extension -- only a dot in the file name
+        // itself counts (`-o ./game` / `-o ../build/game` have dots in the
+        // directory part), and the copy is always NUL-terminated.
         char base_path[256];
-        strncpy(base_path, output_filename, sizeof(base_path));
+        strncpy(base_path, output_filename, sizeof(base_path) - 1);
+        base_path[sizeof(base_path) - 1] = '\0';
         char *last_dot = strrchr(base_path, '.');
-        if (last_dot) *last_dot = '\0';
+        char *last_slash = strrchr(base_path, '/');
+        if (last_dot && (!last_slash || last_dot > last_slash)) *last_dot = '\0';
 
         generate_all_tic80_colorkey_textures(base_path);
 
         // Register all 17 textures in CORRECT order (0-16)
-        CARTresource *prev = NULL;
         for (int tex_idx = 0; tex_idx < 17; tex_idx++) {
             char sheet_name[32];
             char sheet_path[512];

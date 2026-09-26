@@ -1,5 +1,8 @@
 #include "v32lua.h"
 
+static int  pin_reg   (int r);
+static void unpin_reg (int r, int was);
+
 // `_ENV[k]` / `_ENV[k] = v`: globals looked up by NAME at runtime, through a
 // table of (name, RAM address) for every global the program has, emitted
 // after codegen (emit_env_table()). Only when _ENV isn't a variable the
@@ -323,12 +326,13 @@ void  node_table_get (ASTNode *node, int  dest_reg)
         mark_register_live (t_reg, 3);
         generate_asm (node->as.table_get.table_expr, t_reg);
         ensure_in_register (t_reg);
+        int pt = pin_reg (t_reg);                  // k_reg must not be t_reg
         int k_reg = allocate_register ();          // literal: a MOV, no CALL
         mark_register_live (k_reg, 2);
         generate_asm (node->as.table_get.key, k_reg);
         ensure_in_register (k_reg);
-        ensure_in_register (t_reg);
         emit_getk_lookup (t_reg, k_reg, node->as.table_get.key, dest_reg);
+        unpin_reg (t_reg, pt);
         unlock_register (k_reg);
         unlock_register (t_reg);
         return;
@@ -342,19 +346,16 @@ void  node_table_get (ASTNode *node, int  dest_reg)
         mark_register_live (t_reg, 3);
         generate_asm (node->as.table_get.table_expr, t_reg);
         ensure_in_register (t_reg);
+        int pt = pin_reg (t_reg);                  // k_reg must not be t_reg
         int k_reg = allocate_register ();
         mark_register_live (k_reg, 2);
-        if (k_reg != t_reg)
-        {
-            generate_asm (node->as.table_get.key, k_reg);
-            ensure_in_register (k_reg);
-            emit_index_lookup (t_reg, k_reg, node->as.table_get.key, dest_reg);
-            unlock_register (k_reg);
-            unlock_register (t_reg);
-            return;
-        }
+        generate_asm (node->as.table_get.key, k_reg);
+        ensure_in_register (k_reg);
+        emit_index_lookup (t_reg, k_reg, node->as.table_get.key, dest_reg);
+        unpin_reg (t_reg, pt);
         unlock_register (k_reg);
         unlock_register (t_reg);
+        return;
     }
 
     // 4. Fallback: Dynamic heap table lookup.
@@ -400,6 +401,26 @@ void  node_table_get (ASTNode *node, int  dest_reg)
 // table_reg and key_reg hold the table and the boxed literal and are left
 // untouched; the value lands in dest_reg.
 // ---------------------------------------------------------------------------
+// While a table/key pair is in use, the allocator must not hand either
+// register out again as scratch. Their "live" distances are only hints and
+// run out after a few emitted instructions, after which Phase 2 treats them
+// as dead: the inline lookup below then got its scratch register == the
+// key register ("MOV R1, [R0+3] ; hash block" ... "IEQ R1, R1"), so the key
+// check always passed and a lookup returned whatever the probed slot held
+// (warm_wheels' menu: `s.selected[s.current] = ...` indexed nil). Pinning
+// is honoured by every allocation phase; the previous pin state is restored.
+static int pin_reg (int r)
+{
+    if (r <= 0 || r >= NUM_GPRS) return 1;
+    int was = register_pinned[r];
+    register_pinned[r] = 1;
+    return was;
+}
+static void unpin_reg (int r, int was)
+{
+    if (r > 0 && r < NUM_GPRS && !was) register_pinned[r] = 0;
+}
+
 void emit_getk_lookup (int table_reg, int key_reg, ASTNode *key, int dest_reg)
 {
     uint32_t h = 0x811C9DC5u;
@@ -409,6 +430,7 @@ void emit_getk_lookup (int table_reg, int key_reg, ASTNode *key, int dest_reg)
     }
     const char *ctx = get_current_function_name ();
     int id = get_next_label ();
+    int pt = pin_reg (table_reg), pk = pin_reg (key_reg);
     int a  = allocate_register ();
     mark_register_live (a, 1);
 
@@ -440,6 +462,8 @@ void emit_getk_lookup (int table_reg, int key_reg, ASTNode *key, int dest_reg)
     emit_asm ("MOV  R%d, R0\n", dest_reg);
     emit_asm ("__%s_getk_done_%d:\n", ctx, id);
     unlock_register (a);
+    unpin_reg (key_reg, pk);
+    unpin_reg (table_reg, pt);
 }
 
 
@@ -463,7 +487,10 @@ void emit_index_lookup (int table_reg, int key_reg, ASTNode *key, int dest_reg)
     else if (key->type != NODE_IDENTIFIER)
         goto general;             // string/nil/boolean literal: hash part
     {
+        int pt = pin_reg (table_reg), pk = pin_reg (key_reg);   // see pin_reg()
         int a = allocate_register ();
+        unpin_reg (key_reg, pk);
+        unpin_reg (table_reg, pt);
         mark_register_live (a, 1);
         emit_asm ("MOV  R0, R%d ; inline t[i]\n", table_reg);
         emit_asm ("AND  R0, BOXED_DATA\n");

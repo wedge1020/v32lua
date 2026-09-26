@@ -234,9 +234,9 @@ void  emit_asm (const char *format, ...) {
             last_emitted_dest[0] = '\0';
             last_emitted_src[0] = '\0';
         } else {
-            strncpy (last_emitted_inst, opcode, sizeof (last_emitted_inst) - 1);
-            strncpy (last_emitted_dest, dest ? dest : "", sizeof (last_emitted_dest) - 1);
-            strncpy (last_emitted_src,  src  ? src  : "", sizeof (last_emitted_src) - 1);
+            snprintf (last_emitted_inst, sizeof (last_emitted_inst), "%.*s", (int) sizeof (last_emitted_inst) - 1, opcode);
+            snprintf (last_emitted_dest, sizeof (last_emitted_dest), "%.*s", (int) sizeof (last_emitted_dest) - 1, dest ? dest : "");
+            snprintf (last_emitted_src,  sizeof (last_emitted_src),  "%.*s", (int) sizeof (last_emitted_src) - 1,  src  ? src  : "");
         }
 
         // Immediate stderr output in verbose debug mode
@@ -604,14 +604,16 @@ int   emit_variable_map (void)
         fprintf (out(), "%%define  PICO8_MUSIC_PATTERN      0x%.8X\n", (next_ram_address + 7));
         fprintf (out(), "%%define  PICO8_MUSIC_END          0x%.8X\n", (next_ram_address + 8));
         fprintf (out(), "%%define  PICO8_SFX_NEXT           0x%.8X\n", (next_ram_address + 9));
+        fprintf (out(), "%%define  PICO8_START_PREV         0x%.8X\n", (next_ram_address + 10));
         // SFX sound ids start here (-1: the cart plays no synthesized sound)
         fprintf (out(), "%%define  PICO8_SFX_BASE           %d\n", pico8_sfx_base_id);
         fprintf (out(), "%%define  PICO8_AUDIO_RATE         %d\n", synth_audio_rate);
         fprintf (out(), "%%define  PICO8_AUDIO_SPEED        %.4f\n", synth_audio_rate / 44100.0);
         // camera x, y (floats), pen (int), tick frame, draw start frame /
         // cycle, last draw's cost in cycles, music sequencer state (current
-        // pattern, frame it ends on), next auto sfx channel
-        next_ram_address    = next_ram_address + 10;
+        // pattern, frame it ends on), next auto sfx channel, Start held at
+        // the last pause check
+        next_ram_address    = next_ram_address + 11;
         fprintf (out(), "%%define  PICO8_FLAGS_RAM          0x%.8X\n", next_ram_address);
         next_ram_address    = next_ram_address + 256;
         fprintf (out(), "%%define  PICO8_MAP_RAM            0x%.8X\n", next_ram_address);
@@ -1177,9 +1179,8 @@ void emit_cart_title_label(const char *input_filename)
         title_source = derive_cart_title_from_filename(input_filename);
     }
 
-    char truncated[21] = {0};
-    strncpy(truncated, title_source, 20);
-    truncated[20] = '\0';
+    char truncated[21];
+    snprintf(truncated, sizeof(truncated), "%.20s", title_source);
 
     fprintf(out(), ";; --- Cart Title (Vircon32 memory card formatting, max 20 chars) ---\n");
     fprintf(out(), "__cart_title:\n");

@@ -225,3 +225,11 @@
     .global runtime_constant_end
     runtime_constant_end:
 #endif
+
+/* ELF targets: mark the object as not needing an executable stack. An
+   assembler source without this note makes GNU ld assume one ("missing
+   .note.GNU-stack section implies executable stack") and warn. Mach-O
+   (macOS) has no such section. */
+#if defined(__ELF__)
+    .section .note.GNU-stack,"",%progbits
+#endif

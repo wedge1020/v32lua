@@ -287,6 +287,19 @@ bool emit_vircon32_btn_intrinsic(ASTNode *node, int dest_reg)
 
     bool has_player = (arg_count >= 2);
 
+    // Literal id, current gamepad: read the port inline (the common
+    // `btn(5)` in a game loop) instead of CALLing the runtime's 11-way
+    // dispatch. Same test as __builtin_vircon32_btn: pressed = port >= 1.
+    double lit_id;
+    if (!has_player && spu_static_number(args[0], &lit_id) &&
+        lit_id >= 0 && lit_id <= 10 && lit_id == (int) lit_id) {
+        int r = (dest_reg != 0) ? dest_reg : 0;
+        emit_asm("IN   R%d, %s\n", r, vircon32_button_ports[(int) lit_id]);
+        emit_asm("IGE  R%d, 1 ; 1 while pressed\n", r);
+        emit_asm("IADD R%d, BOXED_FALSE ; 0/1 -> false/true\n", r);
+        return true;
+    }
+
     // Push player or nil (to indicate "use current gamepad")
     if (has_player) {
         int reg = allocate_register();
