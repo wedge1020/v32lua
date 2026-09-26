@@ -1,0 +1,25 @@
+#!/bin/bash
+# runlua file.lua [v32run args...]  -- compile with v32lua, assemble, run.
+# Panic handlers are trapped automatically; on a trap or hardware error the
+# faulting location, recent trail and call stack are printed.
+T=$(cd "$(dirname "$0")" && pwd)
+V32LUA=${V32LUA:-$T/../../bin/v32lua}
+f=$1; shift; b=${f%.lua}; b=${b%.p8}
+d=$(dirname $f); bn=$(basename $f)
+( cd $d && $V32LUA -w $bn -o $(basename $b).asm ) > $b.clog 2>&1 || { echo "COMPILE FAIL"; cat $b.clog; exit 1; }
+( cd $d && $T/Assembler $(basename $b).asm -o $(basename $b).vbin -g program ) > $b.alog 2>&1 || { echo "ASSEMBLE FAIL"; cat $b.alog; exit 1; }
+traps=""
+for lab in __runtime_error_not_callable __runtime_error_not_table __runtime_error_hash_overflow __oom_handler __panic_halt; do
+  a=$(grep ",$lab\$" $b.vbin.debug | head -1 | cut -d, -f1); [ -n "$a" ] && traps="$traps,${a#0x}"
+done
+$T/v32run $b.vbin -a $b.asm ${traps:+-t ${traps#,}} "$@" > $b.run
+grep -v "^TRAIL\|^STACK\|^TRAP" $b.run
+if grep -q "^TRAP" $b.run; then
+  echo "$(grep '^TRAP' $b.run) -> $(python3 $T/where.py $b.vbin.debug $b.asm $(grep '^TRAP' $b.run | awk '{print $3}') | sed 's/.* in //')"
+  echo "--- trail"; python3 $T/where.py $b.vbin.debug $b.asm $(grep "^TRAIL" $b.run | cut -d' ' -f2-) | uniq | tail -${TRAIL:-12}
+  echo "--- call stack"; python3 $T/where.py $b.vbin.debug $b.asm $(grep "^STACK" $b.run | cut -d' ' -f2-)
+fi
+ip=$(grep -o "HWERROR.*ip=[0-9A-F]*" $b.run | grep -o "ip=[0-9A-F]*" | cut -d= -f2)
+if [ -n "$ip" ]; then
+  i=$((16#$ip)); python3 $T/where.py $b.vbin.debug $b.asm $(printf "%X %X" $((i-2)) $((i-1)))
+fi
