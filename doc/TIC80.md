@@ -75,6 +75,14 @@ drawn with `DrawRegionRotozoomed`, and multi-tile sprites pick their source
 tiles and cells exactly as TIC-80 does (all 16 flip × rotate combinations,
 1×1 and 2×2, checked pixel by pixel against TIC-80's mapping).
 
+## Input
+
+`btn(id)` and `btnp(id, hold, period)` follow TIC-80's `core/io.c`: `id` is
+floored and masked to 0–31, and `btnp` is true on the press frame and, when
+`hold` and `period` are both given and ≥ 0, again while the button stays held
+once it has been down `hold` frames, every `period` frames (`period` 0: every
+frame). There is no default autorepeat.
+
 ## Pause
 
 Start (gamepad 1) pauses: `TIC()` stops, every SPU channel pauses, one dimmed

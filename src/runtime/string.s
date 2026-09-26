@@ -1855,6 +1855,21 @@ __string_format_handle_s:
     MOV  R2, R0
     IEQ  R2, BOXED_NIL
     JT   R2, __string_format_arg_nil
+    ;; %s applies tostring() to its argument, as Lua does: a number, boolean,
+    ;; table or function is converted first. Unboxing a number as if it were
+    ;; a string pointer read from a wild address ("invalid memory read" on
+    ;; tomb_of_the_tic's level-clear screen, format("%s / %s", score, ...)).
+    PUSH R1
+    PUSH R4
+    PUSH R5
+    PUSH R6
+    PUSH R0
+    CALL __builtin_tostring_scratch_a
+    IADD SP, 1
+    POP  R6
+    POP  R5
+    POP  R4
+    POP  R1
     PUSH R1                     ; save loop state: __unbox_string clobbers R1
     CALL __unbox_string
     POP  R1
@@ -1876,6 +1891,21 @@ __string_format_handle_q:
     MOV  R2, R0
     IEQ  R2, BOXED_NIL
     JT   R2, __string_format_arg_nil
+    ;; Only strings are quoted; a number/boolean is written as a literal
+    ;; (Lua 5.4), which is what %s produces.
+    MOV  R2, R0
+    AND  R2, BOXED_DATA
+    IEQ  R2, BOXED_ROMSTRING
+    JT   R2, __string_format_q_is_string
+    MOV  R2, R0
+    AND  R2, BOXED_DATA
+    IEQ  R2, BOXED_RAMSTRING
+    JF   R2, __string_format_handle_s
+    MOV  R2, R0                 ; false/true share the RAM-string tag
+    AND  R2, BOXED_PAYLOAD      ; (payloads 1/2); real strings are >= 4
+    ILT  R2, 4
+    JT   R2, __string_format_handle_s
+__string_format_q_is_string:
     PUSH R1                     ; save loop state: __unbox_string clobbers R1
     CALL __unbox_string
     POP  R1

@@ -577,9 +577,18 @@ __builtin_tic80_btn:
     PUSH  BP
     MOV   BP, SP
 
-    ;; --- 1. Get Button ID ---
+    ;; --- 1. Button ID: a number, floored, & 31 as TIC-80 does (so the
+    ;; gamepad index below is always 0-3). nil / non-numbers: false --
+    ;; CFI of a NaN-boxed value is host-dependent garbage (0x80000000 on
+    ;; x86 made IDIV/IMOD produce a negative gamepad number).
     MOV   R2, [BP+2]
-    CFI   R2 ; convert button ID to int
+    MOV   R1, R2
+    AND   R1, NAN_VALUE
+    IEQ   R1, NAN_VALUE
+    JT    R1, _tic80_btn_false
+    FLR   R2
+    CFI   R2
+    AND   R2, 31
 
     ;; --- isolate gamepad #, distill R2 to the button 0-7 id on gamepad
     MOV   R3, R2
@@ -672,10 +681,10 @@ _tic80_btn_end:
 ;;
 ;; Returns BOXED_TRUE or BOXED_FALSE in R0
 ;;
-;; TIC-80 btnp behavior:
-;; - Returns true only if button was pressed since last frame
-;; - With hold/period: returns true after 'hold' frames, then every 'period' frames
-;; - Default TIC-80 behavior: hold=6, period=4 (different from PICO-8's 15,4)
+;; TIC-80 btnp behavior (see _tic80_btnp_eval):
+;; - Returns true on the frame the button goes down
+;; - With hold/period: also while held, from 'hold' frames on, every
+;;   'period' frames (every frame for period 0). No default autorepeat.
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -683,9 +692,18 @@ __builtin_tic80_btnp:
     PUSH  BP
     MOV   BP, SP
 
-    ;; --- 1. Evaluate Button ID ---
+    ;; --- 1. Button ID: a number, floored, & 31 as TIC-80 does (so the
+    ;; gamepad index below is always 0-3). nil / non-numbers: false --
+    ;; CFI of a NaN-boxed value is host-dependent garbage (0x80000000 on
+    ;; x86 made IDIV/IMOD produce a negative gamepad number).
     MOV   R2, [BP+2]
+    MOV   R1, R2
+    AND   R1, NAN_VALUE
+    IEQ   R1, NAN_VALUE
+    JT    R1, _tic80_btnp_false
+    FLR   R2
     CFI   R2
+    AND   R2, 31
 
     ;; --- isolate gamepad #, distill R2 to the button 0-7 id on gamepad
     MOV   R3, R2
@@ -749,52 +767,58 @@ _tic80_btnp_x:
 _tic80_btnp_y:
     IN    R2, INP_GamepadButtonY
 
+;; TIC-80 semantics (core/io.c tic_api_btnp): true on the frame the
+;; button goes down; with hold and period given (both >= 0), also while it
+;; is held, once h >= hold, every frame if period is 0, else whenever
+;; h % period == 0 -- h = frames held after the first (TIC-80's holds[],
+;; = the Vircon32 counter - 1). There is NO default autorepeat.
+;;
+;; (Replaced: `IEQ R3, -1` / `IEQ R4, -1` overwrote hold and period with
+;; the 0/1 compare result, so an explicit btnp(id, hold, period) ran
+;; IMOD by 0 -- a CPU division error -- and an invented 6/4 autorepeat
+;; applied to plain btnp(id).)
 _tic80_btnp_eval:
-    ;; R2 now contains Frames Held (>0) or Frames Released (<=0)
-
-    ;; Load hold and period parameters (with defaults)
-    MOV   R3, [BP+3]        ; hold parameter
-    CFI   R3
-    ;; If hold is -1, use TIC-80 default of 6
-    IEQ   R3, -1
-    JT    R3, _tic80_btnp_use_default_hold
-    JMP   _tic80_btnp_check_hold
-_tic80_btnp_use_default_hold:
-    MOV   R3, 6             ; TIC-80 default hold frames
-
-_tic80_btnp_check_hold:
-    MOV   R4, [BP+4]        ; period parameter
-    CFI   R4
-    ;; If period is -1, use TIC-80 default of 4
-    IEQ   R4, -1
-    JT    R4, _tic80_btnp_use_default_period
-    JMP   _tic80_btnp_check_period
-_tic80_btnp_use_default_period:
-    MOV   R4, 4             ; TIC-80 default period frames
-
-_tic80_btnp_check_period:
-    ;; Condition A: Is button not pressed?
+    ;; R2 = frames held (> 0) or frames since release (<= 0)
     MOV   R1, R2
     ILT   R1, 1
-    JT    R1, _tic80_btnp_false   ; If < 1, return false
-
-    ;; Condition B: Initial Press (Frame 1)
+    JT    R1, _tic80_btnp_false         ; not pressed
     MOV   R1, R2
     IEQ   R1, 1
-    JT    R1, _tic80_btnp_true    ; If exactly 1, return true
+    JT    R1, _tic80_btnp_true          ; pressed on this frame
 
-    ;; Condition C: Hold Phase (Frames 2 to hold-1)
-    MOV   R1, R2
-    ILT   R1, R3            ; Compare with hold parameter
-    JT    R1, _tic80_btnp_false   ; If < hold (and > 1), return false
+    ;; hold: a number >= 0, else no autorepeat
+    MOV   R3, [BP+3]
+    MOV   R1, R3
+    AND   R1, NAN_VALUE
+    IEQ   R1, NAN_VALUE
+    JT    R1, _tic80_btnp_false
+    FLR   R3
+    CFI   R3
+    MOV   R1, R3
+    ILT   R1, 0
+    JT    R1, _tic80_btnp_false
+    ;; period: a number >= 0, else no autorepeat
+    MOV   R4, [BP+4]
+    MOV   R1, R4
+    AND   R1, NAN_VALUE
+    IEQ   R1, NAN_VALUE
+    JT    R1, _tic80_btnp_false
+    FLR   R4
+    CFI   R4
+    MOV   R1, R4
+    ILT   R1, 0
+    JT    R1, _tic80_btnp_false
 
-    ;; Condition D: Autorepeat Phase (Frames >= hold)
-    ;; Logic: (FramesHeld - hold) % period == 0
+    ISUB  R2, 1                         ; h
     MOV   R1, R2
-    ISUB  R1, R3            ; Subtract hold frames
-    IMOD  R1, R4            ; Modulo period
-    IEQ   R1, 0             ; Is remainder 0?
-    JT    R1, _tic80_btnp_true    ; If yes, return true
+    ILT   R1, R3
+    JT    R1, _tic80_btnp_false         ; h < hold
+    MOV   R1, R4
+    IEQ   R1, 0
+    JT    R1, _tic80_btnp_true          ; period 0: every frame
+    IMOD  R2, R4                        ; period > 0 here
+    IEQ   R2, 0
+    JT    R2, _tic80_btnp_true
 
 _tic80_btnp_false:
     MOV   R0, BOXED_FALSE
