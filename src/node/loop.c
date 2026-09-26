@@ -468,6 +468,10 @@ void node_for_generic(ASTNode *node)
     mark_register_live(key_reg, 10);
 
     ASTNode *iter_list_head = node->as.for_generic.iter_expr;
+    // Set when the iterator is known at compile time (the pairs()/ipairs()
+    // built-ins): the loop CALLs that routine directly, skipping
+    // __builtin_exec's check/unbox of a function value on every iteration.
+    const char *direct_iter = NULL;
 
     if (iter_list_head != NULL && iter_list_head->next != NULL) {
         // Explicit list form: f, s, var (var is optional -> defaults to nil)
@@ -524,7 +528,9 @@ void node_for_generic(ASTNode *node)
     } else {
         // Single-expression form: pairs(t) / ipairs(t) / any call that
         // itself returns 3 values via R0/R2/R3.
+        iter_intrinsic_node = NULL;
         generate_asm(iter_list_head, 0);
+        if (iter_intrinsic_node == iter_list_head) direct_iter = iter_intrinsic_label;
     }
 
     // ---------------------------------------------------------------------
@@ -627,10 +633,14 @@ void node_for_generic(ASTNode *node)
     unlock_register(arg_reg);
 
     // Call iterator function
-    get_variable_access_string(iter_func_var, access_iter);
-    emit_asm("MOV R0, %s        ; Load iterator function\n", access_iter);
-    emit_asm("MOV R%d, 2 ; argument count (variadic ABI)\n", VARARG_COUNT_REG);
-    emit_asm("CALL __builtin_exec ; Validate and execute iterator (unboxes tag, handles closures)\n");
+    if (direct_iter != NULL) {
+        emit_asm("CALL %s ; the built-in iterator, called directly\n", direct_iter);
+    } else {
+        get_variable_access_string(iter_func_var, access_iter);
+        emit_asm("MOV R0, %s        ; Load iterator function\n", access_iter);
+        emit_asm("MOV R%d, 2 ; argument count (variadic ABI)\n", VARARG_COUNT_REG);
+        emit_asm("CALL __builtin_exec ; Validate and execute iterator (unboxes tag, handles closures)\n");
+    }
     emit_asm("IADD SP, 2         ; Clean up 2 arguments\n");
 
     // Iterator results come back via R0/R2/R3. Lock R2/R3 BEFORE allocating

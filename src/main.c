@@ -70,6 +70,10 @@ static void  print_usage (const char *prog_name)
     fprintf (stdout, "                   [PICO8] / [TIC80] in those API modes\n");
     fprintf (stdout, "  --rate <hz>      Sample rate of sounds synthesized from a PICO-8 or TIC-80\n");
     fprintf (stdout, "                   cart: 11025, 22050 (default), 44100 (--p8rate: same)\n");
+    fprintf (stdout, "  --no-bezel       PICO-8: black side margins instead of the side panels\n");
+    fprintf (stdout, "  --fast-circles   TIC-80/PICO-8: draw filled circles above radius 31 as a\n");
+    fprintf (stdout, "                   scaled disc (1 draw instead of ~1.2 per radius; about\n");
+    fprintf (stdout, "                   1.5%% of the edge pixels differ). Outlines stay exact\n");
     fprintf (stdout, "\nInput files: .lua, .p8 (PICO-8 cart), .tic (TIC-80 cart, Lua only)\n");
 }
 
@@ -188,6 +192,11 @@ int  main (int  argc, char** argv)
                 fprintf(stderr, "Compiler Error: --rate must be 11025, 22050 or 44100 (got '%s')\n", val);
                 return 1;
             }
+        } else if (strcmp(argv[i], "--no-bezel") == 0) {
+            pico8_bezel_enabled = false;
+            g_cli_bezel_set = true;
+        } else if (strcmp(argv[i], "--fast-circles") == 0) {
+            shapes_fast = true;
         } else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
             strncpy(output_filename, argv[++i], sizeof(output_filename) - 1);
         } else if (strcmp(argv[i], "-g") == 0) {
@@ -455,6 +464,7 @@ int  main (int  argc, char** argv)
         char sheet_path[300], vtex_path[310];
         snprintf (sheet_path, sizeof (sheet_path), "%s_pico8", base_path);
         snprintf (vtex_path, sizeof (vtex_path), "%s.vtex", sheet_path);
+        pico8_bezel_build (cart_title);      // side panels, with the final title
         generate_vtex_from_pico8 (vtex_path, pico8_gfx_pixel, 0);
 
         if (textures_head != NULL) {

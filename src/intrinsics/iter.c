@@ -1,5 +1,11 @@
 #include "v32lua.h"
 
+// The pairs()/ipairs() call most recently compiled and its iterator
+// routine: node_for_generic() calls that routine directly (no
+// __builtin_exec) when its iterator expression is exactly that call.
+ASTNode    *iter_intrinsic_node  = NULL;
+const char *iter_intrinsic_label = NULL;
+
 bool emit_ipairs_intrinsic(ASTNode *node) {
     // ipairs(t) returns 3 values via the same R0/R2/R3 convention used
     // everywhere else multi-value returns flow in this compiler (see
@@ -33,6 +39,8 @@ bool emit_ipairs_intrinsic(ASTNode *node) {
     // Writing R0 first is always safe; copying table_reg into R2 BEFORE
     // touching R3 means that even if table_reg == R3, its value is
     // captured into R2 before R3 gets overwritten.
+    iter_intrinsic_node  = node;       // a for-in over this call can CALL the iterator directly
+    iter_intrinsic_label = "__builtin_ipairs_iter";
     emit_asm("MOV R0, __builtin_ipairs_iter ; Iterator function\n");
     emit_asm("OR R0, BOXED_FUNCTION  ; Box as function\n");
     emit_asm("MOV R2, R%d            ; State = table\n", table_reg);
@@ -68,6 +76,8 @@ bool emit_pairs_intrinsic(ASTNode *node) {
     // We use the built-in __builtin_next as the iterator function.
     // Same ordering rationale as ipairs: R0 first (table_reg is never
     // R0), then R2 = table_reg before R3 might clobber it if they alias.
+    iter_intrinsic_node  = node;
+    iter_intrinsic_label = "__builtin_next";
     emit_asm("MOV R0, __builtin_next ; Iterator function\n");
     emit_asm("OR R0, BOXED_FUNCTION  ; Box as function\n");
     emit_asm("MOV R2, R%d            ; State = table\n", table_reg);

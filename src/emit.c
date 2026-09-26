@@ -623,6 +623,7 @@ int   emit_variable_map (void)
         fprintf (out(), "%%define  PICO8_MAP_RAM            0x%.8X\n", next_ram_address);
         next_ram_address    = next_ram_address + (PICO8_MAP_WIDTH * PICO8_MAP_HEIGHT) / 4;
         fprintf (out(), "%%define  PICO8_FRAME_STEP         %d\n", pico8_frame_step);
+        fprintf (out(), "%%define  PICO8_BEZEL              %d\n", pico8_bezel_enabled ? 1 : 0);
         lines_printed      += 6;
     }
 
@@ -631,6 +632,7 @@ int   emit_variable_map (void)
     {
         fprintf (out(), "%%define  SHAPES_TEXTURE           %d\n", shapes_texture_id);
         fprintf (out(), "%%define  SHAPES_MAX_R             %d\n", SHAPES_MAX_R);
+        fprintf (out(), "%%define  SHAPES_FAST              %d\n", shapes_fast ? 1 : 0);
     }
 
     // Unconditional -- see the allocation comment in main.c.
@@ -866,6 +868,16 @@ void  emit_runtime_library (void)
                      word, (w % 8 == 7) ? "\n" : ", ");
         }
 
+        // Is tile 0 fully transparent in colorkey texture k (0-15; 16 is
+        // opaque)? map() skips drawing such cells -- usually most of a map.
+        fprintf (out(), "\n__tic80_tile0_empty:\n    integer ");
+        for (int k = 0; k <= 16; k++) {
+            int empty = (k < 16);
+            for (int y = 0; y < 8 && empty; y++)
+                for (int x = 0; x < 8 && empty; x++)
+                    if ((get_tic80_tile_pixel (x, y) & 15) != k) empty = 0;
+            fprintf (out(), "%d%s", empty, k < 16 ? ", " : "\n");
+        }
         emit_tic80_ram_rom (out());
         emit_shapes_runtime (out());
 

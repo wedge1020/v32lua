@@ -1269,127 +1269,139 @@ _tic80_map_scale_ok:
     ILT   R11, 1
     JT    R11, _tic80_map_done
 
-_tic80_map_row_loop_prestart:
-    MOV   R9, 0
-_tic80_map_row_loop_start:
-    MOV   R7, R9           ; Use R7 as scratch for condition check
-    IGE   R7, R4
-    JT    R7, _tic80_map_done
+    ;; Tiles are drawn right here, placed exactly as spr(tile, x, y,
+    ;; colorkey, scale) places them (texture per colorkey, scale x 2.625,
+    ;; floor(pos * 2.625 + 0.5)). This used to CALL __builtin_tic80_spr per
+    ;; tile -- 13 register saves, 9 pushed arguments and spr's general
+    ;; argument decoding, ~240 cycles a tile; now ~30. The GPU keeps its
+    ;; texture, scale and DrawingPointY between draws, so those are set once
+    ;; per call / per row.
+    MOV   R0, [BP+8]                     ; colorkey -> texture (as spr)
+    FLR   R0
+    CFI   R0
+    MOV   R11, R0
+    ILT   R11, 0
+    JT    R11, _tic80_map_opaque
+    MOV   R11, R0
+    IGT   R11, 15
+    JF    R11, _tic80_map_tex
+_tic80_map_opaque:
+    MOV   R0, 16
+_tic80_map_tex:
+    OUT   GPU_SelectedTexture, R0
+    ISUB  SP, 3                          ; [BP-14] [BP-15] [BP-16], below
+    MOV   R11, __tic80_tile0_empty
+    IADD  R0, R11
+    MOV   R0, [R0]
+    MOV   [BP-16], R0                    ; 1: tile 0 draws nothing here -- skip it
+    MOV   R0, [BP+9]                     ; scale, as spr receives it
+    FMUL  R0, 2.625
+    OUT   GPU_DrawingScaleX, R0
+    OUT   GPU_DrawingScaleY, R0
+    MOV   R0, 0.0
+    OUT   GPU_DrawingAngle, R0
 
-    ;; Inner loop: columns (R10)
-    MOV   R10, 0
+    ;; map cell origin, wrapped into TIC-80's 240 x 136 map
+    IMOD  R5, 240
+    MOV   R11, R5
+    ILT   R11, 0
+    JF    R11, _tic80_map_sx_ok
+    IADD  R5, 240
+_tic80_map_sx_ok:
+    IMOD  R6, 136
+    MOV   R11, R6
+    ILT   R11, 0
+    JF    R11, _tic80_map_sy_ok
+    IADD  R6, 136
+_tic80_map_sy_ok:
+    MOV   [BP-14], R5                    ; first map column
+    MOV   R0, var_TIC80_MAP_WIDTH
+    MOV   R0, [R0]
+    MOV   [BP-15], R0                    ; stored map width
+    MOV   R0, var_TIC80_MAP_HEIGHT
+    MOV   R5, [R0]                       ; R5 = stored map height
+
+    MOV   R9, 0                          ; row
+_tic80_map_row_loop_start:
+    MOV   R7, R9
+    IGE   R7, R4
+    JT    R7, _tic80_map_rows_done
+    ;; this row's screen y, and its map row (R8 = row start, or -1 when the
+    ;; stored map has no such row: those cells read as tile 0)
+    MOV   R0, R9
+    IMUL  R0, R13
+    IADD  R0, R2
+    CIF   R0
+    FMUL  R0, 2.625
+    FADD  R0, 0.5
+    FLR   R0
+    CFI   R0
+    OUT   GPU_DrawingPointY, R0
+    MOV   R8, -1
+    MOV   R0, R6
+    ILT   R0, R5
+    JF    R0, _tic80_map_row_ready
+    MOV   R8, R6
+    MOV   R0, [BP-15]
+    IMUL  R8, R0
+    IADD  R8, R12
+_tic80_map_row_ready:
+    MOV   R11, [BP-14]                   ; map column
+    MOV   R10, 0                         ; col
 _tic80_map_col_loop_start:
-    MOV   R7, R10          ; Use R7 as scratch for condition check
+    MOV   R7, R10
     IGE   R7, R3
     JT    R7, _tic80_map_row_loop_next
-
-    ;; Calculate map cell position: (sx + col, sy + row)
-    ;; Map cell = (x + col, y + row), wrapped into TIC-80's 240 x 136 map
-    ;; like TIC-80 does; cells the cart's MAP data doesn't cover read as 0.
-    MOV   R7, R5
-    IADD  R7, R10
-    IMOD  R7, 240
-    MOV   R11, R7
-    ILT   R11, 0
-    JF    R11, _tic80_map_x_wrapped
-    IADD  R7, 240
-_tic80_map_x_wrapped:
-    MOV   R8, R6
-    IADD  R8, R9
-    IMOD  R8, 136
-    MOV   R11, R8
-    ILT   R11, 0
-    JF    R11, _tic80_map_y_wrapped
-    IADD  R8, 136
-_tic80_map_y_wrapped:
-    MOV   R11, var_TIC80_MAP_WIDTH
-    MOV   R11, [R11]
-    MOV   R0, R7
-    IGE   R0, R11
-    JT    R0, _tic80_map_empty_cell      ; x beyond stored map
-    MOV   R0, var_TIC80_MAP_HEIGHT
-    MOV   R0, [R0]
-    ILE   R0, R8
-    JT    R0, _tic80_map_empty_cell      ; y beyond stored map
-    IMUL  R8, R11                        ; y * width
-    IADD  R7, R8                         ; cell index
-    MOV   R8, R12
-    IADD  R8, R7
-    MOV   R7, [R8]                       ; tile index
-    JMP   _tic80_map_have_cell
-_tic80_map_empty_cell:
+    MOV   R7, 0                          ; tile (0 outside the stored map)
+    MOV   R0, R8
+    ILT   R0, 0
+    JT    R0, _tic80_map_have_cell
+    MOV   R0, R11
+    MOV   R7, [BP-15]
+    ILT   R0, R7
     MOV   R7, 0
+    JF    R0, _tic80_map_have_cell
+    MOV   R0, R8
+    IADD  R0, R11
+    MOV   R7, [R0]
 _tic80_map_have_cell:
-
-    PUSH  R1               ; x save
-    PUSH  R2               ; y save
-    PUSH  R3               ; w save
-    PUSH  R4               ; h save
-    PUSH  R5               ; sx save
-    PUSH  R6               ; sy save
-    PUSH  R7
-    PUSH  R8
-    PUSH  R9
-    PUSH  R10              ; column index save
-    PUSH  R11
-    PUSH  R12
-    PUSH  R13              ; color_key save
-    
-    ;; Push arguments for __builtin_tic80_spr (in reverse order)
-    MOV   R0, 1.0
-    PUSH  R0               ; h = 1.0
-    PUSH  R0               ; w = 1.0
-    MOV   R0, 0
-    PUSH  R0               ; rotate = 0
-    PUSH  R0               ; flip = 0
-    MOV   R0, [BP+9]
-    PUSH  R0               ; scale
-
-    MOV   R0, [BP+8]       ; color_key
-    PUSH  R0               ; color_key (safely preserved!)
-    
-    ;; Calculate screen Y position: y + row*8
-    MOV   R0, R9           ; R0 = row
-    IMUL  R0, R13          ; row * cell size
-    IADD  R0, R2           ; R0 = screen_y + row*8
+    JT    R7, _tic80_map_draw
+    MOV   R0, [BP-16]
+    JT    R0, _tic80_map_skip            ; an empty tile 0: nothing to draw
+_tic80_map_draw:
+    OUT   GPU_SelectedRegion, R7
+    MOV   R0, R10
+    IMUL  R0, R13
+    IADD  R0, R1
     CIF   R0
-    PUSH  R0               ; y
-
-    MOV   R0, R10          ; R0 = col (loop counter)
-    IMUL  R0, R13          ; R0 = col * cell size
-    IADD  R0, R1           ; R0 = x + col * 8 (screen coordinate)
-    CIF   R0
-    PUSH  R0               ; x
-    
-    MOV   R0, R7
-    CIF   R0
-    PUSH  R0               ; id
-
-    CALL  __builtin_tic80_spr
-
-    IADD  SP, 9
-
-    POP   R13              ; color_key restore
-    POP   R12
-    POP   R11
-    POP   R10              ; column index restore
-    POP   R9
-    POP   R8
-    POP   R7
-    POP   R6               ; sy restore
-    POP   R5               ; sx restore
-    POP   R4               ; h restore
-    POP   R3               ; w restore
-    POP   R2               ; y restore
-    POP   R1               ; x restore
-
-    ;; Next column
-    IADD  R10, 1           ; R10 has been clobbered by __builtin_tic80_spr
+    FMUL  R0, 2.625
+    FADD  R0, 0.5
+    FLR   R0
+    CFI   R0
+    OUT   GPU_DrawingPointX, R0
+    OUT   GPU_Command, GPUCommand_DrawRegionZoomed
+_tic80_map_skip:
+    IADD  R11, 1                         ; next map column, wrapping at 240
+    MOV   R0, R11
+    ILT   R0, 240
+    JT    R0, _tic80_map_col_next
+    MOV   R11, 0
+_tic80_map_col_next:
+    IADD  R10, 1
     JMP   _tic80_map_col_loop_start
 
 _tic80_map_row_loop_next:
+    IADD  R6, 1                          ; next map row, wrapping at 136
+    MOV   R0, R6
+    ILT   R0, 136
+    JT    R0, _tic80_map_row_wrapped
+    MOV   R6, 0
+_tic80_map_row_wrapped:
     IADD  R9, 1
     JMP   _tic80_map_row_loop_start
+
+_tic80_map_rows_done:
+    IADD  SP, 3
 
 _tic80_map_done:
     ;; Restore registers
@@ -2094,12 +2106,31 @@ __tic80_circ_common:
     MOV   R0, R10
     ILT   R0, 0
     JT    R0, _tic80_circ_done
-    MOV   R0, R10
-    IGT   R0, SHAPES_MAX_R
-    JT    R0, _tic80_circ_steps
     MOV   R0, SHAPES_TEXTURE
     ILT   R0, 0
     JT    R0, _tic80_circ_steps
+    MOV   R4, 2.625                ; draw scale
+    MOV   R3, R10                 ; the shape's radius
+    MOV   R0, R10
+    IGT   R0, SHAPES_MAX_R
+    JF    R0, _tic80_circ_atlas
+    ;; --fast-circles: a filled circle beyond the atlas is its largest disc,
+    ;; scaled to cover the 2r + 1 pixels (outlines are always drawn exactly)
+    MOV   R0, SHAPES_FAST
+    JF    R0, _tic80_circ_steps
+    JF    R11, _tic80_circ_steps
+    MOV   R3, SHAPES_MAX_R
+    MOV   R0, R10
+    SHL   R0, 1
+    IADD  R0, 1
+    CIF   R0
+    FMUL  R4, R0
+    MOV   R0, SHAPES_MAX_R
+    SHL   R0, 1
+    IADD  R0, 1
+    CIF   R0
+    FDIV  R4, R0
+_tic80_circ_atlas:
 
     ;; --- one draw from the shape atlas ---
     MOV   R1, __tic80_palette
@@ -2109,15 +2140,14 @@ __tic80_circ_common:
     MOV   R6, R0                 ; multiply color to restore
     IN    R7, GPU_SelectedTexture
     OUT   GPU_SelectedTexture, SHAPES_TEXTURE
-    MOV   R1, R10
+    MOV   R1, R3
     JT    R11, _tic80_circ_region
     IADD  R1, SHAPES_MAX_R
     IADD  R1, 1                  ; outlines follow the filled shapes
 _tic80_circ_region:
     OUT   GPU_SelectedRegion, R1
-    MOV   R1, 2.625
-    OUT   GPU_DrawingScaleX, R1
-    OUT   GPU_DrawingScaleY, R1
+    OUT   GPU_DrawingScaleX, R4
+    OUT   GPU_DrawingScaleY, R4
     MOV   R1, R8
     ISUB  R1, R10
     CIF   R1

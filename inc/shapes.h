@@ -7,6 +7,7 @@
 #define SHAPES_REGIONS  (2 * (SHAPES_MAX_R + 1))
 
 extern int   shapes_texture_id;
+extern bool  shapes_fast;
 
 bool  shapes_wanted       (const char *, bool);
 bool  shapes_build        (const char *, bool);

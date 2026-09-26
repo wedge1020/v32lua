@@ -27,8 +27,27 @@ char *process_string_literal (const char *text, int  len)
                 case 'r': processed[j++] = '\r'; break;
                 case '\\': processed[j++] = '\\'; break;
                 case '"':  processed[j++] = '"'; break;
-                // Add more cases here if you want to support \a, \b, or \0
+                case '\'': processed[j++] = '\''; break;
+                case 'x':               // \xHH (Lua 5.2+)
+                    if (i + 2 < len - 1 && isxdigit ((unsigned char) text[i + 1]) &&
+                        isxdigit ((unsigned char) text[i + 2])) {
+                        char hex[3] = { text[i + 1], text[i + 2], 0 };
+                        processed[j++] = (char) strtol (hex, NULL, 16);
+                        i += 2;
+                    } else {
+                        processed[j++] = text[i];
+                    }
+                    break;
                 default: 
+                    if (isdigit ((unsigned char) text[i])) {   // \ddd, up to 3 digits
+                        int v = 0, k = 0;
+                        while (k < 3 && i < len - 1 && isdigit ((unsigned char) text[i])) {
+                            v = v * 10 + (text[i] - '0'); i++; k++;
+                        }
+                        i--;
+                        processed[j++] = (char) (v & 255);
+                        break;
+                    }
                     // Unrecognized escape sequence, just keep the character
                     processed[j++] = text[i]; 
                     break;
@@ -40,6 +59,7 @@ char *process_string_literal (const char *text, int  len)
         i++;
     }
     processed[j] = '\0'; // Ensure it is null-terminated for the C-side
+    if (runtime_req.needs_pico8) pico8_fold_glyphs (processed);
     return (processed);
 }
 
@@ -373,6 +393,7 @@ static int compound_assign_token (NodeType op)
                             char *str = (char *) malloc (len + 1);
                             memcpy (str, yytext + start, len);
                             str[len] = '\0';
+                            if (runtime_req.needs_pico8) pico8_fold_glyphs (str);
                             yylval.string_val  = str;
                             return (TOKEN_STRING);
                         }

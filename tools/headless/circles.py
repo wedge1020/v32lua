@@ -6,7 +6,9 @@
 # 0-45 plus a few large ones -- the shape-atlas path up to SHAPES_MAX_R, the
 # octant-run path above), runs it headless with a GPU log, rebuilds each
 # frame with render.py and compares every console pixel with the reference
-# below. Also prints the GPU draws per circle.
+# below. Also prints the GPU draws per circle. --fast builds the carts with
+# --#fast-circles: filled circles above the atlas are then approximations,
+# reported as the share of their pixels that differ, not as failures.
 #   TIC-80  core/draw.c drawEllipse() (Zingl) on the bounding square; circ()
 #           fills each row between its outermost outline pixels.
 #   PICO-8  the midpoint circle as zepto8 draws it (err from 0, x steps when
@@ -101,9 +103,13 @@ function _draw()
 end
 '''}
 
-def check(api):
+def check(api, fast=False):
     d = tempfile.mkdtemp(prefix='circles_')
-    open(os.path.join(d, 'c.lua'), 'w').write(CART[api])
+    src = CART[api]
+    if fast:
+        first, rest = src.split('\n', 1)
+        src = first + '\n--#fast-circles\n' + rest
+    open(os.path.join(d, 'c.lua'), 'w').write(src)
     env = dict(os.environ, V32_FIXED_TIME='1')
     subprocess.run([T + '/runlua', 'c.lua', '-f', '240', '-q', '-g'], cwd=d, env=env,
                    capture_output=True, check=True)
@@ -115,7 +121,7 @@ def check(api):
     else:
         texs = ['c_pico8.vtex', 'c_shapes.vtex']
         W, H, S, OX, OY, CX, CY, fil, out = 128, 128, 2.75, 144, 4, 64, 64, p8_filled, p8_outline
-    bad, draws, ink = 0, {}, None
+    bad, draws, ink, approx = 0, {}, None, []
     for i, (mode, r) in enumerate(CASES):
         fr = frames[i]
         subprocess.run(['python3', T + '/render.py', 'c.run', str(fr), 'f.png'] + texs, cwd=d, check=True)
@@ -126,15 +132,21 @@ def check(api):
         ref = {(x, y) for x, y in ref if 0 <= x < W and 0 <= y < H and not (x < 4 and y < 4)}
         got = {(x, y) for y in range(H) for x in range(W) if not (x < 4 and y < 4) and px(x, y) == ink}
         draws[(mode, r)] = sum(1 for l in run if l.startswith('F%d GPU Draw' % fr))
-        if got != ref:
+        if fast and mode and r > 31:
+            approx.append((r, 100.0 * len(ref ^ got) / max(1, len(ref))))
+        elif got != ref:
             bad += 1
             print('%s %s r=%d: %d missing, %d extra' % (api, 'filled' if mode else 'outline', r,
                                                       len(ref - got), len(got - ref)))
     print('%s: %d circles, %d pixel mismatches' % (api, len(CASES), bad))
     print('  GPU draws (filled / outline):', ', '.join('r=%d %d/%d' % (r, draws[(1, r)], draws[(0, r)])
                                                       for r in (5, 31, 32, 45, 100)))
+    if approx:
+        print('  --fast-circles, filled r > 31: pixels differing',
+              ', '.join('r=%d %.1f%%' % a for a in approx if a[0] in (32, 40, 45, 60, 100)))
     return bad
 
 if __name__ == '__main__':
-    apis = sys.argv[1:] or ['tic80', 'pico8']
-    sys.exit(1 if sum(check(a) for a in apis) else 0)
+    fast = '--fast' in sys.argv
+    apis = [a for a in sys.argv[1:] if a != '--fast'] or ['tic80', 'pico8']
+    sys.exit(1 if sum(check(a, fast) for a in apis) else 0)

@@ -71,21 +71,36 @@ void generate_vtex_from_pico8 (const char *output_path,
     }
 
     VTEXHeader hdr = { .width = PICO8_SHEET_WIDTH,
-                       .height = PICO8_SWATCH_TEX_HEIGHT };
+                       .height = PICO8_TEX_HEIGHT };
     memcpy (hdr.magic, "V32-VTEX", 8);
     fwrite (&hdr, sizeof (hdr), 1, f);
 
-    uint8_t *pixel_bytes = malloc (PICO8_SHEET_WIDTH * PICO8_SWATCH_TEX_HEIGHT * 4);
+    uint8_t *pixel_bytes = malloc (PICO8_SHEET_WIDTH * PICO8_TEX_HEIGHT * 4);
     if (!pixel_bytes) {
         fclose (f);
         return;
     }
 
-    for (int y = 0; y < PICO8_SWATCH_TEX_HEIGHT; y++) {
+    for (int y = 0; y < PICO8_TEX_HEIGHT; y++) {
         for (int x = 0; x < PICO8_SHEET_WIDTH; x++) {
             uint8_t red, green, blue, alpha;
 
-            if (y >= PICO8_SWATCH_ROW_Y) {
+            if (y >= PICO8_GLYPH_Y) {
+                // --- P8SCII glyph icons (pico8_bezel.c): white, tinted by print ---
+                red = green = blue = alpha = 0;
+                if (pico8_glyph_pixel (x, y - PICO8_GLYPH_Y)) red = green = blue = alpha = 0xFF;
+            } else if (y >= PICO8_BEZEL_Y) {
+                // --- Side panels (pico8_bezel.c): opaque palette art ---
+                alpha = 0;
+                red = green = blue = 0;
+                if (x < PICO8_BEZEL_W) {
+                    uint32_t color = pico8_palette [pico8_bezel_index (x, y - PICO8_BEZEL_Y) & 15];
+                    blue  = (color >> 16) & 0xFF;
+                    green = (color >> 8)  & 0xFF;
+                    red   =  color        & 0xFF;
+                    alpha = 0xFF;
+                }
+            } else if (y >= PICO8_SWATCH_ROW_Y) {
                 // --- Swatch row: 16 solid 3x3 cells, regions 256-271 ---
                 // cell c occupies x in [c*4, c*4+2]; x%4==3 is the gap.
                 int col   = x / PICO8_SWATCH_STRIDE;
@@ -124,7 +139,7 @@ void generate_vtex_from_pico8 (const char *output_path,
         }
     }
 
-    fwrite (pixel_bytes, 1, PICO8_SHEET_WIDTH * PICO8_SWATCH_TEX_HEIGHT * 4, f);
+    fwrite (pixel_bytes, 1, PICO8_SHEET_WIDTH * PICO8_TEX_HEIGHT * 4, f);
     free (pixel_bytes);
     fclose (f);
 }

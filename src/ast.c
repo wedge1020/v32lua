@@ -186,6 +186,18 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
         }
         node->as.cart_hint.value = strdup(param1);
     }
+    else if (strcmp(action, "bezel") == 0 && tokens >= 2) {
+        // --#bezel off | on -- PICO-8 side panels (pico8_bezel.c)
+        const char *v = param1[0] == '"' ? param1 + 1 : param1;
+        if (!g_cli_bezel_set) pico8_bezel_enabled = (strncmp (v, "off", 3) != 0);
+        node->as.cart_hint.value = strdup (param1);
+    }
+    else if (strcmp(action, "fast-circles") == 0) {
+        // --#fast-circles: filled circles above the shape atlas's largest
+        // radius are drawn as that disc, scaled (1 draw; ~1.5% of the edge
+        // pixels differ from the console's). Outlines are always exact.
+        shapes_fast = true;
+    }
     else if (strcmp(action, "version") == 0 && tokens >= 2) {
         // e.g., --#version 1.1
         snprintf(cart_version, sizeof(cart_version), "%.*s", (int) sizeof(cart_version) - 1, param1);

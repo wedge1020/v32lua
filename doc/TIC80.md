@@ -89,6 +89,18 @@ circles are drawn from the algorithm, one rectangle per run of pixels
 (the first octant's runs and their mirror images), about 1.8× faster than
 before. The pause screen's dimming applies to them like to everything else.
 
+With `--fast-circles` (or `--#fast-circles`) a filled circle larger than
+radius 31 is the radius-31 disc scaled up: one draw instead of ~1.2 per unit
+of radius (2,893 → 200 cycles at radius 40), with about 1.5% of its edge
+pixels differing from TIC-80's. Outlines are never approximated: scaling a
+ring thickens it.
+
+`map` draws its cells itself (it used to call `spr` for each one): the
+texture, scale and row position are set once, each cell costs ~30 cycles
+instead of ~240, and cells showing tile 0 are skipped when tile 0 is fully
+transparent under the call's color key. Pixel-identical to before; about 9×
+faster (witchem_up's gameplay went from 991 overrun frames in 2,500 to 5).
+
 `rect` is one scaled draw of a solid swatch, `rectb` four. Their
 arguments are truncated to integers as TIC-80 does, and a width or height
 of 0 or less draws nothing (it used to draw the rectangle mirrored).

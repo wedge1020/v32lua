@@ -63,6 +63,26 @@ static ASTNode *make_method_function_assignment (ASTNode *func_def, char *table,
     return table_set;
 }
 
+// An assignment target must be a variable or a table field; the grammar
+// accepts any prefix expression there (so that `a.b` needn't be spelled out
+// twice -- that duplication made the grammar ambiguous) and checks here.
+static ASTNode *assign_target (ASTNode *e)
+{
+    if (e->type != NODE_IDENTIFIER && e->type != NODE_TABLE_GET) {
+        compiler_error (ERR_SYNTAX, yylineno,
+            "cannot assign to this expression (only a variable or a table field)");
+    }
+    return e;
+}
+
+static ASTNode *append_node (ASTNode *list, ASTNode *item)
+{
+    ASTNode *curr = list;
+    while (curr->next) curr = curr->next;
+    curr->next = item;
+    return list;
+}
+
 // PICO-8's peek operators (@a, %a, $a) as calls of peek/peek2/peek4 --
 // PICO-8-only, like the other PICO-8 operators.
 static ASTNode *make_peek_call (const char *name, ASTNode *addr)
@@ -87,12 +107,18 @@ static ASTNode *make_peek_call (const char *name, ASTNode *addr)
     ASTNode *ast_node;
 }
 
-//%expect 5
+/* The two shift/reduce conflicts are Lua's own ambiguity: a '(' after a
+   complete expression, or after a call statement, could continue it as a
+   call or start the next statement ("a = b\n(f)()"). Both are resolved by
+   shifting -- a call -- which is what Lua 5.2+ (and PICO-8) do. Any other
+   conflict is a grammar error: bison stops if the count changes. */
+%expect 2
 
 /* --- AST Node Types --- */
 %type <ast_node> parameter_list
 %type <ast_node> argument_list
-%type <ast_node> var_list       /* Added for multiple assignment */
+%type <ast_node> var_list       /* assignment targets (prefix expressions) */
+%type <ast_node> name_list      /* local / for-in names */
 %type <ast_node> expr_list      /* Added for multiple assignment */
 %type <ast_node> tic80_section tic80_asset_lines
 
@@ -261,7 +287,18 @@ if_start:
     ;
 
 statement:
-      function_call              { $$ = $1; }
+      prefix_expr {
+        /* A call as a statement. The grammar takes any prefix expression
+           here and checks it is a call: a separate `statement: function_call`
+           made `f()` followed by '(' a reduce/reduce conflict (which bison
+           resolved as two statements, so `f()(x)` didn't parse). Now it is
+           a shift/reduce resolved as Lua 5.2+ does: `f()(x)` is one call. */
+        if ($1->type != NODE_FUNCTION_CALL) {
+            compiler_error(ERR_SYNTAX, yylineno,
+                "syntax error: an expression on its own is not a statement (only a call is)");
+        }
+        $$ = $1;
+    }
     | TOKEN_PRINT_SHORT expr_list {
         /* PICO-8 `?a, b, c` == print(a, b, c) */
         $$ = make_node(NODE_FUNCTION_CALL);
@@ -279,12 +316,17 @@ statement:
         $$->as.id.name = $2;
     }
     | var_list '=' expr_list {
-        $$ = make_node(NODE_MULTIPLE_ASSIGNMENT);
-        $$->as.mult_assign.targets_head = $1;
-        $$->as.mult_assign.values_head = $3;
-        $$->as.mult_assign.is_local = 0;
+        if ($1->next == NULL && $1->type == NODE_TABLE_GET && $3->next == NULL) {
+            /* t.k = v / t[k] = v: a single table store */
+            $$ = make_node_table_set ($1->as.table_get.table_expr, $1->as.table_get.key, $3);
+        } else {
+            $$ = make_node(NODE_MULTIPLE_ASSIGNMENT);
+            $$->as.mult_assign.targets_head = $1;
+            $$->as.mult_assign.values_head = $3;
+            $$->as.mult_assign.is_local = 0;
+        }
     }
-    | TOKEN_LOCAL var_list '=' expr_list {
+    | TOKEN_LOCAL name_list '=' expr_list {
         $$ = make_node(NODE_MULTIPLE_ASSIGNMENT);
         $$->as.mult_assign.targets_head = $2;
         $$->as.mult_assign.values_head = $4;
@@ -358,16 +400,6 @@ statement:
             $$ = make_node_table_set(table_expr, key, new_val);
         }
     }
-    | prefix_expr '[' expr ']' '=' expr
-    { 
-        // $1 = table, $3 = key, $6 = value being assigned
-        $$ = make_node_table_set ($1, $3, $6); 
-    }
-    | prefix_expr '.' TOKEN_IDENTIFIER '=' expr
-    {
-        ASTNode *string_key  = make_node_string ($3);
-        $$                   = make_node_table_set ($1, string_key, $5);
-    }
     | while_start expr TOKEN_DO statement_list TOKEN_END {
         $$ = $1;
         $$->as.while_loop.condition = $2;
@@ -400,7 +432,7 @@ statement:
         $$->as.for_numeric.step_expr   = $8;  // Explicit step
         $$->as.for_numeric.body        = $10;
     }
-    | for_start var_list TOKEN_IN expr_list TOKEN_DO statement_list TOKEN_END {
+    | for_start name_list TOKEN_IN expr_list TOKEN_DO statement_list TOKEN_END {
         $$ = make_node(NODE_FOR_GENERIC);
         $$->as.for_generic.var_list    = $2;
         $$->as.for_generic.iter_expr   = $4;
@@ -503,7 +535,7 @@ statement:
         // workaround.
         $$ = make_node_do_block ($2);
     }
-    | TOKEN_LOCAL var_list {
+    | TOKEN_LOCAL name_list {
         $$ = make_node(NODE_MULTIPLE_ASSIGNMENT);
         $$->as.mult_assign.is_local = 1;
         $$->as.mult_assign.targets_head = $2;
@@ -719,37 +751,20 @@ else_branch:
 
 /* --- LIST RULES FOR MULTIPLE ASSIGNMENT --- */
 var_list:
+    prefix_expr {
+        $$ = assign_target ($1);
+    }
+    | var_list ',' prefix_expr {
+        $$ = append_node ($1, assign_target ($3));
+    }
+    ;
+
+name_list:
     TOKEN_IDENTIFIER {
         $$ = make_node_ident($1);
     }
-    | prefix_expr '.' TOKEN_IDENTIFIER {
-        ASTNode *string_key = make_node_string ($3);
-        $$ = make_node_table_get ($1, string_key);
-    }
-    | prefix_expr '[' expr ']' {
-        $$ = make_node_table_get ($1, $3);
-    }
-    | var_list ',' TOKEN_IDENTIFIER {
-        ASTNode* new_ident = make_node_ident($3);
-        ASTNode* curr = $1;
-        while(curr->next) curr = curr->next;
-        curr->next = new_ident;
-        $$ = $1;
-    }
-    | var_list ',' prefix_expr '.' TOKEN_IDENTIFIER {
-        ASTNode *string_key = make_node_string ($5);
-        ASTNode *new_target = make_node_table_get ($3, string_key);
-        ASTNode* curr = $1;
-        while(curr->next) curr = curr->next;
-        curr->next = new_target;
-        $$ = $1;
-    }
-    | var_list ',' prefix_expr '[' expr ']' {
-        ASTNode *new_target = make_node_table_get ($3, $5);
-        ASTNode* curr = $1;
-        while(curr->next) curr = curr->next;
-        curr->next = new_target;
-        $$ = $1;
+    | name_list ',' TOKEN_IDENTIFIER {
+        $$ = append_node ($1, make_node_ident($3));
     }
     ;
 
@@ -940,66 +955,36 @@ expr:
     ;
 
 function_call:
-    TOKEN_IDENTIFIER '(' argument_list ')' {
+    prefix_expr '(' argument_list ')' {
         ASTNode* node = make_node(NODE_FUNCTION_CALL);
-        node->as.call.target = make_node_ident($1);
-        node->as.call.is_method_call = 0; 
+        node->as.call.target = $1;
+        node->as.call.is_method_call = 0;
         node->as.call.args_head = $3;
         pico8_parse_rewrite_peek(node);   /* peek(a, n): several values */
         $$ = node;
     }
-    | prefix_expr '.' TOKEN_IDENTIFIER '(' argument_list ')' {
-        ASTNode* node = make_node(NODE_FUNCTION_CALL);
-        node->as.call.is_method_call = 0;
-        
-        // Dynamically look up the function inside the table
-        ASTNode* dynamic_lookup = make_node(NODE_TABLE_GET);
-        dynamic_lookup->as.table_get.table_expr = $1;
-        dynamic_lookup->as.table_get.key = make_node_string($3);
-        node->as.call.target = dynamic_lookup;
-        node->as.call.args_head = $5;
-        $$ = node;
-    }
     | prefix_expr ':' TOKEN_IDENTIFIER '(' argument_list ')' {
         ASTNode* node = make_node(NODE_FUNCTION_CALL);
-        node->as.call.target = $1;
         node->as.call.is_method_call = 1;
-        
         ASTNode* dynamic_lookup = make_node(NODE_TABLE_GET);
         dynamic_lookup->as.table_get.table_expr = $1;
         dynamic_lookup->as.table_get.key = make_node_string($3);
         node->as.call.target = dynamic_lookup;
         node->as.call.args_head = $5;
-        $$ = node;
-    }
-    | prefix_expr '(' argument_list ')' {
-        ASTNode* node = make_node(NODE_FUNCTION_CALL);
-        node->as.call.target = $1;
-        node->as.call.is_method_call = 0;
-        node->as.call.args_head = $3;
         $$ = node;
     }
     /* Lua's single-argument call forms: f"str" and f{table} */
-    | TOKEN_IDENTIFIER TOKEN_STRING {
+    | prefix_expr TOKEN_STRING {
         $$ = make_node(NODE_FUNCTION_CALL);
-        $$->as.call.target = make_node_ident($1);
+        $$->as.call.target = $1;
         $$->as.call.is_method_call = 0;
         $$->as.call.args_head = make_node_string($2);
     }
-    | TOKEN_IDENTIFIER table_constructor {
+    | prefix_expr table_constructor {
         $$ = make_node(NODE_FUNCTION_CALL);
-        $$->as.call.target = make_node_ident($1);
+        $$->as.call.target = $1;
         $$->as.call.is_method_call = 0;
         $$->as.call.args_head = $2;
-    }
-    | prefix_expr '.' TOKEN_IDENTIFIER TOKEN_STRING {
-        ASTNode* dynamic_lookup = make_node(NODE_TABLE_GET);
-        dynamic_lookup->as.table_get.table_expr = $1;
-        dynamic_lookup->as.table_get.key = make_node_string($3);
-        $$ = make_node(NODE_FUNCTION_CALL);
-        $$->as.call.target = dynamic_lookup;
-        $$->as.call.is_method_call = 0;
-        $$->as.call.args_head = make_node_string($4);
     }
     | prefix_expr ':' TOKEN_IDENTIFIER TOKEN_STRING {
         ASTNode* dynamic_lookup = make_node(NODE_TABLE_GET);

@@ -136,7 +136,7 @@ _pico8_init_swatches:
 _pico8_init_swatch_loop:
     MOV   R0, R2
     IEQ   R0, 16
-    JT    R0, _pico8_init_state
+    JT    R0, _pico8_init_panels
 
     OUT   GPU_SelectedRegion, R1
     MOV   R3, R2
@@ -155,6 +155,55 @@ _pico8_init_swatch_loop:
     IADD  R1, 1
     IADD  R2, 1
     JMP   _pico8_init_swatch_loop
+
+_pico8_init_panels:
+    ;; side panels (pico8_bezel.c): regions 272 (left) / 273 (right), 48x120
+    MOV   R1, 272
+    OUT   GPU_SelectedRegion, R1
+    MOV   R3, 132
+    OUT   GPU_RegionMinX, 0
+    OUT   GPU_RegionHotspotX, 0
+    OUT   GPU_RegionMaxX, 47
+    OUT   GPU_RegionMinY, R3
+    OUT   GPU_RegionHotspotY, R3
+    MOV   R4, 251
+    OUT   GPU_RegionMaxY, R4
+    MOV   R1, 273
+    OUT   GPU_SelectedRegion, R1
+    OUT   GPU_RegionMinX, 48
+    OUT   GPU_RegionHotspotX, 48
+    OUT   GPU_RegionMaxX, 95
+    OUT   GPU_RegionMinY, R3
+    OUT   GPU_RegionHotspotY, R3
+    OUT   GPU_RegionMaxY, R4
+
+    ;; P8SCII glyphs 128-153: regions 274-299, 7x5, 16 per row of 6 pixels
+    ;; at texture row 252 (PICO8_GLYPH_Y, pico8_bezel.c)
+    MOV   R1, 0
+_pico8_init_glyph_loop:
+    MOV   R0, R1
+    ILT   R0, 26
+    JF    R0, _pico8_init_state
+    MOV   R0, R1
+    IADD  R0, 274
+    OUT   GPU_SelectedRegion, R0
+    MOV   R2, R1
+    AND   R2, 15
+    SHL   R2, 3                   ; x = (n % 16) * 8
+    MOV   R3, R1
+    SHL   R3, -4
+    IMUL  R3, 6
+    IADD  R3, 252                 ; y = 252 + (n / 16) * 6
+    OUT   GPU_RegionMinX, R2
+    OUT   GPU_RegionHotspotX, R2
+    OUT   GPU_RegionMinY, R3
+    OUT   GPU_RegionHotspotY, R3
+    IADD  R2, 6
+    OUT   GPU_RegionMaxX, R2
+    IADD  R3, 4
+    OUT   GPU_RegionMaxY, R3
+    IADD  R1, 1
+    JMP   _pico8_init_glyph_loop
 
 _pico8_init_state:
     ;; PICO-8 seeds its RNG randomly at boot; Vircon32's RNG always boots
@@ -1476,12 +1525,31 @@ _pico8_circ_have_r:
     MOV   R0, R10
     ILT   R0, 0
     JT    R0, _pico8_circ_done
-    MOV   R0, R10
-    IGT   R0, SHAPES_MAX_R
-    JT    R0, _pico8_circ_steps
     MOV   R0, SHAPES_TEXTURE
     ILT   R0, 0
     JT    R0, _pico8_circ_steps
+    MOV   R4, PICO8_SCALE                ; draw scale
+    MOV   R3, R10                 ; the shape's radius
+    MOV   R0, R10
+    IGT   R0, SHAPES_MAX_R
+    JF    R0, _pico8_circ_atlas
+    ;; --fast-circles: a filled circle beyond the atlas is its largest disc,
+    ;; scaled to cover the 2r + 1 pixels (outlines are always drawn exactly)
+    MOV   R0, SHAPES_FAST
+    JF    R0, _pico8_circ_steps
+    JF    R11, _pico8_circ_steps
+    MOV   R3, SHAPES_MAX_R
+    MOV   R0, R10
+    SHL   R0, 1
+    IADD  R0, 1
+    CIF   R0
+    FMUL  R4, R0
+    MOV   R0, SHAPES_MAX_R
+    SHL   R0, 1
+    IADD  R0, 1
+    CIF   R0
+    FDIV  R4, R0
+_pico8_circ_atlas:
 
     ;; --- one draw from the shape atlas ---
     MOV   R1, __pico8_palette
@@ -1491,15 +1559,14 @@ _pico8_circ_have_r:
     MOV   R6, R0                  ; multiply color to restore
     IN    R7, GPU_SelectedTexture
     OUT   GPU_SelectedTexture, SHAPES_TEXTURE
-    MOV   R1, R10
+    MOV   R1, R3
     JT    R11, _pico8_circ_region
     IADD  R1, SHAPES_MAX_R
     IADD  R1, 1                   ; outlines follow the filled shapes
 _pico8_circ_region:
     OUT   GPU_SelectedRegion, R1
-    MOV   R1, PICO8_SCALE
-    OUT   GPU_DrawingScaleX, R1
-    OUT   GPU_DrawingScaleY, R1
+    OUT   GPU_DrawingScaleX, R4
+    OUT   GPU_DrawingScaleY, R4
     MOV   R1, R8                  ; top-left pixel, placed as __pico8_fill does
     ISUB  R1, R10
     CIF   R1
@@ -2048,6 +2115,9 @@ __builtin_pico8_print:
     PUSH  R1
     PUSH  R2
     PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
 
     MOV   R1, [BP+5]
     CALL  __pico8_pen
@@ -2079,22 +2149,118 @@ __builtin_pico8_print:
     CFI   R1
     IADD  R1, PICO8_OFFSET_Y
 
-    ;; __builtin_print ABI: [BP+4] = x, [BP+3] = y, [BP+2] = value
+    ;; the text: any value as tostring() shows it
+    MOV   R2, R1                  ; y
+    PUSH  R2
     PUSH  R3
-    PUSH  R1
-    MOV   R1, [BP+2]
-    PUSH  R1
-    CALL  __builtin_print
-    IADD  SP, 3
+    MOV   R0, [BP+2]
+    PUSH  R0
+    CALL  __builtin_tostring_scratch_a
+    IADD  SP, 1
+    CALL  __unbox_string          ; R0 = characters (clobbers R1)
+    POP   R1                      ; x
+    POP   R2                      ; y
+    MOV   R3, R0
+    CALL  __pico8_print_text
 
     MOV   R1, 0xFFFFFFFF
     OUT   GPU_MultiplyColor, R1
     MOV   R0, BOXED_NIL
+    POP   R6
+    POP   R5
+    POP   R4
     POP   R3
     POP   R2
     POP   R1
     MOV   SP, BP
     POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __pico8_print_text (internal): R1 = x, R2 = y (screen pixels), R3 =
+;; address of the characters (one per word, 0-terminated). ASCII is drawn
+;; in the BIOS font (10 px per character); P8SCII glyphs 128-153 as their
+;; 7x5 icons at the canvas scale, two characters wide like PICO-8's wide
+;; glyphs; "\n" starts a new line 6 PICO-8 pixels down (at the first x).
+;; Uses the multiply color the caller set. Preserves R1-R13.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+__pico8_print_text:
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
+    IN    R0, GPU_SelectedTexture
+    PUSH  R0
+    IN    R0, GPU_SelectedRegion
+    PUSH  R0
+    MOV   R5, R1                  ; x at the start of a line
+    MOV   R6, 0                   ; lines down
+    OUT   GPU_SelectedTexture, -1 ; BIOS font
+_pico8_text_loop:
+    MOV   R4, [R3]
+    MOV   R0, R4
+    IEQ   R0, 0
+    JT    R0, _pico8_text_done
+    MOV   R0, R4
+    IEQ   R0, 10
+    JT    R0, _pico8_text_newline
+    MOV   R0, R4
+    ILT   R0, 128
+    JT    R0, _pico8_text_ascii
+    MOV   R0, R4
+    ISUB  R0, 128
+    ILT   R0, 26
+    JF    R0, _pico8_text_wide    ; other bytes: an empty wide cell
+    OUT   GPU_SelectedTexture, 0
+    MOV   R0, R4
+    IADD  R0, 146                 ; region 274 + (code - 128)
+    OUT   GPU_SelectedRegion, R0
+    MOV   R0, PICO8_SCALE
+    OUT   GPU_DrawingScaleX, R0
+    OUT   GPU_DrawingScaleY, R0
+    OUT   GPU_DrawingPointX, R1
+    MOV   R0, R2
+    IADD  R0, 3                   ; centred in the 20-pixel line
+    OUT   GPU_DrawingPointY, R0
+    OUT   GPU_Command, GPUCommand_DrawRegionZoomed
+    OUT   GPU_SelectedTexture, -1
+_pico8_text_wide:
+    IADD  R1, 20
+    JMP   _pico8_text_next
+_pico8_text_ascii:
+    OUT   GPU_SelectedRegion, R4
+    OUT   GPU_DrawingPointX, R1
+    OUT   GPU_DrawingPointY, R2
+    OUT   GPU_Command, GPUCommand_DrawRegion
+    IADD  R1, 10
+    JMP   _pico8_text_next
+_pico8_text_newline:
+    MOV   R0, R6                  ; y -= this line's offset, then the next
+    IMUL  R0, 33
+    SHL   R0, -1
+    ISUB  R2, R0
+    IADD  R6, 1
+    MOV   R0, R6
+    IMUL  R0, 33                  ; 6 PICO-8 px = 16.5 screen px per line
+    SHL   R0, -1
+    IADD  R2, R0
+    MOV   R1, R5
+_pico8_text_next:
+    IADD  R3, 1
+    JMP   _pico8_text_loop
+_pico8_text_done:
+    POP   R0
+    OUT   GPU_SelectedRegion, R0
+    POP   R0
+    OUT   GPU_SelectedTexture, R0
+    POP   R6
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
     RET
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -2110,16 +2276,33 @@ __builtin_pico8_present:
     MOV   R1, PICO8_SWATCH_REGION_BASE
     OUT   GPU_SelectedRegion, R1          ; color 0 swatch (3x3)
 
-    ;; left + right bars: 144 x 360
+    ;; left + right: 144 x 360 -- the side panels (48x120 at 3x), or black
+    OUT   GPU_DrawingPointY, 0
+    OUT   GPU_DrawingPointX, 0
+    MOV   R1, PICO8_BEZEL
+    JF    R1, _pico8_present_black
+    MOV   R1, 272
+    OUT   GPU_SelectedRegion, R1
+    MOV   R1, 3.0
+    OUT   GPU_DrawingScaleX, R1
+    OUT   GPU_DrawingScaleY, R1
+    OUT   GPU_Command, GPUCommand_DrawRegionZoomed
+    MOV   R1, 273
+    OUT   GPU_SelectedRegion, R1
+    OUT   GPU_DrawingPointX, 496          ; 144 + 352
+    OUT   GPU_Command, GPUCommand_DrawRegionZoomed
+    MOV   R1, PICO8_SWATCH_REGION_BASE
+    OUT   GPU_SelectedRegion, R1          ; color 0 swatch for the bars below
+    JMP   _pico8_present_bars
+_pico8_present_black:
     MOV   R1, 48.0                        ; 144 / 3
     OUT   GPU_DrawingScaleX, R1
     MOV   R1, 120.0                       ; 360 / 3
     OUT   GPU_DrawingScaleY, R1
-    OUT   GPU_DrawingPointY, 0
-    OUT   GPU_DrawingPointX, 0
     OUT   GPU_Command, GPUCommand_DrawRegionZoomed
     OUT   GPU_DrawingPointX, 496          ; 144 + 352
     OUT   GPU_Command, GPUCommand_DrawRegionZoomed
+_pico8_present_bars:
 
     ;; top + bottom bars: 352 x 4 over the canvas columns
     MOV   R1, 117.33333                   ; 352 / 3

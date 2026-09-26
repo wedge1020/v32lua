@@ -114,6 +114,8 @@ bool  emit_tic80_memory_intrinsic (ASTNode *, const char *, int);   // peek/poke
 void  emit_tic80_ram_rom          (FILE *);
 bool  emit_tic80_stub_intrinsic   (ASTNode *, const char *, int);   // trace/key/keyp
 extern bool tic80_uses_memory;
+extern ASTNode    *iter_intrinsic_node;
+extern const char *iter_intrinsic_label;
 extern bool pico8_uses_memory;
 bool  emit_pico8_memory_intrinsic   (ASTNode *, const char *, int);
 bool  emit_pico8_time_intrinsic     (ASTNode *, int);

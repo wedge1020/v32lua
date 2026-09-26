@@ -4,6 +4,25 @@
 #define PICO8_SWATCH_REGION_BASE 256
 #define PICO8_SWATCH_TEX_HEIGHT  132
 
+// Side panels (pico8_bezel.c): 2 x 48x120 at texture 0 row PICO8_BEZEL_Y,
+// regions PICO8_BEZEL_REGION (left) and + 1 (right), drawn at 3x.
+#define PICO8_BEZEL_Y            132
+#define PICO8_BEZEL_W            96
+#define PICO8_BEZEL_H            120
+#define PICO8_BEZEL_REGION       272
+// P8SCII glyphs 128-153 (pico8_bezel.c): 7x5 each, 16 per 6-pixel row at
+// texture 0 row PICO8_GLYPH_Y, regions PICO8_GLYPH_REGION + (code - 128)
+#define PICO8_GLYPH_Y            (PICO8_BEZEL_Y + PICO8_BEZEL_H)
+#define PICO8_GLYPH_COUNT        26
+#define PICO8_GLYPH_REGION       274
+#define PICO8_TEX_HEIGHT         (PICO8_GLYPH_Y + 12)
+int          pico8_glyph_pixel      (int, int);
+void         pico8_fold_glyphs      (char *);
+extern bool  pico8_bezel_enabled;
+extern bool  g_cli_bezel_set;
+void         pico8_bezel_build      (const char *);
+int          pico8_bezel_index      (int, int);
+
 // PICO-8 sound: sfx()/music(), via a small bank of generic placeholder
 // tones layered on the native music.play/sfx.play/sfx.stop machinery --
 // see the block above emit_pico8_sfx_intrinsic() in pico8.c.

@@ -717,8 +717,27 @@ char *process_string_literal (const char *text, int  len)
                 case 'r': processed[j++] = '\r'; break;
                 case '\\': processed[j++] = '\\'; break;
                 case '"':  processed[j++] = '"'; break;
-                // Add more cases here if you want to support \a, \b, or \0
+                case '\'': processed[j++] = '\''; break;
+                case 'x':               // \xHH (Lua 5.2+)
+                    if (i + 2 < len - 1 && isxdigit ((unsigned char) text[i + 1]) &&
+                        isxdigit ((unsigned char) text[i + 2])) {
+                        char hex[3] = { text[i + 1], text[i + 2], 0 };
+                        processed[j++] = (char) strtol (hex, NULL, 16);
+                        i += 2;
+                    } else {
+                        processed[j++] = text[i];
+                    }
+                    break;
                 default: 
+                    if (isdigit ((unsigned char) text[i])) {   // \ddd, up to 3 digits
+                        int v = 0, k = 0;
+                        while (k < 3 && i < len - 1 && isdigit ((unsigned char) text[i])) {
+                            v = v * 10 + (text[i] - '0'); i++; k++;
+                        }
+                        i--;
+                        processed[j++] = (char) (v & 255);
+                        break;
+                    }
                     // Unrecognized escape sequence, just keep the character
                     processed[j++] = text[i]; 
                     break;
@@ -730,6 +749,7 @@ char *process_string_literal (const char *text, int  len)
         i++;
     }
     processed[j] = '\0'; // Ensure it is null-terminated for the C-side
+    if (runtime_req.needs_pico8) pico8_fold_glyphs (processed);
     return (processed);
 }
 
@@ -767,10 +787,10 @@ static int compound_assign_token (NodeType op)
     yylval.number_val = (double) op;
     return TOKEN_COMPOUND_ASSIGN;
 }
-#line 770 "lexer.c"
+#line 790 "lexer.c"
 /* Add these options to disable the unused functions */
 #define YY_NO_INPUT 1
-#line 773 "lexer.c"
+#line 793 "lexer.c"
 
 #define INITIAL 0
 
@@ -985,10 +1005,10 @@ YY_DECL
 		}
 
 	{
-#line 87 "lexer.l"
+#line 107 "lexer.l"
 
 
-#line 991 "lexer.c"
+#line 1011 "lexer.c"
 
 	while ( /*CONSTCOND*/1 )		/* loops until end-of-file is reached */
 		{
@@ -1058,14 +1078,14 @@ do_action:	/* This label is used only to access EOF actions. */
 case 1:
 /* rule 1 can match eol */
 YY_RULE_SETUP
-#line 89 "lexer.l"
+#line 109 "lexer.l"
 { /* Skip whitespace - Fixed single backslashes */ }
 	YY_BREAK
 /* 1. Transposed Multiline Comment: --@ ...  */
 case 2:
 /* rule 2 can match eol */
 YY_RULE_SETUP
-#line 92 "lexer.l"
+#line 112 "lexer.l"
 {
     int len = strlen(yytext);
     // Strip the opening "--@[[" (5 chars) and closing "]]" (2 chars)
@@ -1077,13 +1097,13 @@ YY_RULE_SETUP
 case 3:
 /* rule 3 can match eol */
 YY_RULE_SETUP
-#line 100 "lexer.l"
+#line 120 "lexer.l"
 { /* Skip standard multiline comments safely */ }
 	YY_BREAK
 /* 3. Transposed Single-Line Comment: --@ ... */
 case 4:
 YY_RULE_SETUP
-#line 103 "lexer.l"
+#line 123 "lexer.l"
 {
     // Allocate space and replace "--@" with ";  " to preserve length and add assembly prefix
     char *comment = strdup(yytext);
@@ -1109,7 +1129,7 @@ YY_RULE_SETUP
 case 5:
 /* rule 5 can match eol */
 YY_RULE_SETUP
-#line 125 "lexer.l"
+#line 145 "lexer.l"
 {
     char *start = strchr(yytext, '<') + 1;
     char *end = strchr(yytext, '>');
@@ -1122,7 +1142,7 @@ YY_RULE_SETUP
 case 6:
 /* rule 6 can match eol */
 YY_RULE_SETUP
-#line 134 "lexer.l"
+#line 154 "lexer.l"
 {
     char *start = strchr(yytext, '<') + 2;  // Skip '<' AND '/'
     char *end = strchr(yytext, '>');
@@ -1135,7 +1155,7 @@ YY_RULE_SETUP
 case 7:
 /* rule 7 can match eol */
 YY_RULE_SETUP
-#line 143 "lexer.l"
+#line 163 "lexer.l"
 {
     // Only INSIDE a TIC-80 -- <SECTION> ... -- </SECTION> block. Outside
     // one, "-- 5:6" / "-- 3:30 timeout" is just a comment -- it used to be
@@ -1150,7 +1170,7 @@ YY_RULE_SETUP
 	YY_BREAK
 case 8:
 YY_RULE_SETUP
-#line 155 "lexer.l"
+#line 175 "lexer.l"
 { 
     char *hint = strdup (yytext + 3);
     int len = strlen(hint);
@@ -1165,127 +1185,127 @@ YY_RULE_SETUP
 /* 4. Standard Single-Line Comment: Matches '--' with text, or a bare '--' */
 case 9:
 YY_RULE_SETUP
-#line 167 "lexer.l"
+#line 187 "lexer.l"
 { /* Skip standard single-line comments safely */ }
 	YY_BREAK
 case 10:
 YY_RULE_SETUP
-#line 169 "lexer.l"
+#line 189 "lexer.l"
 { return TOKEN_WHILE;    }
 	YY_BREAK
 case 11:
 YY_RULE_SETUP
-#line 170 "lexer.l"
+#line 190 "lexer.l"
 { return TOKEN_REPEAT;   }
 	YY_BREAK
 case 12:
 YY_RULE_SETUP
-#line 171 "lexer.l"
+#line 191 "lexer.l"
 { return TOKEN_UNTIL;    }
 	YY_BREAK
 case 13:
 YY_RULE_SETUP
-#line 172 "lexer.l"
+#line 192 "lexer.l"
 { return TOKEN_FOR;      }
 	YY_BREAK
 case 14:
 YY_RULE_SETUP
-#line 173 "lexer.l"
+#line 193 "lexer.l"
 { return TOKEN_IN;       }
 	YY_BREAK
 case 15:
 YY_RULE_SETUP
-#line 174 "lexer.l"
+#line 194 "lexer.l"
 { return TOKEN_BREAK;    }
 	YY_BREAK
 case 16:
 YY_RULE_SETUP
-#line 175 "lexer.l"
+#line 195 "lexer.l"
 { return TOKEN_GOTO;     }
 	YY_BREAK
 case 17:
 YY_RULE_SETUP
-#line 176 "lexer.l"
+#line 196 "lexer.l"
 { return TOKEN_DBCOLON;  }
 	YY_BREAK
 case 18:
 YY_RULE_SETUP
-#line 177 "lexer.l"
+#line 197 "lexer.l"
 { return TOKEN_DO;       }
 	YY_BREAK
 case 19:
 YY_RULE_SETUP
-#line 178 "lexer.l"
+#line 198 "lexer.l"
 { return TOKEN_IF;       }
 	YY_BREAK
 case 20:
 YY_RULE_SETUP
-#line 179 "lexer.l"
+#line 199 "lexer.l"
 { return TOKEN_ELSEIF;   }
 	YY_BREAK
 case 21:
 YY_RULE_SETUP
-#line 180 "lexer.l"
+#line 200 "lexer.l"
 { return TOKEN_THEN;     }
 	YY_BREAK
 case 22:
 YY_RULE_SETUP
-#line 181 "lexer.l"
+#line 201 "lexer.l"
 { return TOKEN_ELSE;     }
 	YY_BREAK
 case 23:
 YY_RULE_SETUP
-#line 182 "lexer.l"
+#line 202 "lexer.l"
 { return TOKEN_END;      }
 	YY_BREAK
 case 24:
 YY_RULE_SETUP
-#line 183 "lexer.l"
+#line 203 "lexer.l"
 { return TOKEN_LOCAL;    }
 	YY_BREAK
 case 25:
 YY_RULE_SETUP
-#line 184 "lexer.l"
+#line 204 "lexer.l"
 { return TOKEN_FUNCTION; }
 	YY_BREAK
 case 26:
 YY_RULE_SETUP
-#line 185 "lexer.l"
+#line 205 "lexer.l"
 { return TOKEN_RETURN;   }
 	YY_BREAK
 case 27:
 YY_RULE_SETUP
-#line 186 "lexer.l"
+#line 206 "lexer.l"
 { return TOKEN_AND;      }
 	YY_BREAK
 case 28:
 YY_RULE_SETUP
-#line 187 "lexer.l"
+#line 207 "lexer.l"
 { return TOKEN_OR;       }
 	YY_BREAK
 case 29:
 YY_RULE_SETUP
-#line 188 "lexer.l"
+#line 208 "lexer.l"
 { return TOKEN_TRUE;     }
 	YY_BREAK
 case 30:
 YY_RULE_SETUP
-#line 189 "lexer.l"
+#line 209 "lexer.l"
 { return TOKEN_FALSE;    }
 	YY_BREAK
 case 31:
 YY_RULE_SETUP
-#line 190 "lexer.l"
+#line 210 "lexer.l"
 { return TOKEN_NIL;      }
 	YY_BREAK
 case 32:
 YY_RULE_SETUP
-#line 192 "lexer.l"
+#line 212 "lexer.l"
 { return TOKEN_EQ;       }
 	YY_BREAK
 case 33:
 YY_RULE_SETUP
-#line 193 "lexer.l"
+#line 213 "lexer.l"
 { return TOKEN_NEQ;      }
 	YY_BREAK
 /* Bitwise operators (node/bitops.c). Lua 5.3+: & | ~ << >> (and unary
@@ -1294,87 +1314,87 @@ YY_RULE_SETUP
        spellings come first; flex's longest match would pick them anyway. */
 case 34:
 YY_RULE_SETUP
-#line 198 "lexer.l"
+#line 218 "lexer.l"
 { require_pico8 (">>>="); return compound_assign_token(NODE_LSHR); }
 	YY_BREAK
 case 35:
 YY_RULE_SETUP
-#line 199 "lexer.l"
+#line 219 "lexer.l"
 { require_pico8 ("<<>="); return compound_assign_token(NODE_ROTL); }
 	YY_BREAK
 case 36:
 YY_RULE_SETUP
-#line 200 "lexer.l"
+#line 220 "lexer.l"
 { require_pico8 (">><="); return compound_assign_token(NODE_ROTR); }
 	YY_BREAK
 case 37:
 YY_RULE_SETUP
-#line 201 "lexer.l"
+#line 221 "lexer.l"
 { require_pico8 ("^^=");  return compound_assign_token(NODE_BXOR); }
 	YY_BREAK
 case 38:
 YY_RULE_SETUP
-#line 202 "lexer.l"
+#line 222 "lexer.l"
 { return compound_assign_token(NODE_SHL); }
 	YY_BREAK
 case 39:
 YY_RULE_SETUP
-#line 203 "lexer.l"
+#line 223 "lexer.l"
 { return compound_assign_token(NODE_SHR); }
 	YY_BREAK
 case 40:
 YY_RULE_SETUP
-#line 204 "lexer.l"
+#line 224 "lexer.l"
 { return compound_assign_token(NODE_BAND); }
 	YY_BREAK
 case 41:
 YY_RULE_SETUP
-#line 205 "lexer.l"
+#line 225 "lexer.l"
 { return compound_assign_token(NODE_BOR); }
 	YY_BREAK
 case 42:
 YY_RULE_SETUP
-#line 206 "lexer.l"
+#line 226 "lexer.l"
 { require_pico8 (">>>"); return TOKEN_LSHR; }
 	YY_BREAK
 case 43:
 YY_RULE_SETUP
-#line 207 "lexer.l"
+#line 227 "lexer.l"
 { require_pico8 ("<<>"); return TOKEN_ROTL; }
 	YY_BREAK
 case 44:
 YY_RULE_SETUP
-#line 208 "lexer.l"
+#line 228 "lexer.l"
 { require_pico8 (">><"); return TOKEN_ROTR; }
 	YY_BREAK
 case 45:
 YY_RULE_SETUP
-#line 209 "lexer.l"
+#line 229 "lexer.l"
 { require_pico8 ("^^");  return TOKEN_BXOR; }
 	YY_BREAK
 case 46:
 YY_RULE_SETUP
-#line 210 "lexer.l"
+#line 230 "lexer.l"
 { return TOKEN_SHL;      }
 	YY_BREAK
 case 47:
 YY_RULE_SETUP
-#line 211 "lexer.l"
+#line 231 "lexer.l"
 { return TOKEN_SHR;      }
 	YY_BREAK
 case 48:
 YY_RULE_SETUP
-#line 212 "lexer.l"
+#line 232 "lexer.l"
 { return '&';            }
 	YY_BREAK
 case 49:
 YY_RULE_SETUP
-#line 213 "lexer.l"
+#line 233 "lexer.l"
 { return '|';            }
 	YY_BREAK
 case 50:
 YY_RULE_SETUP
-#line 214 "lexer.l"
+#line 234 "lexer.l"
 { return TOKEN_BXOR;     }
 	YY_BREAK
 /* PICO-8 alias for ~= (C-style "not equal"). Real Lua only ever has
@@ -1384,7 +1404,7 @@ YY_RULE_SETUP
        parser already knows how to handle, so no grammar change at all. */
 case 51:
 YY_RULE_SETUP
-#line 220 "lexer.l"
+#line 240 "lexer.l"
 {
                             if (!runtime_req.needs_pico8) {
                                 compiler_error (ERR_LEXICAL, yylineno,
@@ -1395,57 +1415,57 @@ YY_RULE_SETUP
 	YY_BREAK
 case 52:
 YY_RULE_SETUP
-#line 227 "lexer.l"
+#line 247 "lexer.l"
 { return TOKEN_LE;       }
 	YY_BREAK
 case 53:
 YY_RULE_SETUP
-#line 228 "lexer.l"
+#line 248 "lexer.l"
 { return TOKEN_GE;       }
 	YY_BREAK
 case 54:
 YY_RULE_SETUP
-#line 229 "lexer.l"
+#line 249 "lexer.l"
 { return TOKEN_LT;       }
 	YY_BREAK
 case 55:
 YY_RULE_SETUP
-#line 230 "lexer.l"
+#line 250 "lexer.l"
 { return TOKEN_GT;       }
 	YY_BREAK
 case 56:
 YY_RULE_SETUP
-#line 231 "lexer.l"
+#line 251 "lexer.l"
 { return TOKEN_LEN;      }
 	YY_BREAK
 case 57:
 YY_RULE_SETUP
-#line 232 "lexer.l"
+#line 252 "lexer.l"
 { return TOKEN_NOT;      }
 	YY_BREAK
 case 58:
 YY_RULE_SETUP
-#line 233 "lexer.l"
+#line 253 "lexer.l"
 { return TOKEN_DOTS;     }
 	YY_BREAK
 case 59:
 YY_RULE_SETUP
-#line 234 "lexer.l"
+#line 254 "lexer.l"
 { return TOKEN_CONCAT;   }
 	YY_BREAK
 case 60:
 YY_RULE_SETUP
-#line 235 "lexer.l"
+#line 255 "lexer.l"
 { return TOKEN_ASM;      }
 	YY_BREAK
 case 61:
 YY_RULE_SETUP
-#line 236 "lexer.l"
+#line 256 "lexer.l"
 { return TOKEN_RAWASM;   }
 	YY_BREAK
 case 62:
 YY_RULE_SETUP
-#line 237 "lexer.l"
+#line 257 "lexer.l"
 { return '^'; }
 	YY_BREAK
 /* PICO-8-only compound assignment (see compound_assign_token() above).
@@ -1456,48 +1476,48 @@ YY_RULE_SETUP
        operator matches the rest of this file. */
 case 63:
 YY_RULE_SETUP
-#line 244 "lexer.l"
+#line 264 "lexer.l"
 { return compound_assign_token(NODE_ADD); }
 	YY_BREAK
 case 64:
 YY_RULE_SETUP
-#line 245 "lexer.l"
+#line 265 "lexer.l"
 { return compound_assign_token(NODE_SUB); }
 	YY_BREAK
 case 65:
 YY_RULE_SETUP
-#line 246 "lexer.l"
+#line 266 "lexer.l"
 { return compound_assign_token(NODE_MUL); }
 	YY_BREAK
 case 66:
 YY_RULE_SETUP
-#line 247 "lexer.l"
+#line 267 "lexer.l"
 { return compound_assign_token(NODE_DIV); }
 	YY_BREAK
 case 67:
 YY_RULE_SETUP
-#line 248 "lexer.l"
+#line 268 "lexer.l"
 { return compound_assign_token(NODE_MOD); }
 	YY_BREAK
 case 68:
 YY_RULE_SETUP
-#line 249 "lexer.l"
+#line 269 "lexer.l"
 { return compound_assign_token(NODE_CONCAT); }
 	YY_BREAK
 case 69:
 YY_RULE_SETUP
-#line 250 "lexer.l"
+#line 270 "lexer.l"
 { return compound_assign_token(NODE_FLOORDIV); }
 	YY_BREAK
 case 70:
 YY_RULE_SETUP
-#line 251 "lexer.l"
+#line 271 "lexer.l"
 { return compound_assign_token(NODE_POW); }
 	YY_BREAK
 /* PICO-8 integer division a\b = flr(a/b) */
 case 71:
 YY_RULE_SETUP
-#line 253 "lexer.l"
+#line 273 "lexer.l"
 {
                             if (!runtime_req.needs_pico8) {
                                 compiler_error (ERR_LEXICAL, yylineno,
@@ -1509,7 +1529,7 @@ YY_RULE_SETUP
 /* PICO-8 print shorthand: ?expr, ... at the start of a statement */
 case 72:
 YY_RULE_SETUP
-#line 261 "lexer.l"
+#line 281 "lexer.l"
 {
                             if (!runtime_req.needs_pico8) {
                                 compiler_error (ERR_LEXICAL, yylineno,
@@ -1523,134 +1543,134 @@ YY_RULE_SETUP
        variation selector is optional. */
 case 73:
 YY_RULE_SETUP
-#line 271 "lexer.l"
+#line 291 "lexer.l"
 { yylval.number_val = 0; return TOKEN_NUMBER; }
 	YY_BREAK
 case 74:
 YY_RULE_SETUP
-#line 272 "lexer.l"
+#line 292 "lexer.l"
 { yylval.number_val = 1; return TOKEN_NUMBER; }
 	YY_BREAK
 case 75:
 YY_RULE_SETUP
-#line 273 "lexer.l"
+#line 293 "lexer.l"
 { yylval.number_val = 2; return TOKEN_NUMBER; }
 	YY_BREAK
 case 76:
 YY_RULE_SETUP
-#line 274 "lexer.l"
+#line 294 "lexer.l"
 { yylval.number_val = 3; return TOKEN_NUMBER; }
 	YY_BREAK
 case 77:
 YY_RULE_SETUP
-#line 275 "lexer.l"
+#line 295 "lexer.l"
 { yylval.number_val = 4; return TOKEN_NUMBER; }
 	YY_BREAK
 case 78:
 YY_RULE_SETUP
-#line 276 "lexer.l"
+#line 296 "lexer.l"
 { yylval.number_val = 5; return TOKEN_NUMBER; }
 	YY_BREAK
 /* PICO-8 peek operators: @a == peek(a), $a == peek4(a); %a == peek2(a)
        is the unary use of '%' (parser.y) */
 case 79:
 YY_RULE_SETUP
-#line 279 "lexer.l"
+#line 299 "lexer.l"
 { require_pico8 ("@"); return TOKEN_PEEK; }
 	YY_BREAK
 case 80:
 YY_RULE_SETUP
-#line 280 "lexer.l"
+#line 300 "lexer.l"
 { require_pico8 ("$"); return TOKEN_PEEK4; }
 	YY_BREAK
 case 81:
 YY_RULE_SETUP
-#line 281 "lexer.l"
+#line 301 "lexer.l"
 { return '+'; }
 	YY_BREAK
 case 82:
 YY_RULE_SETUP
-#line 282 "lexer.l"
+#line 302 "lexer.l"
 { return '-'; }
 	YY_BREAK
 case 83:
 YY_RULE_SETUP
-#line 283 "lexer.l"
+#line 303 "lexer.l"
 { return '*'; }
 	YY_BREAK
 case 84:
 YY_RULE_SETUP
-#line 284 "lexer.l"
+#line 304 "lexer.l"
 { return TOKEN_FLOORDIV; }
 	YY_BREAK
 case 85:
 YY_RULE_SETUP
-#line 285 "lexer.l"
+#line 305 "lexer.l"
 { return '/'; }
 	YY_BREAK
 case 86:
 YY_RULE_SETUP
-#line 286 "lexer.l"
+#line 306 "lexer.l"
 { return '%'; }
 	YY_BREAK
 case 87:
 YY_RULE_SETUP
-#line 287 "lexer.l"
+#line 307 "lexer.l"
 { return '('; }
 	YY_BREAK
 case 88:
 YY_RULE_SETUP
-#line 288 "lexer.l"
+#line 308 "lexer.l"
 { return ')'; }
 	YY_BREAK
 case 89:
 YY_RULE_SETUP
-#line 289 "lexer.l"
+#line 309 "lexer.l"
 { return '='; }
 	YY_BREAK
 case 90:
 YY_RULE_SETUP
-#line 290 "lexer.l"
+#line 310 "lexer.l"
 { return ','; }
 	YY_BREAK
 case 91:
 YY_RULE_SETUP
-#line 291 "lexer.l"
+#line 311 "lexer.l"
 { return '{'; }
 	YY_BREAK
 case 92:
 YY_RULE_SETUP
-#line 292 "lexer.l"
+#line 312 "lexer.l"
 { return '}'; }
 	YY_BREAK
 case 93:
 YY_RULE_SETUP
-#line 293 "lexer.l"
+#line 313 "lexer.l"
 { return '['; }
 	YY_BREAK
 case 94:
 YY_RULE_SETUP
-#line 294 "lexer.l"
+#line 314 "lexer.l"
 { return ']'; }
 	YY_BREAK
 case 95:
 YY_RULE_SETUP
-#line 295 "lexer.l"
+#line 315 "lexer.l"
 { return '.'; }
 	YY_BREAK
 case 96:
 YY_RULE_SETUP
-#line 296 "lexer.l"
+#line 316 "lexer.l"
 { return ':'; }
 	YY_BREAK
 case 97:
 YY_RULE_SETUP
-#line 297 "lexer.l"
+#line 317 "lexer.l"
 { return ';'; }
 	YY_BREAK
 case 98:
 YY_RULE_SETUP
-#line 299 "lexer.l"
+#line 319 "lexer.l"
 { 
                             yylval.string_val  = strdup (yytext); 
                             return (TOKEN_IDENTIFIER); 
@@ -1658,7 +1678,7 @@ YY_RULE_SETUP
 	YY_BREAK
 case 99:
 YY_RULE_SETUP
-#line 304 "lexer.l"
+#line 324 "lexer.l"
 {
                             // Hex, with an optional hex fraction (0x1.8 ==
                             // 1.5 -- valid Lua, and PICO-8's 0x0.4 style)
@@ -1683,7 +1703,7 @@ YY_RULE_SETUP
 	YY_BREAK
 case 100:
 YY_RULE_SETUP
-#line 326 "lexer.l"
+#line 346 "lexer.l"
 {
                             // PICO-8 binary literal (0b1010, 0b0101.1)
                             require_pico8 ("0b");
@@ -1701,7 +1721,7 @@ YY_RULE_SETUP
 	YY_BREAK
 case 101:
 YY_RULE_SETUP
-#line 341 "lexer.l"
+#line 361 "lexer.l"
 {
                             /* exponent form (1e-17, 2.5E3) added: TIC-80
                                exports and hand-written tables use it --
@@ -1712,7 +1732,7 @@ YY_RULE_SETUP
 	YY_BREAK
 case 102:
 YY_RULE_SETUP
-#line 349 "lexer.l"
+#line 369 "lexer.l"
 {
                             yylval.number_val  = atof (yytext);
                             return (TOKEN_NUMBER);
@@ -1721,7 +1741,7 @@ YY_RULE_SETUP
 case 103:
 /* rule 103 can match eol */
 YY_RULE_SETUP
-#line 354 "lexer.l"
+#line 374 "lexer.l"
 { 
                             yylval.string_val  = process_string_literal (yytext, yyleng); 
                             return (TOKEN_STRING);
@@ -1729,7 +1749,7 @@ YY_RULE_SETUP
 	YY_BREAK
 case 104:
 YY_RULE_SETUP
-#line 359 "lexer.l"
+#line 379 "lexer.l"
 {
                             /* single-quoted strings -- plain Lua, but only
                                "..." used to be accepted */
@@ -1740,7 +1760,7 @@ YY_RULE_SETUP
 case 105:
 /* rule 105 can match eol */
 YY_RULE_SETUP
-#line 366 "lexer.l"
+#line 386 "lexer.l"
 {
                             /* long string [[...]]: no escape processing; a
                                newline right after the opening [[ is dropped,
@@ -1751,21 +1771,22 @@ YY_RULE_SETUP
                             char *str = (char *) malloc (len + 1);
                             memcpy (str, yytext + start, len);
                             str[len] = '\0';
+                            if (runtime_req.needs_pico8) pico8_fold_glyphs (str);
                             yylval.string_val  = str;
                             return (TOKEN_STRING);
                         }
 	YY_BREAK
 case 106:
 YY_RULE_SETUP
-#line 380 "lexer.l"
+#line 401 "lexer.l"
 { compiler_error(ERR_LEXICAL, yylineno, "Unexpected character '%s'", yytext); }
 	YY_BREAK
 case 107:
 YY_RULE_SETUP
-#line 381 "lexer.l"
+#line 402 "lexer.l"
 ECHO;
 	YY_BREAK
-#line 1768 "lexer.c"
+#line 1789 "lexer.c"
 case YY_STATE_EOF(INITIAL):
 	yyterminate();
 
@@ -2741,6 +2762,6 @@ void yyfree (void * ptr )
 
 #define YYTABLES_NAME "yytables"
 
-#line 381 "lexer.l"
+#line 402 "lexer.l"
 
 

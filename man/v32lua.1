@@ -15,6 +15,8 @@ v32lua \- compile a subset of Lua to Vircon32 assembly and cartridge XML
 .IR title ]
 .RB [ \-\-rate
 .IR hz ]
+.RB [ \-\-fast\-circles ]
+.RB [ \-\-no\-bezel ]
 .IR input.lua " | " cart.p8 " | " cart.tic
 .br
 .B v32lua
@@ -168,6 +170,23 @@ hint.
 and
 .B \-\-#p8rate
 are the old names and still work.
+.TP
+.B \-\-fast\-circles
+TIC-80 and PICO-8: draw filled circles larger than radius 31 as the
+pre-rendered radius-31 disc, scaled (one GPU draw instead of about 1.2
+per unit of radius; roughly 1.5% of the edge pixels differ from the
+console's). Outlines are always exact. Same as a
+.B \-\-#fast\-circles
+hint.
+.TP
+.B \-\-no\-bezel
+PICO-8: leave the screen margins beside the canvas black instead of
+drawing the side panels. Overrides a
+.B \-\-#bezel
+hint
+.RB ( off
+or
+.BR on ).
 .TP
 .B \-\-version
 Print version, author, and project URL information, and exit

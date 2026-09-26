@@ -38,6 +38,18 @@ The 128×128 PICO-8 screen is drawn at 2.75× (352×352) and centered on the
 are masked in black, because the GPU has no clip rectangle and PICO-8
 clips everything to its screen. Palette index 0 is transparent in sprites.
 
+### Side panels
+
+The 352×352 canvas leaves a 144-pixel strip on each side of the 640×360
+screen. Those used to be masked black after every frame (PICO-8 clips its
+drawing; the Vircon32 GPU has no clip rectangle, so off-canvas drawing would
+show). They now carry two panels of original pixel art, drawn in their place
+at no extra cost: the platform names as plain pixel text over a starfield
+with a ship and a ringed planet (left) and a sunset over a perspective grid
+(right), a controls legend (d-pad, O = A, X = B, Start = pause) and the
+cart's title. They are generated at compile time into spare rows of the
+sprite texture. `--no-bezel` (or `--#bezel off`) restores the black margins.
+
 ## Main loop
 
 `_init()` once, then per tick `_update()` → `_draw()` →
@@ -64,7 +76,7 @@ before `_init()`; the map and flags are already loaded then.
 | `fget(n [, f])`, `fset(n, [f,] v)` | From `__gff__`; writable at runtime. |
 | `cls([c])`, `color([c])` | |
 | `rectfill`, `rect`, `circfill`, `circ`, `line`, `pset` | Corners in any order. An omitted color uses the pen; a given color becomes the pen (PICO-8 rule). Circles are PICO-8's own pixels (see [Circles](#circles)). |
-| `print(s [, x, y [, c]])` | BIOS font tinted with the palette color. Glyphs are the BIOS font's, not PICO-8's 3×5 font. |
+| `print(s [, x, y [, c]])` | BIOS font tinted with the palette color (the letters are the BIOS font's, not PICO-8's 3×5 font). PICO-8's glyph characters 128–153 (button glyphs, arrows, ♥, ★, ● …) are drawn as 7×5 icons, two characters wide; `\n` starts a new line. |
 | `camera([x, y])` | |
 | `btn([i [, p]])`, `btnp([i [, p]])` | 0 left, 1 right, 2 up, 3 down, 4 O (→ A), 5 X (→ B). No `i` → bitfield. `btnp`: first frame of a press, then from frame 15 every 4 frames. |
 | `add`, `del`, `count`, `foreach`, `for v in all(t)` | `del` uses full `==` (string contents compare). `foreach`/`all` follow PICO-8's rule that deleting the current element is safe. `count(t, v)` isn't supported. |
@@ -137,6 +149,11 @@ glyphs ⬅️ ➡️ ⬆️ ⬇️ 🅾️ ❎ as the numbers 0–5, `f"str"` an
 last argument of a builtin is expanded at compile time. The peek operators
 `@a`, `%a` and `$a` are `peek(a)`, `peek2(a)` and `peek4(a)`.
 
+Glyph characters in strings — a `.p8` stores them as Unicode, e.g. 🅾️ ❎ ⬅️
+♥ ★ — become their single P8SCII character (128–153), as in PICO-8:
+`#"🅾️" == 1`, `ord("❎") == 151`, `sub()` sees one character. Strings also
+take Lua's `\ddd` and `\xHH` escapes. (Kana, 154–253, stay UTF-8.)
+
 Bitwise operators work on PICO-8's 16.16 fixed-point representation, as in
 PICO-8: `& | ~` (or `^^`) `<< >> >>> <<> >><` and unary `~`, with the
 compound forms `&= |= ^^= <<= >>= >>>= <<>= >><=`. `>>` is arithmetic,
@@ -194,7 +211,10 @@ at compile time into a small texture (256×407, only in carts that draw
 circles), so each is **one** GPU draw, tinted to its color: 4–33× less CPU
 time than drawing it point by point or span by span, as before. Larger
 circles are drawn from the algorithm, one rectangle per run of pixels,
-about 2.3× faster than before.
+about 2.3× faster than before. With `--fast-circles` (or `--#fast-circles`)
+a filled circle larger than radius 31 is the radius-31 disc scaled up: one
+draw, with about 1.5% of its edge pixels differing from PICO-8's; outlines
+stay exact (a scaled ring would get thicker).
 
 ## Performance
 
