@@ -796,7 +796,8 @@ char *derive_cart_title_from_filename(const char *path)
     title_buf[sizeof(title_buf) - 1] = '\0';
 
     char *dot = strrchr(title_buf, '.');
-    if (dot != NULL && strcmp(dot, ".lua") == 0) {
+    if (dot != NULL && (strcmp(dot, ".lua") == 0 || strcmp(dot, ".p8") == 0 ||
+                        strcmp(dot, ".tic") == 0)) {
         *dot = '\0';
     }
     return title_buf;

@@ -1041,6 +1041,7 @@ _pico8_foreach_loop:
 
     PUSH  R0                     ; f(v)
     MOV   R0, [BP+2]
+    MOV   R13, 1                 ; argument count (variadic ABI)
     CALL  __builtin_exec
     IADD  SP, 1
     JMP   _pico8_foreach_loop

@@ -43,8 +43,34 @@ void  node_function_def (ASTNode *node)
 
     reset_spill_slots(-(num_locals + 1));
     int total_stack = num_locals + NUM_GPRS;
+
+    // Variadic ABI: every call that may reach a variadic function loads the
+    // number of arguments it pushed (self included, NIL padding excluded)
+    // into VARARG_COUNT_REG right before CALL __builtin_exec -- which only
+    // touches R0-R5 -- so the callee can save it here, whatever path the
+    // call took (named function, local function, table field, parameter,
+    // runtime callback). It used to be a stack word pushed only when the
+    // call site could statically prove the target variadic, so a call
+    // through a local or any other value left the callee reading a fixed
+    // parameter as the count (and every parameter one slot off).
+    bool fn_is_variadic = false;
+    for (ASTNode *pp = node->as.function_def.params; pp != NULL; pp = pp->next) {
+        if (pp->type == NODE_IDENTIFIER && strcmp(pp->as.id.name, "...") == 0) {
+            fn_is_variadic = true;
+            break;
+        }
+    }
+    int vararg_count_slot = -(total_stack + 1);   // just below the spill area
+    if (fn_is_variadic) {
+        total_stack++;
+    }
+
     if (total_stack > 0) {
         emit_asm("ISUB SP, %d ; Reserve stack for locals + spills\n", total_stack);
+    }
+    if (fn_is_variadic) {
+        emit_asm("MOV [BP %d], R%d ; save caller's argument count (variadic ABI)\n",
+                 vararg_count_slot, VARARG_COUNT_REG);
     }
 
     // --- Default implicit return value(s): nil until overwritten ---
@@ -102,19 +128,9 @@ void  node_function_def (ASTNode *node)
     // shifts every real fixed parameter's offset out by exactly one,
     // matching where node_function_call() actually put them.
     // -------------------------------------------------------------------
-    bool has_dots_marker = false;
-    for (ASTNode *pp = node->as.function_def.params; pp != NULL; pp = pp->next) {
-        if (pp->type == NODE_IDENTIFIER && strcmp(pp->as.id.name, "...") == 0) {
-            has_dots_marker = true;
-            break;
-        }
-    }
-
-    int vararg_count_offset = -1;
-    if (has_dots_marker) {
-        vararg_count_offset = param_offset; // this slot will hold the runtime arg count
-        param_offset++;
-    }
+    // (Superseded: the count now arrives in VARARG_COUNT_REG and lives in
+    // a frame slot, so fixed parameters sit at their ordinary offsets.)
+    int vararg_count_offset = fn_is_variadic ? vararg_count_slot : -1;
 
     int is_variadic = 0;
     int fixed_param_count = 0;
@@ -155,7 +171,10 @@ void  node_function_def (ASTNode *node)
     SymbolNode *sym = resolve_symbol(func_name);
     if (sym) {
         sym->is_variadic = is_variadic;
-        sym->arity = is_variadic ? -1 : explicit_param_count;
+        // Fixed parameter count for variadic functions too: call sites pad
+        // omitted fixed parameters with nil (the count register still says
+        // how many were really passed).
+        sym->arity = explicit_param_count;
     }
 
     // NOTE: the old unconditional "ISUB SP, 1 ; Space for argument count
@@ -531,7 +550,7 @@ void  node_function_call (ASTNode *node, int  dest_reg)
     // program; callees ignore the extra trailing slots and the caller pops
     // everything it pushed. (Known variadic targets keep their own
     // argument-count convention below.)
-    if (expected_arity < 0 && !is_c_call && !(target_sym && target_sym->is_variadic)) {
+    if (expected_arity < 0 && !is_c_call) {
         extern int g_max_param_count;
         expected_arity = g_max_param_count;
     }
@@ -664,14 +683,16 @@ void  node_function_call (ASTNode *node, int  dest_reg)
     // -------------------------------------------------------------------------
     // STEP 3.5: Push Argument Count for Variadic Functions
     // -------------------------------------------------------------------------
-    if (target_sym && target_sym->is_variadic) {
-        emit_asm("    ; --- Variadic call: push argument count ---\n");
-        int arg_count_reg = allocate_register();
-        emit_asm("MOV R%d, %d ; Load total argument count\n", arg_count_reg, total_arg_count);
-        emit_asm("PUSH R%d ; Push arg count for variadic function\n", arg_count_reg);
-        unlock_register(arg_count_reg);
-        total_arg_count++; // Account for the arg count itself
+    // (Now VARARG_COUNT_REG, loaded just before CALL __builtin_exec below --
+    // see node_function_def().) Skipped only when the target is statically
+    // known to be a non-variadic Lua function.
+    SymbolNode *callee_fn = NULL;
+    if (node->as.call.target->type == NODE_IDENTIFIER) {
+        callee_fn = resolve_function_symbol(node->as.call.target->as.id.name);
+    } else {
+        callee_fn = target_sym;
     }
+    bool pass_arg_count = !(callee_fn != NULL && callee_fn->is_function && !callee_fn->is_variadic);
 
     // -------------------------------------------------------------------------
     // STEP 4: Execute Call & Clean Up Stack
@@ -706,6 +727,11 @@ void  node_function_call (ASTNode *node, int  dest_reg)
 
         // Unlock target_reg now that we've moved its value to R0
         unlock_pinned_register(target_reg);
+
+        if (pass_arg_count) {
+            emit_asm("MOV R%d, %d ; argument count (variadic ABI)\n",
+                     VARARG_COUNT_REG, actual_passed_count);
+        }
 
         // Call the Lua function executor (handles tag validation & tail-call)
         emit_asm("CALL __builtin_exec ; Validate and execute\n");

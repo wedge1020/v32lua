@@ -13,6 +13,16 @@ Vircon32 ones.
 | `v32lua game.lua` with `--#p8 "game.p8"` | For stripped `.lua` exports: code from the `.lua`, assets from the cart. Put the hint at the top, like `--#api`. |
 | `v32lua game.lua` with `--#api pico8` | No assets: blank sprite sheet, empty map, no flags. |
 
+Nothing in the cart has to be edited: a `.p8` selects the PICO-8 layer by
+itself, and the hints have command-line equivalents that take precedence
+over them — `--api pico8`, `--title "..."`, `--p8rate N`:
+
+    v32lua celeste.p8 --title "celeste" --p8rate 11025
+
+Without `--title` (or a `--#title` hint) the title is the cart's first
+comment line (PICO-8 shows it as the cart's name), else the file name,
+prefixed with `[PICO8] ` — e.g. `[PICO8] ~celeste~`.
+
 Map rows 32–63 are read from the lower half of `__gfx__`, exactly like
 PICO-8's shared memory. Trailing all-zero rows that PICO-8 omits are fine.
 
@@ -97,7 +107,8 @@ sound at the end of the frame, so the next pattern starts exactly where
 the previous one ends. A game update that runs past the frame a pattern
 ends on starts the next one late, at the position it would have reached.
 
-Sample rate (`--#p8rate`, at the top of the file with `--#api`/`--#p8`):
+Sample rate (`--p8rate N` on the command line, or `--#p8rate` at the top of
+the file with `--#api`/`--#p8`):
 
 | `--#p8rate` | Celeste's sound data | Notes |
 |---|---|---|

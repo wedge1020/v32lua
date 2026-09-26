@@ -23,6 +23,7 @@ struct TIC80AssetData {
 
 // In the TIC80 assets section
 extern bool  tic80_has_map;
+extern uint8_t tic80_sprite_flags[512];
 extern bool  tic80_has_waves;
 extern bool  tic80_has_sfx;
 extern bool  tic80_has_tracks;
@@ -49,5 +50,10 @@ void      parse_tic80_map_row        (int, const char *);
 void parse_tic80_wave(int wave_index, const char *hex_data);
 void parse_tic80_sfx(int sfx_index, const char *hex_data);
 void parse_tic80_track(int track_index, const char *hex_data);
+
+// tic80_cart.c -- binary .tic cartridges
+bool        tic80_is_binary_cart_path (const char *path);
+char       *tic80_cart_to_text (const char *path);     // malloc'd .lua-project text
+const char *tic80_metatag (const char *code, const char *tag);
 
 #endif

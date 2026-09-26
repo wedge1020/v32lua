@@ -629,6 +629,7 @@ void node_for_generic(ASTNode *node)
     // Call iterator function
     get_variable_access_string(iter_func_var, access_iter);
     emit_asm("MOV R0, %s        ; Load iterator function\n", access_iter);
+    emit_asm("MOV R%d, 2 ; argument count (variadic ABI)\n", VARARG_COUNT_REG);
     emit_asm("CALL __builtin_exec ; Validate and execute iterator (unboxes tag, handles closures)\n");
     emit_asm("IADD SP, 2         ; Clean up 2 arguments\n");
 

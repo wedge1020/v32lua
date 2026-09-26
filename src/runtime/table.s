@@ -1833,6 +1833,7 @@ __sort_use_comp:
     PUSH R2                      ; param 2 pushed first
     PUSH R1                      ; param 1 pushed last
     MOV  R0, [BP-4]
+    MOV  R13, 2                  ; argument count (variadic ABI)
     CALL __builtin_exec
     IADD SP, 2
     IEQ  R0, BOXED_TRUE

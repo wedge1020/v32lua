@@ -6,6 +6,11 @@ YACC = bison
 
 # --- Flags ---
 CFLAGS = -Wall -Wextra -g -I ../inc -DYYDEBUG=1
+# -MMD -MP: record each object's header dependencies (*.d, included at the
+# end), so editing a header such as context.h rebuilds every object that
+# uses it. Without this, changing a struct left stale objects with the old
+# layout linked in -- a silent miscompile until the next `make clean`.
+DEPFLAGS = -MMD -MP
 CLIBS = -lm
 
 # --- Output Executable ---
@@ -14,7 +19,7 @@ TARGET = ../bin/v32lua
 # --- Object Files ---
 
 # Core sources
-CORE_SRCS = parser.o lexer.o main.o context.o ffi.o closures.o generator.o ast.o emit.o internals.o register.o table.o tilemap.o pico8_assets.o pico8_audio.o pico8_prelude.o tic80_assets.o vtex_generator.o vsnd_generator.o runtime_embed.o
+CORE_SRCS = parser.o lexer.o main.o context.o ffi.o closures.o generator.o ast.o emit.o internals.o register.o table.o tilemap.o pico8_assets.o pico8_audio.o pico8_prelude.o tic80_assets.o tic80_cart.o vtex_generator.o vsnd_generator.o runtime_embed.o
 
 # generate cases - automatically include all .c files in generate/
 NODE_DIR = node
@@ -45,7 +50,7 @@ lexer.c: lexer.l ../inc/parser.h
 
 # Rule for standard C files
 %.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
 # Rule for Assembly files (instructs assembler to disable executable stack requirement)
 %.o: %.S
@@ -76,6 +81,8 @@ context:
 	@cp -v runtime_embed.S    runtime_embed.S.txt
 
 clean:
-	rm -f $(TARGET) $(OBJS) ../monolithic_source.c *.txt runtime/*.txt intrinsics/*.txt node/*.txt *.output
+	rm -f $(TARGET) $(OBJS) $(OBJS:.o=.d) ../monolithic_source.c *.txt runtime/*.txt intrinsics/*.txt node/*.txt *.output
 
 .PHONY: all clean monorule
+
+-include $(wildcard *.d node/*.d intrinsics/*.d)

@@ -24,6 +24,7 @@ uint8_t tic80_map_data[TIC80_MAP_MAX_WIDTH * TIC80_MAP_MAX_HEIGHT] = {0};
 int tic80_map_width = 0;
 int tic80_map_height = 0;
 bool tic80_has_map = false;
+uint8_t tic80_sprite_flags[512] = {0};    // fget()/fset() flags, from -- <FLAGS>
 
 // =============================================================================
 // Helper Functions
@@ -225,8 +226,12 @@ void process_tic80_section(const char *section, TIC80AssetData *assets)
     // Example: -- 0:2C1C1A5D275D533EB1... (96 chars total)
     // ========================================================================
     if (strcmp(section, "PALETTE") == 0) {
-        if (assets != NULL) {
-            TIC80AssetData *data = assets;
+        // Row 000 is vbank 0's palette (a cart may also carry row 001, the
+        // vbank 1 palette; rows arrive in reverse order in this list, so
+        // "the first item" was row 001 whenever both were present).
+        TIC80AssetData *data = assets;
+        while (data != NULL && data->index != 0) data = data->next;
+        if (data != NULL) {
             // Parse the 96-char hex string (16 colors x 6 chars each: RRGGBB)
             if (strlen(data->hex_data) >= 96) {
                 for (int i = 0; i < 16; i++) {
@@ -249,6 +254,34 @@ void process_tic80_section(const char *section, TIC80AssetData *assets)
             parse_tic80_tile(item->index, item->hex_data);
         }
         tic80_has_any_assets = true;
+    }
+    // ========================================================================
+    // SPRITES SECTION -- the second half of the sheet: sprite ids 256-511.
+    // Same line format as TILES, indices 000-255 within the section. It
+    // used to be ignored, so every foreground sprite drew as blank.
+    // ========================================================================
+    else if (strcmp(section, "SPRITES") == 0) {
+        for (TIC80AssetData *item = assets; item != NULL; item = item->next) {
+            if (item->index >= 0 && item->index < 256) {
+                parse_tic80_tile(256 + item->index, item->hex_data);
+            }
+        }
+        tic80_has_any_assets = true;
+    }
+    // ========================================================================
+    // FLAGS SECTION -- fget()/fset() sprite flags: row 000 = ids 0-255,
+    // row 001 = ids 256-511, one byte per sprite written as two hex digits
+    // with the nibbles swapped (TIC-80's "flip" hex, as for TILES/MAP).
+    // ========================================================================
+    else if (strcmp(section, "FLAGS") == 0) {
+        for (TIC80AssetData *item = assets; item != NULL; item = item->next) {
+            if (item->index < 0 || item->index > 1) continue;
+            const char *h = item->hex_data;
+            for (int i = 0; i < 256 && h[i * 2] && h[i * 2 + 1]; i++) {
+                char pair[3] = { h[i * 2 + 1], h[i * 2], 0 };   // un-flip
+                tic80_sprite_flags[item->index * 256 + i] = (uint8_t) strtoul(pair, NULL, 16);
+            }
+        }
     }
     // ========================================================================
     // MAP SECTION

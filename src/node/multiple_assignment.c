@@ -89,7 +89,7 @@ void node_multiple_assignment(ASTNode *node)
             SymbolNode *callee_sym = NULL;
 
             if (curr_val->as.call.target->type == NODE_IDENTIFIER) {
-                callee_sym = resolve_symbol(curr_val->as.call.target->as.id.name);
+                callee_sym = resolve_function_symbol(curr_val->as.call.target->as.id.name);
             } else if (callee_path[0] != '\0') {
                 callee_sym = resolve_symbol(callee_path);
 
@@ -275,7 +275,24 @@ void node_multiple_assignment(ASTNode *node)
         // push it to the stack immediately, in target order, BEFORE any
         // target is written.
         ASTNode *scan_val = curr_val;
+        ASTNode *values_arr[64];
         for (int i = 0; i < n; i++) {
+            values_arr[i] = scan_val;
+
+            // `local function f` (desugared to `local f; f = function`) and
+            // plain re-assignment of an existing local/upvalue: record (or
+            // clear) which function the local now names, BEFORE the value
+            // is generated -- so a recursive call inside the body already
+            // sees it. See resolve_function_symbol().
+            if (!node->as.mult_assign.is_local && targets_arr[i]->type == NODE_IDENTIFIER) {
+                SymbolNode *ts = resolve_symbol(targets_arr[i]->as.id.name);
+                if (ts != NULL && ts->type != SYM_GLOBAL) {
+                    ts->fn_alias = (scan_val != NULL && scan_val->type == NODE_FUNCTION_POINTER &&
+                                    scan_val->as.func_ptr.func_def != NULL)
+                                 ? scan_val->as.func_ptr.mangled_name : NULL;
+                }
+            }
+
             int tmp_reg = allocate_pinned_register();
             mark_register_live(tmp_reg, 1);
 
@@ -304,6 +321,12 @@ void node_multiple_assignment(ASTNode *node)
             if (tgt->type == NODE_IDENTIFIER) {
                 if (node->as.mult_assign.is_local) {
                     SymbolNode *sym = register_local(tgt->as.id.name);
+                    ASTNode    *v   = values_arr[i];
+                    if (sym->type != SYM_GLOBAL) {   // top-level 'local' is a RAM global
+                        sym->fn_alias = (v != NULL && v->type == NODE_FUNCTION_POINTER &&
+                                         v->as.func_ptr.func_def != NULL)
+                                      ? v->as.func_ptr.mangled_name : NULL;
+                    }
 
                     if (g_verbose_debug) {
                         fprintf(stderr, "[debug] node_multiple_assignment() Declaring local: %s (val_reg=R%d, boxed=%d)\n",

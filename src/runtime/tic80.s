@@ -137,7 +137,7 @@ _tic80_init_textures_done:
 ;;
 ;; __builtin_tic80_init_flags: Initialize Sprite Flag Buffer
 ;;
-;; Allocates and zero-initializes 512 bytes (128 words) for sprite flags
+;; Allocates 512 bytes (128 words) for sprite flags, filled from __tic80_flags_rom
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -156,7 +156,7 @@ __builtin_tic80_init_flags:
     MOV   [R1], R0
     MOV   R12, R0            ; R12 = flag buffer pointer
 
-    ;; Zero-initialize the flag buffer (128 words)
+    ;; Fill the flag buffer from the cart's flags (128 words)
     MOV   R2, 0             ; word index
 
 _tic80_init_flags_zero_loop:
@@ -165,9 +165,11 @@ _tic80_init_flags_zero_loop:
     JF    R8, _tic80_init_flags_done
     MOV   R8, R2
 
+    MOV   R1, __tic80_flags_rom  ; the cart's -- <FLAGS> (zeros if none)
+    IADD  R1, R2
+    MOV   R8, [R1]
     MOV   R1, R12
     IADD  R1, R2
-    MOV   R8, 0
     MOV   [R1], R8
 
     IADD  R2, 1

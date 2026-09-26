@@ -4,6 +4,38 @@
 char          cart_version[64]    = "1.0";
 char          cart_title[128]     = "Vircon32 Program";
 bool          cart_title_was_set  = false;
+bool          g_cli_api_set       = false;
+bool          g_cli_p8rate_set    = false;
+bool          g_cli_title_set     = false;
+
+// Switches the compiler into one API mode: shared by the --#api hint, the
+// --api command-line option and API auto-detection. False for an unknown name.
+bool apply_api_mode (const char *api_name)
+{
+    if (strcmp(api_name, "pico8") == 0) {
+        runtime_req.needs_pico8           = true;
+        runtime_req.needs_tic80           = false;
+        runtime_req.needs_vircon32        = false;
+        runtime_req.needs_tables          = true;
+        // PICO-8's bare math globals (rnd/flr/min/max/tan/...) alias onto
+        // math.* emitters that CALL __builtin_* routines in math.s, but
+        // needs_math is otherwise only set for a literal "math." prefix
+        // -- tan()/rnd() in a PICO-8 cart failed to assemble without it.
+        runtime_req.needs_math            = true;
+    } else if (strcmp(api_name, "tic80") == 0) {
+        runtime_req.needs_tic80           = true;
+        runtime_req.needs_pico8           = false;
+        runtime_req.needs_vircon32        = false;
+        runtime_req.needs_tables          = true;
+    } else if (strcmp(api_name, "vircon32") == 0 || strcmp(api_name, "native") == 0) {
+        runtime_req.needs_tic80           = false;
+        runtime_req.needs_pico8           = false;
+        runtime_req.needs_vircon32        = true;
+    } else {
+        return false;
+    }
+    return true;
+}
 CARTresource *textures_head       = NULL;
 CARTresource *sounds_head         = NULL;
 CARTresource *textures_tail       = NULL;
@@ -112,23 +144,12 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
             api_name[sizeof(api_name) - 1] = '\0';
         }
 
-        if (strcmp(api_name, "pico8")        == 0) {
-            runtime_req.needs_pico8           = true;
-            runtime_req.needs_tic80           = false;
-            runtime_req.needs_vircon32        = false;
-            runtime_req.needs_tables          = true;
-            // PICO-8's bare math globals (rnd/flr/min/max/tan/...) alias onto
-            // math.* emitters that CALL __builtin_* routines in math.s, but
-            // needs_math is otherwise only set for a literal "math." prefix
-            // -- tan()/rnd() in a PICO-8 cart failed to assemble without it.
-            runtime_req.needs_math            = true;
-        } else if (strcmp(api_name, "tic80") == 0) {
-            runtime_req.needs_tic80           = true;
-            runtime_req.needs_pico8           = false;
-            runtime_req.needs_vircon32        = false;
-            runtime_req.needs_tables          = true;
-        } else {
+        if (g_cli_api_set) {
+            // --api on the command line wins over the source's own hint
+        } else if (strcmp(api_name, "pico8") != 0 && strcmp(api_name, "tic80") != 0) {
             compiler_error(ERR_SEMANTIC, -1, "Unknown API: %s. Use 'pico8' or 'tic80'", api_name);
+        } else {
+            apply_api_mode(api_name);
         }
         node->as.cart_hint.value = strdup(api_name);
     }
@@ -147,11 +168,9 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
         }
         // same effect as --#api pico8 (put this hint first, like --#api,
         // so PICO-8-only syntax later in the file is recognised)
-        runtime_req.needs_pico8    = true;
-        runtime_req.needs_tic80    = false;
-        runtime_req.needs_vircon32 = false;
-        runtime_req.needs_tables   = true;
-        runtime_req.needs_math     = true;
+        if (!g_cli_api_set) {
+            apply_api_mode("pico8");
+        }
         node->as.cart_hint.value = strdup(path);
     }
     else if (strcmp(action, "p8rate") == 0 && tokens >= 2) {
@@ -161,7 +180,9 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
         if (rate != 11025 && rate != 22050 && rate != 44100) {
             compiler_error(ERR_SEMANTIC, yylineno, "--#p8rate: use 11025, 22050 or 44100 (got '%s')", param1);
         }
-        pico8_audio_rate = rate;
+        if (!g_cli_p8rate_set) {      // --p8rate on the command line wins
+            pico8_audio_rate = rate;
+        }
         node->as.cart_hint.value = strdup(param1);
     }
     else if (strcmp(action, "version") == 0 && tokens >= 2) {
@@ -173,8 +194,10 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
         // e.g., --#title "My Awesome Game"
         char title_buf[128] = {0};
         if (sscanf(raw_hint, "%*s \"%127[^\"]\"", title_buf) == 1) {
-            cart_title_was_set = true;
-            strncpy(cart_title, title_buf, sizeof(cart_title) - 1);
+            if (!g_cli_title_set) {    // --title on the command line wins
+                cart_title_was_set = true;
+                strncpy(cart_title, title_buf, sizeof(cart_title) - 1);
+            }
             node->as.cart_hint.value = strdup(title_buf);
         }
     }

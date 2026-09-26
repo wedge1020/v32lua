@@ -88,7 +88,7 @@ int  get_expected_arity (ASTNode *target)
 
     // 1. Direct function call: foo(1, 2)
     if (target->type == NODE_IDENTIFIER) {
-        SymbolNode *sym = resolve_symbol(target->as.id.name);
+        SymbolNode *sym = resolve_function_symbol(target->as.id.name);
         if (sym && sym->is_function) {
             return sym->arity;
         }

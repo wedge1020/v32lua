@@ -9,7 +9,13 @@ v32lua \- compile a subset of Lua to Vircon32 assembly and cartridge XML
 .RB [ \-v ]
 .RB [ \-d ]
 .RB [ \-w ]
-.IR input.lua " | " cart.p8
+.RB [ \-\-api
+.IR api ]
+.RB [ \-\-title
+.IR title ]
+.RB [ \-\-p8rate
+.IR hz ]
+.IR input.lua " | " cart.p8 " | " cart.tic
 .br
 .B v32lua
 .B \-\-version
@@ -114,6 +120,51 @@ inside a
 entry point, or a mismatched cart-resource ordering). Errors are
 unaffected and still halt compilation.
 .TP
+.BI \-\-api " api"
+Select the API layer:
+.BR pico8 ,
+.BR tic80 ,
+or
+.B vircon32
+(native). Overrides a
+.B \-\-#api
+hint in the source. Without this option the API is detected: a
+.I .p8
+file is PICO-8, a
+.I .tic
+file is TIC-80, and a
+.I .lua
+file uses its own
+.BR \-\-#api / \-\-#p8
+hint or, with none, its entry points
+.RB ( TIC()
+selects tic80;
+.BR _draw() ,
+.BR _update() ,
+.B _update60()
+select pico8; otherwise native).
+.TP
+.BI \-\-title " title"
+Cartridge title, used verbatim; overrides a
+.B \-\-#title
+hint. Without either, the title is the cart's own (TIC-80
+.B \-\- title:
+metadata, or PICO-8's first comment line) or the input file name, prefixed with
+.B [PICO8]
+or
+.B [TIC80]
+in those API modes.
+.TP
+.BI \-\-p8rate " hz"
+Sample rate of PICO-8 sounds synthesized from the cart:
+.BR 11025 ,
+.B 22050
+(default) or
+.BR 44100 .
+Overrides a
+.B \-\-#p8rate
+hint.
+.TP
 .B \-\-version
 Print version, author, and project URL information, and exit
 immediately without processing any input.
@@ -159,6 +210,16 @@ cart in
 .RS
 .nf
 v32lua \-g \-o build/game.asm src/game.lua
+.fi
+.RE
+.PP
+Compile an unmodified PICO-8 cart (API detected from the extension) with a
+chosen title and lo-fi sound, and a TIC-80 binary cart:
+.PP
+.RS
+.nf
+v32lua celeste.p8 \-\-title "celeste" \-\-p8rate 11025
+v32lua game.tic
 .fi
 .RE
 .SH ENTRY POINTS

@@ -72,4 +72,4 @@ put: context
 	done
 
 archive: clean
-	zip -r v32lua-project.zip demos doc inc lib Makefile man README.* scripts src tests v32
+	zip -r v32lua-project.zip demos doc inc lib Makefile man README.* scripts src tests v32 testing tools

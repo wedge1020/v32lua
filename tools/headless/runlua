@@ -4,7 +4,7 @@
 # faulting location, recent trail and call stack are printed.
 T=$(cd "$(dirname "$0")" && pwd)
 V32LUA=${V32LUA:-$T/../../bin/v32lua}
-f=$1; shift; b=${f%.lua}; b=${b%.p8}
+f=$1; shift; b=${f%.lua}; b=${b%.p8}; b=${b%.tic}
 d=$(dirname $f); bn=$(basename $f)
 ( cd $d && $V32LUA -w $bn -o $(basename $b).asm ) > $b.clog 2>&1 || { echo "COMPILE FAIL"; cat $b.clog; exit 1; }
 ( cd $d && $T/Assembler $(basename $b).asm -o $(basename $b).vbin -g program ) > $b.alog 2>&1 || { echo "ASSEMBLE FAIL"; cat $b.alog; exit 1; }

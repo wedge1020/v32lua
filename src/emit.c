@@ -398,7 +398,19 @@ void  emit_cart_xml (const char *input_filename, int  verbose)
     // 5. Emit the Vircon32 XML configuration
     fprintf (xml, "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\" ?>\n");
     fprintf (xml, "<rom-definition version=\"1.0\">\n");
-    fprintf (xml, "    <rom type=\"cartridge\" title=\"%s\" version=\"%s\" />\n", cart_title, cart_version);
+    // XML-escape the title: it can now come from a file name or a cart's
+    // own metadata ("Tom & Jerry", "\"quoted\""), not only from --#title.
+    char xml_title[sizeof (cart_title) * 6];
+    {
+        char *w = xml_title;
+        for (const char *r = cart_title; *r; r++) {
+            const char *e = (*r == '&') ? "&amp;" : (*r == '<') ? "&lt;" : (*r == '>') ? "&gt;"
+                          : (*r == '"') ? "&quot;" : NULL;
+            if (e) { strcpy (w, e); w += strlen (e); } else { *w++ = *r; }
+        }
+        *w = '\0';
+    }
+    fprintf (xml, "    <rom type=\"cartridge\" title=\"%s\" version=\"%s\" />\n", xml_title, cart_version);
     fprintf (xml, "<binary path=\"%s\" />\n", vbin_path);
     
     if (textures_head != NULL) {
@@ -819,6 +831,19 @@ void  emit_runtime_library (void)
             }
         }
         fprintf (out(), "\n");
+
+        // Sprite flags from the cart's -- <FLAGS> section (zeros if none),
+        // packed 4 sprites per word (sprite n at bits 8*(n%4)) -- the layout
+        // __builtin_tic80_fget/fset use. Copied to RAM by init_flags.
+        fprintf (out(), "\n__tic80_flags_rom:\n");
+        for (int w = 0; w < 128; w++) {
+            uint32_t word = (uint32_t) tic80_sprite_flags[w * 4]
+                          | ((uint32_t) tic80_sprite_flags[w * 4 + 1] << 8)
+                          | ((uint32_t) tic80_sprite_flags[w * 4 + 2] << 16)
+                          | ((uint32_t) tic80_sprite_flags[w * 4 + 3] << 24);
+            fprintf (out(), "%s0x%08X%s", (w % 8 == 0) ? "    integer " : "",
+                     word, (w % 8 == 7) ? "\n" : ", ");
+        }
 
         emit_tic80_map_data (out());
     }

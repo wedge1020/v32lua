@@ -343,6 +343,17 @@ int main(int argc, char** argv)
             if (canon) {
                 // machine-readable: CANON <name> <kind> <value>
                 uint32_t u = w.AsBinary; string nm = n.rfind("var_", 0) == 0 ? n.substr(4) : n;
+                printf("RAW %s %08X\n", nm.c_str(), u);
+                if ((u & 0xFFC00000u) == 0x7FC00000u || ((u & 0xFFC00000u) == 0xFFC00000u && u > 0xFFC00002u)) {
+                    // escaped copy (one line, non-printables as \xHH) for the unit-test harness
+                    bool rom = (u & 0xFFC00000u) == 0x7FC00000u; string e;
+                    for (int k = 0; k < 4000; k++) { VirconWord c;
+                        bool ok = rom ? CAR.ReadAddress((u & 0x3FFFFF) + k, c) : RAM.ReadAddress((u & 0x3FFFFF) + k, c);
+                        if (!ok || c.AsInteger == 0) break;
+                        int ch = c.AsInteger; char b[8];
+                        if (ch >= 32 && ch < 127) e += (char) ch; else { snprintf(b, sizeof b, "\\x%02X", ch & 0xFF); e += b; } }
+                    printf("ESTR %s %s\n", nm.c_str(), e.c_str());
+                }
                 auto rdstr = [&](bool rom, uint32_t addr) { string r; for (int k = 0; k < 4000; k++) { VirconWord c;
                         bool ok = rom ? CAR.ReadAddress(addr + k, c) : RAM.ReadAddress(addr + k, c);
                         if (!ok || c.AsInteger == 0) break; r += (char) c.AsInteger; } return r; };

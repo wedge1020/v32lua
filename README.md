@@ -187,6 +187,30 @@ Available options:
 * `--version`: Displays compiler version and author information.
 * `--help`, `-h`: Displays command-line usage instructions.
 
+Cartridge options — each overrides the matching `--#` hint in the source,
+so a PICO-8 or TIC-80 cart compiles without editing it (`--opt=value` also
+works):
+
+* `--api pico8|tic80|vircon32`: Selects the API layer. Without it the API
+  is detected: a `.p8` is PICO-8, a `.tic` is TIC-80, and a `.lua` uses its
+  own `--#api`/`--#p8` hint — or, with none, its entry points (`TIC()` →
+  tic80; `_draw()`/`_update()`/`_update60()` → pico8; otherwise native).
+* `--title "text"`: Cartridge title, used as is. Without it: the `--#title`
+  hint, else the cart's own title (TIC-80's `-- title:` metadata, PICO-8's
+  first comment line) or the file name — prefixed with `[PICO8] ` or
+  `[TIC80] ` in those API modes.
+* `--p8rate 11025|22050|44100`: Sample rate of PICO-8 sounds synthesized
+  from the cart (default 22050; see [doc/PICO8.md](doc/PICO8.md)).
+
+```bash
+$ v32lua celeste.p8 --title "celeste" --p8rate 11025   # API detected from .p8
+$ v32lua game.tic                                        # TIC-80 binary cart
+```
+
+Input files: `.lua`, `.p8` (PICO-8 cartridge), `.tic` (TIC-80 cartridge,
+Lua carts only; the code and bank 0's tiles, sprites, map, flags, palette,
+waveforms and SFX are read — the same data a TIC-80 `.lua` export carries).
+
 ---
 
 ## API Compatibility Layers

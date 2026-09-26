@@ -1810,7 +1810,15 @@ __string_format_handle_f:
     PUSH R5
     PUSH R6
     PUSH R0                     ; value
-    PUSH R12                    ; precision parsed from the format string (-1 if none)
+    ;; %f with no precision is C's/Lua's %.6f ("2.500000"). -1 would select
+    ;; ftoa's default mode, which since the tostring() change formats like
+    ;; %.14g ("2.5") -- right for tostring/.., wrong for %f.
+    MOV  R2, R12
+    IEQ  R2, -1
+    JF   R2, __string_format_f_has_prec
+    MOV  R12, 6
+__string_format_f_has_prec:
+    PUSH R12                    ; precision (6 if the format string gave none)
     CALL __builtin_ftoa_scratch_a  ; was __builtin_ftoa
     IADD SP, 2
     POP  R6

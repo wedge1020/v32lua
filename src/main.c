@@ -60,6 +60,86 @@ static void  print_usage (const char *prog_name)
     fprintf (stdout, "  -d           Displays operational debug information\n");
     fprintf (stdout, "  -w           Inhibit all warnings\n");
     //fprintf (stdout, "  -Wall        Enable all warnings\n");
+    fprintf (stdout, "\nCartridge options (override the matching --# hint in the source):\n");
+    fprintf (stdout, "  --api <name>     API layer: pico8, tic80 or vircon32. Default: detected\n");
+    fprintf (stdout, "                   from the file (.p8 -> pico8, .tic -> tic80; a .lua by\n");
+    fprintf (stdout, "                   its --#api hint, else TIC()/_draw()/_update() entry points)\n");
+    fprintf (stdout, "  --title <text>   Cartridge title. Default: the --#title hint, else the\n");
+    fprintf (stdout, "                   cart's own title (TIC-80 '-- title:', PICO-8's first\n");
+    fprintf (stdout, "                   comment line) or the file name, prefixed with\n");
+    fprintf (stdout, "                   [PICO8] / [TIC80] in those API modes\n");
+    fprintf (stdout, "  --p8rate <hz>    PICO-8 sound sample rate: 11025, 22050 (default), 44100\n");
+    fprintf (stdout, "\nInput files: .lua, .p8 (PICO-8 cart), .tic (TIC-80 cart, Lua only)\n");
+}
+
+// "--opt value" or "--opt=value": returns the value (advancing *i past it),
+// or NULL when argv[*i] is not this option.
+static const char *option_value (int argc, char **argv, int *i, const char *name)
+{
+    size_t n = strlen (name);
+    if (strncmp (argv[*i], name, n) != 0) return NULL;
+    if (argv[*i][n] == '=') return argv[*i] + n + 1;
+    if (argv[*i][n] != '\0') return NULL;
+    if (*i + 1 >= argc) {
+        fprintf (stderr, "Compiler Error: %s needs a value\n", name);
+        exit (1);
+    }
+    return argv[++(*i)];
+}
+
+// True if some line of src starts (after indentation) with prefix.
+static bool has_line_starting (const char *src, const char *prefix)
+{
+    size_t n = strlen (prefix);
+    for (const char *p = src; p && *p; ) {
+        const char *q = p;
+        while (*q == ' ' || *q == '\t') q++;
+        if (strncmp (q, prefix, n) == 0) return true;
+        p = strchr (p, '\n');
+        if (p) p++;
+    }
+    return false;
+}
+
+// API auto-detection for a .lua with no --#api / --#p8 hint (and no --api):
+// the entry points name the platform. Returns NULL when it isn't clear.
+static const char *detect_api_from_source (const char *src)
+{
+    bool tic   = has_line_starting (src, "function TIC(")    || has_line_starting (src, "function TIC (") ||
+                 has_line_starting (src, "TIC=function")      || has_line_starting (src, "TIC = function");
+    bool pico8 = has_line_starting (src, "function _draw(")  || has_line_starting (src, "function _update(") ||
+                 has_line_starting (src, "function _update60(");
+    bool v32   = has_line_starting (src, "function main(")   || has_line_starting (src, "function game_loop(");
+    if (tic && !pico8 && !v32) return "tic80";
+    if (pico8 && !tic && !v32) return "pico8";
+    return NULL;
+}
+
+// PICO-8 shows a cart's first comment line as its title: the first line of
+// Lua code that isn't blank or a --# hint, if it is a "--" comment.
+static void pico8_embedded_title (const char *lua, char *out, size_t out_size)
+{
+    out[0] = '\0';
+    for (const char *p = lua; p && *p; ) {
+        const char *eol = strchr (p, '\n');
+        size_t len = eol ? (size_t) (eol - p) : strlen (p);
+        const char *q = p;
+        while (q < p + len && (*q == ' ' || *q == '\t' || *q == '\r')) q++;
+        if (q < p + len && strncmp (q, "--#", 3) != 0) {
+            if (strncmp (q, "--", 2) == 0 && strncmp (q, "--[[", 4) != 0) {
+                q += 2;
+                while (q < p + len && (*q == ' ' || *q == '\t')) q++;
+                const char *e = p + len;
+                while (e > q && (e[-1] == ' ' || e[-1] == '\t' || e[-1] == '\r')) e--;
+                size_t n = (size_t) (e - q);
+                if (n >= out_size) n = out_size - 1;
+                memcpy (out, q, n);
+                out[n] = '\0';
+            }
+            return;
+        }
+        p = eol ? eol + 1 : NULL;
+    }
 }
 
 static void log_stage (int  stage_num, const char *stage_name, int  verbose)
@@ -82,12 +162,31 @@ int  main (int  argc, char** argv)
     char  output_filename[256]  = { 0 };
     int   verbose               = 0;
     int   o_dowarnings          = 1; // display warnings by default
+    const char *cli_api         = NULL;
+    const char *cli_title       = NULL;
+    int         cli_p8rate      = 0;
 
     g_verbose_debug             = false;
 
     // --- Command Line Argument Parsing ---
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
+        const char *val;
+        if ((val = option_value(argc, argv, &i, "--api")) != NULL) {
+            if      (strcmp(val, "native") == 0 || strcmp(val, "v32") == 0) val = "vircon32";
+            if (strcmp(val, "pico8") != 0 && strcmp(val, "tic80") != 0 && strcmp(val, "vircon32") != 0) {
+                fprintf(stderr, "Compiler Error: --api must be pico8, tic80 or vircon32 (got '%s')\n", val);
+                return 1;
+            }
+            cli_api = val;
+        } else if ((val = option_value(argc, argv, &i, "--title")) != NULL) {
+            cli_title = val;
+        } else if ((val = option_value(argc, argv, &i, "--p8rate")) != NULL) {
+            cli_p8rate = atoi(val);
+            if (cli_p8rate != 11025 && cli_p8rate != 22050 && cli_p8rate != 44100) {
+                fprintf(stderr, "Compiler Error: --p8rate must be 11025, 22050 or 44100 (got '%s')\n", val);
+                return 1;
+            }
+        } else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
             strncpy(output_filename, argv[++i], sizeof(output_filename) - 1);
         } else if (strcmp(argv[i], "-g") == 0) {
             g_debug_mode = true;
@@ -137,6 +236,28 @@ int  main (int  argc, char** argv)
 
     tic80_init_default_palette ();
 
+    // --- Command-line cartridge options ---
+    // Applied before lexing: PICO-8's extra syntax is only recognised once
+    // pico8 mode is on. The in-source hints check the g_cli_*_set flags and
+    // leave these values alone.
+    if (cli_api != NULL) {
+        apply_api_mode (cli_api);
+        g_cli_api_set = true;
+    }
+    if (cli_p8rate != 0) {
+        pico8_audio_rate = cli_p8rate;
+        g_cli_p8rate_set = true;
+    }
+    if (cli_title != NULL) {
+        strncpy (cart_title, cli_title, sizeof (cart_title) - 1);
+        cart_title[sizeof (cart_title) - 1] = '\0';
+        cart_title_was_set = true;
+        g_cli_title_set    = true;
+    }
+    bool is_tic_cart = tic80_is_binary_cart_path (input_filename);
+    char embedded_tic80_title[128] = { 0 };   // TIC-80 "-- title:" metadata
+    char embedded_pico8_title[128] = { 0 };   // PICO-8 first comment line
+
     g_lua_filename                  = input_filename;
     g_asm_filename                  = output_filename;
 
@@ -153,7 +274,12 @@ int  main (int  argc, char** argv)
     // TIC-80 sections) sees one ordinary linear token stream either way.
     log_stage(2, "preprocessor", verbose);
     {
-        char *expanded_source = expand_includes (input_filename, &g_line_map, &g_line_map_count);
+        // A binary TIC-80 cart becomes the text of its .lua project export
+        // (code + -- <TILES> ... sections), which the rest of the compiler
+        // already understands. See tic80_cart.c.
+        char *expanded_source = is_tic_cart
+                              ? tic80_cart_to_text (input_filename)
+                              : expand_includes (input_filename, &g_line_map, &g_line_map_count);
 
         // CRLF -> LF (Windows-saved sources): Lua reads a line break inside
         // a long string as "\n", and a stray '\r' in split([[...]], "\n")
@@ -171,7 +297,8 @@ int  main (int  argc, char** argv)
         // lexed (every other line blanked so line numbers still match the
         // .p8, header replaced by "--#api pico8"), and __gfx__/__gff__/
         // __map__ are parsed as the cart's assets. See pico8_assets.c.
-        if (pico8_is_cart_text (expanded_source)) {
+        bool is_p8_cart = pico8_is_cart_text (expanded_source);
+        if (is_p8_cart) {
             char *lua_only = pico8_split_cart (expanded_source);
             if (lua_only == NULL) {
                 compiler_error (ERR_INTERNAL, -1, "Out of memory splitting .p8 cartridge");
@@ -180,11 +307,36 @@ int  main (int  argc, char** argv)
             expanded_source = lua_only;
         }
 
+        // --- API auto-detection (no --api given) ---
+        // .p8 and .tic say what they are. A .lua keeps its own --#api/--#p8
+        // hint when it has one; otherwise its entry points decide.
+        if (!g_cli_api_set) {
+            const char *detected = NULL;
+            if (is_p8_cart)       detected = "pico8";
+            else if (is_tic_cart) detected = "tic80";
+            else if (!strstr (expanded_source, "--#api") && !strstr (expanded_source, "--#p8"))
+                detected = detect_api_from_source (expanded_source);
+            if (detected != NULL) {
+                apply_api_mode (detected);
+                if (verbose) {
+                    fprintf (stdout, "api: %s (detected)\n", detected);
+                }
+            }
+        }
+
+        // Titles a cart carries itself, used when neither --title nor
+        // --#title gives one (decided after parsing, once the API is final).
+        snprintf (embedded_tic80_title, sizeof (embedded_tic80_title), "%s",
+                  tic80_metatag (expanded_source, "title"));
+        pico8_embedded_title (expanded_source, embedded_pico8_title, sizeof (embedded_pico8_title));
+
         // PICO-8 builtins implemented in Lua (split, tostr, stat, ...):
         // appended when the program uses them. See pico8_prelude.c.
-        if (strstr (expanded_source, "--#api pico8") ||
-            strstr (expanded_source, "--#api \"pico8\"") ||
-            strstr (expanded_source, "--#p8")) {
+        if (runtime_req.needs_pico8 ||
+            (!g_cli_api_set &&
+             (strstr (expanded_source, "--#api pico8") ||
+              strstr (expanded_source, "--#api \"pico8\"") ||
+              strstr (expanded_source, "--#p8")))) {
             expanded_source = pico8_append_prelude (expanded_source);
         }
 
@@ -204,6 +356,29 @@ int  main (int  argc, char** argv)
         compiler_error(ERR_SYNTAX, -1, "Parsing failed due to syntax errors.");
     }
     fclose(yyin);
+
+    // --- Cartridge title ---
+    // --title > --#title > the cart's own title > the file name; the last
+    // two get a [PICO8] / [TIC80] prefix in those API modes. Always resolved
+    // here, so the XML <rom title> and the __cart_title label agree.
+    if (!cart_title_was_set) {
+        const char *base   = NULL;
+        const char *prefix = "";
+        if (runtime_req.needs_tic80) {
+            prefix = "[TIC80] ";
+            if (embedded_tic80_title[0]) base = embedded_tic80_title;
+        } else if (runtime_req.needs_pico8) {
+            prefix = "[PICO8] ";
+            if (embedded_pico8_title[0]) base = embedded_pico8_title;
+        }
+        if (base == NULL) base = derive_cart_title_from_filename (input_filename);
+        if (strncmp (base, prefix, strlen (prefix)) == 0) prefix = "";
+        snprintf (cart_title, sizeof (cart_title), "%s%s", prefix, base);
+        cart_title_was_set = true;
+    }
+    if (verbose) {
+        fprintf (stdout, "cart title: \"%s\"\n", cart_title);
+    }
 
     if (runtime_req.needs_tic80)
     {

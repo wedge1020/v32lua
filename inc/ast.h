@@ -167,6 +167,13 @@ uint32_t tic80_get_palette_color(int index);
 extern char cart_version[64];
 extern char cart_title[128];
 extern bool cart_title_was_set;
+
+// Command-line overrides (main.c). When set, the matching in-source hint
+// (--#api / --#p8rate / --#title) is ignored, so a cart compiles unmodified.
+extern bool g_cli_api_set;       // --api given
+extern bool g_cli_p8rate_set;    // --p8rate given
+extern bool g_cli_title_set;     // --title given
+bool apply_api_mode (const char *api_name);   // "pico8" | "tic80" | "vircon32"
 extern CARTresource *textures_head;
 extern CARTresource *sounds_head;
 extern CARTresource *textures_tail;

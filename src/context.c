@@ -122,6 +122,25 @@ SymbolNode *resolve_symbol (const char *name)
     return (NULL); // Not found anywhere
 }
 
+// ============================================================================
+// resolve_function_symbol: see context.h. `local function f` inside a
+// function is desugared into a stack local `f` holding a pointer to the
+// mangled function `f__lN`; only the mangled symbol knows f's arity and
+// return count, so callers that need them (multi-return extraction, arity
+// padding, passthrough return counting) follow the alias.
+// ============================================================================
+SymbolNode *resolve_function_symbol (const char *name)
+{
+    SymbolNode *sym = resolve_symbol (name);
+    if (sym != NULL && !sym->is_function && sym->fn_alias != NULL) {
+        SymbolNode *fn = resolve_symbol (sym->fn_alias);
+        if (fn != NULL && fn->is_function) {
+            return (fn);
+        }
+    }
+    return (sym);
+}
+
 // Search ONLY the immediate current block scope (do not traverse parent pointers!)
 SymbolNode *resolve_local_symbol_current_scope (const char *name)
 {
@@ -802,6 +821,20 @@ SymbolNode *register_upvalue (const char *name, int offset)
     sym->location = -offset;   // same convention as register_parameter
     sym->is_boxed = true;
 
+    // Carry a captured `local function`'s alias into the closure, so a
+    // call through the upvalue still sees the function's arity and
+    // return count. The capturing function's own scope is current (and
+    // is a boundary), so look the name up from the enclosing scope.
+    if (current_scope != NULL && current_scope->parent != NULL) {
+        ScopeNode *saved = current_scope;
+        current_scope    = current_scope->parent;
+        SymbolNode *outer = resolve_symbol(name);
+        current_scope    = saved;
+        if (outer != NULL && outer->type != SYM_GLOBAL && outer->fn_alias != NULL) {
+            sym->fn_alias = strdup(outer->fn_alias);
+        }
+    }
+
     if (current_scope->last == NULL) {
         current_scope->symbols = sym;
     } else {
@@ -861,7 +894,7 @@ int count_max_return_values (ASTNode *node)
                     SymbolNode *callee_sym  = NULL;
 
                     if (call_target->type == NODE_IDENTIFIER) {
-                        callee_sym = resolve_symbol(call_target->as.id.name);
+                        callee_sym = resolve_function_symbol(call_target->as.id.name);
                     } else {
                         char path_buf[256] = {0};
                         if (resolve_static_path(call_target, path_buf)) {

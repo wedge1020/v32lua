@@ -10,6 +10,11 @@
 #define _REGISTER_H
 
 #define NUM_GPRS 14
+
+// Variadic ABI: argument count register, loaded by every call site that may
+// reach a variadic function immediately before CALL __builtin_exec (which
+// only uses R0-R5). Runtime .s callers of Lua functions hard-code R13 too.
+#define VARARG_COUNT_REG 13
 #define MAX_SPILL_SLOTS 64  // Arbitrary limit for spilled values
 
 // Maximum number of "extra" (beyond the 3 register-passed) return values

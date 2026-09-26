@@ -20,6 +20,10 @@ typedef struct SymbolNode
     int         return_count;
     bool        is_boxed;     // slot holds a box pointer, not the value
     ASTNode    *def_node;     // for is_function symbols
+    char       *fn_alias;     // local/upvalue bound to a `local function`
+                              // (or `local f = function ...`): the mangled
+                              // name of that function's own symbol, which
+                              // carries its arity / return_count metadata
     struct SymbolNode* next;
 } SymbolNode;
 
@@ -159,5 +163,11 @@ bool        name_list_add                (NameList  **, const char *);
 int         name_list_length             (NameList   *);
 SymbolNode *register_upvalue             (const char *, int);
 int         count_max_return_values      (ASTNode *);
+
+// A call target's function metadata (arity, return_count, is_variadic):
+// the symbol itself for a named function, or -- for a local bound to a
+// `local function NAME` / `local NAME = function` -- the mangled function
+// symbol it aliases. Otherwise the plain symbol (possibly NULL).
+SymbolNode *resolve_function_symbol (const char *name);
 
 #endif

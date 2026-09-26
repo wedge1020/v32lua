@@ -90,7 +90,7 @@ string_result1: "HelloWorld"
 string_result2: "Hello World"
 string_result3: "Test"
 string_result4: "Value- 42"
-string_result5: "Value- 3.140000"
+string_result5: "Value- 3.14"
 string_result6: "ABCD"
 number_result1: 15.0000
 string_result7: "True- true"

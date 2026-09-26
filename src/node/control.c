@@ -40,7 +40,7 @@ void  node_return (ASTNode *node)
         SymbolNode *callee_sym  = NULL;
 
         if (call_target->type == NODE_IDENTIFIER) {
-            callee_sym = resolve_symbol(call_target->as.id.name);
+            callee_sym = resolve_function_symbol(call_target->as.id.name);
         } else {
             char path_buf[256] = {0};
             if (resolve_static_path(call_target, path_buf)) {
