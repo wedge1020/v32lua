@@ -434,6 +434,7 @@ int  main (int  argc, char** argv)
             cart_resource_append (&textures_head, &textures_tail,
                                   next_texture_id++, sheet_name, sheet_path);
         }
+        register_shapes_texture (program_text, base_path, true);
     }
 
     if (runtime_req.needs_pico8)
@@ -465,6 +466,7 @@ int  main (int  argc, char** argv)
         cart_resource_append (&textures_head, &textures_tail,
                               0, "pico8_spritesheet", sheet_path);
         next_texture_id++;
+        register_shapes_texture (program_text, base_path, false);
     }
 
     // --- Stage 4: Semantic Analyzer ---
@@ -482,6 +484,7 @@ int  main (int  argc, char** argv)
         register_global ("TIC80_SPRITE_FLAGS_PTR");
         register_global ("TIC80_EXIT_FLAG");
         register_global ("TIC80_RAM_PTR");     // peek/poke RAM, created on first use
+        register_global ("TIC80_PMEM_PTR");    // pmem() slots when there is no memory card
     }
 
 

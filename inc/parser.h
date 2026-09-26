@@ -91,22 +91,24 @@ extern int yydebug;
     TOKEN_NOT = 292,               /* TOKEN_NOT  */
     TOKEN_LEN = 293,               /* TOKEN_LEN  */
     UNARY_MINUS = 294,             /* UNARY_MINUS  */
-    TOKEN_TRUE = 295,              /* TOKEN_TRUE  */
-    TOKEN_FALSE = 296,             /* TOKEN_FALSE  */
-    TOKEN_NIL = 297,               /* TOKEN_NIL  */
-    TOKEN_FLOORDIV = 298,          /* TOKEN_FLOORDIV  */
-    TOKEN_BXOR = 299,              /* TOKEN_BXOR  */
-    TOKEN_SHL = 300,               /* TOKEN_SHL  */
-    TOKEN_SHR = 301,               /* TOKEN_SHR  */
-    TOKEN_LSHR = 302,              /* TOKEN_LSHR  */
-    TOKEN_ROTL = 303,              /* TOKEN_ROTL  */
-    TOKEN_ROTR = 304,              /* TOKEN_ROTR  */
-    TOKEN_DOTS = 305,              /* TOKEN_DOTS  */
-    TOKEN_REPEAT = 306,            /* TOKEN_REPEAT  */
-    TOKEN_UNTIL = 307,             /* TOKEN_UNTIL  */
-    TOKEN_GOTO = 308,              /* TOKEN_GOTO  */
-    TOKEN_DBCOLON = 309,           /* TOKEN_DBCOLON  */
-    TOKEN_PRINT_SHORT = 310        /* TOKEN_PRINT_SHORT  */
+    TOKEN_PEEK = 295,              /* TOKEN_PEEK  */
+    TOKEN_PEEK4 = 296,             /* TOKEN_PEEK4  */
+    TOKEN_TRUE = 297,              /* TOKEN_TRUE  */
+    TOKEN_FALSE = 298,             /* TOKEN_FALSE  */
+    TOKEN_NIL = 299,               /* TOKEN_NIL  */
+    TOKEN_FLOORDIV = 300,          /* TOKEN_FLOORDIV  */
+    TOKEN_BXOR = 301,              /* TOKEN_BXOR  */
+    TOKEN_SHL = 302,               /* TOKEN_SHL  */
+    TOKEN_SHR = 303,               /* TOKEN_SHR  */
+    TOKEN_LSHR = 304,              /* TOKEN_LSHR  */
+    TOKEN_ROTL = 305,              /* TOKEN_ROTL  */
+    TOKEN_ROTR = 306,              /* TOKEN_ROTR  */
+    TOKEN_DOTS = 307,              /* TOKEN_DOTS  */
+    TOKEN_REPEAT = 308,            /* TOKEN_REPEAT  */
+    TOKEN_UNTIL = 309,             /* TOKEN_UNTIL  */
+    TOKEN_GOTO = 310,              /* TOKEN_GOTO  */
+    TOKEN_DBCOLON = 311,           /* TOKEN_DBCOLON  */
+    TOKEN_PRINT_SHORT = 312        /* TOKEN_PRINT_SHORT  */
   };
   typedef enum yytokentype yytoken_kind_t;
 #endif
@@ -115,13 +117,13 @@ extern int yydebug;
 #if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED
 union YYSTYPE
 {
-#line 68 "parser.y"
+#line 84 "parser.y"
 
     double   number_val;
     char    *string_val;
     ASTNode *ast_node;
 
-#line 125 "../inc/parser.h"
+#line 127 "../inc/parser.h"
 
 };
 typedef union YYSTYPE YYSTYPE;

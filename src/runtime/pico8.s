@@ -178,9 +178,15 @@ _pico8_init_state:
     OUT   GPU_ActiveBlending, GPUBlendingMode_Alpha
     MOV   R0, 1                          ; treat Start as held until first released
     MOV   [PICO8_START_PREV], R0
+    MOV   R0, 0
+    MOV   [PICO8_TICKS], R0                ; time() = 0 until the first frame
+    MOV   [PICO8_RAM_PTR], R0              ; peek/poke RAM: created on first use
+    MOV   [PICO8_CARTDATA], R0             ; no cartdata() yet
 
     CALL  __builtin_pico8_reload
     CALL  __pico8_audio_init
+    CALL  __shapes_init                  ; circle atlas regions, if any
+    OUT   GPU_SelectedTexture, 0
 
     POP   R4
     POP   R3
@@ -1412,9 +1418,16 @@ __builtin_pico8_pset:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; circfill(x, y, r [, col]) / circ(x, y, r [, col])
-;; [BP+2]=x [BP+3]=y [BP+4]=r [BP+5]=col
-;; Midpoint circle. circfill draws 4 horizontal spans per step; circ plots
-;; the 8 symmetric points. R6 = err, R7 = py, R8 = cx, R9 = cy, R10 = px.
+;; [BP+2]=x [BP+3]=y [BP+4]=r (nil -> 4) [BP+5]=col. Returns nil.
+;;
+;; The pixels are the midpoint circle PICO-8 draws (as in zepto8: err
+;; starts at 0, x steps when err >= r - 1; circfill fills the same rows'
+;; spans). Radius 0-SHAPES_MAX_R: ONE draw of the pre-rendered shape
+;; (shapes.c), tinted with the multiply color. Larger: the first octant is
+;; walked -- one point per row, (X, K) from (r, 0) -- and each run of rows
+;; with the same X becomes rectangles: with its 7 mirror images for circ(),
+;; as 4 row spans for circfill(). (The old code drew 8 single pixels / 4
+;; spans per step: ~5.7 r / ~2.8 r draws, against ~2.3 r / ~1.2 r now.)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 __builtin_pico8_circfill:
     PUSH  BP
@@ -1440,16 +1453,18 @@ __pico8_circ_common:
     PUSH  R8
     PUSH  R9
     PUSH  R10
+    PUSH  R12
+    PUSH  R0                      ; [BP-13]: the current run's X
 
     MOV   R1, [BP+5]
     CALL  __pico8_pen
-    MOV   R5, R1
+    MOV   R12, R1                 ; color
     MOV   R1, [BP+2]
     CALL  __pico8_to_int
-    MOV   R8, R1
+    MOV   R8, R1                  ; cx
     MOV   R1, [BP+3]
     CALL  __pico8_to_int
-    MOV   R9, R1
+    MOV   R9, R1                  ; cy
     MOV   R1, [BP+4]
     MOV   R0, R1
     IEQ   R0, BOXED_NIL
@@ -1457,101 +1472,123 @@ __pico8_circ_common:
     MOV   R1, 4.0                 ; PICO-8 default radius
 _pico8_circ_have_r:
     CALL  __pico8_to_int
-    MOV   R10, R1
+    MOV   R10, R1                 ; r
     MOV   R0, R10
     ILT   R0, 0
     JT    R0, _pico8_circ_done
-
-    MOV   R7, 0
-    MOV   R6, 0
-
-_pico8_circ_loop:
     MOV   R0, R10
-    IGE   R0, R7
-    JF    R0, _pico8_circ_done
+    IGT   R0, SHAPES_MAX_R
+    JT    R0, _pico8_circ_steps
+    MOV   R0, SHAPES_TEXTURE
+    ILT   R0, 0
+    JT    R0, _pico8_circ_steps
 
-    JF    R11, _pico8_circ_points
-
-    ;; filled: spans at rows cy+-py (width 2px+1) and cy+-px (width 2py+1)
-    MOV   R4, 1
-    MOV   R1, R8
+    ;; --- one draw from the shape atlas ---
+    MOV   R1, __pico8_palette
+    IADD  R1, R12
+    MOV   R1, [R1]
+    CALL  __pico8_tint
+    MOV   R6, R0                  ; multiply color to restore
+    IN    R7, GPU_SelectedTexture
+    OUT   GPU_SelectedTexture, SHAPES_TEXTURE
+    MOV   R1, R10
+    JT    R11, _pico8_circ_region
+    IADD  R1, SHAPES_MAX_R
+    IADD  R1, 1                   ; outlines follow the filled shapes
+_pico8_circ_region:
+    OUT   GPU_SelectedRegion, R1
+    MOV   R1, PICO8_SCALE
+    OUT   GPU_DrawingScaleX, R1
+    OUT   GPU_DrawingScaleY, R1
+    MOV   R1, R8                  ; top-left pixel, placed as __pico8_fill does
     ISUB  R1, R10
-    MOV   R3, R10
-    IADD  R3, R10
-    IADD  R3, 1
-    MOV   R2, R9
-    IADD  R2, R7
-    CALL  __pico8_fill
-    MOV   R2, R9
-    ISUB  R2, R7
-    CALL  __pico8_fill
-    MOV   R1, R8
-    ISUB  R1, R7
-    MOV   R3, R7
-    IADD  R3, R7
-    IADD  R3, 1
-    MOV   R2, R9
-    IADD  R2, R10
-    CALL  __pico8_fill
-    MOV   R2, R9
-    ISUB  R2, R10
-    CALL  __pico8_fill
-    JMP   _pico8_circ_step
-
-_pico8_circ_points:
-    MOV   R3, 1
-    MOV   R4, 1
-    ;; (cx+-px, cy+-py)
-    MOV   R1, R8
-    IADD  R1, R10
-    MOV   R2, R9
-    IADD  R2, R7
-    CALL  __pico8_fill
-    MOV   R2, R9
-    ISUB  R2, R7
-    CALL  __pico8_fill
-    MOV   R1, R8
+    CIF   R1
+    MOV   R0, [PICO8_CAMERA_X]
+    FSUB  R1, R0
+    FMUL  R1, PICO8_SCALE
+    FADD  R1, 0.5
+    FLR   R1
+    CFI   R1
+    IADD  R1, PICO8_OFFSET_X
+    OUT   GPU_DrawingPointX, R1
+    MOV   R1, R9
     ISUB  R1, R10
-    CALL  __pico8_fill
-    MOV   R2, R9
-    IADD  R2, R7
-    CALL  __pico8_fill
-    ;; (cx+-py, cy+-px)
-    MOV   R1, R8
-    IADD  R1, R7
-    MOV   R2, R9
-    IADD  R2, R10
-    CALL  __pico8_fill
-    MOV   R2, R9
-    ISUB  R2, R10
-    CALL  __pico8_fill
-    MOV   R1, R8
-    ISUB  R1, R7
-    CALL  __pico8_fill
-    MOV   R2, R9
-    IADD  R2, R10
-    CALL  __pico8_fill
+    CIF   R1
+    MOV   R0, [PICO8_CAMERA_Y]
+    FSUB  R1, R0
+    FMUL  R1, PICO8_SCALE
+    FADD  R1, 0.5
+    FLR   R1
+    CFI   R1
+    IADD  R1, PICO8_OFFSET_Y
+    OUT   GPU_DrawingPointY, R1
+    OUT   GPU_Command, GPUCommand_DrawRegionZoomed
+    OUT   GPU_SelectedTexture, R7
+    OUT   GPU_MultiplyColor, R6
+    JMP   _pico8_circ_done
 
-_pico8_circ_step:
-    IADD  R7, 1
-    MOV   R0, R7
-    IMUL  R0, 2
+_pico8_circ_steps:
+    MOV   R0, [PICO8_CAMERA_X]    ; center in screen coordinates
+    CFI   R0
+    ISUB  R8, R0
+    MOV   R0, [PICO8_CAMERA_Y]
+    CFI   R0
+    ISUB  R9, R0
+    OUT   GPU_SelectedTexture, 0  ; the color's swatch, once per circle
+    MOV   R0, R12
+    IADD  R0, PICO8_SWATCH_REGION_BASE
+    OUT   GPU_SelectedRegion, R0
+    ;; R2 = X, R3 = K, R6 = err, R7 = first row of the current run
+    MOV   R2, R10
+    MOV   R3, 0
+    MOV   R6, 0
+    MOV   R7, 0
+_pico8_circ_loop:
+    MOV   [BP-13], R2
+    IADD  R3, 1                   ; K++; X-- when err >= r - 1
+    MOV   R0, R10
+    ISUB  R0, 1
+    MOV   R1, R6
+    ILT   R1, R0
+    JF    R1, _pico8_circ_x
+    MOV   R0, R3
+    SHL   R0, 1
     IADD  R0, 1
     IADD  R6, R0
-    MOV   R0, R6
-    ISUB  R0, R10
-    ISUB  R0, R10
-    IGE   R0, 0
-    JF    R0, _pico8_circ_loop
-    ISUB  R10, 1
-    MOV   R0, R10
-    IMUL  R0, 2
-    ISUB  R6, R0
-    IADD  R6, 1
+    JMP   _pico8_circ_next
+_pico8_circ_x:
+    ISUB  R2, 1
+    MOV   R0, R3
+    ISUB  R0, R2
+    SHL   R0, 1
+    IADD  R0, 1
+    IADD  R6, R0
+_pico8_circ_next:
+    MOV   R0, R2                  ; left the octant (X < K): last run
+    ILT   R0, R3
+    JT    R0, _pico8_circ_last
+    MOV   R0, [BP-13]
+    IEQ   R0, R2
+    JT    R0, _pico8_circ_loop    ; same X: the run goes on
+    PUSH  R2
+    PUSH  R3
+    MOV   R1, [BP-13]
+    MOV   R2, R7
+    ISUB  R3, 1
+    CALL  __pico8_circ_run
+    POP   R3
+    POP   R2
+    MOV   R7, R3
     JMP   _pico8_circ_loop
+_pico8_circ_last:
+    MOV   R1, [BP-13]
+    MOV   R2, R7
+    ISUB  R3, 1
+    CALL  __pico8_circ_run
 
 _pico8_circ_done:
-    MOV   R0, BOXED_NIL
+    POP   R12                     ; (scratch slot)
+    POP   R12
     POP   R10
     POP   R9
     POP   R8
@@ -1563,8 +1600,192 @@ _pico8_circ_done:
     POP   R2
     POP   R1
     POP   R11
+    MOV   R0, BOXED_NIL
     MOV   SP, BP
     POP   BP
+    RET
+
+;; __pico8_circ_rect (internal): a rectangle of the circle fallback -- R1 = x,
+;; R2 = y (screen coordinates: the camera is already applied), R3 = w,
+;; R4 = h (integers, >= 1) -- with texture 0 and the color's swatch region
+;; already selected. Same placement as __pico8_fill. Clobbers R0 only.
+__pico8_circ_rect:
+    MOV   R0, R3
+    CIF   R0
+    FMUL  R0, PICO8_SCALE
+    FDIV  R0, 3.0
+    OUT   GPU_DrawingScaleX, R0
+    MOV   R0, R4
+    CIF   R0
+    FMUL  R0, PICO8_SCALE
+    FDIV  R0, 3.0
+    OUT   GPU_DrawingScaleY, R0
+    MOV   R0, R1
+    CIF   R0
+    FMUL  R0, PICO8_SCALE
+    FADD  R0, 0.5
+    FLR   R0
+    CFI   R0
+    IADD  R0, PICO8_OFFSET_X
+    OUT   GPU_DrawingPointX, R0
+    MOV   R0, R2
+    CIF   R0
+    FMUL  R0, PICO8_SCALE
+    FADD  R0, 0.5
+    FLR   R0
+    CFI   R0
+    IADD  R0, PICO8_OFFSET_Y
+    OUT   GPU_DrawingPointY, R0
+    OUT   GPU_Command, GPUCommand_DrawRegionZoomed
+    RET
+
+;; __pico8_circ_run (internal): one run of first-octant points -- column
+;; R1 = X, rows R2 = k1 .. R3 = k2 (relative to the center R8, R9) --
+;; drawn with its 7 mirror images (R11 = 0) or as the 4 row spans it
+;; bounds (R11 = 1), in color R12. Preserves R1-R13.
+__pico8_circ_run:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1                      ; [BP-1] X
+    PUSH  R2                      ; [BP-2] k1
+    PUSH  R3                      ; [BP-3] k2
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
+    PUSH  R7
+    MOV   R5, R12
+    MOV   R7, [BP-1]              ; X
+    MOV   R6, [BP-3]
+    MOV   R0, [BP-2]
+    ISUB  R6, R0
+    IADD  R6, 1                   ; h = k2 - k1 + 1
+    JT    R11, _pico8_run_filled
+
+    MOV   R3, 1                   ; columns cx +- X
+    MOV   R4, R6
+    MOV   R1, R8
+    IADD  R1, R7
+    MOV   R2, R9
+    MOV   R0, [BP-2]
+    IADD  R2, R0
+    CALL  __pico8_circ_rect
+    MOV   R1, R8
+    ISUB  R1, R7
+    CALL  __pico8_circ_rect
+    MOV   R2, R9
+    MOV   R0, [BP-3]
+    ISUB  R2, R0
+    CALL  __pico8_circ_rect
+    MOV   R1, R8
+    IADD  R1, R7
+    CALL  __pico8_circ_rect
+    MOV   R3, R6                  ; rows cy +- X
+    MOV   R4, 1
+    MOV   R1, R8
+    MOV   R0, [BP-2]
+    IADD  R1, R0
+    MOV   R2, R9
+    IADD  R2, R7
+    CALL  __pico8_circ_rect
+    MOV   R2, R9
+    ISUB  R2, R7
+    CALL  __pico8_circ_rect
+    MOV   R1, R8
+    MOV   R0, [BP-3]
+    ISUB  R1, R0
+    CALL  __pico8_circ_rect
+    MOV   R2, R9
+    IADD  R2, R7
+    CALL  __pico8_circ_rect
+    JMP   _pico8_run_done
+
+_pico8_run_filled:
+    MOV   R1, R8                  ; rows cy + k1..k2 and cy - k2..k1, width 2X + 1
+    ISUB  R1, R7
+    MOV   R3, R7
+    SHL   R3, 1
+    IADD  R3, 1
+    MOV   R4, R6
+    MOV   R2, R9
+    MOV   R0, [BP-2]
+    IADD  R2, R0
+    CALL  __pico8_circ_rect
+    MOV   R2, R9
+    MOV   R0, [BP-3]
+    ISUB  R2, R0
+    CALL  __pico8_circ_rect
+    MOV   R0, [BP-3]              ; rows cy +- X, width 2 k2 + 1
+    MOV   R1, R8
+    ISUB  R1, R0
+    MOV   R3, R0
+    SHL   R3, 1
+    IADD  R3, 1
+    MOV   R4, 1
+    MOV   R2, R9
+    IADD  R2, R7
+    CALL  __pico8_circ_rect
+    MOV   R2, R9
+    ISUB  R2, R7
+    CALL  __pico8_circ_rect
+
+_pico8_run_done:
+    POP   R7
+    POP   R6
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; __pico8_tint (internal): R1 = color (0xAABBGGRR) -> GPU_MultiplyColor =
+;; that color times the current multiply color (per channel), so a shape
+;; drawn white comes out in the color. R0 = the previous multiply color.
+;; Preserves R1-R13.
+__pico8_tint:
+    IN    R0, GPU_MultiplyColor
+    PUSH  R0
+    IEQ   R0, 0xFFFFFFFF
+    JF    R0, _pico8_tint_mix
+    OUT   GPU_MultiplyColor, R1
+    POP   R0
+    RET
+_pico8_tint_mix:
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    IN    R2, GPU_MultiplyColor
+    MOV   R5, 0
+    MOV   R4, 0
+_pico8_tint_channel:
+    MOV   R3, R4
+    ISGN  R3
+    MOV   R0, R1
+    SHL   R0, R3
+    AND   R0, 255
+    PUSH  R0
+    MOV   R0, R2
+    SHL   R0, R3
+    AND   R0, 255
+    POP   R3
+    IMUL  R0, R3
+    IADD  R0, 127
+    IDIV  R0, 255
+    SHL   R0, R4
+    OR    R5, R0
+    IADD  R4, 8
+    MOV   R0, R4
+    ILT   R0, 32
+    JT    R0, _pico8_tint_channel
+    OUT   GPU_MultiplyColor, R5
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R0
     RET
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1668,6 +1889,23 @@ __builtin_pico8_cls:
     MOV   R1, [BP+2]
     CALL  __pico8_to_int
     AND   R1, 15
+    ;; screen memory (0x6000-0x7FFF) follows, if peek/poke RAM exists
+    MOV   R0, [PICO8_RAM_PTR]
+    JF    R0, _pico8_cls_draw
+    PUSH  R11
+    PUSH  R12
+    PUSH  R13
+    MOV   R13, R0
+    IADD  R13, 0x6000
+    MOV   R12, R1
+    SHL   R12, 4
+    OR    R12, R1                 ; both pixels of each byte
+    MOV   R11, 0x2000
+    SETS
+    POP   R13
+    POP   R12
+    POP   R11
+_pico8_cls_draw:
     MOV   R0, __pico8_palette
     IADD  R1, R0
     MOV   R1, [R1]
@@ -2413,6 +2651,9 @@ __builtin_pico8_flip:
     PUSH  R1
     CALL  __builtin_pico8_present
     CALL  __builtin_pico8_pause_check
+    MOV   R1, [PICO8_TICKS]              ; one more PICO-8 frame for time()
+    IADD  R1, 1
+    MOV   [PICO8_TICKS], R1
     MOV   R1, PICO8_FRAME_STEP
 _pico8_flip_wait:
     WAIT
@@ -2548,4 +2789,1158 @@ _pico8_pause_wait:
     POP   R1                             ; caller's selected gamepad
     OUT   INP_SelectedGamepad, R1
     POP   R1
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; PICO-8 MEMORY: peek/poke (8, 16 and 32 bits), memcpy, memset, reload,
+;; sget/sset, cartdata/dget/dset.
+;;
+;; PICO-8's 64 KB address space is emulated as 65536 words, one byte per
+;; word, created on first use and filled from the cart ROM image
+;; (__pico8_rom_gfx / __pico8_rom_snd / map / flags, see pico8_assets.c).
+;;   0x0000-0x0FFF  sprites 0-127                       storage (cart data)
+;;   0x1000-0x1FFF  sprites 128-255 = map rows 32-63   live: the map buffer
+;;   0x2000-0x2FFF  map rows 0-31                       live: the map buffer
+;;   0x3000-0x30FF  sprite flags                        live: fget()/fset()
+;;   0x3100-0x42FF  music, sfx                          storage (cart data)
+;;   0x4300-0x5DFF  general use, custom font            storage
+;;   0x5E00-0x5EFF  cartdata (dget/dset)                storage; after
+;;                  cartdata(), written through to the memory card
+;;   0x5F00-0x5F3F  draw state                          storage, except
+;;                  0x5F25 pen and 0x5F28-0x5F2B camera x/y (live)
+;;   0x5F4C-0x5F4F  buttons, players 0-3                live (read only)
+;;   0x6000-0x7FFF  screen                              writes are drawn
+;;   0x8000-0xFFFF  upper memory                        storage
+;; Sprites and sound are rendered at compile time, so writing the sprite
+;; sheet or the music/sfx data changes nothing seen or heard, and reading
+;; the screen returns what was written to screen memory, not what spr() or
+;; rect() drew (there is no GPU read-back).
+;;
+;; Addresses are taken modulo 0x10000 like PICO-8's 16-bit addresses (so
+;; the 16.16 literal -32768 and 0x8000 are the same address). peek2/poke2
+;; are signed 16-bit, peek4/poke4 the raw 16.16 fixed-point bits.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; Draw state defaults (0x5F00-0x5F3F): draw palette (color 0 transparent),
+;; screen palette, clip rect 0,0,128,128, pen 6.
+__pico8_drawstate_rom:
+    integer 0x10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+    integer 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+    integer 0, 0, 128, 128, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    integer 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+
+;; __pico8_ram (internal): R0 = base of the emulated RAM, created and
+;; filled on first use. Preserves R1-R13.
+__pico8_ram:
+    MOV   R0, [PICO8_RAM_PTR]
+    PUSH  R1
+    MOV   R1, R0
+    IEQ   R1, 0
+    JT    R1, _pico8_ram_create
+    POP   R1
+    RET
+_pico8_ram_create:
+    PUSH  R2
+    PUSH  R3
+    PUSH  R6
+    PUSH  R11
+    PUSH  R12
+    PUSH  R13
+    MOV   R0, 65536
+    PUSH  R0
+    CALL  __malloc                ; clobbers R0-R3, R6
+    IADD  SP, 1
+    MOV   [PICO8_RAM_PTR], R0
+    MOV   R13, R0                 ; zero-fill: SETS writes R12 to [R13], R11 times
+    MOV   R12, 0
+    MOV   R11, 65536
+    SETS
+    MOV   R1, 0                   ; sprite sheet, from the cart
+_pico8_ram_gfx:
+    CALL  __pico8_cart_rd
+    MOV   R2, [PICO8_RAM_PTR]
+    IADD  R2, R1
+    MOV   [R2], R0
+    IADD  R1, 1
+    MOV   R2, R1
+    ILT   R2, 0x1000
+    JT    R2, _pico8_ram_gfx
+    MOV   R1, 0x3100              ; music and sfx, from the cart
+_pico8_ram_snd:
+    CALL  __pico8_cart_rd
+    MOV   R2, [PICO8_RAM_PTR]
+    IADD  R2, R1
+    MOV   [R2], R0
+    IADD  R1, 1
+    MOV   R2, R1
+    ILT   R2, 0x4300
+    JT    R2, _pico8_ram_snd
+    MOV   R13, [PICO8_RAM_PTR]    ; draw state defaults
+    IADD  R13, 0x5F00
+    MOV   R12, __pico8_drawstate_rom
+    MOV   R11, 64
+    MOVS
+    POP   R13
+    POP   R12
+    POP   R11
+    POP   R6
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   R0, [PICO8_RAM_PTR]
+    RET
+
+;; __pico8_map_cell_index (internal): R1 = address in 0x1000-0x2FFF ->
+;; R1 = map cell index (y * 128 + x). Clobbers R0.
+__pico8_map_cell_index:
+    MOV   R0, R1
+    IGE   R0, 0x2000
+    JT    R0, _pico8_mci_upper
+    ISUB  R1, 0x1000              ; 0x1000-0x1FFF: rows 32-63
+    IADD  R1, 4096
+    RET
+_pico8_mci_upper:
+    ISUB  R1, 0x2000              ; 0x2000-0x2FFF: rows 0-31
+    RET
+
+;; __pico8_byte_of (internal): R2 = base of data packed 4 bytes per word
+;; (low byte first), R1 = byte index -> R0 = byte. Clobbers R1, R2.
+__pico8_byte_of:
+    MOV   R0, R1
+    SHL   R0, -2
+    IADD  R2, R0
+    MOV   R0, [R2]
+    AND   R1, 3
+    SHL   R1, 3
+    ISGN  R1
+    SHL   R0, R1
+    AND   R0, 255
+    RET
+
+;; __pico8_cart_rd (internal): R1 = address -> R0 = the byte the CART holds
+;; there (what reload() copies from; 0 above 0x42FF). Preserves R1-R13.
+__pico8_cart_rd:
+    PUSH  R1
+    PUSH  R2
+    MOV   R0, R1
+    ILT   R0, 0
+    JT    R0, _pico8_cart_zero
+    MOV   R0, R1
+    ILT   R0, 0x1000
+    JT    R0, _pico8_cart_gfx
+    MOV   R0, R1
+    ILT   R0, 0x3000
+    JT    R0, _pico8_cart_map
+    MOV   R0, R1
+    ILT   R0, 0x3100
+    JT    R0, _pico8_cart_flags
+    MOV   R0, R1
+    ILT   R0, 0x4300
+    JT    R0, _pico8_cart_snd
+_pico8_cart_zero:
+    MOV   R0, 0
+    JMP   _pico8_cart_done
+_pico8_cart_gfx:
+    MOV   R2, __pico8_rom_gfx
+    CALL  __pico8_byte_of
+    JMP   _pico8_cart_done
+_pico8_cart_map:
+    CALL  __pico8_map_cell_index
+    MOV   R2, __pico8_map_rom
+    CALL  __pico8_byte_of
+    JMP   _pico8_cart_done
+_pico8_cart_flags:
+    ISUB  R1, 0x3000
+    MOV   R2, __pico8_flags_rom
+    IADD  R2, R1
+    MOV   R0, [R2]
+    AND   R0, 255
+    JMP   _pico8_cart_done
+_pico8_cart_snd:
+    ISUB  R1, 0x3100
+    MOV   R2, __pico8_rom_snd
+    CALL  __pico8_byte_of
+_pico8_cart_done:
+    POP   R2
+    POP   R1
+    RET
+
+;; __pico8_rd (internal): R1 = address (0-0xFFFF) -> R0 = byte.
+;; Preserves R1-R13.
+__pico8_rd:
+    PUSH  R1
+    PUSH  R2
+    MOV   R0, R1
+    ILT   R0, 0x1000
+    JT    R0, _pico8_rd_ram
+    MOV   R0, R1
+    ILT   R0, 0x3000
+    JT    R0, _pico8_rd_map
+    MOV   R0, R1
+    ILT   R0, 0x3100
+    JT    R0, _pico8_rd_flags
+    MOV   R0, R1
+    IEQ   R0, 0x5F25
+    JT    R0, _pico8_rd_pen
+    MOV   R0, R1
+    ILT   R0, 0x5F28
+    JT    R0, _pico8_rd_ram
+    MOV   R0, R1
+    ILT   R0, 0x5F2C
+    JT    R0, _pico8_rd_camera
+    MOV   R0, R1
+    ILT   R0, 0x5F4C
+    JT    R0, _pico8_rd_ram
+    MOV   R0, R1
+    ILT   R0, 0x5F50
+    JT    R0, _pico8_rd_buttons
+_pico8_rd_ram:
+    CALL  __pico8_ram
+    IADD  R0, R1
+    MOV   R0, [R0]
+    JMP   _pico8_rd_done
+_pico8_rd_map:
+    CALL  __pico8_map_cell_index
+    MOV   R2, PICO8_MAP_RAM
+    CALL  __pico8_byte_of
+    JMP   _pico8_rd_done
+_pico8_rd_flags:
+    ISUB  R1, 0x3000
+    MOV   R2, PICO8_FLAGS_RAM
+    IADD  R2, R1
+    MOV   R0, [R2]
+    AND   R0, 255
+    JMP   _pico8_rd_done
+_pico8_rd_pen:
+    CALL  __pico8_ram
+    IADD  R0, R1
+    MOV   R0, [R0]
+    AND   R0, 0xF0                ; the high nibble is kept as written
+    MOV   R2, [PICO8_PEN]
+    OR    R0, R2
+    JMP   _pico8_rd_done
+_pico8_rd_camera:
+    ;; 0x5F28/29 = camera x, 0x5F2A/2B = camera y (signed 16-bit, low first)
+    ISUB  R1, 0x5F28
+    MOV   R2, R1
+    AND   R2, 1
+    SHL   R2, 3                   ; bit position of the byte
+    SHL   R1, -1                  ; 0 = x, 1 = y
+    MOV   R0, [PICO8_CAMERA_X]
+    JF    R1, _pico8_rd_cam_have
+    MOV   R0, [PICO8_CAMERA_Y]
+_pico8_rd_cam_have:
+    CFI   R0                      ; camera() stores whole numbers
+    ISGN  R2
+    SHL   R0, R2
+    AND   R0, 255
+    JMP   _pico8_rd_done
+_pico8_rd_buttons:
+    ;; bit b = btn(b, player)
+    ISUB  R1, 0x5F4C
+    CIF   R1
+    PUSH  R1                      ; p
+    MOV   R0, BOXED_NIL
+    PUSH  R0                      ; i = nil: bitfield
+    CALL  __builtin_pico8_btn
+    IADD  SP, 2
+    CFI   R0
+    AND   R0, 255
+_pico8_rd_done:
+    POP   R2
+    POP   R1
+    RET
+
+;; __pico8_fill_screen (internal): __pico8_fill in screen coordinates
+;; (no camera). Same registers as __pico8_fill.
+__pico8_fill_screen:
+    MOV   R0, [PICO8_CAMERA_X]
+    PUSH  R0
+    MOV   R0, [PICO8_CAMERA_Y]
+    PUSH  R0
+    MOV   R0, 0
+    MOV   [PICO8_CAMERA_X], R0
+    MOV   [PICO8_CAMERA_Y], R0
+    CALL  __pico8_fill
+    POP   R0
+    MOV   [PICO8_CAMERA_Y], R0
+    POP   R0
+    MOV   [PICO8_CAMERA_X], R0
+    RET
+
+;; __pico8_wr (internal): R1 = address (0-0xFFFF), R2 = byte (0-255).
+;; Preserves R0-R13.
+__pico8_wr:
+    PUSH  R0
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    CALL  __pico8_ram             ; the RAM image always holds the byte
+    IADD  R0, R1
+    MOV   [R0], R2
+    MOV   R0, R1
+    ILT   R0, 0x1000
+    JT    R0, _pico8_wr_done
+    MOV   R0, R1
+    ILT   R0, 0x3000
+    JT    R0, _pico8_wr_map
+    MOV   R0, R1
+    ILT   R0, 0x3100
+    JT    R0, _pico8_wr_flags
+    MOV   R0, R1
+    ILT   R0, 0x5E00
+    JT    R0, _pico8_wr_done
+    MOV   R0, R1
+    ILT   R0, 0x5F00
+    JT    R0, _pico8_wr_cartdata
+    MOV   R0, R1
+    IEQ   R0, 0x5F25
+    JT    R0, _pico8_wr_pen
+    MOV   R0, R1
+    ILT   R0, 0x5F28
+    JT    R0, _pico8_wr_done
+    MOV   R0, R1
+    ILT   R0, 0x5F2C
+    JT    R0, _pico8_wr_camera
+    MOV   R0, R1
+    ILT   R0, 0x6000
+    JT    R0, _pico8_wr_done
+    MOV   R0, R1
+    ILT   R0, 0x8000
+    JT    R0, _pico8_wr_screen
+    JMP   _pico8_wr_done
+
+_pico8_wr_map:
+    CALL  __pico8_map_cell_index
+    MOV   R3, R1
+    SHL   R3, -2
+    IADD  R3, PICO8_MAP_RAM
+    AND   R1, 3
+    SHL   R1, 3
+    MOV   R4, 255
+    SHL   R4, R1
+    NOT   R4
+    MOV   R0, [R3]
+    AND   R0, R4
+    SHL   R2, R1
+    OR    R0, R2
+    MOV   [R3], R0
+    JMP   _pico8_wr_done
+
+_pico8_wr_flags:
+    ISUB  R1, 0x3000
+    IADD  R1, PICO8_FLAGS_RAM
+    MOV   [R1], R2
+    JMP   _pico8_wr_done
+
+_pico8_wr_pen:
+    AND   R2, 15
+    MOV   [PICO8_PEN], R2
+    JMP   _pico8_wr_done
+
+_pico8_wr_camera:
+    ISUB  R1, 0x5F28
+    MOV   R3, R1
+    AND   R3, 1
+    SHL   R3, 3                   ; bit position of the byte
+    SHL   R1, -1                  ; 0 = x, 1 = y
+    MOV   R0, [PICO8_CAMERA_X]
+    JF    R1, _pico8_wr_cam_have
+    MOV   R0, [PICO8_CAMERA_Y]
+_pico8_wr_cam_have:
+    CFI   R0
+    AND   R0, 0xFFFF
+    MOV   R4, 255
+    SHL   R4, R3
+    NOT   R4
+    AND   R0, R4
+    SHL   R2, R3
+    OR    R0, R2
+    MOV   R4, R0                  ; sign-extend the 16-bit value
+    IGE   R4, 0x8000
+    JF    R4, _pico8_wr_cam_pos
+    ISUB  R0, 0x10000
+_pico8_wr_cam_pos:
+    CIF   R0
+    JT    R1, _pico8_wr_cam_y
+    MOV   [PICO8_CAMERA_X], R0
+    JMP   _pico8_wr_done
+_pico8_wr_cam_y:
+    MOV   [PICO8_CAMERA_Y], R0
+    JMP   _pico8_wr_done
+
+_pico8_wr_cartdata:
+    ;; after cartdata(), the 32-bit slot this byte belongs to goes to the
+    ;; memory card too (card word DATA_BASE + 1 + slot)
+    MOV   R0, [PICO8_CARTDATA]
+    JF    R0, _pico8_wr_done
+    IN    R0, MEM_Connected
+    JF    R0, _pico8_wr_done
+    ISUB  R1, 0x5E00
+    SHL   R1, -2                  ; slot 0-63
+    MOV   R3, R1
+    SHL   R3, 2
+    IADD  R3, 0x5E00
+    CALL  __pico8_ram
+    IADD  R3, R0                  ; the slot's 4 bytes
+    MOV   R2, [R3]
+    MOV   R4, [R3+1]
+    SHL   R4, 8
+    OR    R2, R4
+    MOV   R4, [R3+2]
+    SHL   R4, 16
+    OR    R2, R4
+    MOV   R4, [R3+3]
+    SHL   R4, 24
+    OR    R2, R4
+    IADD  R1, VIRCON32_MEMCARD_DATA_BASE
+    MOV   [R1+1], R2
+    JMP   _pico8_wr_done
+
+_pico8_wr_screen:
+    ;; 64 bytes per row, 2 pixels per byte (low nibble = left pixel);
+    ;; drawn in screen coordinates. One draw when both pixels match.
+    ISUB  R1, 0x6000
+    MOV   R5, R2                  ; byte
+    MOV   R2, R1
+    SHL   R2, -6                  ; y
+    AND   R1, 63
+    SHL   R1, 1                   ; x
+    MOV   R4, 1                   ; h
+    MOV   R3, R5
+    SHL   R3, -4                  ; right pixel
+    AND   R5, 15                  ; left pixel
+    MOV   R0, R3
+    IEQ   R0, R5
+    JF    R0, _pico8_wr_screen_two
+    MOV   R3, 2
+    CALL  __pico8_fill_screen
+    JMP   _pico8_wr_done
+_pico8_wr_screen_two:
+    PUSH  R3
+    MOV   R3, 1
+    CALL  __pico8_fill_screen
+    POP   R5
+    IADD  R1, 1
+    CALL  __pico8_fill_screen
+
+_pico8_wr_done:
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    POP   R0
+    RET
+
+;; __pico8_addr (internal): R1 = Lua number -> R1 = flr(n) mod 0x10000,
+;; as an integer 0-0xFFFF (anything else -> 0). Also how byte and 16-bit
+;; values are reduced before storing. Preserves R0, R2-R13.
+__pico8_addr:
+    PUSH  R2
+    MOV   R2, R1
+    AND   R2, NAN_VALUE
+    IEQ   R2, NAN_VALUE
+    JT    R2, _pico8_addr_zero
+    FLR   R1
+    MOV   R2, R1
+    FDIV  R2, 65536.0
+    FLR   R2
+    FMUL  R2, 65536.0
+    FSUB  R1, R2                  ; 0 <= n < 65536, exact
+    CFI   R1
+    AND   R1, 0xFFFF
+    POP   R2
+    RET
+_pico8_addr_zero:
+    MOV   R1, 0
+    POP   R2
+    RET
+
+;; __pico8_fix32 (internal): R1 = Lua number -> R1 = the 32 bits of its
+;; 16.16 fixed-point form, flr(n * 65536) mod 2^32. Preserves R0, R2-R13.
+__pico8_fix32:
+    PUSH  R2
+    MOV   R2, R1
+    AND   R2, NAN_VALUE
+    IEQ   R2, NAN_VALUE
+    JT    R2, _pico8_fix32_zero
+    FMUL  R1, 65536.0
+    FLR   R1
+    MOV   R2, R1
+    FDIV  R2, 4294967296.0
+    FLR   R2
+    FMUL  R2, 4294967296.0
+    FSUB  R1, R2                  ; 0 <= n < 2^32
+    MOV   R2, R1
+    FGE   R2, 2147483648.0
+    JF    R2, _pico8_fix32_ok
+    FSUB  R1, 4294967296.0        ; into CFI's range
+_pico8_fix32_ok:
+    CFI   R1
+    POP   R2
+    RET
+_pico8_fix32_zero:
+    MOV   R1, 0
+    POP   R2
+    RET
+
+;; __pico8_peek_w (internal): R1 = address (int), R2 = width (1, 2, 4)
+;; -> R0 = Lua number. Preserves R1-R13.
+__pico8_peek_w:
+    PUSH  R1
+    PUSH  R3
+    PUSH  R4
+    MOV   R3, 0                   ; value
+    MOV   R4, 0                   ; bit position
+_pico8_peek_w_byte:
+    CALL  __pico8_rd
+    SHL   R0, R4
+    OR    R3, R0
+    IADD  R1, 1
+    AND   R1, 0xFFFF
+    IADD  R4, 8
+    MOV   R0, R2
+    SHL   R0, 3
+    IGT   R0, R4
+    JT    R0, _pico8_peek_w_byte
+    MOV   R0, R2
+    IEQ   R0, 2
+    JF    R0, _pico8_peek_w_not2
+    MOV   R0, R3                  ; peek2: signed 16-bit
+    IGE   R0, 0x8000
+    JF    R0, _pico8_peek_w_not2
+    ISUB  R3, 0x10000
+_pico8_peek_w_not2:
+    MOV   R0, R3
+    CIF   R0
+    MOV   R3, R2
+    IEQ   R3, 4
+    JF    R3, _pico8_peek_w_done
+    FDIV  R0, 65536.0             ; peek4: 16.16
+_pico8_peek_w_done:
+    POP   R4
+    POP   R3
+    POP   R1
+    RET
+
+;; __pico8_poke_w (internal): R1 = address (int), R2 = width (1, 2, 4),
+;; R3 = Lua number. Preserves R0-R13.
+__pico8_poke_w:
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    MOV   R5, R2                  ; width = bytes to write
+    PUSH  R1
+    MOV   R1, R3
+    MOV   R0, R5
+    IEQ   R0, 4
+    JT    R0, _pico8_poke_w_fix
+    CALL  __pico8_addr            ; flr(v) mod 0x10000
+    JMP   _pico8_poke_w_have
+_pico8_poke_w_fix:
+    CALL  __pico8_fix32
+_pico8_poke_w_have:
+    MOV   R4, R1                  ; bits to store, low byte first
+    POP   R1
+_pico8_poke_w_byte:
+    MOV   R2, R4
+    AND   R2, 255
+    CALL  __pico8_wr
+    SHL   R4, -8
+    IADD  R1, 1
+    AND   R1, 0xFFFF
+    ISUB  R5, 1
+    MOV   R2, R5
+    IGT   R2, 0
+    JT    R2, _pico8_poke_w_byte
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_pico8_peek: [BP+2] = width (raw int 1/2/4), [BP+3] = address
+;; -> R0 = value
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+__builtin_pico8_peek:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    MOV   R1, [BP+3]
+    CALL  __pico8_addr
+    MOV   R2, [BP+2]
+    CALL  __pico8_peek_w
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_pico8_poke: [BP+2] = width (raw int), [BP+3] = count (raw int,
+;; >= 1), [BP+4] = address, [BP+5 ...] = the values, written one after
+;; another (poke(a, v1, v2, ...)). R0 = nil.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+__builtin_pico8_poke:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    MOV   R1, [BP+4]
+    CALL  __pico8_addr
+    MOV   R2, [BP+2]              ; width
+    MOV   R4, [BP+3]              ; values left
+    MOV   R5, BP
+    IADD  R5, 5                   ; -> first value
+_pico8_poke_next:
+    MOV   R0, R4
+    IGT   R0, 0
+    JF    R0, _pico8_poke_done
+    MOV   R3, [R5]
+    CALL  __pico8_poke_w
+    IADD  R1, R2
+    AND   R1, 0xFFFF
+    IADD  R5, 1
+    ISUB  R4, 1
+    JMP   _pico8_poke_next
+_pico8_poke_done:
+    MOV   R0, BOXED_NIL
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; __pico8_count (internal): R1 = Lua number -> R1 = flr(n) as an int,
+;; clamped to 0-0x10000 (a byte count). Preserves R0, R2-R13.
+__pico8_count:
+    PUSH  R2
+    MOV   R2, R1
+    AND   R2, NAN_VALUE
+    IEQ   R2, NAN_VALUE
+    JT    R2, _pico8_count_zero
+    MOV   R2, R1
+    FLT   R2, 1.0
+    JT    R2, _pico8_count_zero
+    MOV   R2, R1
+    FGT   R2, 65536.0
+    JF    R2, _pico8_count_ok
+    MOV   R1, 65536.0
+_pico8_count_ok:
+    FLR   R1
+    CFI   R1
+    POP   R2
+    RET
+_pico8_count_zero:
+    MOV   R1, 0
+    POP   R2
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_pico8_memcpy: [BP+2] = dest, [BP+3] = src, [BP+4] = length
+;; Overlapping ranges are copied as by memmove, like PICO-8. R0 = nil.
+;; __builtin_pico8_reload_range: reload(dest, src, length): the same, but
+;; reading the cart's own data (as it was before any poke/mset/fset).
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+__builtin_pico8_reload_range:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R6
+    MOV   R6, 1                   ; source: the cart
+    JMP   _pico8_copy_common
+__builtin_pico8_memcpy:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R6
+    MOV   R6, 0                   ; source: RAM
+_pico8_copy_common:
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    MOV   R1, [BP+4]
+    CALL  __pico8_count
+    MOV   R5, R1                  ; bytes left
+    MOV   R1, [BP+2]
+    CALL  __pico8_addr
+    MOV   R3, R1                  ; dest
+    MOV   R1, [BP+3]
+    CALL  __pico8_addr
+    MOV   R4, R1                  ; src
+    MOV   R2, 1                   ; step
+    JT    R6, _pico8_copy_loop    ; (the cart is never the destination)
+    MOV   R0, R3                  ; dest after src: copy from the end
+    IGT   R0, R4
+    JF    R0, _pico8_copy_loop
+    IADD  R3, R5
+    ISUB  R3, 1
+    IADD  R4, R5
+    ISUB  R4, 1
+    MOV   R2, -1
+_pico8_copy_loop:
+    MOV   R0, R5
+    IGT   R0, 0
+    JF    R0, _pico8_copy_done
+    AND   R3, 0xFFFF
+    AND   R4, 0xFFFF
+    MOV   R1, R4
+    JT    R6, _pico8_copy_from_cart
+    CALL  __pico8_rd
+    JMP   _pico8_copy_put
+_pico8_copy_from_cart:
+    CALL  __pico8_cart_rd
+_pico8_copy_put:
+    MOV   R1, R3
+    PUSH  R2
+    MOV   R2, R0
+    CALL  __pico8_wr
+    POP   R2
+    IADD  R3, R2
+    IADD  R4, R2
+    ISUB  R5, 1
+    JMP   _pico8_copy_loop
+_pico8_copy_done:
+    MOV   R0, BOXED_NIL
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    POP   R6
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_pico8_memset: [BP+2] = dest, [BP+3] = value, [BP+4] = length
+;; R0 = nil. Filling screen memory with a byte whose two pixels match (the
+;; memset(0x6000, 0, 0x2000) idiom) is drawn as at most 3 rectangles
+;; instead of one draw per byte.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+__builtin_pico8_memset:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
+    PUSH  R7
+    MOV   R1, [BP+4]
+    CALL  __pico8_count
+    MOV   R5, R1                  ; length
+    MOV   R1, [BP+3]
+    CALL  __pico8_addr
+    AND   R1, 255
+    MOV   R2, R1                  ; byte
+    MOV   R1, [BP+2]
+    CALL  __pico8_addr
+    MOV   R3, R1                  ; dest
+    ;; fast screen path: both nibbles equal and no wrap past 0xFFFF
+    MOV   R6, 0
+    MOV   R0, R2
+    SHL   R0, -4
+    MOV   R4, R2
+    AND   R4, 15
+    IEQ   R0, R4
+    JF    R0, _pico8_memset_loop
+    MOV   R0, R3
+    IADD  R0, R5
+    ILE   R0, 0x10000
+    JF    R0, _pico8_memset_loop
+    MOV   R6, 1
+_pico8_memset_loop:
+    MOV   R0, R5
+    IGT   R0, 0
+    JF    R0, _pico8_memset_draw
+    AND   R3, 0xFFFF
+    MOV   R1, R3
+    JF    R6, _pico8_memset_wr
+    MOV   R0, R1                  ; screen byte on the fast path: store only
+    ILT   R0, 0x6000
+    JT    R0, _pico8_memset_wr
+    MOV   R0, R1
+    IGE   R0, 0x8000
+    JT    R0, _pico8_memset_wr
+    CALL  __pico8_ram
+    IADD  R0, R1
+    MOV   [R0], R2
+    JMP   _pico8_memset_next
+_pico8_memset_wr:
+    CALL  __pico8_wr
+_pico8_memset_next:
+    IADD  R3, 1
+    ISUB  R5, 1
+    JMP   _pico8_memset_loop
+
+_pico8_memset_draw:
+    JF    R6, _pico8_memset_done
+    ;; screen part of [dest, dest + length): byte offsets s..e (relative
+    ;; to 0x6000), drawn as a partial first row, whole rows, a partial last
+    ;; row
+    MOV   R1, [BP+2]
+    CALL  __pico8_addr
+    MOV   R6, R1                  ; s
+    MOV   R1, [BP+4]
+    CALL  __pico8_count
+    MOV   R7, R6
+    IADD  R7, R1                  ; e
+    IMAX  R6, 0x6000
+    IMIN  R7, 0x8000
+    ISUB  R6, 0x6000
+    ISUB  R7, 0x6000
+    MOV   R0, R6
+    ILT   R0, R7
+    JF    R0, _pico8_memset_done
+    MOV   R5, R2
+    AND   R5, 15                  ; color
+    MOV   R4, 1                   ; h
+    MOV   R0, R6
+    AND   R0, 63
+    JF    R0, _pico8_memset_rows  ; s starts a row
+    MOV   R1, R6                  ; partial first row: s .. min(e, row end)
+    AND   R1, 63
+    SHL   R1, 1
+    MOV   R2, R6
+    SHL   R2, -6
+    MOV   R3, R6
+    OR    R3, 63
+    IADD  R3, 1                   ; row end
+    IMIN  R3, R7
+    MOV   R0, R3
+    ISUB  R3, R6
+    SHL   R3, 1                   ; w
+    MOV   R6, R0
+    CALL  __pico8_fill_screen
+_pico8_memset_rows:
+    MOV   R3, R7
+    ISUB  R3, R6
+    SHL   R3, -6                  ; whole rows
+    JF    R3, _pico8_memset_last
+    MOV   R4, R3
+    MOV   R1, 0
+    MOV   R2, R6
+    SHL   R2, -6
+    SHL   R3, 6
+    IADD  R6, R3
+    MOV   R3, 128
+    CALL  __pico8_fill_screen
+    MOV   R4, 1
+_pico8_memset_last:
+    MOV   R3, R7
+    ISUB  R3, R6
+    JF    R3, _pico8_memset_done
+    SHL   R3, 1
+    MOV   R1, 0
+    MOV   R2, R6
+    SHL   R2, -6
+    CALL  __pico8_fill_screen
+_pico8_memset_done:
+    MOV   R0, BOXED_NIL
+    POP   R7
+    POP   R6
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_pico8_reload_all: reload() with no arguments -- the map and
+;; flags (always), and the sprite sheet and sound data of the emulated RAM
+;; if it exists. R0 = nil.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+__builtin_pico8_reload_all:
+    PUSH  R1
+    PUSH  R2
+    CALL  __builtin_pico8_reload
+    MOV   R0, [PICO8_RAM_PTR]
+    JF    R0, _pico8_reload_all_done
+    MOV   R1, 0
+_pico8_reload_all_gfx:
+    CALL  __pico8_cart_rd
+    MOV   R2, [PICO8_RAM_PTR]
+    IADD  R2, R1
+    MOV   [R2], R0
+    IADD  R1, 1
+    MOV   R2, R1
+    ILT   R2, 0x1000
+    JT    R2, _pico8_reload_all_gfx
+    MOV   R1, 0x3100
+_pico8_reload_all_snd:
+    CALL  __pico8_cart_rd
+    MOV   R2, [PICO8_RAM_PTR]
+    IADD  R2, R1
+    MOV   [R2], R0
+    IADD  R1, 1
+    MOV   R2, R1
+    ILT   R2, 0x4300
+    JT    R2, _pico8_reload_all_snd
+_pico8_reload_all_done:
+    MOV   R0, BOXED_NIL
+    POP   R2
+    POP   R1
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; sget(x, y): [BP+2] = x, [BP+3] = y -> sprite sheet pixel (0 off-sheet)
+;; sset(x, y [, c]): [BP+4] = c (nil -> the pen). R0 = nil.
+;; The sheet is read from / written to memory 0x0000-0x1FFF; drawing uses
+;; the sheet as it was compiled, so sset() is not seen by spr().
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+__builtin_pico8_sget:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    CALL  __pico8_sheet_addr
+    JF    R0, _pico8_sget_done    ; R0 = 0.0 off-sheet
+    CALL  __pico8_rd
+    JF    R3, _pico8_sget_lo
+    SHL   R0, -4
+_pico8_sget_lo:
+    AND   R0, 15
+    CIF   R0
+_pico8_sget_done:
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+__builtin_pico8_sset:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    CALL  __pico8_sheet_addr
+    JF    R0, _pico8_sset_done
+    MOV   R2, [BP+4]
+    MOV   R4, R2
+    IEQ   R4, BOXED_NIL
+    JF    R4, _pico8_sset_col
+    MOV   R2, [PICO8_PEN]
+    JMP   _pico8_sset_have
+_pico8_sset_col:
+    PUSH  R1
+    MOV   R1, R2
+    CALL  __pico8_to_int
+    MOV   R2, R1
+    POP   R1
+_pico8_sset_have:
+    AND   R2, 15
+    CALL  __pico8_rd
+    JT    R3, _pico8_sset_hi
+    AND   R0, 0xF0
+    OR    R0, R2
+    JMP   _pico8_sset_put
+_pico8_sset_hi:
+    AND   R0, 0x0F
+    SHL   R2, 4
+    OR    R0, R2
+_pico8_sset_put:
+    MOV   R2, R0
+    CALL  __pico8_wr
+_pico8_sset_done:
+    MOV   R0, BOXED_NIL
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; __pico8_sheet_addr (internal, uses the caller's frame): [BP+2] = x,
+;; [BP+3] = y -> R0 = 1 and R1 = byte address, R3 = 1 for the high nibble;
+;; R0 = 0 off the 128x128 sheet. Clobbers R2.
+__pico8_sheet_addr:
+    MOV   R1, [BP+3]
+    CALL  __pico8_to_int
+    MOV   R2, R1                  ; y
+    MOV   R1, [BP+2]
+    CALL  __pico8_to_int          ; x
+    MOV   R0, 0
+    MOV   R3, R1
+    ILT   R3, 0
+    JT    R3, _pico8_sheet_off
+    MOV   R3, R1
+    IGE   R3, 128
+    JT    R3, _pico8_sheet_off
+    MOV   R3, R2
+    ILT   R3, 0
+    JT    R3, _pico8_sheet_off
+    MOV   R3, R2
+    IGE   R3, 128
+    JT    R3, _pico8_sheet_off
+    MOV   R3, R1
+    AND   R3, 1
+    SHL   R1, -1
+    SHL   R2, 6
+    IADD  R1, R2
+    MOV   R0, 1
+_pico8_sheet_off:
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; cartdata(id): [BP+2] = hash of the id (raw int, computed at compile
+;; time). With a memory card: if the card holds this id's data, it is loaded
+;; into 0x5E00-0x5EFF and true is returned; otherwise the card's slots are
+;; claimed for this id and zeroed, and false is returned. From then on,
+;; writes to 0x5E00-0x5EFF (dset, poke) are saved to the card. Without a
+;; card, dget/dset still work for the session and false is returned.
+;; Card layout: word DATA_BASE = id hash, DATA_BASE + 1 + n = slot n.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+__builtin_pico8_cartdata:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    PUSH  R11
+    PUSH  R12
+    PUSH  R13
+    MOV   R5, BOXED_FALSE
+    IN    R0, MEM_Connected
+    JF    R0, _pico8_cartdata_done
+    MOV   R1, VIRCON32_MEMCARD_DATA_BASE
+    MOV   R0, [R1]
+    MOV   R2, [BP+2]
+    IEQ   R0, R2
+    JF    R0, _pico8_cartdata_new
+    MOV   R5, BOXED_TRUE
+    JMP   _pico8_cartdata_load
+_pico8_cartdata_new:
+    MOV   [R1], R2                ; claim the slots for this id
+    MOV   R13, R1
+    IADD  R13, 1
+    MOV   R12, 0
+    MOV   R11, 64
+    SETS
+_pico8_cartdata_load:
+    CALL  __pico8_ram
+    MOV   R3, R0
+    IADD  R3, 0x5E00              ; RAM bytes
+    IADD  R1, 1                   ; card slots
+    MOV   R4, 64
+_pico8_cartdata_slot:
+    MOV   R2, [R1]
+    MOV   R0, R2
+    AND   R0, 255
+    MOV   [R3], R0
+    MOV   R0, R2
+    SHL   R0, -8
+    AND   R0, 255
+    MOV   [R3+1], R0
+    MOV   R0, R2
+    SHL   R0, -16
+    AND   R0, 255
+    MOV   [R3+2], R0
+    MOV   R0, R2
+    SHL   R0, -24
+    MOV   [R3+3], R0
+    IADD  R1, 1
+    IADD  R3, 4
+    ISUB  R4, 1
+    MOV   R0, R4
+    IGT   R0, 0
+    JT    R0, _pico8_cartdata_slot
+    MOV   R0, 1
+    MOV   [PICO8_CARTDATA], R0
+_pico8_cartdata_done:
+    MOV   R0, R5
+    POP   R13
+    POP   R12
+    POP   R11
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; dget(n): [BP+2] = n -> peek4(0x5E00 + 4 * n) (0 outside 0-63)
+;; dset(n, v): [BP+2] = n, [BP+3] = v -> poke4(0x5E00 + 4 * n, v). R0 = nil.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+__builtin_pico8_dget:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    CALL  __pico8_dslot
+    JF    R0, _pico8_dget_done    ; R0 = 0.0 outside 0-63
+    MOV   R2, 4
+    CALL  __pico8_peek_w
+_pico8_dget_done:
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+__builtin_pico8_dset:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    CALL  __pico8_dslot
+    JF    R0, _pico8_dset_done
+    MOV   R2, 4
+    MOV   R3, [BP+3]
+    CALL  __pico8_poke_w
+_pico8_dset_done:
+    MOV   R0, BOXED_NIL
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; __pico8_dslot (internal, caller's frame): [BP+2] = n -> R0 = 1 and
+;; R1 = 0x5E00 + 4 * flr(n), or R0 = 0 if n is not 0-63.
+__pico8_dslot:
+    MOV   R1, [BP+2]
+    CALL  __pico8_to_int
+    MOV   R0, 0
+    MOV   R2, R1
+    ILT   R2, 0
+    JT    R2, _pico8_dslot_done
+    MOV   R2, R1
+    IGE   R2, 64
+    JT    R2, _pico8_dslot_done
+    SHL   R1, 2
+    IADD  R1, 0x5E00
+    MOV   R0, 1
+_pico8_dslot_done:
     RET

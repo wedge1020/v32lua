@@ -246,7 +246,10 @@ present):
   first use with the cart's palette, tiles, sprites and map in it; the map
   (0x08000), gamepad (0x0FF80) and sprite-flag (0x14404) areas are live
   views of `mget`/`mset`, the buttons and `fget`/`fset`. Other writes are
-  stored but don't change the screen or sound. A function the program
+  stored but don't change the screen or sound. `pmem` has TIC-80's 256
+  32-bit slots on the memory card. Circles on both fantasy-console layers
+  are one GPU draw each up to radius 31 (pre-rendered at compile time,
+  pixel-identical to the consoles'). A function the program
   defines itself (`function pal(...)`) replaces the built-in of that name,
   as in Lua.
 * **PICO-8 compatibility layer** (`--#api "pico8"`) — the PICO-8-shaped
@@ -257,7 +260,11 @@ present):
   (`flr`, `rnd`, `mid`, turn-based `sin`/`cos`, ...), `sspr`, `split`,
   `tostr`/`tonum`, `_ENV[name]`, the PICO-8 syntax shortcuts (`?`, `\`,
   `f"str"`, button glyphs, ...), `sfx`/`music` playing the cart's own
-  `__sfx__`/`__music__` (synthesized at compile time), and
+  `__sfx__`/`__music__` (synthesized at compile time), `time`/`t`,
+  `peek`/`poke` (8/16/32-bit, and the `@ % $` operators), `memcpy`/
+  `memset`/`reload`/`sget`/`sset` on an emulated 64 KB RAM in PICO-8's
+  layout (map, flags, pen, camera, buttons live; screen writes drawn),
+  `cartdata`/`dget`/`dset` saved on the memory card, and
   `_init`/`_update` (30 fps)/
   `_update60`/`_draw`. The 128×128 screen is scaled 2.75× and centered;
   drawing outside it is masked. A **`.p8` cart compiles directly**
@@ -876,9 +883,11 @@ decision:
   of whole SFX would roughly halve that again (about half of Celeste's
   notes repeat), at the cost of a note-level sequencer.
 * PICO-8: `pal`/`palt` (compile to no-ops with a warning), `clip`,
-  `peek`/`poke` and the `@ % $` peek shorthands, `cartdata`/`dget`/`dset`,
-  real `stat` values, fractional `spr` widths; the SFX editor's filter
-  switches in synthesized sound
+  real `stat` values, fractional `spr` widths, `pget`, `oval`/`ovalfill`,
+  `menuitem`, multi-cart loading (`reload` from another file, `cstore`);
+  writing sprite/sound memory has no effect and reading screen memory
+  returns only what was written there (no GPU read-back); the SFX
+  editor's filter switches in synthesized sound
 * TIC-80: `tri`/`trib`, `elli`/`ellib`, `clip`, `mouse`, `font`,
   `map()`'s remap callback; the `sfx()` speed argument and `music()`'s
   tempo/speed/sustain arguments (see [doc/TIC80.md](doc/TIC80.md#sound)).

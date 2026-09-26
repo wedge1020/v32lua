@@ -274,6 +274,10 @@ static int compound_assign_token (NodeType op)
 "\xE2\xAC\x87"(\xEF\xB8\x8F)?      { yylval.number_val = 3; return TOKEN_NUMBER; }
 "\xF0\x9F\x85\xBE"(\xEF\xB8\x8F)?  { yylval.number_val = 4; return TOKEN_NUMBER; }
 "\xE2\x9D\x8E"(\xEF\xB8\x8F)?      { yylval.number_val = 5; return TOKEN_NUMBER; }
+    /* PICO-8 peek operators: @a == peek(a), $a == peek4(a); %a == peek2(a)
+       is the unary use of '%' (parser.y) */
+"@"                     { require_pico8 ("@"); return TOKEN_PEEK; }
+"$"                     { require_pico8 ("$"); return TOKEN_PEEK4; }
 "+"                     { return '+'; }
 "-"                     { return '-'; }
 "*"                     { return '*'; }

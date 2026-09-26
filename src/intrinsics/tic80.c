@@ -761,6 +761,7 @@ bool emit_tic80_pmem_intrinsic(ASTNode *node, int dest_reg) {
         int reg = allocate_register();
         register_pinned[reg] = 1;
         generate_asm(args[1], reg);  // value
+        ensure_in_register(reg);
         emit_asm("PUSH R%d ; Arg 2: value\n", reg);
         register_pinned[reg] = 0;
         unlock_register(reg);
@@ -774,6 +775,7 @@ bool emit_tic80_pmem_intrinsic(ASTNode *node, int dest_reg) {
     int reg = allocate_register();
     register_pinned[reg] = 1;
     generate_asm(args[0], reg);  // index
+    ensure_in_register(reg);
     emit_asm("PUSH R%d ; Arg 1: index\n", reg);
     register_pinned[reg] = 0;
     unlock_register(reg);

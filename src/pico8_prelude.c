@@ -85,6 +85,22 @@ static const PreludeFunc prelude[] = {
     { "lshr", NULL, "function lshr(a, n) return a >>> n end\n" },
     { "rotl", NULL, "function rotl(a, n) return a <<> n end\n" },
     { "rotr", NULL, "function rotr(a, n) return a >>< n end\n" },
+    // peek(a, n) / peek2(a, n) / peek4(a, n): n values, up to 8 (the
+    // calling convention has no return count, as for unpack()); the
+    // intrinsics handle the single-value form, see pico8mem.c
+    { "__p8_peekn", NULL,
+      "function __p8_peekn(a, n, w)\n"
+      "  local v = {}\n"
+      "  if n > 8 then n = 8 end\n"
+      "  for i = 1, n do\n"
+      "    if w == 1 then v[i] = peek(a) elseif w == 2 then v[i] = peek2(a) else v[i] = peek4(a) end\n"
+      "    a = a + w\n"
+      "  end\n"
+      "  return v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8]\n"
+      "end\n" },
+    { "peek",  "__p8_peekn", "" },
+    { "peek2", "__p8_peekn", "" },
+    { "peek4", "__p8_peekn", "" },
     { NULL, NULL, NULL }
 };
 
@@ -110,9 +126,20 @@ static bool defines (const char *src, const char *name)
     return strstr (src, pat) != NULL;
 }
 
+// Which prelude names the program uses as the built-in (mentioned, not
+// defined by the program itself) -- set by pico8_append_prelude().
+static bool prelude_builtin[64];
+
+bool pico8_prelude_builtin (const char *name)
+{
+    for (int i = 0; prelude[i].name && i < 64; i++)
+        if (strcmp (prelude[i].name, name) == 0) return prelude_builtin[i];
+    return false;
+}
+
 char *pico8_append_prelude (char *src)
 {
-    bool want[32] = { false };
+    bool want[64] = { false };
     int  count = 0;
     for (int i = 0; prelude[i].name; i++) count++;
 
@@ -120,6 +147,7 @@ char *pico8_append_prelude (char *src)
         if (prelude[i].name[0] != '_' && mentions (src, prelude[i].name) &&
             !defines (src, prelude[i].name)) {
             want[i] = true;
+            prelude_builtin[i] = true;
             for (int j = 0; j < count; j++)
                 if (prelude[i].needs && strcmp (prelude[j].name, prelude[i].needs) == 0)
                     want[j] = true;

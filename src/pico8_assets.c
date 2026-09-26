@@ -419,6 +419,79 @@ const char *pico8_music_line (int n)
 }
 bool pico8_has_audio (void) { return p8_sfx_rows > 0; }
 
+// Packs `count` bytes 4 per word (low byte first) under `label`.
+static void emit_packed_bytes (FILE *out, const char *label, const uint8_t *b, int count)
+{
+    fprintf (out, "%s:\n", label);
+    for (int i = 0; i < count; i += 4) {
+        uint32_t w = 0;
+        for (int k = 0; k < 4 && i + k < count; k++) w |= (uint32_t) b[i + k] << (8 * k);
+        fprintf (out, "%s0x%08X%s", (i / 4) % 8 == 0 ? "    integer " : "", w,
+                 ((i / 4) % 8 == 7 || i + 4 >= count) ? "\n" : ", ");
+    }
+}
+
+// The cart's 0x0000-0x0FFF (sprites 0-127) and 0x3100-0x42FF (music, sfx)
+// in PICO-8's memory layout, for peek()/reload() (see the memory section of
+// pico8.s; the map and flags come from __pico8_map_rom/__pico8_flags_rom).
+// Only a program that uses the memory functions gets the bytes; the labels
+// always exist.
+static void emit_pico8_memory_rom (FILE *out)
+{
+    if (!pico8_uses_memory) {
+        fprintf (out, "__pico8_rom_gfx:\n__pico8_rom_snd:\n    integer 0\n");
+        return;
+    }
+    static uint8_t gfx[0x1000];
+    for (int i = 0; i < 0x1000; i++) {
+        int x = (i % 64) * 2, y = i / 64;
+        gfx[i] = (uint8_t) ((p8_gfx[y][x] & 15) | ((p8_gfx[y][x + 1] & 15) << 4));
+    }
+    emit_packed_bytes (out, "__pico8_rom_gfx", gfx, 0x1000);
+
+    // 0x3100: 64 patterns x 4 bytes -- byte c = channel c's sfx (bit 6 set:
+    // channel off); bit 7 of bytes 0/1/2 = loop start / loop end / stop.
+    // 0x3200: 64 sfx x 68 bytes -- 32 notes of 16 bits (pitch 0-5, waveform
+    // 6-8, volume 9-11, effect 12-14, custom instrument 15), then editor
+    // mode, speed, loop start, loop end.
+    static uint8_t snd[0x1200];
+    memset (snd, 0, sizeof snd);
+    for (int n = 0; n < 64; n++) {
+        const char *m = pico8_music_line (n);
+        if (m == NULL || strlen (m) < 11) continue;
+        int flags = p8_hex (m[0]) * 16 + p8_hex (m[1]);
+        for (int c = 0; c < 4; c++) {
+            int v = p8_hex (m[3 + c * 2]) * 16 + p8_hex (m[4 + c * 2]);
+            if (v < 0) v = 0x40;
+            uint8_t b = (uint8_t) (v & 0x7F);
+            if (c < 3 && flags > 0 && (flags >> c) & 1) b |= 0x80;
+            snd[n * 4 + c] = b;
+        }
+    }
+    for (int n = 0; n < 64; n++) {
+        const char *f = pico8_sfx_line (n);
+        if (f == NULL || strlen (f) < 8) continue;
+        uint8_t *o = snd + 0x100 + n * 68;
+        for (int k = 0; k < 4; k++) {
+            int v = p8_hex (f[k * 2]) * 16 + p8_hex (f[k * 2 + 1]);
+            o[64 + k] = (uint8_t) (v < 0 ? 0 : v);
+        }
+        size_t len = strlen (f);
+        for (int i = 0; i < 32 && 8 + (size_t) i * 5 + 5 <= len; i++) {
+            const char *q = f + 8 + i * 5;
+            int pitch = p8_hex (q[0]) * 16 + p8_hex (q[1]);
+            int wave = p8_hex (q[2]), vol = p8_hex (q[3]), fx = p8_hex (q[4]);
+            if (pitch < 0 || wave < 0 || vol < 0 || fx < 0) continue;
+            unsigned w = (unsigned) (pitch & 63) | (unsigned) (wave & 7) << 6 |
+                         (unsigned) (vol & 7) << 9 | (unsigned) (fx & 7) << 12 |
+                         (unsigned) ((wave >> 3) & 1) << 15;
+            o[i * 2]     = (uint8_t) (w & 0xFF);
+            o[i * 2 + 1] = (uint8_t) (w >> 8);
+        }
+    }
+    emit_packed_bytes (out, "__pico8_rom_snd", snd, 0x1200);
+}
+
 // ROM data the runtime reads at init: packed map (4 cells per word, cell
 // x at byte x%4 -- the same layout __builtin_pico8_mget/mset/map use) and
 // one word per sprite of fget() flags. Always emitted, zero-filled when the
@@ -439,6 +512,7 @@ void emit_pico8_cart_data (FILE *out)
         }
     }
     emit_pico8_audio_tables (out);
+    emit_pico8_memory_rom (out);
     fprintf (out, "__pico8_flags_rom:\n");
     for (int r = 0; r < 16; r++) {
         fprintf (out, "    integer ");

@@ -992,6 +992,11 @@ void generate_program (ASTNode *head)
         emit_asm ("MOV  [PICO8_DRAW_COST], R0 ; RAM isn't clean after the BIOS\n");
         emit_asm ("__start:\n");
         emit_asm ("CALL __builtin_pico8_pause_check ; Start pauses, as on the TIC-80 layer\n");
+        // time()/t(): PICO-8 counts frames (_update calls), not wall time,
+        // so time stands still while paused
+        emit_asm ("MOV  R0, [PICO8_TICKS]\n");
+        emit_asm ("IADD R0, 1\n");
+        emit_asm ("MOV  [PICO8_TICKS], R0 ; one more PICO-8 frame for time()\n");
         emit_asm ("IN   R0, TIM_FrameCounter\n");
         emit_asm ("MOV  [PICO8_TICK_FRAME], R0 ; frame this tick started on\n");
         if (has_update)

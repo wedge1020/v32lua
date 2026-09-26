@@ -703,12 +703,16 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         }
 
         if (strcmp (func_name, "sspr")  == 0) return (emit_pico8_sspr_intrinsic  (node, dest_reg));
-        if (strcmp (func_name, "reload") == 0) {
-            if (node->as.call.args_head != NULL)
-                compiler_warning (ERR_SEMANTIC, node->line_number,
-                    "reload(): only the no-argument form is supported (map and flags are restored)");
-            emit_asm ("CALL __builtin_pico8_reload\n");
-            if (dest_reg != 0) emit_asm ("MOV R%d, R0\n", dest_reg);
+        // time() / t() -- seconds, counted in PICO-8 frames
+        if (strcmp (func_name, "time") == 0 || strcmp (func_name, "t") == 0)
+        {
+            return (emit_pico8_time_intrinsic (node, dest_reg));
+        }
+
+        // peek/poke family, memcpy, memset, reload, cstore, sget/sset,
+        // cartdata/dget/dset -- emulated 64 KB RAM (pico8mem.c)
+        if (emit_pico8_memory_intrinsic (node, func_name, dest_reg))
+        {
             return true;
         }
         if (strcmp (func_name, "rect")  == 0) return (emit_pico8_rect_intrinsic  (node, dest_reg));

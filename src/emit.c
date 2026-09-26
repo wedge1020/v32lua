@@ -605,6 +605,9 @@ int   emit_variable_map (void)
         fprintf (out(), "%%define  PICO8_MUSIC_END          0x%.8X\n", (next_ram_address + 8));
         fprintf (out(), "%%define  PICO8_SFX_NEXT           0x%.8X\n", (next_ram_address + 9));
         fprintf (out(), "%%define  PICO8_START_PREV         0x%.8X\n", (next_ram_address + 10));
+        fprintf (out(), "%%define  PICO8_TICKS              0x%.8X\n", (next_ram_address + 11));
+        fprintf (out(), "%%define  PICO8_RAM_PTR            0x%.8X\n", (next_ram_address + 12));
+        fprintf (out(), "%%define  PICO8_CARTDATA           0x%.8X\n", (next_ram_address + 13));
         // SFX sound ids start here (-1: the cart plays no synthesized sound)
         fprintf (out(), "%%define  PICO8_SFX_BASE           %d\n", pico8_sfx_base_id);
         fprintf (out(), "%%define  PICO8_AUDIO_RATE         %d\n", synth_audio_rate);
@@ -612,14 +615,22 @@ int   emit_variable_map (void)
         // camera x, y (floats), pen (int), tick frame, draw start frame /
         // cycle, last draw's cost in cycles, music sequencer state (current
         // pattern, frame it ends on), next auto sfx channel, Start held at
-        // the last pause check
-        next_ram_address    = next_ram_address + 11;
+        // the last pause check, PICO-8 frames since start (time()), the
+        // emulated 64 KB RAM (0 until first used), cartdata() state
+        next_ram_address    = next_ram_address + 14;
         fprintf (out(), "%%define  PICO8_FLAGS_RAM          0x%.8X\n", next_ram_address);
         next_ram_address    = next_ram_address + 256;
         fprintf (out(), "%%define  PICO8_MAP_RAM            0x%.8X\n", next_ram_address);
         next_ram_address    = next_ram_address + (PICO8_MAP_WIDTH * PICO8_MAP_HEIGHT) / 4;
         fprintf (out(), "%%define  PICO8_FRAME_STEP         %d\n", pico8_frame_step);
         lines_printed      += 6;
+    }
+
+    // Circle shape atlas (shapes.c): texture index, -1 when there is none
+    if (runtime_req.needs_pico8 || runtime_req.needs_tic80)
+    {
+        fprintf (out(), "%%define  SHAPES_TEXTURE           %d\n", shapes_texture_id);
+        fprintf (out(), "%%define  SHAPES_MAX_R             %d\n", SHAPES_MAX_R);
     }
 
     // Unconditional -- see the allocation comment in main.c.
@@ -814,6 +825,7 @@ void  emit_runtime_library (void)
     {
         emit_embedded_asm (runtime_pico8_start);
         emit_pico8_cart_data (out());
+        emit_shapes_runtime (out());
     }
     if (g_uses_env)
     {
@@ -855,6 +867,7 @@ void  emit_runtime_library (void)
         }
 
         emit_tic80_ram_rom (out());
+        emit_shapes_runtime (out());
 
         emit_tic80_map_data (out());
         emit_tic80_audio_tables (out());

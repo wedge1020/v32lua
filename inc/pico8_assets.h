@@ -39,5 +39,6 @@ extern long  pico8_audio_bytes;
 extern int   synth_audio_rate;
 
 char        *pico8_append_prelude   (char *);
+bool         pico8_prelude_builtin  (const char *);
 
 #endif

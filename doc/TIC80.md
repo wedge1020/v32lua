@@ -75,6 +75,40 @@ drawn with `DrawRegionRotozoomed`, and multi-tile sprites pick their source
 tiles and cells exactly as TIC-80 does (all 16 flip × rotate combinations,
 1×1 and 2×2, checked pixel by pixel against TIC-80's mapping).
 
+## Shapes
+
+`circ`/`circb` draw TIC-80's own pixels (its `drawEllipse()`, Zingl's
+algorithm, on the circle's bounding square; `circ` fills each row between
+the outline's outermost pixels) — checked pixel for pixel by
+`tools/headless/circles.py`. Every circle up to radius 31 is pre-rendered
+at compile time into a small white texture (256×407, only in carts that
+draw circles) and drawn as **one** zoomed region tinted with the GPU
+multiply color: 3–28× less CPU time than the point-by-point / span-by-span
+drawing before (180 cycles per circle at any radius up to 31). Larger
+circles are drawn from the algorithm, one rectangle per run of pixels
+(the first octant's runs and their mirror images), about 1.8× faster than
+before. The pause screen's dimming applies to them like to everything else.
+
+`rect` is one scaled draw of a solid swatch, `rectb` four. Their
+arguments are truncated to integers as TIC-80 does, and a width or height
+of 0 or less draws nothing (it used to draw the rectangle mirrored).
+
+## Memory
+
+`peek`/`peek1`/`peek2`/`peek4`, `poke`/`poke1`/`poke2`/`poke4`, `memcpy`
+and `memset` work on an emulated 96 KB RAM: the palette, tiles, sprites
+and map come from the cart; the map (0x8000), gamepads (0xFF80) and sprite
+flags (0x14404) are live views of `mget`/`mset`, `btn` and `fget`/`fset`;
+the rest is plain storage (writing the screen, palette or sound registers
+changes nothing seen or heard).
+
+`pmem(index [, value])` has TIC-80's 256 slots of 32 bits. It returns the
+slot's value — when writing, the value before the write, as TIC-80 does —
+as an unsigned number; values are truncated to integers; an index outside
+0–255 gives nil. The slots are saved on the memory card (earlier versions
+kept one byte per slot at the same place, so their saves still read back);
+without a card they are kept in RAM for the session instead of faulting.
+
 ## Input
 
 `btn(id)` and `btnp(id, hold, period)` follow TIC-80's `core/io.c`: `id` is

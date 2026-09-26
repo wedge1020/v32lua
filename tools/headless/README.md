@@ -28,6 +28,8 @@ stands in for it).
 | `profile.py prog.vbin.debug prof.txt [N]` | Cycles per routine from a `-P` profile. |
 | `trap prog LABEL` | Run until an asm label is reached; print trail and call stack. |
 | `where.py prog.vbin.debug prog.asm ADDR...` | Map addresses to asm lines. |
+| `circles.py [tic80\|pico8]` | Pixel-checks TIC-80 `circ`/`circb` and PICO-8 `circfill`/`circ` (radius 0-45 and some large ones: the shape-atlas and the octant-run paths) against the consoles' own rasterizers; prints the GPU draws per circle. |
+| `V32_NO_MEMCARD=1` | Run with no memory card connected (`MEM_Connected` reads 0; card memory faults, as on the console). |
 | `V32_FIXED_TIME=1` | Start the clock at a fixed date and time. Carts seed their RNG from the clock (`math.random`, PICO-8 `rnd`), so this makes runs repeatable: compare two builds' `-g`/`-s` logs for the same pad script. For a cart that overruns its frames, compare with no pad script (input is frame-indexed, so a timing change moves it). |
 | `V32_CFI=arm` / `V32_CFI_LOG=1` | The emulator's float→int conversion of NaN or out-of-range values is host-dependent (0x80000000 on x86-64; 0 or saturated on ARM64). Pick the ARM behaviour, or log every such conversion. |
 | `difftest.py test.lua` | Compare `R_*` globals against reference Lua 5.4 (`$LUA54`). |

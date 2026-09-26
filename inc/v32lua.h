@@ -25,6 +25,7 @@
 #include "internals.h"
 #include "register.h"
 #include "closures.h"
+#include "shapes.h"
 
 #define  VERSION             "20260925-dev"
 #define  AUTHOR              "Matthew Haas"

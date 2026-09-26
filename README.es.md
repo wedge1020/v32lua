@@ -859,12 +859,16 @@ una decisión de diseño:
   Los juegos de larga duración deberían reutilizar tablas en lugar de
   crearlas en cada fotograma.
 * PICO-8: `pal`/`palt` (compilan a no-ops con una advertencia), `clip`,
-  `peek`/`poke`, `cartdata`/`dget`/`dset`, valores reales de `stat`,
-  anchos fraccionarios en `spr`; los filtros del editor de SFX en el
+  valores reales de `stat`, anchos fraccionarios en `spr`, `pget`,
+  `oval`/`ovalfill`, `menuitem`, la carga multicartucho (`reload` desde
+  otro archivo, `cstore`); escribir en la memoria de sprites o de sonido
+  no tiene efecto y leer la memoria de pantalla solo devuelve lo escrito
+  allí (no hay lectura de la GPU); los filtros del editor de SFX en el
   sonido sintetizado
-* TIC-80: familia `peek`/`poke`, `tri`/`trib`, `elli`/`ellib`, `clip`,
-  `key`/`keyp`, `mouse`, `font`, rotación en `spr`, y síntesis de los datos
-  `WAVES`/`SFX`/`MUSIC` propios del cartucho (se usan tonos provisionales)
+* TIC-80: `tri`/`trib`, `elli`/`ellib`, `clip`, `key`/`keyp`, `mouse`,
+  `font`, la función de reasignación de `map()`; el argumento de velocidad
+  de `sfx()` y los argumentos tempo/velocidad/sustain de `music()` (ver
+  [doc/TIC80.md](doc/TIC80.md#sound))
 * `tonumber(s, base)` — la forma de dos argumentos, con base explícita
 * Un diagnóstico (advertencia/error) para leer, desde dentro de una
   función, una `local` declarada en un bloque léxicamente fuera de

@@ -877,13 +877,16 @@ attente d'une décision de conception :
   réinitialisation. Les jeux qui tournent longtemps devraient réutiliser
   leurs tables plutôt que d'en créer à chaque image.
 * PICO-8 : `pal`/`palt` (compilés en no-op avec un avertissement),
-  `clip`, `peek`/`poke`, `cartdata`/`dget`/`dset`, les vraies valeurs de
-  `stat`, les largeurs fractionnaires de `spr` ; les filtres de l'éditeur
-  de SFX dans le son synthétisé
-* TIC-80 : famille `peek`/`poke`, `tri`/`trib`, `elli`/`ellib`, `clip`,
-  `key`/`keyp`, `mouse`, `font`, rotation de `spr`, et synthèse des données
-  `WAVES`/`SFX`/`MUSIC` propres à la cartouche (des sons provisoires sont
-  utilisés)
+  `clip`, les vraies valeurs de `stat`, les largeurs fractionnaires de
+  `spr`, `pget`, `oval`/`ovalfill`, `menuitem`, le chargement multi-
+  cartouche (`reload` depuis un autre fichier, `cstore`) ; écrire dans la
+  mémoire des sprites ou du son est sans effet et lire la mémoire écran ne
+  rend que ce qui y a été écrit (pas de relecture GPU) ; les filtres de
+  l'éditeur de SFX dans le son synthétisé
+* TIC-80 : `tri`/`trib`, `elli`/`ellib`, `clip`, `key`/`keyp`, `mouse`,
+  `font`, la fonction de remappage de `map()` ; l'argument de vitesse de
+  `sfx()` et les arguments tempo/vitesse/sustain de `music()` (voir
+  [doc/TIC80.md](doc/TIC80.md#sound))
 * `tonumber(s, base)` — la forme à deux arguments, avec base explicite
 * Un diagnostic (avertissement/erreur) pour la lecture, depuis
   l'intérieur d'une fonction, d'une `local` déclarée dans un bloc

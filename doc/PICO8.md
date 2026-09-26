@@ -63,7 +63,7 @@ before `_init()`; the map and flags are already loaded then.
 | `mget(x, y)`, `mset(x, y, v)` | 128×64 map; out-of-range reads 0, writes are ignored. |
 | `fget(n [, f])`, `fset(n, [f,] v)` | From `__gff__`; writable at runtime. |
 | `cls([c])`, `color([c])` | |
-| `rectfill`, `rect`, `circfill`, `circ`, `line`, `pset` | Corners in any order. An omitted color uses the pen; a given color becomes the pen (PICO-8 rule). |
+| `rectfill`, `rect`, `circfill`, `circ`, `line`, `pset` | Corners in any order. An omitted color uses the pen; a given color becomes the pen (PICO-8 rule). Circles are PICO-8's own pixels (see [Circles](#circles)). |
 | `print(s [, x, y [, c]])` | BIOS font tinted with the palette color. Glyphs are the BIOS font's, not PICO-8's 3×5 font. |
 | `camera([x, y])` | |
 | `btn([i [, p]])`, `btnp([i [, p]])` | 0 left, 1 right, 2 up, 3 down, 4 O (→ A), 5 X (→ B). No `i` → bitfield. `btnp`: first frame of a press, then from frame 15 every 4 frames. |
@@ -75,7 +75,11 @@ before `_init()`; the map and flags are already loaded then.
 | `sfx(n [, channel])`, `music(n)` | The cart's own `__sfx__`/`__music__`, synthesized at compile time (below). Without that data: a placeholder tone bank — see [PICO8_SFX_SOUND_BANK.md](PICO8_SFX_SOUND_BANK.md). |
 | `split(s [, sep [, convert]])`, `unpack(t [, i])` | `unpack` returns up to 8 values. |
 | `tostr(v [, hex])`, `tonum(s)`, `chr(n)`, `ord(s [, i])` | |
-| `reload()` | Restores the map and sprite flags from the cart (no arguments). |
+| `peek`, `peek2`, `peek4`, `poke`, `poke2`, `poke4`, `memcpy`, `memset`, `@a %a $a` | On an emulated 64 KB RAM in PICO-8's layout (see [Memory](#memory)). `peek(a, n)` returns n values (up to 8); `poke(a, v1, v2, …)` writes several. |
+| `reload([dest, src, len])`, `cstore(…)` | `reload` copies from the cart's own data (as compiled, before any `poke`/`mset`/`fset`); no arguments restores all of 0x0000–0x42FF. `reload` from another cart file and `cstore` do nothing (with a warning). |
+| `sget(x, y)`, `sset(x, y [, c])` | The sprite sheet in memory. `sset` isn't seen by `spr`/`map`, which draw the sheet as compiled. |
+| `cartdata(id)`, `dget(n)`, `dset(n, v)` | 64 persistent numbers at 0x5E00, saved on the memory card (see [Memory](#memory)). |
+| `time()`, `t()` | Seconds since the cart started, counted in PICO-8 frames (1/30 s each, 1/60 s with `_update60`) as PICO-8 does, so it stands still while paused. |
 | `stat(n)`, `printh(s)` | Stubs (`stat` returns 0) — real functions, so `stat` works as a no-op value. |
 | `_ENV[name]` | Reads or writes the global called `name` (only globals the program uses by name exist). |
 | `pal`, `palt` | Accepted as no-ops (one warning): sprite colors are baked into the texture. |
@@ -88,6 +92,41 @@ with "- PAUSED -" over it, and Start again resumes. Music picks up where it
 stopped (the sequencer's clock is moved forward by the time spent paused).
 `flip()` loops check for the pause too.
 
+## Memory
+
+`peek`/`poke` and friends address a 64 KB RAM laid out like PICO-8's. It
+is created the first time it is used (so carts that don't use it pay
+nothing) and filled from the cart:
+
+| Address | Contents |
+|---|---|
+| 0x0000–0x0FFF | Sprites 0–127 |
+| 0x1000–0x2FFF | The map (rows 32–63 at 0x1000, shared with sprites 128–255; rows 0–31 at 0x2000) — **live**: `poke` changes what `mget`/`map` see, `mset` what `peek` reads |
+| 0x3000–0x30FF | Sprite flags — **live** (`fget`/`fset`) |
+| 0x3100–0x42FF | Music and SFX, in PICO-8's format |
+| 0x4300–0x5DFF | General use (and the custom font area) |
+| 0x5E00–0x5EFF | `cartdata` storage (`dget`/`dset` are `peek4`/`poke4` here) |
+| 0x5F00–0x5F3F | Draw state, with PICO-8's defaults; the pen (0x5F25) and camera (0x5F28–0x5F2B) are **live** |
+| 0x5F4C–0x5F4F | Buttons of players 0–3 — **live**, read only |
+| 0x6000–0x7FFF | The screen: writes (`poke`, `memset`, `memcpy`) are **drawn**; `cls` fills it too. `memset` of whole rows with a byte whose two pixels match (the `memset(0x6000, 0, 0x2000)` idiom) is at most 3 draws |
+| 0x8000–0xFFFF | Upper memory |
+
+Addresses wrap at 16 bits as in PICO-8 (`0x8000` and the fixed-point
+`-32768` are the same address). `peek2`/`poke2` are signed 16-bit,
+`peek4`/`poke4` the raw 16.16 bits.
+
+Limits: sprites and sound are rendered at compile time, so writing the
+sprite sheet, the palette registers or the sound data changes nothing seen
+or heard; reading the screen returns what was written to screen memory,
+not what `spr`/`rect`/`print` drew (Vircon32 has no GPU read-back).
+
+`cartdata(id)` claims the memory card's data area for `id` (a hash is
+stored with the data, so another cart's save isn't mistaken for this
+one's): if the card already holds this id's data it is loaded and
+`cartdata` returns true; from then on every write to 0x5E00–0x5EFF is also
+written to the card. Without a memory card `dget`/`dset` still work for
+the session, and nothing is saved.
+
 ## Syntax
 
 With `--#api pico8` (or a `.p8`): `!=`, `+= -= *= /= %= ..= ^= \=`, `a\b`
@@ -95,7 +134,8 @@ With `--#api pico8` (or a `.p8`): `!=`, `+= -= *= /= %= ..= ^= \=`, `a\b`
 glyphs ⬅️ ➡️ ⬆️ ⬇️ 🅾️ ❎ as the numbers 0–5, `f"str"` and `f{...}` calls
 (standard Lua), and numeric strings wherever a builtin expects a number
 (`rnd"128"`, `sfx"38"`, `music"-1"`). `unpack(split"72,32,56")` as the
-last argument of a builtin is expanded at compile time.
+last argument of a builtin is expanded at compile time. The peek operators
+`@a`, `%a` and `$a` are `peek(a)`, `peek2(a)` and `peek4(a)`.
 
 Bitwise operators work on PICO-8's 16.16 fixed-point representation, as in
 PICO-8: `& | ~` (or `^^`) `<< >> >>> <<> >><` and unary `~`, with the
@@ -145,6 +185,17 @@ switches (noiz, buzz, detune, reverb, dampen) are ignored, a slide doesn't
 carry across patterns, and it hasn't been compared against PICO-8 by ear.
 `music()`'s fade and channel-mask arguments are ignored.
 
+## Circles
+
+`circ` and `circfill` draw the pixels PICO-8 does (its midpoint circle, as
+reimplemented by zepto8 — checked pixel for pixel by
+`tools/headless/circles.py`). Every circle up to radius 31 is pre-rendered
+at compile time into a small texture (256×407, only in carts that draw
+circles), so each is **one** GPU draw, tinted to its color: 4–33× less CPU
+time than drawing it point by point or span by span, as before. Larger
+circles are drawn from the algorithm, one rectangle per run of pixels,
+about 2.3× faster than before.
+
 ## Performance
 
 Table field access, arrays and `all()` loops are the hot paths in most
@@ -154,8 +205,7 @@ times per object per frame, run at about a third of full speed.
 
 ## Not supported (yet)
 
-`clip`, `peek`/`poke`/`memcpy`/`memset` and the `@ % $` peek shorthands,
-`cartdata`/`dget`/`dset`, real `stat` values, `menuitem`, the text cursor
-(`print` without coordinates prints at 0,0), palette remapping,
-fractional `spr` widths (`spr(n, x, y, 0.5)`), and `reload` with
-arguments.
+`clip`, real `stat` values, `menuitem`, the text cursor (`print` without
+coordinates prints at 0,0), palette remapping, fractional `spr` widths
+(`spr(n, x, y, 0.5)`), `pget`, `oval`/`ovalfill`, loading data from other
+cart files (`reload` with a file name, multi-cart games), and `cstore`.

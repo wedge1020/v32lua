@@ -173,7 +173,8 @@ struct StubCar : VirconControlInterface, VirconROM {
 };
 
 struct StubMem : VirconControlInterface, VirconRAM {
-    bool ReadPort(int32_t p, VirconWord& r) override { if (p) return false; r.AsInteger = 1; return true; }
+    bool present = true;    // V32_NO_MEMCARD=1: no card (its memory then faults, as on the console)
+    bool ReadPort(int32_t p, VirconWord& r) override { if (p) return false; r.AsInteger = present ? 1 : 0; return true; }
     bool WritePort(int32_t, VirconWord) override { return false; }
 };
 
@@ -227,7 +228,8 @@ int main(int argc, char** argv)
     RAM.Connect(Constants::RAMSize);
     BIOS.Connect(bios, 16);
     CAR.Connect(prog.data(), prog.size()); CAR.words = prog.size();
-    MEMC.Connect(Constants::MemoryCardSize);
+    if (getenv("V32_NO_MEMCARD") && atoi(getenv("V32_NO_MEMCARD"))) MEMC.present = false;
+    else MEMC.Connect(Constants::MemoryCardSize);
     MB.Slaves[0] = &RAM; MB.Slaves[1] = &BIOS; MB.Slaves[2] = &CAR; MB.Slaves[3] = &MEMC;
     CB.Slaves[0] = &TIM; CB.Slaves[1] = &RNG; CB.Slaves[2] = &GPU; CB.Slaves[3] = &SPU;
     CB.Slaves[4] = &PAD; CB.Slaves[5] = &CAR; CB.Slaves[6] = &MEMC; CB.Slaves[7] = &NUL;

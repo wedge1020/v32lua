@@ -63,6 +63,22 @@ static ASTNode *make_method_function_assignment (ASTNode *func_def, char *table,
     return table_set;
 }
 
+// PICO-8's peek operators (@a, %a, $a) as calls of peek/peek2/peek4 --
+// PICO-8-only, like the other PICO-8 operators.
+static ASTNode *make_peek_call (const char *name, ASTNode *addr)
+{
+    if (!runtime_req.needs_pico8) {
+        compiler_error (ERR_SYNTAX, yylineno,
+            "'%s' as a prefix operator is a PICO-8 extension; add --#api pico8",
+            name[4] == '2' ? "%" : (name[4] == '4' ? "$" : "@"));
+    }
+    ASTNode *call = make_node (NODE_FUNCTION_CALL);
+    call->as.call.target = make_node_ident (name);
+    call->as.call.is_method_call = 0;
+    call->as.call.args_head = addr;
+    return call;
+}
+
 %}
 
 %union {
@@ -92,6 +108,7 @@ static ASTNode *make_method_function_assignment (ASTNode *func_def, char *table,
 %token TOKEN_FUNCTION TOKEN_ASM TOKEN_RAWASM TOKEN_RETURN TOKEN_AND TOKEN_OR
 %token TOKEN_EQ TOKEN_NEQ TOKEN_LE TOKEN_GE TOKEN_LT TOKEN_GT TOKEN_CONCAT
 %token TOKEN_LOCAL TOKEN_IN TOKEN_DO TOKEN_NOT TOKEN_LEN UNARY_MINUS
+%token TOKEN_PEEK TOKEN_PEEK4
 %token TOKEN_TRUE TOKEN_FALSE TOKEN_NIL TOKEN_FLOORDIV
 %token TOKEN_BXOR TOKEN_SHL TOKEN_SHR TOKEN_LSHR TOKEN_ROTL TOKEN_ROTR
 %token TOKEN_DOTS
@@ -115,7 +132,7 @@ static ASTNode *make_method_function_assignment (ASTNode *func_def, char *table,
 %right TOKEN_CONCAT
 %left '+' '-'
 %left '*' '/' '%' TOKEN_FLOORDIV
-%right TOKEN_NOT TOKEN_LEN UNARY_MINUS
+%right TOKEN_NOT TOKEN_LEN UNARY_MINUS TOKEN_PEEK TOKEN_PEEK4
 %right '^'
 %left '['
 %left '.'
@@ -877,6 +894,10 @@ expr:
     | TOKEN_NIL   { $$ = make_node_nil ();          }
     | TOKEN_LEN expr    { $$ = make_node_unary  (OP_LEN,   $2);     }
     | '-' expr %prec UNARY_MINUS { $$ = make_node_unary (OP_UNM, $2); }
+    /* PICO-8 peek operators: @a, %a, $a == peek(a), peek2(a), peek4(a) */
+    | TOKEN_PEEK expr  %prec UNARY_MINUS { $$ = make_peek_call ("peek",  $2); }
+    | '%' expr         %prec UNARY_MINUS { $$ = make_peek_call ("peek2", $2); }
+    | TOKEN_PEEK4 expr %prec UNARY_MINUS { $$ = make_peek_call ("peek4", $2); }
     | TOKEN_NOT expr             { $$ = make_node_unary (OP_NOT, $2); }
     | expr TOKEN_EQ expr      { $$ = make_node(NODE_RELATIONAL); $$->as.binary.operator = OP_EQ;  $$->as.binary.left = $1; $$->as.binary.right = $3; }
     | expr TOKEN_NEQ expr     { $$ = make_node(NODE_RELATIONAL); $$->as.binary.operator = OP_NEQ; $$->as.binary.left = $1; $$->as.binary.right = $3; }
@@ -924,6 +945,7 @@ function_call:
         node->as.call.target = make_node_ident($1);
         node->as.call.is_method_call = 0; 
         node->as.call.args_head = $3;
+        pico8_parse_rewrite_peek(node);   /* peek(a, n): several values */
         $$ = node;
     }
     | prefix_expr '.' TOKEN_IDENTIFIER '(' argument_list ')' {

@@ -120,6 +120,9 @@ _tic80_init_swatch_done:
 
 _tic80_init_done:
 _tic80_init_textures_done:
+    ;; Regions of the circle shape atlas, if the program draws circles
+    CALL  __shapes_init
+
     ;; Initialize map buffer after textures
     CALL  __builtin_tic80_init_map
 
@@ -1410,93 +1413,116 @@ _tic80_map_done:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-;; __builtin_tic80_pmem: Access TIC-80 Persistent Memory (mapped to Vircon32 MEMCARD)
+;; __builtin_tic80_pmem: pmem(index [, value]) -- TIC-80 persistent memory
 ;;
-;; TIC-80 pmem() signature:
-;;   pmem(index)          -> returns byte value at index (read)
-;;   pmem(index, value)  -> writes byte value at index (write)
+;; 256 slots of 32 bits (TIC-80's TIC_PERSISTENT_SIZE). Returns the slot's
+;; value -- when writing, the value BEFORE the write, as TIC-80 does -- as
+;; an unsigned number (pmem(0, -1) reads back 4294967295). A value is
+;; truncated to an integer. An index that is not 0-255 returns nil.
 ;;
-;; Stack layout:
-;;   [BP+2] = index (0-65535 for TIC-80's 64KB)
-;;   [BP+3] = value (optional, for write)
+;; Stored on the memory card at word 0x30000000 + index (earlier versions
+;; kept one byte per slot there, so their saves still read back). With no
+;; card connected, the slots live in RAM for the session (TIC80_PMEM_PTR),
+;; instead of the write faulting on a missing card.
 ;;
-;; Returns: R0 = byte value (for read), or the value written (for write)
-;;
-;; Maps TIC-80's 64KB persistent memory to first 64KB of Vircon32 MEMCARD
-;; MEMCARD base: 0x30000000, size: 1MB (0x100000 bytes)
+;; Stack: [BP+2] = index, [BP+3] = value (nil: read only)
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 __builtin_tic80_pmem:
     PUSH  BP
     MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R6
 
-    ;; Check if this is a write operation (2 arguments)
-    ;; Stack has: [BP+0]=return addr, [BP+1]=old BP, [BP+2]=index, [BP+3]=value
-    MOV   R1, [BP+3]        ; Load potential value argument
-    MOV   R2, BOXED_NIL
-    IEQ   R1, R2
-    JT    R1, _tic80_pmem_read
-
-    ;; === WRITE OPERATION ===
-    ;; Convert index to integer
-    MOV   R1, [BP+2]        ; index
-    CFI   R1                ; R1 = integer index
-
-    ;; Bounds check: 0 <= index < 65536 (TIC-80 pmem limit)
+    MOV   R1, [BP+2]              ; index: a number 0 <= i < 256
     MOV   R2, R1
-    ILT   R2, 0
+    AND   R2, NAN_VALUE
+    IEQ   R2, NAN_VALUE
     JT    R2, _tic80_pmem_invalid
     MOV   R2, R1
-    IGE   R2, 65536
-    JT    R2, _tic80_pmem_invalid
+    FGE   R2, 0.0
+    JF    R2, _tic80_pmem_invalid
+    MOV   R2, R1
+    FLT   R2, 256.0
+    JF    R2, _tic80_pmem_invalid
+    CFI   R1
 
-    ;; Convert value to integer (byte)
-    MOV   R2, [BP+3]        ; value
-    CFI   R2
-    AND   R2, 0xFF         ; Clamp to byte (0-255)
-
-    ;; Calculate MEMCARD address: 0x30000000 + index
+    IN    R2, MEM_Connected
+    JF    R2, _tic80_pmem_ram
     MOV   R3, 0x30000000
-    IADD  R3, R1           ; R3 = MEMCARD address
+    JMP   _tic80_pmem_have
+_tic80_pmem_ram:
+    MOV   R3, [var_TIC80_PMEM_PTR]
+    MOV   R2, R3
+    IEQ   R2, BOXED_NIL
+    JF    R2, _tic80_pmem_have
+    PUSH  R1                      ; first use: 256 zeroed words
+    MOV   R0, 256
+    PUSH  R0
+    CALL  __malloc                ; clobbers R0-R3, R6
+    IADD  SP, 1
+    POP   R1
+    MOV   [var_TIC80_PMEM_PTR], R0
+    MOV   R3, R0
+    MOV   R2, 256
+_tic80_pmem_zero:
+    MOV   R6, 0
+    MOV   [R0], R6
+    IADD  R0, 1
+    ISUB  R2, 1
+    MOV   R6, R2
+    IGT   R6, 0
+    JT    R6, _tic80_pmem_zero
+_tic80_pmem_have:
+    IADD  R3, R1                  ; the slot
+    MOV   R0, [R3]                ; value before any write
 
-    ;; Write byte to MEMCARD
+    MOV   R2, [BP+3]
+    MOV   R1, R2
+    IEQ   R1, BOXED_NIL
+    JT    R1, _tic80_pmem_result
+    MOV   R1, R2                  ; value -> 32-bit integer (truncated)
+    AND   R1, NAN_VALUE
+    IEQ   R1, NAN_VALUE
+    JF    R1, _tic80_pmem_num
+    MOV   R2, 0.0                 ; not a number: 0
+_tic80_pmem_num:
+    MOV   R1, R2                  ; keep CFI in range: -2^31 .. 2^32 - 1
+    FLT   R1, -2147483648.0
+    JF    R1, _tic80_pmem_lo_ok
+    MOV   R2, -2147483648.0
+_tic80_pmem_lo_ok:
+    MOV   R1, R2
+    FGE   R1, 2147483648.0
+    JF    R1, _tic80_pmem_hi_ok
+    FSUB  R2, 4294967296.0        ; unsigned values above 2^31 - 1
+    MOV   R1, R2
+    FGE   R1, 2147483648.0
+    JF    R1, _tic80_pmem_hi_ok
+    MOV   R2, -1.0
+_tic80_pmem_hi_ok:
+    CFI   R2
     MOV   [R3], R2
 
-    ;; Return the value written (as boxed Lua number)
-    CIF   R2
-    MOV   R0, R2
-    JMP   _tic80_pmem_done
-
-_tic80_pmem_read:
-    ;; === READ OPERATION ===
-    MOV   R1, [BP+2]        ; index
-    CFI   R1                ; R1 = integer index
-
-    ;; Bounds check
-    MOV   R0, R1
-    ILT   R0, 0
-    JT    R0, _tic80_pmem_invalid
-    MOV   R0, R1
-    IGE   R0, 65536
-    JT    R0, _tic80_pmem_invalid
-
-    ;; Calculate MEMCARD address
-    MOV   R3, 0x30000000
-    IADD  R3, R1
-
-    ;; Read byte from MEMCARD
-    MOV   R0, [R3]
-    AND   R0, 0xFF         ; Ensure byte value
-
-    ;; Return as boxed Lua number
-    CIF   R0
+_tic80_pmem_result:
+    CIF   R0                      ; as unsigned
+    MOV   R1, R0
+    FLT   R1, 0.0
+    JF    R1, _tic80_pmem_done
+    FADD  R0, 4294967296.0
     JMP   _tic80_pmem_done
 
 _tic80_pmem_invalid:
-    MOV   R0, BOXED_NIL     ; Return nil for out-of-bounds
+    MOV   R0, BOXED_NIL
 
 _tic80_pmem_done:
+    POP   R6
+    POP   R3
+    POP   R2
+    POP   R1
     MOV   SP, BP
     POP   BP
     RET
@@ -1857,386 +1883,517 @@ __builtin_tic80_line:
     RET
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; __builtin_tic80_rect -- rect(x, y, w, h, color)  [filled]
+;; __builtin_tic80_rect  -- rect(x, y, w, h, color)   [filled]: one draw
+;; __builtin_tic80_rectb -- rectb(x, y, w, h, color)  [1px border]: 4 draws
+;; Stack: [BP+2]=x [BP+3]=y [BP+4]=w [BP+5]=h [BP+6]=color. Returns nil.
+;; Arguments are truncated to integers as TIC-80 does (so a rectangle at
+;; x = 10.7 lands on the same pixel column as TIC-80's); a width or height
+;; <= 0 draws nothing (it used to become a negative GPU scale, drawing the
+;; rectangle mirrored). Kept lean -- no helper calls per argument -- since
+;; carts draw many of these per frame.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 __builtin_tic80_rect:
     PUSH  BP
     MOV   BP, SP
-
-    MOV   R1, [BP+2]         ; x
-    MOV   R2, [BP+3]         ; y
-    MOV   R3, [BP+4]         ; w
-    MOV   R4, [BP+5]         ; h
-    MOV   R5, [BP+6]         ; color
-    CFI   R5
-    AND   R5, 15
-
-    CALL  __tic80_draw_swatch
-
-    MOV   R0, R5
-    CIF   R0
-
-    MOV   SP, BP
-    POP   BP
-    RET
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; __builtin_tic80_rectb -- rectb(x, y, w, h, color)  [1px border only]
-;; Drawn as 4 filled strips via __tic80_draw_swatch: top, bottom, left, right.
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+    MOV   R5, 1                  ; filled
+    JMP   __tic80_rect_common
 
 __builtin_tic80_rectb:
     PUSH  BP
     MOV   BP, SP
-    PUSH  R10                ; callee-saved scratch for x,y,w,h,color
-    PUSH  R11
-    PUSH  R12
-    PUSH  R13
+    MOV   R5, 0                  ; border
 
-    MOV   R10, [BP+2]        ; x  (float)
-    MOV   R11, [BP+3]        ; y  (float)
-    MOV   R12, [BP+4]        ; w  (float)
-    MOV   R13, [BP+5]        ; h  (float)
-    MOV   R5,  [BP+6]        ; color
-    CFI   R5
-    AND   R5, 15
+    ;; R1-R5 are scratch here, as in pix()/line() (callers keep nothing in
+    ;; them across a TIC-80 drawing call); R6-R13 are untouched.
+__tic80_rect_common:
+    MOV   R3, [BP+4]
+    CFI   R3                     ; w
+    MOV   R0, R3
+    ILT   R0, 1
+    JT    R0, _tic80_rect_done
+    MOV   R4, [BP+5]
+    CFI   R4                     ; h
+    MOV   R0, R4
+    ILT   R0, 1
+    JT    R0, _tic80_rect_done
+    MOV   R1, [BP+2]
+    CFI   R1                     ; x
+    MOV   R2, [BP+3]
+    CFI   R2                     ; y
+    OUT   GPU_SelectedTexture, 0
+    MOV   R0, [BP+6]
+    CFI   R0
+    AND   R0, 15
+    IADD  R0, 512                ; the color's swatch
+    OUT   GPU_SelectedRegion, R0
+    JF    R5, _tic80_rect_border
+    CALL  __tic80_rect_int
+    JMP   _tic80_rect_done
 
-    ;; top strip: (x, y, w, 1)
-    MOV   R1, R10
-    MOV   R2, R11
-    MOV   R3, R12
-    MOV   R4, 1.0
-    CALL  __tic80_draw_swatch
+_tic80_rect_border:
+    MOV   R5, R4                 ; h
+    MOV   R4, 1
+    CALL  __tic80_rect_int       ; top    (x, y, w, 1)
+    PUSH  R2
+    IADD  R2, R5
+    ISUB  R2, 1
+    CALL  __tic80_rect_int       ; bottom (x, y + h - 1, w, 1)
+    POP   R2
+    MOV   R4, R5
+    MOV   R5, R3                 ; w
+    MOV   R3, 1
+    CALL  __tic80_rect_int       ; left   (x, y, 1, h)
+    IADD  R1, R5
+    ISUB  R1, 1
+    CALL  __tic80_rect_int       ; right  (x + w - 1, y, 1, h)
 
-    ;; bottom strip: (x, y+h-1, w, 1)
-    MOV   R1, R10
-    MOV   R2, R11
-    FADD  R2, R13
-    FSUB  R2, 1.0
-    MOV   R3, R12
-    MOV   R4, 1.0
-    CALL  __tic80_draw_swatch
-
-    ;; left strip: (x, y, 1, h)
-    MOV   R1, R10
-    MOV   R2, R11
-    MOV   R3, 1.0
-    MOV   R4, R13
-    CALL  __tic80_draw_swatch
-
-    ;; right strip: (x+w-1, y, 1, h)
-    MOV   R1, R10
-    FADD  R1, R12
-    FSUB  R1, 1.0
-    MOV   R2, R11
-    MOV   R3, 1.0
-    MOV   R4, R13
-    CALL  __tic80_draw_swatch
-
-    MOV   R0, R5
-    CIF   R0
-
-    POP   R13
-    POP   R12
-    POP   R11
-    POP   R10
+_tic80_rect_done:
+    MOV   R0, BOXED_NIL
     MOV   SP, BP
     POP   BP
     RET
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; __tic80_circ_plot_point (internal helper -- not Lua-callable)
-;; In: R1=x (int), R2=y (int), R5=color (int 0-15). Destroys R1-R4, R8.
-;; Stamps a single 1x1 swatch -- the same primitive pix() uses for one point.
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __tic80_trunc (internal): R1 = Lua number -> R1 = integer, truncated
+;; toward zero like TIC-80's (s32) casts; nil / non-numbers -> 0, values
+;; clamped to +-2^30 first (CFI is undefined out of range). Preserves
+;; R2-R13, clobbers R0.
+__tic80_trunc:
+    MOV   R0, R1
+    AND   R0, NAN_VALUE
+    IEQ   R0, NAN_VALUE
+    JT    R0, _tic80_trunc_zero
+    MOV   R0, R1
+    FLT   R0, -1073741824.0
+    JF    R0, _tic80_trunc_lo
+    MOV   R1, -1073741824.0
+_tic80_trunc_lo:
+    MOV   R0, R1
+    FGT   R0, 1073741824.0
+    JF    R0, _tic80_trunc_hi
+    MOV   R1, 1073741824.0
+_tic80_trunc_hi:
+    CFI   R1
+    RET
+_tic80_trunc_zero:
+    MOV   R1, 0
+    RET
 
-__tic80_circ_plot_point:
-    CIF   R1
-    CIF   R2
-    MOV   R3, 1.0
-    MOV   R4, 1.0
-    CALL  __tic80_draw_swatch
+;; __tic80_tint (internal): R1 = color (0xAABBGGRR) -> GPU_MultiplyColor =
+;; that color times the current multiply color (per channel), so a shape
+;; drawn white comes out in the color -- dimmed too on the pause screen,
+;; which draws its frame under a gray multiply. R0 = the previous multiply
+;; color (restore it after drawing). Preserves R1-R13.
+__tic80_tint:
+    IN    R0, GPU_MultiplyColor
+    PUSH  R0
+    IEQ   R0, 0xFFFFFFFF
+    JF    R0, _tic80_tint_mix
+    OUT   GPU_MultiplyColor, R1
+    POP   R0
+    RET
+_tic80_tint_mix:
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    IN    R2, GPU_MultiplyColor
+    MOV   R5, 0                 ; result
+    MOV   R4, 0                 ; channel shift
+_tic80_tint_channel:
+    MOV   R3, R4
+    ISGN  R3
+    MOV   R0, R1
+    SHL   R0, R3
+    AND   R0, 255
+    PUSH  R0
+    MOV   R0, R2
+    SHL   R0, R3
+    AND   R0, 255
+    POP   R3
+    IMUL  R0, R3
+    IADD  R0, 127
+    IDIV  R0, 255
+    SHL   R0, R4
+    OR    R5, R0
+    IADD  R4, 8
+    MOV   R0, R4
+    ILT   R0, 32
+    JT    R0, _tic80_tint_channel
+    OUT   GPU_MultiplyColor, R5
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R0
     RET
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; __tic80_circ_draw_hspan (internal helper -- not Lua-callable)
-;; In: R1=x_left (int), R2=y (int), R3=width in TIC-80 pixels (int, >=1),
-;;     R5=color (int 0-15). Destroys R1-R4, R8.
-;; A 1-pixel-tall horizontal strip -- how circ() fills each scanline.
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-__tic80_circ_draw_hspan:
-    CIF   R1
-    CIF   R2
-    CIF   R3
-    MOV   R4, 1.0
-    CALL  __tic80_draw_swatch
-    RET
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; __builtin_tic80_circ -- circ(x, y, radius, color)  [filled]
-;; Standard integer midpoint (Bresenham) circle algorithm. Instead of
-;; plotting 8 individual points per step (which would leave gaps once
-;; filled), each step draws 4 horizontal spans connecting the symmetric
-;; x-extents for its two rows -- the usual "filled circle via spans"
-;; decomposition of the same algorithm circb() uses for the outline.
-;; The span at py==0 and the span at px==py get drawn twice (once from
-;; each pair) -- harmless: same color, same pixels, just a couple of
-;; redundant swatch stamps at the poles/diagonal.
-;; Stack: [BP+2]=x [BP+3]=y [BP+4]=radius [BP+5]=color
-;; Returns: R0 = color (boxed) that was drawn.
+;; __builtin_tic80_circ -- circ(x, y, radius, color)   [filled]
+;; __builtin_tic80_circb -- circb(x, y, radius, color) [outline]
+;; Stack: [BP+2]=x [BP+3]=y [BP+4]=radius [BP+5]=color. Returns nil.
+;;
+;; The pixels are TIC-80's own (core/draw.c: Zingl's ellipse algorithm on
+;; the circle's bounding square; circ() fills each row between its leftmost
+;; and rightmost outline pixel). Arguments are truncated to integers like
+;; TIC-80's; a negative radius draws nothing.
+;;
+;; Radius 0-SHAPES_MAX_R: ONE draw of the pre-rendered shape (shapes.c),
+;; tinted by the multiply color. Larger: the algorithm walks the first
+;; octant -- one point per row, (X, K) from (r, 0) -- and each run of rows
+;; with the same X becomes rectangles: the run and its 7 mirror images for
+;; circb(), 4 row spans for circ() (a filled circle's row spans are exactly
+;; its outline's, by the 8-way symmetry). About 2.3 r draws for circb and
+;; 1.2 r for circ, against 5.7 r and 2.8 r point/span draws before. Beyond
+;; r = 282 Zingl's terms overflow 32 bits, so there the midpoint circle is
+;; used instead (a few pixels differ; such a circle is mostly off-screen).
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 __builtin_tic80_circ:
     PUSH  BP
     MOV   BP, SP
-    PUSH  R6                 ; err (midpoint decision variable)
-    PUSH  R7                 ; py  (algorithm y, starts at 0)
-    PUSH  R10                ; cx  (int)
-    PUSH  R11                ; cy  (int)
-    PUSH  R12                ; color (int, clamped 0-15)
-    PUSH  R13                ; px  (algorithm x, starts at radius)
-
-    MOV   R10, [BP+2]        ; x (float)
-    CFI   R10                ; cx (int)
-    MOV   R11, [BP+3]        ; y (float)
-    CFI   R11                ; cy (int)
-    MOV   R13, [BP+4]        ; radius (float)
-    CFI   R13                ; px = radius (int)
-    MOV   R12, [BP+5]        ; color (float)
-    CFI   R12
-    AND   R12, 15            ; clamp to valid swatch 0-15
-
-    MOV   R7, 0               ; py = 0
-    MOV   R6, 0               ; err = 0
-
-__circ_loop:
-    MOV   R1, R13
-    IGE   R1, R7              ; px >= py ? (destructive -- R13 read via copy)
-    JF    R1, __circ_done
-
-    ;; --- Span A: row cy+py, from cx-px to cx+px  (width = 2*px+1) ---
-    MOV   R1, R10
-    ISUB  R1, R13
-    MOV   R2, R11
-    IADD  R2, R7
-    MOV   R3, R13
-    IMUL  R3, 2
-    IADD  R3, 1
-    MOV   R5, R12
-    CALL  __tic80_circ_draw_hspan
-
-    ;; --- Span B: row cy-py, from cx-px to cx+px  (width = 2*px+1) ---
-    MOV   R1, R10
-    ISUB  R1, R13
-    MOV   R2, R11
-    ISUB  R2, R7
-    MOV   R3, R13
-    IMUL  R3, 2
-    IADD  R3, 1
-    MOV   R5, R12
-    CALL  __tic80_circ_draw_hspan
-
-    ;; --- Span C: row cy+px, from cx-py to cx+py  (width = 2*py+1) ---
-    MOV   R1, R10
-    ISUB  R1, R7
-    MOV   R2, R11
-    IADD  R2, R13
-    MOV   R3, R7
-    IMUL  R3, 2
-    IADD  R3, 1
-    MOV   R5, R12
-    CALL  __tic80_circ_draw_hspan
-
-    ;; --- Span D: row cy-px, from cx-py to cx+py  (width = 2*py+1) ---
-    MOV   R1, R10
-    ISUB  R1, R7
-    MOV   R2, R11
-    ISUB  R2, R13
-    MOV   R3, R7
-    IMUL  R3, 2
-    IADD  R3, 1
-    MOV   R5, R12
-    CALL  __tic80_circ_draw_hspan
-
-    ;; --- Advance the midpoint decision variable ---
-    IADD  R7, 1                ; py += 1
-    MOV   R1, R7
-    IMUL  R1, 2
-    IADD  R1, 1
-    IADD  R6, R1               ; err += 1 + 2*py
-
-    MOV   R2, R6
-    ISUB  R2, R13               ; err - px
-    IMUL  R2, 2
-    IADD  R2, 1                 ; 2*(err-px) + 1
-    MOV   R3, R2
-    IGT   R3, 0                 ; > 0 ?
-    JF    R3, __circ_loop
-
-    ISUB  R13, 1                ; px -= 1
-    MOV   R1, R13
-    IMUL  R1, 2
-    MOV   R2, 1
-    ISUB  R2, R1
-    IADD  R6, R2                ; err += 1 - 2*px
-
-    JMP   __circ_loop
-
-__circ_done:
-    MOV   R0, R12
-    CIF   R0
-
-    POP   R13
-    POP   R12
-    POP   R11
-    POP   R10
-    POP   R7
-    POP   R6
-    MOV   SP, BP
-    POP   BP
-    RET
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; __builtin_tic80_circb -- circb(x, y, radius, color)  [1px outline only]
-;; Same midpoint algorithm as circ(), but plots the 8 symmetric points per
-;; step directly as single 1x1 stamps instead of connecting them into spans
-;; -- an unfilled outline rather than a solid disc.
-;; Stack: [BP+2]=x [BP+3]=y [BP+4]=radius [BP+5]=color
-;; Returns: R0 = color (boxed) that was drawn.
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+    PUSH  R11
+    MOV   R11, 1                 ; filled
+    JMP   __tic80_circ_common
 
 __builtin_tic80_circb:
     PUSH  BP
     MOV   BP, SP
-    PUSH  R6                 ; err
-    PUSH  R7                 ; py
-    PUSH  R10                ; cx (int)
-    PUSH  R11                ; cy (int)
-    PUSH  R12                ; color (int, clamped)
-    PUSH  R13                ; px (starts at radius)
+    PUSH  R11
+    MOV   R11, 0                 ; outline
 
-    MOV   R10, [BP+2]
-    CFI   R10
-    MOV   R11, [BP+3]
-    CFI   R11
-    MOV   R13, [BP+4]
-    CFI   R13
-    MOV   R12, [BP+5]
-    CFI   R12
-    AND   R12, 15
+__tic80_circ_common:
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
+    PUSH  R7
+    PUSH  R8
+    PUSH  R9
+    PUSH  R10
+    PUSH  R12
+    PUSH  R13
+    PUSH  R0                     ; [BP-14]: the current run's X
 
-    MOV   R7, 0
-    MOV   R6, 0
+    MOV   R1, [BP+2]
+    CALL  __tic80_trunc
+    MOV   R8, R1                 ; cx
+    MOV   R1, [BP+3]
+    CALL  __tic80_trunc
+    MOV   R9, R1                 ; cy
+    MOV   R1, [BP+4]
+    CALL  __tic80_trunc
+    MOV   R10, R1                ; r
+    MOV   R1, [BP+5]
+    CALL  __tic80_trunc
+    AND   R1, 15
+    MOV   R12, R1                ; color
 
-__circb_loop:
-    MOV   R1, R13
-    IGE   R1, R7
-    JF    R1, __circb_done
+    MOV   R0, R10
+    ILT   R0, 0
+    JT    R0, _tic80_circ_done
+    MOV   R0, R10
+    IGT   R0, SHAPES_MAX_R
+    JT    R0, _tic80_circ_steps
+    MOV   R0, SHAPES_TEXTURE
+    ILT   R0, 0
+    JT    R0, _tic80_circ_steps
 
-    ;; --- Point 1: (cx+px, cy+py) ---
+    ;; --- one draw from the shape atlas ---
+    MOV   R1, __tic80_palette
+    IADD  R1, R12
+    MOV   R1, [R1]
+    CALL  __tic80_tint
+    MOV   R6, R0                 ; multiply color to restore
+    IN    R7, GPU_SelectedTexture
+    OUT   GPU_SelectedTexture, SHAPES_TEXTURE
     MOV   R1, R10
-    IADD  R1, R13
-    MOV   R2, R11
-    IADD  R2, R7
-    MOV   R5, R12
-    CALL  __tic80_circ_plot_point
+    JT    R11, _tic80_circ_region
+    IADD  R1, SHAPES_MAX_R
+    IADD  R1, 1                  ; outlines follow the filled shapes
+_tic80_circ_region:
+    OUT   GPU_SelectedRegion, R1
+    MOV   R1, 2.625
+    OUT   GPU_DrawingScaleX, R1
+    OUT   GPU_DrawingScaleY, R1
+    MOV   R1, R8
+    ISUB  R1, R10
+    CIF   R1
+    FMUL  R1, 2.625
+    FADD  R1, 0.5
+    FLR   R1
+    CFI   R1
+    OUT   GPU_DrawingPointX, R1
+    MOV   R1, R9
+    ISUB  R1, R10
+    CIF   R1
+    FMUL  R1, 2.625
+    FADD  R1, 0.5
+    FLR   R1
+    CFI   R1
+    OUT   GPU_DrawingPointY, R1
+    OUT   GPU_Command, GPUCommand_DrawRegionZoomed
+    OUT   GPU_SelectedTexture, R7
+    OUT   GPU_MultiplyColor, R6
+    JMP   _tic80_circ_done
 
-    ;; --- Point 2: (cx+py, cy+px) ---
-    MOV   R1, R10
-    IADD  R1, R7
-    MOV   R2, R11
-    IADD  R2, R13
-    MOV   R5, R12
-    CALL  __tic80_circ_plot_point
-
-    ;; --- Point 3: (cx-py, cy+px) ---
-    MOV   R1, R10
-    ISUB  R1, R7
-    MOV   R2, R11
-    IADD  R2, R13
-    MOV   R5, R12
-    CALL  __tic80_circ_plot_point
-
-    ;; --- Point 4: (cx-px, cy+py) ---
-    MOV   R1, R10
-    ISUB  R1, R13
-    MOV   R2, R11
-    IADD  R2, R7
-    MOV   R5, R12
-    CALL  __tic80_circ_plot_point
-
-    ;; --- Point 5: (cx-px, cy-py) ---
-    MOV   R1, R10
-    ISUB  R1, R13
-    MOV   R2, R11
-    ISUB  R2, R7
-    MOV   R5, R12
-    CALL  __tic80_circ_plot_point
-
-    ;; --- Point 6: (cx-py, cy-px) ---
-    MOV   R1, R10
-    ISUB  R1, R7
-    MOV   R2, R11
-    ISUB  R2, R13
-    MOV   R5, R12
-    CALL  __tic80_circ_plot_point
-
-    ;; --- Point 7: (cx+py, cy-px) ---
-    MOV   R1, R10
-    IADD  R1, R7
-    MOV   R2, R11
-    ISUB  R2, R13
-    MOV   R5, R12
-    CALL  __tic80_circ_plot_point
-
-    ;; --- Point 8: (cx+px, cy-py) ---
-    MOV   R1, R10
-    IADD  R1, R13
-    MOV   R2, R11
-    ISUB  R2, R7
-    MOV   R5, R12
-    CALL  __tic80_circ_plot_point
-
-    ;; --- Advance the midpoint decision variable ---
-    IADD  R7, 1
-    MOV   R1, R7
-    IMUL  R1, 2
-    IADD  R1, 1
-    IADD  R6, R1
-
-    MOV   R2, R6
-    ISUB  R2, R13
-    IMUL  R2, 2
-    IADD  R2, 1
-    MOV   R3, R2
-    IGT   R3, 0
-    JF    R3, __circb_loop
-
-    ISUB  R13, 1
-    MOV   R1, R13
-    IMUL  R1, 2
-    MOV   R2, 1
-    ISUB  R2, R1
-    IADD  R6, R2
-
-    JMP   __circb_loop
-
-__circb_done:
+_tic80_circ_steps:
+    OUT   GPU_SelectedTexture, 0     ; the color's swatch, once per circle
     MOV   R0, R12
-    CIF   R0
+    IADD  R0, 512
+    OUT   GPU_SelectedRegion, R0
+    ;; R2 = X, R3 = K, R13 = first row of the current run
+    ;; Zingl (a = b = 2r): R4 = dx, R5 = dy, R6 = err, R7 = 8 a^2
+    MOV   R2, R10
+    MOV   R3, 0
+    MOV   R13, 0
+    MOV   R6, 0                  ; err (midpoint)
+    MOV   R0, R10
+    IGT   R0, 282
+    JT    R0, _tic80_circ_loop
+    MOV   R0, R10
+    SHL   R0, 1                  ; a
+    MOV   R5, R0
+    IMUL  R5, R0                 ; a^2
+    MOV   R7, R5
+    SHL   R7, 3                  ; 8 a^2
+    MOV   R4, 1
+    ISUB  R4, R0
+    IMUL  R4, R5
+    SHL   R4, 2                  ; dx = 4 (1 - a) b^2
+    SHL   R5, 2                  ; dy = 4 a^2
+    MOV   R6, R4
+    IADD  R6, R5                 ; err = dx + dy
 
+_tic80_circ_loop:
+    MOV   [BP-14], R2
+    MOV   R0, R10
+    IGT   R0, 282
+    JT    R0, _tic80_circ_mid
+    MOV   R1, R6
+    SHL   R1, 1                  ; e2 = 2 err
+    MOV   R0, R1
+    ILE   R0, R5                 ; e2 <= dy: y step
+    JF    R0, _tic80_circ_zx
+    IADD  R3, 1
+    IADD  R5, R7
+    IADD  R6, R5
+_tic80_circ_zx:
+    MOV   R0, R1
+    IGE   R0, R4                 ; e2 >= dx or 2 err > dy: x step
+    JT    R0, _tic80_circ_zxs
+    MOV   R0, R6
+    SHL   R0, 1
+    IGT   R0, R5
+    JF    R0, _tic80_circ_next
+_tic80_circ_zxs:
+    ISUB  R2, 1
+    IADD  R4, R7
+    IADD  R6, R4
+    JMP   _tic80_circ_next
+
+_tic80_circ_mid:
+    IADD  R3, 1                  ; midpoint: K++, X-- when err >= r - 1
+    MOV   R0, R10
+    ISUB  R0, 1
+    MOV   R1, R6
+    ILT   R1, R0
+    JF    R1, _tic80_circ_midx
+    MOV   R0, R3
+    SHL   R0, 1
+    IADD  R0, 1
+    IADD  R6, R0
+    JMP   _tic80_circ_next
+_tic80_circ_midx:
+    ISUB  R2, 1
+    MOV   R0, R3
+    ISUB  R0, R2
+    SHL   R0, 1
+    IADD  R0, 1
+    IADD  R6, R0
+
+_tic80_circ_next:
+    MOV   R0, R2                 ; left the octant (X < K): last run
+    ILT   R0, R3
+    JT    R0, _tic80_circ_last
+    MOV   R0, [BP-14]
+    IEQ   R0, R2
+    JT    R0, _tic80_circ_loop   ; same X: the run goes on
+    PUSH  R2
+    PUSH  R3
+    MOV   R1, [BP-14]
+    MOV   R2, R13
+    ISUB  R3, 1
+    CALL  __tic80_circ_run
+    POP   R3
+    POP   R2
+    MOV   R13, R3
+    JMP   _tic80_circ_loop
+_tic80_circ_last:
+    MOV   R1, [BP-14]
+    MOV   R2, R13
+    ISUB  R3, 1
+    CALL  __tic80_circ_run
+
+_tic80_circ_done:
+    POP   R13                    ; (scratch slot)
     POP   R13
     POP   R12
-    POP   R11
     POP   R10
+    POP   R9
+    POP   R8
     POP   R7
     POP   R6
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    POP   R11
+    MOV   R0, BOXED_NIL
     MOV   SP, BP
     POP   BP
     RET
 
+;; __tic80_rect_int (internal): solid rectangle, R1 = x, R2 = y, R3 = w,
+;; R4 = h (integers, >= 1), with texture 0 and the color's swatch region
+;; (512 + color) already selected -- rect()/rectb() and the circle
+;; fallback select them once per call. Clobbers R0 only.
+__tic80_rect_int:
+    MOV   R0, R3
+    CIF   R0
+    FMUL  R0, 2.625
+    FMUL  R0, 0.333333333         ; the swatch is 3x3
+    OUT   GPU_DrawingScaleX, R0
+    MOV   R0, R4
+    CIF   R0
+    FMUL  R0, 2.625
+    FMUL  R0, 0.333333333
+    OUT   GPU_DrawingScaleY, R0
+    MOV   R0, R1
+    CIF   R0
+    FMUL  R0, 2.625
+    FADD  R0, 0.5
+    FLR   R0
+    CFI   R0
+    OUT   GPU_DrawingPointX, R0
+    MOV   R0, R2
+    CIF   R0
+    FMUL  R0, 2.625
+    FADD  R0, 0.5
+    FLR   R0
+    CFI   R0
+    OUT   GPU_DrawingPointY, R0
+    OUT   GPU_Command, GPUCommand_DrawRegionZoomed
+    RET
+
+;; __tic80_circ_run (internal): one run of first-octant points -- column
+;; R1 = X, rows R2 = k1 .. R3 = k2 (relative to the center R8, R9) --
+;; drawn with its 7 mirror images (R11 = 0) or as the 4 row spans it
+;; bounds (R11 = 1), in color R12. Preserves R1-R13.
+__tic80_circ_run:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1                     ; [BP-1] X
+    PUSH  R2                     ; [BP-2] k1
+    PUSH  R3                     ; [BP-3] k2
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
+    PUSH  R7
+    MOV   R5, R12
+    MOV   R7, [BP-1]             ; X
+    MOV   R6, [BP-3]
+    MOV   R0, [BP-2]
+    ISUB  R6, R0
+    IADD  R6, 1                  ; h = k2 - k1 + 1
+    JT    R11, _tic80_run_filled
+
+    ;; columns cx +- X, rows cy + k1 .. cy + k2 and cy - k2 .. cy - k1
+    MOV   R3, 1
+    MOV   R4, R6
+    MOV   R1, R8
+    IADD  R1, R7
+    MOV   R2, R9
+    MOV   R0, [BP-2]
+    IADD  R2, R0
+    CALL  __tic80_rect_int
+    MOV   R1, R8
+    ISUB  R1, R7
+    CALL  __tic80_rect_int
+    MOV   R2, R9
+    MOV   R0, [BP-3]
+    ISUB  R2, R0
+    CALL  __tic80_rect_int
+    MOV   R1, R8
+    IADD  R1, R7
+    CALL  __tic80_rect_int
+    ;; mirrored in the diagonals: rows cy +- X, columns cx + k1 .. cx + k2
+    ;; and cx - k2 .. cx - k1
+    MOV   R3, R6
+    MOV   R4, 1
+    MOV   R1, R8
+    MOV   R0, [BP-2]
+    IADD  R1, R0
+    MOV   R2, R9
+    IADD  R2, R7
+    CALL  __tic80_rect_int
+    MOV   R2, R9
+    ISUB  R2, R7
+    CALL  __tic80_rect_int
+    MOV   R1, R8
+    MOV   R0, [BP-3]
+    ISUB  R1, R0
+    CALL  __tic80_rect_int
+    MOV   R2, R9
+    IADD  R2, R7
+    CALL  __tic80_rect_int
+    JMP   _tic80_run_done
+
+_tic80_run_filled:
+    ;; rows cy + k1 .. cy + k2 and cy - k2 .. cy - k1, from cx - X to cx + X
+    MOV   R1, R8
+    ISUB  R1, R7
+    MOV   R3, R7
+    SHL   R3, 1
+    IADD  R3, 1
+    MOV   R4, R6
+    MOV   R2, R9
+    MOV   R0, [BP-2]
+    IADD  R2, R0
+    CALL  __tic80_rect_int
+    MOV   R2, R9
+    MOV   R0, [BP-3]
+    ISUB  R2, R0
+    CALL  __tic80_rect_int
+    ;; rows cy +- X, from cx - k2 to cx + k2
+    MOV   R0, [BP-3]
+    MOV   R1, R8
+    ISUB  R1, R0
+    MOV   R3, R0
+    SHL   R3, 1
+    IADD  R3, 1
+    MOV   R4, 1
+    MOV   R2, R9
+    IADD  R2, R7
+    CALL  __tic80_rect_int
+    MOV   R2, R9
+    ISUB  R2, R7
+    CALL  __tic80_rect_int
+
+_tic80_run_done:
+    POP   R7
+    POP   R6
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; __builtin_tic80_print(text, x, y, color)
