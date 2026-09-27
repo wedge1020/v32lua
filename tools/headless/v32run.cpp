@@ -40,6 +40,14 @@ using namespace std;
 
 static int  g_frame = 0;
 static int  g_overruns = 0;
+// The GPU's per-frame pixel budget, as the real one counts it (V32GPU.cpp):
+// every draw costs its full (scaled) region size, capped at the screen size,
+// times 1.15 when scaled and +0.25 when rotated, whether it lands on screen
+// or not; a clear costs half a screen. Once the budget is spent, that draw and
+// every later one in the frame is silently dropped.
+static const long g_gpu_capacity = 9L * 640 * 360;
+static long g_gpu_rem = g_gpu_capacity;
+static int  g_gpu_dropped = 0, g_gpu_drop_frames = 0, g_gpu_last_drop = -1, g_gpu_first_drop = -1;
 static string memdump;
 static const char* profpath = nullptr; static int profstart = 0;
 static map<uint32_t, long long> g_prof;
@@ -90,7 +98,7 @@ struct LogGPU : VirconControlInterface {
     long key() { return (long)P[5] * 100000 + P[6]; }
     bool ReadPort(int32_t p, VirconWord& r) override {
         if (p > 17) return false;
-        if (p == 1) { r.AsInteger = 1000000; return true; }
+        if (p == 1) { r.AsInteger = (int32_t) g_gpu_rem; return true; }
         if (p >= 12) { r.AsInteger = regions[key()].v[p - 12]; return true; }
         r.AsInteger = P[p]; return true;
     }
@@ -103,6 +111,27 @@ struct LogGPU : VirconControlInterface {
             return true;
         }
         if (p == 0) {
+            long need = -1;
+            if (v.AsInteger == 0x10) need = 640L * 360 / 2;
+            else if (v.AsInteger >= 0x11 && v.AsInteger <= 0x14) {
+                R& rg = regions[key()];
+                VirconWord zx, zy; zx.AsInteger = P[9]; zy.AsInteger = P[10];
+                bool zoom = (v.AsInteger == 0x12 || v.AsInteger == 0x14), rot = (v.AsInteger == 0x13 || v.AsInteger == 0x14);
+                float rw = abs(rg.v[2] - rg.v[0]) + 1, rh = abs(rg.v[3] - rg.v[1]) + 1;
+                if (zoom) { rw *= fabsf(zx.AsFloat); rh *= fabsf(zy.AsFloat); }
+                float cf = 1 + (zoom ? 0.15f : 0) + (rot ? 0.25f : 0);
+                need = (long)(int32_t)(cf * min((int)rw, 640) * min((int)rh, 360));
+            }
+            bool dropped = false;
+            if (need >= 0) {
+                if (g_gpu_rem < 0) dropped = true;
+                else { g_gpu_rem -= need; if (g_gpu_rem < 0) { g_gpu_rem = -1; dropped = true; } }
+                if (dropped) {
+                    g_gpu_dropped++;
+                    if (g_gpu_last_drop != g_frame) { g_gpu_drop_frames++; g_gpu_last_drop = g_frame; }
+                    if (g_gpu_first_drop < 0) g_gpu_first_drop = g_frame;
+                }
+            }
             if (!g_log_gpu) return true;
             VirconWord sx, sy, an; sx.AsInteger = P[9]; sy.AsInteger = P[10]; an.AsInteger = P[11];
             const char* n = "?";
@@ -112,7 +141,7 @@ struct LogGPU : VirconControlInterface {
                 case 0x14: n = "DrawRotozoomed"; break;
             }
             if (v.AsInteger == 0x10)
-                printf("F%d GPU %s color=%08X\n", g_frame, n, (uint32_t)P[2]);
+                printf("F%d GPU%s %s color=%08X\n", g_frame, dropped ? "-DROPPED" : "", n, (uint32_t)P[2]);
             else {
                 R& rg = regions[key()];
                 bool zoom = (v.AsInteger == 0x12 || v.AsInteger == 0x14);
@@ -122,8 +151,8 @@ struct LogGPU : VirconControlInterface {
                 float w = fx * (rg.v[2] - rg.v[0] + 1), h = fy * (rg.v[3] - rg.v[1] + 1);
                 if (w < 0) { x0 += w; w = -w; }
                 if (h < 0) { y0 += h; h = -h; }
-                printf("F%d GPU %s tex=%d reg=%d pt=(%d,%d) sx=%g sy=%g ang=%g mul=%08X blend=%X src=(%d,%d)-(%d,%d) hot=(%d,%d) SCREEN=(%.2f,%.2f %.2fx%.2f)\n",
-                       g_frame, n, P[5], P[6], P[7], P[8], sx.AsFloat, sy.AsFloat, an.AsFloat,
+                printf("F%d GPU%s %s tex=%d reg=%d pt=(%d,%d) sx=%g sy=%g ang=%g mul=%08X blend=%X src=(%d,%d)-(%d,%d) hot=(%d,%d) SCREEN=(%.2f,%.2f %.2fx%.2f)\n",
+                       g_frame, dropped ? "-DROPPED" : "", n, P[5], P[6], P[7], P[8], sx.AsFloat, sy.AsFloat, an.AsFloat,
                        (uint32_t)P[3], P[4], rg.v[0], rg.v[1], rg.v[2], rg.v[3], rg.v[4], rg.v[5], x0, y0, w, h);
             }
             return true;
@@ -276,6 +305,7 @@ int main(int argc, char** argv)
     static int32_t hist[48]; long long hpos = 0;
     string status = "FRAMES_EXHAUSTED";
     for (g_frame = 0; g_frame < frames; g_frame++) {
+        g_gpu_rem = g_gpu_capacity;            // V32GPU::ChangeFrame
         TIM.ChangeFrame(); CPU.ChangeFrame();
         PAD.frame();
         if (pad.count(g_frame)) for (auto& e : pad[g_frame]) PAD.state[0][e.first] = e.second > 0 ? 1 : -1;
@@ -327,7 +357,9 @@ int main(int argc, char** argv)
         for (unsigned k = 0; k < n; k++) { VirconWord v; bool ok = a0 >= 0x20000000 ? CAR.ReadAddress(a0 - 0x20000000 + k, v) : RAM.ReadAddress(a0 + k, v);
             printf("MEM %08X = %08X %s\n", a0 + k, ok ? v.AsBinary : 0, ok ? fmtword(v).c_str() : "?"); } }
     if (profpath) { FILE* pf = fopen(profpath, "w"); if (pf) { for (auto& e : g_prof) fprintf(pf, "%08X %lld\n", e.first, e.second); fclose(pf); } }
-    printf("STATUS %s frames=%d cycles=%lld ip=%08X overruns=%d\n", status.c_str(), g_frame, cyc, (uint32_t) CPU.InstructionPointer.AsInteger, g_overruns);
+    printf("STATUS %s frames=%d cycles=%lld ip=%08X overruns=%d gpu_dropped=%d", status.c_str(), g_frame, cyc, (uint32_t) CPU.InstructionPointer.AsInteger, g_overruns, g_gpu_dropped);
+    if (g_gpu_dropped) printf(" (in %d frames, first F%d: over the GPU's 9-screen pixel budget)", g_gpu_drop_frames, g_gpu_first_drop);
+    printf("\n");
     printf("REGS");
     VirconWord* regs = (VirconWord*)&CPU.Registers[0];
     for (int r = 0; r < 16; r++) { VirconWord w; memcpy(&w, (char*)regs + r * 4, 4); printf(" R%d=%08X", r, w.AsBinary); }

@@ -16,6 +16,11 @@ __builtin_exec:
     JMP __runtime_error_not_callable
 
 __exec_valid:
+    ;; One return value unless the callee says otherwise: a compiled Lua
+    ;; function stores its real count on return (node_return()); runtime
+    ;; routines reached through here don't, and leave R2/R3 as scratch.
+    MOV R1, 1
+    MOV [RET_COUNT], R1
     MOV R2, R0
     AND R2, BOXED_CLOSURE_FLAG
     JT  R2, __exec_closure

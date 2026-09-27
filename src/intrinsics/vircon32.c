@@ -41,6 +41,9 @@ int  vircon32_sfx_cursor_base          = -1;
 int  vircon32_btn_prev_state_base      = -1;
 int  vircon32_music_channel_mask_base  = -1;
 int  vircon32_sfx_channel_mask_base    = -1;
+// One word: how many values the last compiled Lua function returned (see
+// node_return() and __builtin_exec). Always allocated, like the above.
+int  ret_count_base                    = -1;
 
 // ============================================================================
 // spr(region_id, x, y[, scale_x][, scale_y][, angle_deg][, color_mult][, blend_mode])

@@ -105,6 +105,18 @@ faster (witchem_up's gameplay went from 991 overrun frames in 2,500 to 5).
 arguments are truncated to integers as TIC-80 does, and a width or height
 of 0 or less draws nothing (it used to draw the rectangle mirrored).
 
+Circles and rectangles are clipped to the 240×136 screen before they reach
+the GPU, and ones entirely off it aren't drawn at all. The Vircon32 GPU has
+a pixel budget of 9 screens per frame. Each draw is charged its whole
+scaled size, whether or not it lands on screen, and once the budget is
+spent the GPU silently skips every later draw in that frame. witchem_up's
+title screen scrolls 294 cloud circles, mostly off screen or hanging below
+it. Those cost 29 screens a frame, so the title and the witch, drawn last,
+never appeared. Clipped, they cost 5.3. A circle crossing the left or top
+edge is trimmed in whole 8-pixel steps (21 screen pixels), so its pixels
+stay on exactly the same grid. The headless runner models this budget (see
+`gpu_dropped` in tools/headless/README.md).
+
 ## Memory
 
 `peek`/`peek1`/`peek2`/`peek4`, `poke`/`poke1`/`poke2`/`poke4`, `memcpy`

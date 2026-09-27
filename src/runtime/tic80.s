@@ -2119,6 +2119,26 @@ __tic80_circ_common:
     MOV   R0, R10
     ILT   R0, 0
     JT    R0, _tic80_circ_done
+    ;; entirely off the 240x136 screen: nothing to draw. The GPU charges a
+    ;; draw's whole size against its per-frame pixel budget (9 screens)
+    ;; whether it lands on screen or not, and once that runs out it drops
+    ;; every later draw of the frame.
+    MOV   R0, R8
+    IADD  R0, R10
+    ILT   R0, 0
+    JT    R0, _tic80_circ_done
+    MOV   R0, R9
+    IADD  R0, R10
+    ILT   R0, 0
+    JT    R0, _tic80_circ_done
+    MOV   R0, R8
+    ISUB  R0, R10
+    IGT   R0, 239
+    JT    R0, _tic80_circ_done
+    MOV   R0, R9
+    ISUB  R0, R10
+    IGT   R0, 135
+    JT    R0, _tic80_circ_done
     MOV   R0, SHAPES_TEXTURE
     ILT   R0, 0
     JT    R0, _tic80_circ_steps
@@ -2162,21 +2182,86 @@ _tic80_circ_region:
     OUT   GPU_DrawingScaleX, R4
     OUT   GPU_DrawingScaleY, R4
     MOV   R1, R8
-    ISUB  R1, R10
+    ISUB  R1, R10                ; x0 = cx - r
+    MOV   R2, R9
+    ISUB  R2, R10                ; y0 = cy - r
+    MOV   R0, R3
+    IEQ   R0, R10
+    JF    R0, _tic80_circ_place  ; --fast-circles' scaled disc: unclipped
+    ;; fully on screen (the usual case): draw the shape's own region
+    MOV   R0, R1
+    OR    R0, R2
+    ILT   R0, 0
+    JT    R0, _tic80_circ_clip
+    MOV   R0, R8
+    IADD  R0, R10
+    IGT   R0, 239
+    JT    R0, _tic80_circ_clip
+    MOV   R0, R9
+    IADD  R0, R10
+    IGT   R0, 135
+    JF    R0, _tic80_circ_place
+_tic80_circ_clip:
+    ;; Clip to the screen through a scratch region (a copy of the shape's,
+    ;; trimmed): the GPU charges the whole region, so a circle hanging off
+    ;; an edge would cost as much as one fully on screen. R12 (the color)
+    ;; and R3 are free from here on.
+    IN    R5, GPU_RegionMinX
+    IN    R13, GPU_RegionMinY
+    OUT   GPU_SelectedRegion, 4095   ; scratch: the atlas uses 0..2*SHAPES_MAX_R+1
+    MOV   R0, R10
+    SHL   R0, 1                  ; 2r: the shape's last pixel
+    MOV   R3, R1
+    IADD  R3, R0
+    ISUB  R3, 239
+    MOV   R12, 0
+    IMAX  R3, R12                ; columns past the right edge
+    MOV   R12, R5
+    IADD  R12, R0
+    ISUB  R12, R3
+    OUT   GPU_RegionMaxX, R12
+    MOV   R3, R2
+    IADD  R3, R0
+    ISUB  R3, 135
+    MOV   R12, 0
+    IMAX  R3, R12                ; rows past the bottom edge
+    MOV   R12, R13
+    IADD  R12, R0
+    ISUB  R12, R3
+    OUT   GPU_RegionMaxY, R12
+    MOV   R3, 0
+    ISUB  R3, R1
+    MOV   R12, 0
+    IMAX  R3, R12                ; columns past the left edge
+    AND   R3, 0xFFFFFFF8         ; whole multiples of 8 (8 * 2.625 = 21 screen
+                                 ; pixels): the scaled pixels keep their grid
+    IADD  R5, R3
+    IADD  R1, R3
+    OUT   GPU_RegionMinX, R5
+    OUT   GPU_RegionHotspotX, R5
+    MOV   R3, 0
+    ISUB  R3, R2
+    MOV   R12, 0
+    IMAX  R3, R12                ; rows past the top edge
+    AND   R3, 0xFFFFFFF8         ; whole multiples of 8 (8 * 2.625 = 21 screen
+                                 ; pixels): the scaled pixels keep their grid
+    IADD  R13, R3
+    IADD  R2, R3
+    OUT   GPU_RegionMinY, R13
+    OUT   GPU_RegionHotspotY, R13
+_tic80_circ_place:
     CIF   R1
     FMUL  R1, 2.625
     FADD  R1, 0.5
     FLR   R1
     CFI   R1
     OUT   GPU_DrawingPointX, R1
-    MOV   R1, R9
-    ISUB  R1, R10
-    CIF   R1
-    FMUL  R1, 2.625
-    FADD  R1, 0.5
-    FLR   R1
-    CFI   R1
-    OUT   GPU_DrawingPointY, R1
+    CIF   R2
+    FMUL  R2, 2.625
+    FADD  R2, 0.5
+    FLR   R2
+    CFI   R2
+    OUT   GPU_DrawingPointY, R2
     OUT   GPU_Command, GPUCommand_DrawRegionZoomed
     OUT   GPU_SelectedTexture, R7
     OUT   GPU_MultiplyColor, R6
@@ -2304,7 +2389,53 @@ _tic80_circ_done:
 ;; R4 = h (integers, >= 1), with texture 0 and the color's swatch region
 ;; (512 + color) already selected -- rect()/rectb() and the circle
 ;; fallback select them once per call. Clobbers R0 only.
+;; Clipped to the 240x136 screen first: the GPU charges a draw's whole
+;; size against its per-frame pixel budget, on screen or not.
+_tic80_rect_clip:
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    IADD  R3, R1                 ; x + w
+    MOV   R0, 240
+    IMIN  R3, R0
+    MOV   R0, 0
+    IMAX  R1, R0
+    ISUB  R3, R1                 ; clipped w
+    MOV   R0, R3
+    ILE   R0, 0
+    JT    R0, _tic80_rect_int_off
+    IADD  R4, R2                 ; y + h
+    MOV   R0, 136
+    IMIN  R4, R0
+    MOV   R0, 0
+    IMAX  R2, R0
+    ISUB  R4, R2                 ; clipped h
+    MOV   R0, R4
+    ILE   R0, 0
+    JT    R0, _tic80_rect_int_off
+    CALL  __tic80_rect_draw
+_tic80_rect_int_off:
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    RET
 __tic80_rect_int:
+    ;; fast path: entirely on screen (x, y >= 0, x + w <= 240, y + h <= 136)
+    MOV   R0, R1
+    OR    R0, R2
+    ILT   R0, 0                  ; x or y negative
+    JT    R0, _tic80_rect_clip
+    MOV   R0, R1
+    IADD  R0, R3
+    IGT   R0, 240
+    JT    R0, _tic80_rect_clip
+    MOV   R0, R2
+    IADD  R0, R4
+    IGT   R0, 136
+    JT    R0, _tic80_rect_clip
+__tic80_rect_draw:
     MOV   R0, R3
     CIF   R0
     FMUL  R0, 2.625

@@ -117,6 +117,7 @@ void node_multiple_assignment(ASTNode *node)
         // count_max_return_values() / mark_global_as_function()).
         char callee_path[256] = {0};
         int  return_count     = 1;
+        bool callee_is_static = false;
 
         if (resolve_static_path(curr_val->as.call.target, callee_path)) {
             return_count = get_builtin_return_count(callee_path);
@@ -148,6 +149,7 @@ void node_multiple_assignment(ASTNode *node)
             if (callee_sym != NULL && callee_sym->is_function && callee_sym->return_count > 1) {
                 return_count = callee_sym->return_count;
             }
+            callee_is_static = (callee_sym != NULL && callee_sym->is_function);
         }
 
         if (return_count > 1) {
@@ -259,6 +261,97 @@ void node_multiple_assignment(ASTNode *node)
             }
 
             return;  // Early exit - we handled all assignments
+        }
+
+        // -----------------------------------------------------------------
+        // A callee that can't be resolved statically -- a method or a
+        // function stored in a table (`local x, y = b:pos()`, with
+        // `pos = function(m) return m.x, m.y end` in a constructor), a
+        // parameter, a local function value -- used to be taken as
+        // returning ONE value, so every target after the first got nil.
+        // Every compiled function now stores how many values it returned
+        // in [RET_COUNT] (node_return()), and __builtin_exec presets 1 for
+        // runtime routines, whose R2/R3 are just scratch. So: take values
+        // 2 and 3 from R2/R3 when [RET_COUNT] covers them, nil otherwise.
+        // An intrinsic emits no exec call for this node (g_last_exec_call),
+        // and gives one value.
+        // -----------------------------------------------------------------
+        int n_targets = 0;
+        for (ASTNode *t = curr_tgt; t != NULL; t = t->next) n_targets++;
+
+        if (return_count == 1 && !callee_is_static && n_targets >= 2) {
+            // R2/R3 must not be handed out as the registers that receive
+            // the values: they ARE values 2 and 3 until copied.
+            int pin2 = register_pinned[2], pin3 = register_pinned[3];
+            register_pinned[2] = register_pinned[3] = 1;
+            int v0 = allocate_register();
+            mark_register_live(v0, 10000);
+            register_pinned[2] = pin2; register_pinned[3] = pin3;
+
+            generate_asm(curr_val, v0);
+            ensure_in_register(v0);
+            bool counted = (g_last_exec_call == curr_val);
+
+            register_pinned[2] = register_pinned[3] = 1;
+            int v1 = allocate_register();
+            mark_register_live(v1, 10000);
+            int v2 = allocate_register();
+            mark_register_live(v2, 10000);
+            register_pinned[2] = pin2; register_pinned[3] = pin3;
+
+            if (counted) {
+                int id = get_next_label();
+                const char *ctx = get_current_function_name();
+                emit_asm("MOV R%d, R2 ; return value 1, if there is one\n", v1);
+                emit_asm("MOV R%d, R3 ; return value 2, if there is one\n", v2);
+                int c = allocate_register();
+                emit_asm("MOV R%d, [RET_COUNT]\n", c);
+                emit_asm("ILT R%d, 2\n", c);
+                emit_asm("JF  R%d, __%s_mret1_%d\n", c, ctx, id);
+                emit_asm("MOV R%d, BOXED_NIL ; fewer than 2 values returned\n", v1);
+                emit_asm("__%s_mret1_%d:\n", ctx, id);
+                emit_asm("MOV R%d, [RET_COUNT]\n", c);
+                emit_asm("ILT R%d, 3\n", c);
+                emit_asm("JF  R%d, __%s_mret2_%d\n", c, ctx, id);
+                emit_asm("MOV R%d, BOXED_NIL ; fewer than 3 values returned\n", v2);
+                emit_asm("__%s_mret2_%d:\n", ctx, id);
+                unlock_register(c);
+            } else {
+                emit_asm("MOV R%d, BOXED_NIL\n", v1);
+                emit_asm("MOV R%d, BOXED_NIL\n", v2);
+            }
+
+            // Park one value per target, then store in reverse (as above).
+            ASTNode *dt[64];
+            int      dn = 0;
+            for (ASTNode *t = curr_tgt; t != NULL; t = t->next) {
+                if (dn >= 64) {
+                    compiler_error(ERR_INTERNAL, -1,
+                        "Multiple assignment exceeds 64-target internal limit");
+                }
+                dt[dn++] = t;
+            }
+            int vals[3] = { v0, v1, v2 };
+            for (int i = 0; i < dn; i++) {
+                if (i < 3) {
+                    emit_asm("PUSH R%d ; park value %d for target #%d\n", vals[i], i, i);
+                } else {
+                    emit_asm("MOV R%d, BOXED_NIL\n", v2);
+                    emit_asm("PUSH R%d ; nil for target #%d\n", v2, i);
+                }
+            }
+            unlock_register(v0);
+            unlock_register(v1);
+            unlock_register(v2);
+
+            for (int i = dn - 1; i >= 0; i--) {
+                int v = allocate_pinned_register();
+                mark_register_live(v, 1);
+                emit_asm("POP R%d ; value for target #%d\n", v, i);
+                store_assignment_target(dt[i], v, node->as.mult_assign.is_local);
+                unlock_pinned_register(v);
+            }
+            return;
         }
     }
 

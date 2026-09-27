@@ -641,6 +641,7 @@ int   emit_variable_map (void)
         fprintf (out(), "%%define  VIRCON32_SFX_CURSOR      0x%.8X\n", vircon32_sfx_cursor_base);
         fprintf (out(), "%%define  VIRCON32_MUSIC_CHANNEL_MASK 0x%.8X\n", vircon32_music_channel_mask_base);
         fprintf (out(), "%%define  VIRCON32_SFX_CHANNEL_MASK   0x%.8X\n", vircon32_sfx_channel_mask_base);
+        fprintf (out(), "%%define  RET_COUNT                0x%.8X\n", ret_count_base);
 
         // Fixed hardware address range for the memory card -- word-addressed
         // like the rest of this VM's memory, entirely outside the compiler-

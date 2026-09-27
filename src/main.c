@@ -498,7 +498,7 @@ int  main (int  argc, char** argv)
     }
 
 
-    // ALWAYS allocated (47 words), regardless of runtime_req.needs_vircon32.
+    // ALWAYS allocated (48 words), regardless of runtime_req.needs_vircon32.
     // That flag is not final here: "--#api pico8/tic80" clears it, and the
     // sound/memcard/tilemap intrinsics set it again DURING codegen -- long
     // after this allocation. PICO-8 sfx()/music() did exactly that, and every
@@ -522,6 +522,8 @@ int  main (int  argc, char** argv)
         vircon32_music_channel_mask_base  = next_ram_address;
         next_ram_address                  = next_ram_address + 1;
         vircon32_sfx_channel_mask_base    = next_ram_address;
+        next_ram_address                  = next_ram_address + 1;
+        ret_count_base                    = next_ram_address;   // RET_COUNT
         next_ram_address                  = next_ram_address + 1;
     }
     

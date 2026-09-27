@@ -33,7 +33,7 @@ extern int  spill_slot_for_reg[NUM_GPRS];
 
 // Track next available stack slot (negative offset from BP)
 extern int  next_spill_slot;
-extern int  register_inventory[];
+extern int  register_inventory[NUM_GPRS];
 extern int  register_use_distance[NUM_GPRS];
 extern int  base_spill_frame_offset;
 

@@ -29,6 +29,23 @@ void  node_function_def (ASTNode *node)
     memcpy(saved_spill_slot_for_reg, spill_slot_for_reg, sizeof(saved_spill_slot_for_reg));
     memcpy(saved_register_use_distance, register_use_distance, sizeof(saved_register_use_distance));
 
+    // The body runs in its own frame, whenever it's called -- not in the
+    // middle of whatever expression encloses its definition. So it starts
+    // with every register free, whatever that enclosing code holds: a
+    // `u = function(m) ... end` inside a nested table constructor used to
+    // inherit the constructor's live, PINNED registers (5 of 13 in
+    // witchem_up's enemy_def), and under that pressure the allocator's
+    // last-resort steal handed out registers still in use -- `m.t - m.smove`
+    // came out as FSUB R1, R1. Restored below for the enclosing code.
+    int saved_register_inventory[NUM_GPRS];
+    int saved_register_pinned[NUM_GPRS];
+    memcpy(saved_register_inventory, register_inventory, sizeof(saved_register_inventory));
+    memcpy(saved_register_pinned, register_pinned, sizeof(saved_register_pinned));
+    for (int i = 1; i < NUM_GPRS; i++) {
+        register_inventory[i] = 0;
+        register_pinned[i]    = 0;
+    }
+
     push_function_context (func_name, node);
 
     if (g_debug_mode) {
@@ -242,6 +259,8 @@ void  node_function_def (ASTNode *node)
 
             unlock_register(pad_reg);
         }
+        emit_asm("MOV R1, 0\n");
+        emit_asm("MOV [RET_COUNT], R1 ; no values returned\n");
     }
 
     emit_asm ("__%s_return:\n", func_name);
@@ -265,6 +284,8 @@ void  node_function_def (ASTNode *node)
     base_spill_frame_offset = saved_base_spill_frame_offset;
     memcpy(spill_slot_for_reg, saved_spill_slot_for_reg, sizeof(spill_slot_for_reg));
     memcpy(register_use_distance, saved_register_use_distance, sizeof(register_use_distance));
+    memcpy(register_inventory, saved_register_inventory, sizeof(register_inventory));
+    memcpy(register_pinned, saved_register_pinned, sizeof(register_pinned));
 
     if (is_nested_def) {
         emit_asm("__%s_skip:\n", func_name);
@@ -295,6 +316,14 @@ void  node_function_def (ASTNode *node)
 //   - arg_reg: Temporary for each argument evaluation
 //   - pad_reg: For padding missing arguments
 // ============================================================================
+// The call node whose CALL __builtin_exec was emitted most recently. Right
+// after it, [RET_COUNT] says how many values the callee returned (a compiled
+// function stores it on return; __builtin_exec presets 1 for runtime
+// routines). A caller checks `g_last_exec_call == its call node` after
+// generating the call: an intrinsic emits no exec call for its own node, so
+// an argument's call (the last one emitted) never passes for it.
+ASTNode *g_last_exec_call = NULL;
+
 void  node_function_call (ASTNode *node, int  dest_reg)
 {
     // -------------------------------------------------------------------------
@@ -736,6 +765,7 @@ void  node_function_call (ASTNode *node, int  dest_reg)
 
         // Call the Lua function executor (handles tag validation & tail-call)
         emit_asm("CALL __builtin_exec ; Validate and execute\n");
+        g_last_exec_call = node;   // RET_COUNT is valid right after this call
 
         // Clean up arguments from stack
         if (total_arg_count > 0) {
