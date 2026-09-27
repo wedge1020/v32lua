@@ -441,6 +441,22 @@ bool try_get_immediate_operand(ASTNode *node, char *imm_buffer, size_t buf_size)
 {
     if (node == NULL) return false;
 
+    // CASE 1b: rgba() with literal components -> its packed word
+    if (is_rgba_intrinsic_call(node)) {
+        ASTNode *args[5] = { NULL };
+        int argc = 0;
+        for (ASTNode *a = node->as.call.args_head; a != NULL; a = a->next) {
+            if (argc < 5) args[argc] = a;
+            argc++;
+        }
+        unsigned int word;
+        if (rgba_static_word(args, argc, &word)) {
+            snprintf(imm_buffer, buf_size, "0x%08X", word);
+            return true;
+        }
+        return false;
+    }
+
     // CASE 1: The node is a function call like hex("0xFF000000")
     if (node->type == NODE_FUNCTION_CALL)
     {

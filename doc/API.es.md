@@ -464,9 +464,16 @@ para ignorar la escala por completo).
 mismo modelo que `ioports.gpu.clear(color)`). Un literal numérico
 (`0xFFFFFFFF`, `0x80FFFFFF`, `-1`) se convierte en esa palabra al compilar.
 Cualquier otra expresión debe contener ya la palabra empaquetada:
-`hex("0xFF8080FF")` directamente, o una variable asignada desde `hex()`. Un
-número calculado en tiempo de ejecución *no* se convierte — un float32 no
-puede representar exactamente un color de 32 bits.
+`rgba(r, g, b [, a])` (ver [Colores: rgba()](#colors-rgba)),
+`hex("0xFF8080FF")`, o una variable asignada desde uno de ellos. Un número
+calculado en tiempo de ejecución *no* se convierte — un float32 no puede
+representar exactamente un color de 32 bits. Para un color que cambia en
+ejecución (un fundido), guarda los componentes como números y empaquétalos
+al dibujar:
+
+```lua
+spr(REGION_SOLID, x, y, w, h, 0, rgba(0, 0, 0, frame * 8))   -- fundido a negro
+```
 
 Un `nil` pasado explícitamente para un argumento opcional (por ejemplo,
 `spr(id, x, y, nil, nil, 45)`) se trata idénticamente a que ese argumento
@@ -486,7 +493,7 @@ formas:
 |---|---|---|
 | nombre preestablecido | `clear("black")` | `"black"`, `"white"`, `"blue"`, `"red"`, `"green"` — literal de cadena, resuelto en tiempo de compilación; cualquier otro nombre es un error de compilación |
 | literal empaquetado | `clear(0xFF202020)` | `0xAABBGGRR`; se pliega en tiempo de compilación a la palabra cruda de 32 bits |
-| palabra empaquetada | `clear(hex("0xFF202020"))`, `clear(c)` | un valor no literal se escribe al puerto sin tocar, así que ya debe contener la palabra cruda — es decir, venir de `hex()` |
+| palabra empaquetada | `clear(rgba(32, 32, 32))`, `clear(hex("0xFF202020"))`, `clear(c)` | un valor no literal se escribe al puerto sin tocar, así que ya debe contener la palabra cruda — es decir, venir de `rgba()` o de `hex()` |
 | componentes | `clear(32, 32, 32)`, `clear(r, g, b, 128)` | rojo, verde, azul, alfa, cada uno `0`–`255`; alfa es opcional y por defecto vale `255` (opaco) |
 
 ```lua
@@ -508,15 +515,53 @@ pliega a una sola constante empaquetada en tiempo de compilación — los
 literales fuera de rango se limitan a `0`–`255` con una advertencia. En
 otro caso cada componente se evalúa como una expresión normal, se limita
 a `0`–`255`, se trunca a entero y se empaqueta en tiempo de ejecución. Un
-`nil` explícito para `a` significa opaco, igual que omitirlo; no hay
-comprobación de nil en tiempo de ejecución en los componentes, así que una
-variable que sea `nil` en ejecución da un color indefinido.
+`nil` explícito para `a` significa opaco, igual que omitirlo, y también un
+alfa que sea `nil` en ejecución; no hay comprobación de nil en tiempo de
+ejecución en el rojo, el verde y el azul, así que una variable que sea
+`nil` ahí da un color indefinido.
 
 *Por qué una variable empaquetada necesita `hex()`:* los números de v32lua
 son float32, así que un número como `0xFF202020` guardado en una variable
 contiene un flotante, no los bits del color, y `clear()` no puede
 distinguirlos en tiempo de ejecución. Los literales escritos directamente
 en la llamada funcionan, porque se pliegan en tiempo de compilación.
+`rgba()` (abajo) también da la palabra cruda.
+
+<a id="colors-rgba"></a>
+**Colores: rgba(r, g, b [, a])**
+
+Devuelve la palabra empaquetada `0xAABBGGRR` de la GPU para un color — la
+palabra cruda de 32 bits, *no* un número Lua — para todo lo que espera una:
+el `color_mult` de `spr()`, `ioports.gpu.clear(color)`,
+`ioports.gpu.multiply`, `ioports.gpu.bgcolor`.
+
+```lua
+spr(id, x, y, 1, 1, 0, rgba(255, 255, 255, alpha))   -- fundido
+ioports.gpu.multiply = rgba(r, g, b)                 -- sin conversión a flotante
+ioports.gpu.clear(rgba(16, 16, 48))
+```
+
+* 3 o 4 argumentos (cualquier otra cantidad es un error de compilación).
+  El alfa vale 255 por defecto; un alfa `nil` (literal o en ejecución)
+  también vale 255.
+* Cada componente se limita a `0`–`255` y se trunca (`127.9` → 127),
+  exactamente como `clear(r, g, b [, a])`, con quien comparte el código.
+* Con todos los argumentos literales se pliega al compilar en una sola
+  constante (`rgba(1, 2, 3, 4)` es `0x04030201`); los literales fuera de
+  rango se limitan con una advertencia. Si no, se empaqueta en ejecución;
+  los componentes que llaman a funciones son seguros.
+* Solo en modo Vircon32 nativo. Una función tuya llamada `rgba` tiene
+  prioridad.
+
+**Cuidado — guarda los componentes, no la palabra.** Una palabra cruda
+cuyos bits altos coinciden con una de las etiquetas de valor del lenguaje
+*es* ese valor para el resto del programa: `rgba(0, 0, 192, 255)` es
+`0xFFC00000`, es decir `nil`, y `0xFF8xxxxx` se lee como una tabla.
+Pasarla directamente a una llamada o a un puerto siempre es seguro (solo
+se copia). Guardarla en una tabla (un valor `nil` borra la clave),
+comprobarla (`if c then`) o compararla con `nil` no lo es. `hex()` tiene
+el mismo problema. Lo seguro es guardar los componentes como números y
+llamar a `rgba()` donde se usa el color, como en los ejemplos de arriba.
 
 **Definiendo regiones de textura**
 

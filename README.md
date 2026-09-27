@@ -750,7 +750,8 @@ sample of the most commonly used entries:
 | **`ioports.gpu.minX/minY/maxX/maxY`** | `GPU_RegionMin/MaxX/Y` | Read / Write | Defines the pixel boundaries of the active texture region. |
 | **`ioports.gpu.hotX/hotY`** | `GPU_RegionHotSpotX/Y` | Read / Write | Sets the drawing origin (hotspot) relative to the sprite region. |
 | **`ioports.gpu.draw([mode])`** | `GPU_Command` | Function Call | Executes a hardware draw command: `"zoom"`, `"rotate"`, `"rotozoom"`, or default. |
-| **`ioports.gpu.clear([color])`**<br>**`ioports.gpu.clear(r, g, b [, a])`** | `GPU_ClearColor` + `GPU_Command` | Function Call | Sets the clear color and wipes the screen. Supports preset color strings (`"black"`, `"white"`, `"blue"`, `"red"`, `"green"`), a packed `0xAABBGGRR` value (a literal, or `hex()` for a variable), or separate components: `clear(r, g, b [, a])`, each `0`–`255`, alpha defaulting to opaque. |
+| **`ioports.gpu.clear([color])`**<br>**`ioports.gpu.clear(r, g, b [, a])`** | `GPU_ClearColor` + `GPU_Command` | Function Call | Sets the clear color and wipes the screen. Supports preset color strings (`"black"`, `"white"`, `"blue"`, `"red"`, `"green"`), a packed `0xAABBGGRR` value (a literal, or `rgba()`/`hex()` for a runtime value), or separate components: `clear(r, g, b [, a])`, each `0`–`255`, alpha defaulting to opaque. |
+| **`rgba(r, g, b [, a])`** | — | Intrinsic | The packed `0xAABBGGRR` word (raw, not a Lua number) for `spr()`'s `color_mult`, `ioports.gpu.clear(color)`, `ioports.gpu.multiply` / `bgcolor`. Components clamped to `0`–`255` and truncated, alpha defaults to 255; folded at compile time when all are literals. Keep colors as components and call `rgba()` where they're drawn — see [doc/API.md](doc/API.md#colors-rgba) for why. |
 
 *Gamepad & Input (`ioports.inp.*`)*
 

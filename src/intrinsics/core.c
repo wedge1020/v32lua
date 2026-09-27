@@ -379,7 +379,19 @@ int try_emit_action_intrinsic (const char *action, int  dest_reg)
 // ============================================================================
 // --- Helper: Check if an AST node produces a raw hardware integer ---
 // ============================================================================
+// rgba(...) in native Vircon32 mode, not a function the program defines
+bool is_rgba_intrinsic_call (ASTNode *node)
+{
+    return node != NULL && node->type == NODE_FUNCTION_CALL &&
+           node->as.call.target != NULL && node->as.call.target->type == NODE_IDENTIFIER &&
+           strcmp (node->as.call.target->as.id.name, "rgba") == 0 &&
+           runtime_req.needs_vircon32 && !runtime_req.needs_pico8 && !runtime_req.needs_tic80 &&
+           resolve_symbol ("rgba") == NULL;
+}
+
 bool is_raw_integer_expression (ASTNode *node) {
+    // rgba() gives a raw packed word too
+    if (is_rgba_intrinsic_call (node)) return true;
     if (node != NULL)
     {
         // 1. Check if the expression is a direct call to the hex() intrinsic
@@ -571,6 +583,12 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         (runtime_req.needs_tic80    == false))
     {
         //try_emit_call_vircon32_instinsic (node, dest_reg);
+
+        // rgba(r, g, b [, a]) -> raw packed 0xAABBGGRR word (gpu.c)
+        if (strcmp (func_name, "rgba") == 0)
+        {
+            return (emit_rgba_intrinsic (node, dest_reg));
+        }
 
         // spr()
         if (strcmp (func_name, "spr") == 0)

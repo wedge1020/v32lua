@@ -155,20 +155,23 @@ void emit_gpu_blending_intrinsic (ASTNode *node, int  dest_reg)
 }
 
 // ============================================================================
-// ioports.gpu.clear() -- helpers
+// Packed RGBA colors -- shared by ioports.gpu.clear(r, g, b [, a]) and
+// rgba(r, g, b [, a])
 // ============================================================================
 
 // Clamp a compile-time-known color component to 0..255, warning if the
 // literal was out of range (or fractional, which truncates like CFI would).
-static unsigned int gpu_clear_fold_component (double value, const char *name, int line)
+static unsigned int rgba_fold_component (double value, const char *fname, const char *name, int line, bool warn)
 {
     if (value < 0.0 || value > 255.0) {
-        compiler_warning (ERR_SEMANTIC, line,
-            "ioports.gpu.clear(): %s component %g is outside 0..255; clamped", name, value);
+        if (warn)
+            compiler_warning (ERR_SEMANTIC, line,
+                "%s: %s component %g is outside 0..255; clamped", fname, name, value);
         value = (value < 0.0) ? 0.0 : 255.0;
     } else if (value != (double)(int) value) {
-        compiler_warning (ERR_SEMANTIC, line,
-            "ioports.gpu.clear(): %s component %g is not a whole number; truncated", name, value);
+        if (warn)
+            compiler_warning (ERR_SEMANTIC, line,
+                "%s: %s component %g is not a whole number; truncated", fname, name, value);
     }
     return (unsigned int) value;
 }
@@ -182,31 +185,167 @@ static unsigned int gpu_clear_fold_component (double value, const char *name, in
 // computed, so a component expression that CALLs (a function call, table
 // lookup, ...) can't clobber a component computed earlier -- register
 // contents do not survive CALL boundaries.
-static void gpu_clear_push_component (ASTNode *arg, const char *name, int line)
+static void rgba_push_component (ASTNode *arg, const char *fname, const char *name, int line)
 {
     double value;
     int reg = allocate_register ();
     register_pinned[reg] = 1;
 
     if (spu_static_number (arg, &value)) {
-        unsigned int c = gpu_clear_fold_component (value, name, line);
-        emit_asm ("MOV R%d, %u ; clear(): %s = %u\n", reg, c, name, c);
+        unsigned int c = rgba_fold_component (value, fname, name, line, true);
+        emit_asm ("MOV R%d, %u ; %s: %s = %u\n", reg, c, fname, name, c);
     } else {
         int bound = allocate_register ();
         register_pinned[bound] = 1;
         generate_asm (arg, reg);
+        if (strcmp (name, "alpha") == 0) {
+            // a nil alpha at run time is opaque, like a literal nil
+            emit_asm ("MOV R%d, R%d\n", bound, reg);
+            emit_asm ("IEQ R%d, BOXED_NIL\n", bound);
+            int id = get_next_label ();
+            const char *ctx = get_current_function_name ();
+            emit_asm ("JF  R%d, __%s_rgba_alpha_%d\n", bound, ctx, id);
+            emit_asm ("MOV R%d, 255.0 ; %s: nil alpha -> 255\n", reg, fname);
+            emit_asm ("__%s_rgba_alpha_%d:\n", ctx, id);
+        }
         emit_asm ("MOV R%d, 0.0\n", bound);
-        emit_asm ("FMAX R%d, R%d ; clear(): %s >= 0\n", reg, bound, name);
+        emit_asm ("FMAX R%d, R%d ; %s: %s >= 0\n", reg, bound, fname, name);
         emit_asm ("MOV R%d, 255.0\n", bound);
-        emit_asm ("FMIN R%d, R%d ; clear(): %s <= 255\n", reg, bound, name);
+        emit_asm ("FMIN R%d, R%d ; %s: %s <= 255\n", reg, bound, fname, name);
         emit_asm ("CFI R%d\n", reg);
         register_pinned[bound] = 0;
         unlock_register (bound);
     }
 
-    emit_asm ("PUSH R%d ; clear(): %s component\n", reg, name);
+    emit_asm ("PUSH R%d ; %s: %s component\n", reg, fname, name);
     register_pinned[reg] = 0;
     unlock_register (reg);
+}
+
+static const char *rgba_names[4] = { "red", "green", "blue", "alpha" };
+
+// The packed word of (r, g, b [, a]) when every component is a numeric
+// literal (a missing or nil alpha is 255). No warnings: the emitter gives
+// them.
+bool rgba_static_word (ASTNode **args, int argc, unsigned int *word)
+{
+    if (argc != 3 && argc != 4) return false;
+    double v[4] = { 0.0, 0.0, 0.0, 255.0 };
+    for (int i = 0; i < 3; i++)
+        if (!spu_static_number (args[i], &v[i])) return false;
+    if (argc == 4 && args[3]->type != NODE_NIL && !spu_static_number (args[3], &v[3]))
+        return false;
+    unsigned int c[4];
+    for (int i = 0; i < 4; i++) c[i] = rgba_fold_component (v[i], "", rgba_names[i], 0, false);
+    *word = (c[3] << 24) | (c[2] << 16) | (c[1] << 8) | c[0];
+    return true;
+}
+
+// Packs (r, g, b [, a]) into the GPU's 0xAABBGGRR word: folded at compile
+// time when every component is a literal, else each component is clamped
+// to 0..255, truncated and combined with SHL/OR at run time. A missing or
+// nil alpha is 255. argc must be 3 or 4. Returns the register that holds
+// the word (allocated here; the caller unlocks it), or -1 after an error.
+int emit_pack_rgba (const char *fname, ASTNode **args, int argc, int line)
+{
+    bool has_alpha = (argc == 4 && args[3]->type != NODE_NIL);
+
+    for (int i = 0; i < 3; i++) {
+        if (args[i]->type == NODE_STRING || args[i]->type == NODE_NIL) {
+            compiler_error (ERR_SEMANTIC, line, "%s: %s component must be a number", fname, rgba_names[i]);
+            return -1;
+        }
+    }
+    if (has_alpha && args[3]->type == NODE_STRING) {
+        compiler_error (ERR_SEMANTIC, line, "%s: alpha component must be a number", fname);
+        return -1;
+    }
+
+    // --- All literal: fold to one packed word ---
+    double v[4] = { 0.0, 0.0, 0.0, 255.0 };
+    bool all_static = true;
+    for (int i = 0; i < 3; i++)
+        all_static = all_static && spu_static_number (args[i], &v[i]);
+    if (has_alpha)
+        all_static = all_static && spu_static_number (args[3], &v[3]);
+
+    if (all_static) {
+        unsigned int c[4];
+        for (int i = 0; i < 4; i++)
+            c[i] = rgba_fold_component (v[i], fname, rgba_names[i], line, true);
+        unsigned int packed = (c[3] << 24) | (c[2] << 16) | (c[1] << 8) | c[0];
+
+        int color_reg = allocate_register ();
+        emit_asm ("MOV R%d, 0x%.8X ; %s(%u, %u, %u, %u) -> 0xAABBGGRR\n",
+                  color_reg, packed, fname, c[0], c[1], c[2], c[3]);
+        return color_reg;
+    }
+
+    // --- Runtime pack: push r, g, b, a; pop a, b, g, r ---
+    for (int i = 0; i < 3; i++)
+        rgba_push_component (args[i], fname, rgba_names[i], line);
+    if (has_alpha) {
+        rgba_push_component (args[3], fname, rgba_names[3], line);
+    } else {
+        emit_asm ("MOV R0, 255 ; %s: alpha defaults to opaque\n", fname);
+        emit_asm ("PUSH R0\n");
+    }
+
+    int acc = allocate_register ();
+    register_pinned[acc] = 1;
+    int tmp = allocate_register ();
+    register_pinned[tmp] = 1;
+
+    emit_asm ("POP R%d ; alpha\n", acc);
+    emit_asm ("SHL R%d, 8\n", acc);
+    emit_asm ("POP R%d ; blue\n", tmp);
+    emit_asm ("OR R%d, R%d\n", acc, tmp);
+    emit_asm ("SHL R%d, 8\n", acc);
+    emit_asm ("POP R%d ; green\n", tmp);
+    emit_asm ("OR R%d, R%d\n", acc, tmp);
+    emit_asm ("SHL R%d, 8\n", acc);
+    emit_asm ("POP R%d ; red\n", tmp);
+    emit_asm ("OR R%d, R%d ; R%d = 0xAABBGGRR\n", acc, tmp, acc);
+
+    register_pinned[tmp] = 0;
+    unlock_register (tmp);
+    register_pinned[acc] = 0;
+    return acc;
+}
+
+/**
+ * rgba(r, g, b [, a]) -- native Vircon32 mode: the RAW packed 0xAABBGGRR
+ * word (not a Lua number), for spr()'s color_mult, ioports.gpu.clear(color),
+ * ioports.gpu.multiply / bgcolor ... Components are clamped to 0..255 and
+ * truncated; a missing or nil alpha is 255 -- exactly clear(r, g, b [, a]).
+ *
+ * CAVEAT: a raw word whose top bits match a NaN-box tag IS that value to
+ * the rest of the language: rgba(0, 0, 192, 255) is 0xFFC00000 = nil, and
+ * 0xFF8xxxxx reads as a table. Passing it straight to a call is safe;
+ * storing it in a table, testing it, or comparing it with nil is not
+ * (hex() has the same issue). Keep the components as numbers and call
+ * rgba() where the color is used.
+ */
+bool emit_rgba_intrinsic (ASTNode *node, int dest_reg)
+{
+    ASTNode *args[5] = { NULL };
+    int      argc    = 0;
+    for (ASTNode *a = node->as.call.args_head; a != NULL; a = a->next) {
+        if (argc < 5) args[argc] = a;
+        argc++;
+    }
+    if (argc != 3 && argc != 4) {
+        compiler_error (ERR_SEMANTIC, node->line_number,
+            "rgba(): expected 3 or 4 arguments (rgba(r, g, b [, a])), got %d", argc);
+        return false;
+    }
+    emit_asm ("    ;; --- Intrinsic: rgba() -> raw packed 0xAABBGGRR ---\n");
+    int reg = emit_pack_rgba ("rgba()", args, argc, node->line_number);
+    if (reg < 0) return false;
+    if (dest_reg != 0 && dest_reg != reg)
+        emit_asm ("MOV R%d, R%d ; rgba() result (a raw word, not a number)\n", dest_reg, reg);
+    unlock_register (reg);
+    return true;
 }
 
 /**
@@ -254,74 +393,10 @@ void emit_gpu_clear_intrinsic(ASTNode *node, int dest_reg) {
     // clear(r, g, b [, a])
     // =====================================================================
     if (argc >= 3) {
-        static const char *names[4] = { "red", "green", "blue", "alpha" };
-        bool has_alpha = (argc == 4 && args[3]->type != NODE_NIL);
-
-        for (int i = 0; i < 3; i++) {
-            if (args[i]->type == NODE_STRING || args[i]->type == NODE_NIL) {
-                compiler_error (ERR_SEMANTIC, node->line_number,
-                    "ioports.gpu.clear(): %s component must be a number", names[i]);
-                return;
-            }
-        }
-        if (has_alpha && args[3]->type == NODE_STRING) {
-            compiler_error (ERR_SEMANTIC, node->line_number,
-                "ioports.gpu.clear(): alpha component must be a number");
-            return;
-        }
-
-        // --- All literal: fold to one packed word ---
-        double v[4] = { 0.0, 0.0, 0.0, 255.0 };
-        bool all_static = true;
-        for (int i = 0; i < 3; i++)
-            all_static = all_static && spu_static_number (args[i], &v[i]);
-        if (has_alpha)
-            all_static = all_static && spu_static_number (args[3], &v[3]);
-
-        if (all_static) {
-            unsigned int c[4];
-            for (int i = 0; i < 4; i++)
-                c[i] = gpu_clear_fold_component (v[i], names[i], node->line_number);
-            unsigned int packed = (c[3] << 24) | (c[2] << 16) | (c[1] << 8) | c[0];
-
-            int color_reg = allocate_register ();
-            emit_asm ("MOV R%d, 0x%.8X ; clear(%u, %u, %u, %u) -> 0xAABBGGRR\n",
-                      color_reg, packed, c[0], c[1], c[2], c[3]);
-            emit_asm ("OUT GPU_ClearColor, R%d\n", color_reg);
-            unlock_register (color_reg);
-        } else {
-            // --- Runtime pack: push r, g, b, a; pop a, b, g, r ---
-            for (int i = 0; i < 3; i++)
-                gpu_clear_push_component (args[i], names[i], node->line_number);
-            if (has_alpha) {
-                gpu_clear_push_component (args[3], names[3], node->line_number);
-            } else {
-                emit_asm ("MOV R0, 255 ; clear(): alpha defaults to opaque\n");
-                emit_asm ("PUSH R0\n");
-            }
-
-            int acc = allocate_register ();
-            register_pinned[acc] = 1;
-            int tmp = allocate_register ();
-            register_pinned[tmp] = 1;
-
-            emit_asm ("POP R%d ; alpha\n", acc);
-            emit_asm ("SHL R%d, 8\n", acc);
-            emit_asm ("POP R%d ; blue\n", tmp);
-            emit_asm ("OR R%d, R%d\n", acc, tmp);
-            emit_asm ("SHL R%d, 8\n", acc);
-            emit_asm ("POP R%d ; green\n", tmp);
-            emit_asm ("OR R%d, R%d\n", acc, tmp);
-            emit_asm ("SHL R%d, 8\n", acc);
-            emit_asm ("POP R%d ; red\n", tmp);
-            emit_asm ("OR R%d, R%d ; R%d = 0xAABBGGRR\n", acc, tmp, acc);
-            emit_asm ("OUT GPU_ClearColor, R%d\n", acc);
-
-            register_pinned[tmp] = 0;
-            unlock_register (tmp);
-            register_pinned[acc] = 0;
-            unlock_register (acc);
-        }
+        int color_reg = emit_pack_rgba ("ioports.gpu.clear()", args, argc, node->line_number);
+        if (color_reg < 0) return;
+        emit_asm ("OUT GPU_ClearColor, R%d\n", color_reg);
+        unlock_register (color_reg);
     }
 
     // =====================================================================

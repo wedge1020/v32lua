@@ -467,10 +467,16 @@ qui ne sont écrits que dans les branches qui les utilisent réellement
 `GPU_MultiplyColor`, sans conversion flottant → entier (le même modèle que
 `ioports.gpu.clear(couleur)`). Un littéral numérique (`0xFFFFFFFF`,
 `0x80FFFFFF`, `-1`) est converti en ce mot à la compilation. Toute autre
-expression doit déjà contenir le mot compressé : `hex("0xFF8080FF")`
-directement, ou une variable affectée depuis `hex()`. Un nombre calculé à
-l'exécution n'est *pas* converti — un float32 ne peut pas représenter
-exactement une couleur 32 bits.
+expression doit déjà contenir le mot compressé : `rgba(r, g, b [, a])`
+(voir [Couleurs : rgba()](#colors-rgba)), `hex("0xFF8080FF")`, ou une
+variable affectée depuis l'un d'eux. Un nombre calculé à l'exécution n'est
+*pas* converti — un float32 ne peut pas représenter exactement une couleur
+32 bits. Pour une couleur qui change à l'exécution (un fondu), gardez les
+composantes sous forme de nombres et assemblez-les au moment du dessin :
+
+```lua
+spr(REGION_SOLID, x, y, w, h, 0, rgba(0, 0, 0, frame * 8))   -- fondu au noir
+```
 
 Un `nil` explicitement passé pour un argument optionnel (par exemple
 `spr(id, x, y, nil, nil, 45)`) est traité de façon identique à cet
@@ -490,7 +496,7 @@ quatre façons :
 |---|---|---|
 | nom prédéfini | `clear("black")` | `"black"`, `"white"`, `"blue"`, `"red"`, `"green"` — chaîne littérale, résolue à la compilation ; tout autre nom est une erreur de compilation |
 | littéral compressé | `clear(0xFF202020)` | `0xAABBGGRR` ; replié à la compilation en mot brut de 32 bits |
-| mot compressé | `clear(hex("0xFF202020"))`, `clear(c)` | une valeur non littérale est écrite telle quelle sur le port, elle doit donc déjà contenir le mot brut — c'est-à-dire provenir de `hex()` |
+| mot compressé | `clear(rgba(32, 32, 32))`, `clear(hex("0xFF202020"))`, `clear(c)` | une valeur non littérale est écrite telle quelle sur le port, elle doit donc déjà contenir le mot brut — c'est-à-dire provenir de `rgba()` ou de `hex()` |
 | composantes | `clear(32, 32, 32)`, `clear(r, g, b, 128)` | rouge, vert, bleu, alpha, chacune de `0` à `255` ; alpha est facultatif et vaut `255` (opaque) par défaut |
 
 ```lua
@@ -512,15 +518,54 @@ est repliée en une seule constante à la compilation — les littéraux hors
 plage sont bornés à `0`–`255` avec un avertissement. Sinon chaque
 composante est évaluée comme une expression ordinaire, bornée à
 `0`–`255`, tronquée en entier et assemblée à l'exécution. Un `nil`
-explicite pour `a` signifie opaque, comme l'omettre ; il n'y a pas de
-vérification de nil à l'exécution sur les composantes, donc une variable
-valant `nil` à l'exécution donne une couleur indéfinie.
+explicite pour `a` signifie opaque, comme l'omettre, de même qu'un alpha
+valant `nil` à l'exécution ; il n'y a pas de vérification de nil à
+l'exécution sur le rouge, le vert et le bleu, donc une variable valant
+`nil` à cet endroit donne une couleur indéfinie.
 
 *Pourquoi une variable compressée a besoin de `hex()` :* les nombres de
 v32lua sont des float32, donc un nombre comme `0xFF202020` stocké dans une
 variable contient un flottant, pas les bits de la couleur, et `clear()` ne
 peut pas les distinguer à l'exécution. Les littéraux écrits directement
-dans l'appel fonctionnent, car ils sont repliés à la compilation.
+dans l'appel fonctionnent, car ils sont repliés à la compilation. `rgba()`
+(ci-dessous) produit aussi le mot brut.
+
+<a id="colors-rgba"></a>
+**Couleurs : rgba(r, g, b [, a])**
+
+Renvoie le mot compressé `0xAABBGGRR` du GPU pour une couleur — le mot brut
+de 32 bits, *pas* un nombre Lua — pour tout ce qui en attend un : le
+`color_mult` de `spr()`, `ioports.gpu.clear(couleur)`,
+`ioports.gpu.multiply`, `ioports.gpu.bgcolor`.
+
+```lua
+spr(id, x, y, 1, 1, 0, rgba(255, 255, 255, alpha))   -- fondu
+ioports.gpu.multiply = rgba(r, g, b)                 -- sans conversion flottante
+ioports.gpu.clear(rgba(16, 16, 48))
+```
+
+* 3 ou 4 arguments (tout autre nombre est une erreur de compilation).
+  L'alpha vaut 255 par défaut ; un alpha `nil` (littéral ou à l'exécution)
+  vaut aussi 255.
+* Chaque composante est bornée à `0`–`255` et tronquée (`127.9` → 127),
+  exactement comme `clear(r, g, b [, a])`, dont elle partage le code.
+* Des arguments tous littéraux sont repliés à la compilation en une seule
+  constante (`rgba(1, 2, 3, 4)` vaut `0x04030201`) ; les littéraux hors
+  plage sont bornés avec un avertissement. Sinon l'assemblage se fait à
+  l'exécution ; des composantes qui appellent des fonctions sont sûres.
+* Mode Vircon32 natif uniquement. Une fonction à vous nommée `rgba` a la
+  priorité.
+
+**Attention — gardez les composantes, pas le mot.** Un mot brut dont les
+bits de poids fort correspondent à l'une des étiquettes de valeur du
+langage *est* cette valeur pour le reste du programme : `rgba(0, 0, 192,
+255)` vaut `0xFFC00000`, c'est-à-dire `nil`, et `0xFF8xxxxx` se lit comme
+une table. Le passer directement à un appel ou à un port est toujours sûr
+(il est seulement copié). Le ranger dans une table (une valeur `nil`
+supprime la clé), le tester (`if c then`) ou le comparer à `nil` ne l'est
+pas. `hex()` a le même problème. L'usage sûr est de garder les
+composantes sous forme de nombres et d'appeler `rgba()` là où la couleur
+est utilisée, comme dans les exemples ci-dessus.
 
 **Définir des régions de texture**
 

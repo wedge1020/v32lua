@@ -423,10 +423,16 @@ branches that actually use them (harmless to leave stale, since e.g.
 `GPU_MultiplyColor` as-is, without a float → integer conversion (the same
 model as `ioports.gpu.clear(color)`). A numeric literal (`0xFFFFFFFF`,
 `0x80FFFFFF`, `-1`) is folded to that word at compile time. Any other
-expression must already hold the packed word: `hex("0xFF8080FF")`
-directly, or a variable assigned from `hex()`. A plain number computed at
-runtime is *not* converted — float32 can't hold a 32-bit color exactly
-anyway.
+expression must already hold the packed word: `rgba(r, g, b [, a])`
+(see [Colors: rgba()](#colors-rgba)), `hex("0xFF8080FF")`, or a variable
+assigned from one of them. A plain number computed at runtime is *not*
+converted — float32 can't hold a 32-bit color exactly anyway. For a color
+that changes at runtime (a fade), keep the components as numbers and pack
+them at the draw:
+
+```lua
+spr(REGION_SOLID, x, y, w, h, 0, rgba(0, 0, 0, frame * 8))   -- fade to black
+```
 
 An explicitly-passed `nil` for an optional argument (e.g.
 `spr(id, x, y, nil, nil, 45)`) is treated identically to that argument
@@ -444,7 +450,7 @@ issues `GPUCommand_ClearScreen`. Omit the arguments to clear with whatever
 |---|---|---|
 | preset name | `clear("black")` | `"black"`, `"white"`, `"blue"`, `"red"`, `"green"` — string literal, resolved at compile time; any other name is a compile error |
 | packed literal | `clear(0xFF202020)` | `0xAABBGGRR`; folded at compile time to the raw 32-bit word |
-| packed word | `clear(hex("0xFF202020"))`, `clear(c)` | a non-literal value is written to the port untouched, so it must already hold the raw word — i.e. come from `hex()` |
+| packed word | `clear(rgba(32, 32, 32))`, `clear(hex("0xFF202020"))`, `clear(c)` | a non-literal value is written to the port untouched, so it must already hold the raw word — i.e. come from `rgba()` or `hex()` |
 | components | `clear(32, 32, 32)`, `clear(r, g, b, 128)` | red, green, blue, alpha, each `0`–`255`; alpha is optional and defaults to `255` (opaque) |
 
 ```lua
@@ -466,13 +472,50 @@ packed constant at compile time — out-of-range literals are clamped to
 `0`–`255` with a warning. Otherwise each component is evaluated as an
 ordinary expression, clamped to `0`–`255`, truncated to an integer, and
 packed at runtime. An explicit `nil` for `a` means opaque, like leaving it
-out; there is no runtime nil check on the components, so a variable that
-is `nil` at runtime gives an undefined color.
+out, and so does an alpha that is `nil` at runtime; there is no runtime
+nil check on red, green and blue, so a variable that is `nil` there gives
+an undefined color.
 
-*Why a packed variable needs `hex()`:* v32lua numbers are float32, so a
-number like `0xFF202020` stored in a variable holds a float, not the color
-bits, and `clear()` can't tell the two apart at runtime. Literals written
-directly in the call are fine, because they're folded at compile time.
+*Why a packed variable needs `rgba()` or `hex()`:* v32lua numbers are
+float32, so a number like `0xFF202020` stored in a variable holds a float,
+not the color bits, and `clear()` can't tell the two apart at runtime.
+Literals written directly in the call are fine, because they're folded at
+compile time.
+
+<a id="colors-rgba"></a>
+**Colors: rgba(r, g, b [, a])**
+
+Returns the GPU's packed `0xAABBGGRR` word for a color — the raw 32-bit
+word, *not* a Lua number — for anything that takes one: `spr()`'s
+`color_mult`, `ioports.gpu.clear(color)`, `ioports.gpu.multiply`,
+`ioports.gpu.bgcolor`.
+
+```lua
+spr(id, x, y, 1, 1, 0, rgba(255, 255, 255, alpha))   -- fade in/out
+ioports.gpu.multiply = rgba(r, g, b)                 -- no float conversion
+ioports.gpu.clear(rgba(16, 16, 48))
+```
+
+* 3 or 4 arguments (any other count is a compile error). Alpha defaults
+  to 255; `nil` alpha (literal or at runtime) is 255 too.
+* Each component is clamped to `0`–`255` and truncated (`127.9` → 127),
+  exactly like `clear(r, g, b [, a])`, whose packing code it shares.
+* All-literal arguments fold at compile time to one constant
+  (`rgba(1, 2, 3, 4)` is `0x04030201`); out-of-range literals are clamped
+  with a warning. Otherwise it packs at runtime; components that call
+  functions are safe.
+* Native Vircon32 mode only. A function of your own named `rgba` takes
+  precedence.
+
+**Caveat — keep the components, not the word.** A raw word whose top bits
+match one of the language's value tags *is* that value to the rest of the
+program: `rgba(0, 0, 192, 255)` is `0xFFC00000`, which is `nil`, and
+`0xFF8xxxxx` reads as a table. Passing the result straight to a call or a
+port is always safe (it is only copied). Storing it in a table (a `nil`
+value deletes the key), testing it (`if c then`), or comparing it with
+`nil` is not. `hex()` has the same issue. The safe idiom is to keep the
+components as numbers and call `rgba()` where the color is used, as in
+the examples above.
 
 **Defining texture regions**
 
