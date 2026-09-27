@@ -56,7 +56,7 @@ vbin: obj/$(DEMO).vbin
 obj/$(DEMO).vbin: prep obj/$(DEMO).asm
 	$(ASSEMBLER) $(ASM_DEBUG_FLAGS) -o obj/$(DEMO).vbin    obj/$(DEMO).asm
 ifneq ($(HAVE_OPTIMIZER),)
-	$(ASSEMBLER) $(ASM_DEBUG_FLAGS) -o obj/$(DEMO)Opt.vbin obj/$(DEMO)Opt.asm
+	-$(ASSEMBLER) $(ASM_DEBUG_FLAGS) -o obj/$(DEMO)Opt.vbin obj/$(DEMO)Opt.asm
 endif
 
 # Process PNG sprite sheet to Vircon texture
@@ -82,7 +82,7 @@ v32: bin/$(DEMO).v32
 bin/$(DEMO).v32: obj/$(DEMO).vbin
 	$(PACKER) $(DEMO).xml    -o bin/$(DEMO).v32
 ifneq ($(HAVE_OPTIMIZER),)
-	$(PACKER) $(DEMO)Opt.xml -o bin/$(DEMO)Opt.v32
+	-$(PACKER) $(DEMO)Opt.xml -o bin/$(DEMO)Opt.v32
 endif
 
 context:
