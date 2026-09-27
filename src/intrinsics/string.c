@@ -369,10 +369,31 @@ bool emit_string_gsub_intrinsic(ASTNode *node, int dest_reg) {
 // ============================================================================
 bool emit_tonumber_intrinsic(ASTNode *node, int dest_reg) {
     ASTNode *arg = node->as.call.args_head;
-    if (!arg || arg->next != NULL) {
+    if (!arg || (arg->next != NULL && arg->next->next != NULL)) {
         compiler_error(ERR_SYNTAX, node->line_number,
-            "tonumber() expects exactly 1 argument (explicit-base form not yet supported)");
+            "tonumber() expects 1 or 2 arguments: tonumber(v [, base])");
         return false;
+    }
+
+    // tonumber(s, base): Lua 5.4's rules (string.s __builtin_tonumber_base).
+    // Arguments pushed in order, so [BP+2] = base, [BP+3] = s.
+    if (arg->next != NULL) {
+        emit_asm("    ;; --- Intrinsic: tonumber(s, base) ---\n");
+        int r = allocate_pinned_register();
+        generate_asm(arg, r);
+        ensure_in_register(r);
+        emit_asm("    PUSH R%d             ; s\n", r);
+        generate_asm(arg->next, r);
+        ensure_in_register(r);
+        emit_asm("    PUSH R%d             ; base\n", r);
+        emit_asm("    CALL __builtin_tonumber_base\n");
+        emit_asm("    IADD SP, 2\n");
+        if (dest_reg != 0) {
+            emit_asm("    MOV R%d, R0         ; number, or nil\n", dest_reg);
+        }
+        unlock_pinned_register(r);
+        runtime_req.needs_strings = true;
+        return true;
     }
 
     emit_asm("    ;; --- Intrinsic: tonumber(value) ---\n");

@@ -898,7 +898,6 @@ decision:
 * TIC-80 `circ`/`circb`/`rectb` draw one GPU quad per pixel: a cart that
   draws many large outlines each frame (witchem_up's title screen) runs
   below full speed
-* `tonumber(s, base)` — the two-argument, explicit-base form
 * A diagnostic (warn/error) for reading, from inside a function, a
   `local` declared in a block lexically outside any function at chunk
   level (see above)

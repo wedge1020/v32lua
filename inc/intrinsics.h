@@ -73,6 +73,7 @@ bool  emit_pico8_foreach_intrinsic  (ASTNode *, int);
 bool  emit_pico8_sfx_intrinsic      (ASTNode *, int);
 bool  emit_pico8_music_intrinsic    (ASTNode *, int);
 bool pico8_fold_numeric_string_args (ASTNode *, const char *);
+bool emit_cart_restart_intrinsic (ASTNode *, int, const char *);
 bool  emit_pico8_sspr_intrinsic     (ASTNode *, int);
 bool  emit_pico8_count_intrinsic    (ASTNode *, int);
 bool  emit_pico8_del_intrinsic      (ASTNode *, int);

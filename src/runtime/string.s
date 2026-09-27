@@ -3359,3 +3359,136 @@ __strmeth_gsub:
     MOV  SP, BP
     POP  BP
     RET
+
+;; ===========================================================================
+;; __builtin_tonumber_base: tonumber(s, base), as Lua 5.4's (b_str2int):
+;; s must be a string and base 2..36; leading/trailing whitespace, one
+;; optional '-', then at least one digit 0-9 / a-z / A-Z below base, and
+;; nothing else ("0x10" in base 16 is nil). Anything else gives nil.
+;;   [BP+2] = base   [BP+3] = s      (base pushed first: argument order)
+;; Returns R0 = the number or nil. Preserves R1-R7.
+;; ===========================================================================
+__builtin_tonumber_base:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
+    PUSH  R7
+
+    ;; --- base: a number, 2..36 ---
+    MOV   R5, [BP+2]
+    MOV   R1, R5
+    AND   R1, NAN_VALUE
+    IEQ   R1, NAN_VALUE
+    JT    R1, __tnb_nil               ; not a number
+    CFI   R5
+    MOV   R1, R5
+    ILT   R1, 2
+    JT    R1, __tnb_nil
+    MOV   R1, R5
+    IGT   R1, 36
+    JT    R1, __tnb_nil
+    MOV   R6, R5
+    CIF   R6                          ; R6 = base as a float
+
+    ;; --- s: a string ---
+    MOV   R0, [BP+3]
+    MOV   R1, R0
+    AND   R1, BOXED_DATA
+    IEQ   R1, BOXED_ROMSTRING
+    JT    R1, __tnb_is_string
+    MOV   R1, R0
+    AND   R1, BOXED_DATA
+    IEQ   R1, BOXED_RAMSTRING
+    JF    R1, __tnb_nil
+    MOV   R1, R0
+    AND   R1, BOXED_PAYLOAD
+    ILT   R1, 4
+    JT    R1, __tnb_nil               ; nil / false / true
+__tnb_is_string:
+    CALL  __unbox_string              ; R0 = char pointer
+
+    CALL  __tnb_skip_space
+    MOV   R3, 0                       ; negative?
+    MOV   R1, [R0]
+    IEQ   R1, 45                      ; '-'
+    JF    R1, __tnb_digits
+    MOV   R3, 1
+    IADD  R0, 1
+__tnb_digits:
+    MOV   R4, 0.0                     ; value
+    MOV   R2, 0                       ; digits seen
+__tnb_loop:
+    MOV   R1, [R0]
+    MOV   R7, R1
+    ISUB  R7, 48                      ; '0'..'9'
+    MOV   R1, R7
+    ILT   R1, 0
+    JT    R1, __tnb_end
+    MOV   R1, R7
+    ILT   R1, 10
+    JT    R1, __tnb_have_digit
+    MOV   R7, [R0]
+    OR    R7, 32                      ; lower-case a letter
+    ISUB  R7, 87                      ; 'a' -> 10
+    MOV   R1, R7
+    ILT   R1, 10
+    JT    R1, __tnb_end
+    MOV   R1, R7
+    IGT   R1, 35
+    JT    R1, __tnb_end
+__tnb_have_digit:
+    MOV   R1, R7
+    IGE   R1, R5                      ; digit >= base: not part of the number
+    JT    R1, __tnb_end
+    FMUL  R4, R6
+    CIF   R7
+    FADD  R4, R7
+    IADD  R2, 1
+    IADD  R0, 1
+    JMP   __tnb_loop
+__tnb_end:
+    JF    R2, __tnb_nil               ; no digits
+    CALL  __tnb_skip_space
+    MOV   R1, [R0]
+    JT    R1, __tnb_nil               ; something else follows
+    JF    R3, __tnb_done
+    FSGN  R4
+__tnb_done:
+    MOV   R0, R4
+    JMP   __tnb_ret
+__tnb_nil:
+    MOV   R0, BOXED_NIL
+__tnb_ret:
+    POP   R7
+    POP   R6
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; skips whitespace (space, \t \n \v \f \r) at R0; clobbers R1
+__tnb_skip_space:
+    MOV   R1, [R0]
+    IEQ   R1, 32
+    JT    R1, __tnb_skip_one
+    MOV   R1, [R0]
+    ISUB  R1, 9
+    ILT   R1, 0
+    JT    R1, __tnb_skip_done
+    MOV   R1, [R0]
+    IGT   R1, 13
+    JT    R1, __tnb_skip_done
+__tnb_skip_one:
+    IADD  R0, 1
+    JMP   __tnb_skip_space
+__tnb_skip_done:
+    RET

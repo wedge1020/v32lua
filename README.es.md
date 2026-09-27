@@ -869,7 +869,6 @@ una decisión de diseño:
   `font`, la función de reasignación de `map()`; el argumento de velocidad
   de `sfx()` y los argumentos tempo/velocidad/sustain de `music()` (ver
   [doc/TIC80.md](doc/TIC80.md#sound))
-* `tonumber(s, base)` — la forma de dos argumentos, con base explícita
 * Un diagnóstico (advertencia/error) para leer, desde dentro de una
   función, una `local` declarada en un bloque léxicamente fuera de
   cualquier función a nivel de chunk (ver arriba)

@@ -185,3 +185,27 @@ __panic_uint_done:
     POP  BP
     RET
 
+
+;; ===========================================================================
+;; __builtin_cart_restart: TIC-80 reset() / PICO-8 run() -- start the cart
+;; over, as the BIOS hands it over: hardware back to its defaults, a black
+;; screen, the next frame, then the cart's first instruction with a fresh
+;; stack. Global/heap/layer state is re-created by the cart's own start-up
+;; code (which already assumes nothing about RAM -- the BIOS leaves it dirty).
+;; Never returns.
+;; ===========================================================================
+__builtin_cart_restart:
+    OUT   GPU_SelectedTexture, -1
+    OUT   GPU_SelectedRegion, 0
+    OUT   SPU_SelectedSound, -1
+    OUT   SPU_SelectedChannel, 0
+    OUT   INP_SelectedGamepad, 0
+    OUT   SPU_Command, SPUCommand_StopAllChannels
+    OUT   GPU_MultiplyColor, 0xFFFFFFFF
+    OUT   GPU_ActiveBlending, GPUBlendingMode_Alpha
+    OUT   GPU_ClearColor, 0xFF000000
+    OUT   GPU_Command, GPUCommand_ClearScreen
+    WAIT
+    MOV   SP, 0x003FFFFF                ; where the BIOS starts the stack
+    MOV   BP, SP
+    JMP   V32_CART_PAGE                 ; the cart's first instruction

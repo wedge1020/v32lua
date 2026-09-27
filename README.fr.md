@@ -887,7 +887,6 @@ attente d'une décision de conception :
   `font`, la fonction de remappage de `map()` ; l'argument de vitesse de
   `sfx()` et les arguments tempo/vitesse/sustain de `music()` (voir
   [doc/TIC80.md](doc/TIC80.md#sound))
-* `tonumber(s, base)` — la forme à deux arguments, avec base explicite
 * Un diagnostic (avertissement/erreur) pour la lecture, depuis
   l'intérieur d'une fonction, d'une `local` déclarée dans un bloc
   lexicalement en dehors de toute fonction au niveau du chunk (voir

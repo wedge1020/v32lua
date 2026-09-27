@@ -94,6 +94,7 @@ before `_init()`; the map and flags are already loaded then.
 | `reload([dest, src, len])`, `cstore(…)` | `reload` copies from the cart's own data (as compiled, before any `poke`/`mset`/`fset`); no arguments restores all of 0x0000–0x42FF. `reload` from another cart file and `cstore` do nothing (with a warning). |
 | `sget(x, y)`, `sset(x, y [, c])` | The sprite sheet in memory. `sset` isn't seen by `spr`/`map`, which draw the sheet as compiled. |
 | `cartdata(id)`, `dget(n)`, `dset(n, v)` | 64 persistent numbers at 0x5E00, saved on the memory card (see [Memory](#memory)). |
+| `run()` | Starts the cart over: hardware defaults (texture -1, region 0, sound -1, channel 0, gamepad 0), all sound stopped, white multiply color, alpha blending, a black screen, then the cart's first instruction on the next frame with a fresh stack. `cartdata` values on the memory card survive it; `run`'s parameter string isn't passed on. |
 | `time()`, `t()` | Seconds since the cart started, counted in PICO-8 frames (1/30 s each, 1/60 s with `_update60`) as PICO-8 does, so it stands still while paused. |
 | `stat(n)`, `printh(s)` | Stubs (`stat` returns 0) — real functions, so `stat` works as a no-op value. |
 | `_ENV[name]` | Reads or writes the global called `name` (only globals the program uses by name exist). The drawing builtins (`rect`, `rectfill`, `line`, `pset`, `circ`, `circfill`, `spr`, `sspr`, `map`, `print`, `pal`, `palt`, `clip`, `fillp`, `camera`, `color`, `cls`) are there too, for carts that call them by name. |

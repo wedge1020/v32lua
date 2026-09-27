@@ -21,6 +21,7 @@
 
 #include "v32lua.h"
 #include <ctype.h>
+#include <strings.h>     // strncasecmp
 
 enum {
     TIC_CHUNK_TILES     = 1,
@@ -227,7 +228,7 @@ char *tic80_cart_to_text (const char *path)
             if (s == NULL || (s != out.s && s[-1] != '\n')) continue;
             s += strlen (tags[t]);
             while (*s == ' ' || *s == '\t') s++;
-            if (strncmp (s, "lua", 3) != 0 || isalnum ((unsigned char) s[3])) {
+            if (strncasecmp (s, "lua", 3) != 0 || isalnum ((unsigned char) s[3])) {   // "Lua" too
                 char lang_name[32] = { 0 };
                 sscanf (s, "%31s", lang_name);
                 compiler_error (ERR_SEMANTIC, -1,

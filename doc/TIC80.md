@@ -141,6 +141,20 @@ floored and masked to 0–31, and `btnp` is true on the press frame and, when
 once it has been down `hold` frames, every `period` frames (`period` 0: every
 frame). There is no default autorepeat.
 
+## reset()
+
+`reset()` starts the cart over, as TIC-80 does. The hardware goes back to
+its defaults:
+- texture -1, region 0; sound -1, channel 0; gamepad 0;
+- all sound stopped;
+- multiply color white; alpha blending;
+- the screen cleared to black.
+
+After the next frame, the cart restarts from its first instruction with a
+fresh stack. Globals, the heap and the layer's state are re-created by the
+cart's own start-up code; `pmem` values saved on the memory card survive it (without a card they
+live in RAM and start over).
+
 ## Pause
 
 Start (gamepad 1) pauses: `TIC()` stops, every SPU channel pauses, one dimmed

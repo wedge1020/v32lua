@@ -179,6 +179,23 @@ static void pico8_spread_vararg_args (ASTNode *node, const char *func_name)
     if (prev) prev->next = head; else node->as.call.args_head = head;
 }
 
+// TIC-80 reset() / PICO-8 run([param]): hardware back to its defaults, a
+// black frame, then the cart from its first instruction with a fresh stack
+// (exec.s __builtin_cart_restart). Arguments are evaluated for their side
+// effects (run()'s parameter string isn't passed on).
+bool emit_cart_restart_intrinsic (ASTNode *node, int dest_reg, const char *name)
+{
+    (void) dest_reg;
+    emit_asm ("    ;; --- %s(): restart the cart ---\n", name);
+    for (ASTNode *a = node->as.call.args_head; a != NULL; a = a->next) {
+        int r = allocate_register ();
+        generate_asm (a, r);
+        unlock_register (r);
+    }
+    emit_asm ("    JMP __builtin_cart_restart ; never returns\n");
+    return true;
+}
+
 // Parses a whole string as a PICO-8 number literal (decimal, 0x hex,
 // optional sign). Returns false if anything but the number is present.
 static bool pico8_parse_number_string (const char *str, double *out)
@@ -687,6 +704,12 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
             return (emit_pico8_cos_intrinsic (node, dest_reg));
         }
 
+        // run([param]) -- start the cart over (exec.s __builtin_cart_restart)
+        if (strcmp (func_name, "run") == 0)
+        {
+            return (emit_cart_restart_intrinsic (node, dest_reg, "run"));
+        }
+
         // __p8_split1(s, sep, conv) -- the prelude split()'s native fast path
         if (strcmp (func_name, "__p8_split1") == 0)
         {
@@ -986,6 +1009,12 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         if (strcmp (func_name, "time") == 0)
         {
             return (emit_tic80_time_intrinsic (node, dest_reg));
+        }
+
+        // reset() -- start the cart over (exec.s __builtin_cart_restart)
+        if (strcmp (func_name, "reset") == 0)
+        {
+            return (emit_cart_restart_intrinsic (node, dest_reg, "reset"));
         }
 
         // exit() -- request the cart stop after the current frame
