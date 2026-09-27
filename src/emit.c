@@ -608,6 +608,7 @@ int   emit_variable_map (void)
         fprintf (out(), "%%define  PICO8_TICKS              0x%.8X\n", (next_ram_address + 11));
         fprintf (out(), "%%define  PICO8_RAM_PTR            0x%.8X\n", (next_ram_address + 12));
         fprintf (out(), "%%define  PICO8_CARTDATA           0x%.8X\n", (next_ram_address + 13));
+        fprintf (out(), "%%define  PICO8_MENU_HOOK          0x%.8X\n", (next_ram_address + 14));
         // SFX sound ids start here (-1: the cart plays no synthesized sound)
         fprintf (out(), "%%define  PICO8_SFX_BASE           %d\n", pico8_sfx_base_id);
         fprintf (out(), "%%define  PICO8_AUDIO_RATE         %d\n", synth_audio_rate);
@@ -616,8 +617,9 @@ int   emit_variable_map (void)
         // cycle, last draw's cost in cycles, music sequencer state (current
         // pattern, frame it ends on), next auto sfx channel, Start held at
         // the last pause check, PICO-8 frames since start (time()), the
-        // emulated 64 KB RAM (0 until first used), cartdata() state
-        next_ram_address    = next_ram_address + 14;
+        // emulated 64 KB RAM (0 until first used), cartdata() state, the
+        // pause menu (menuitem(): a boxed Lua function, 0 = none)
+        next_ram_address    = next_ram_address + 15;
         fprintf (out(), "%%define  PICO8_FLAGS_RAM          0x%.8X\n", next_ram_address);
         next_ram_address    = next_ram_address + 256;
         fprintf (out(), "%%define  PICO8_MAP_RAM            0x%.8X\n", next_ram_address);
@@ -642,6 +644,9 @@ int   emit_variable_map (void)
         fprintf (out(), "%%define  VIRCON32_MUSIC_CHANNEL_MASK 0x%.8X\n", vircon32_music_channel_mask_base);
         fprintf (out(), "%%define  VIRCON32_SFX_CHANNEL_MASK   0x%.8X\n", vircon32_sfx_channel_mask_base);
         fprintf (out(), "%%define  RET_COUNT                0x%.8X\n", ret_count_base);
+        fprintf (out(), "%%define  META_CALL_DEPTH          0x%.8X\n", meta_call_base);
+        fprintf (out(), "%%define  META_CALL_STACK          0x%.8X\n", meta_call_base + 1);
+        fprintf (out(), "%%define  META_CALL_STACK_SIZE     %d\n", META_CALL_STACK_SIZE);
 
         // Fixed hardware address range for the memory card -- word-addressed
         // like the rest of this VM's memory, entirely outside the compiler-

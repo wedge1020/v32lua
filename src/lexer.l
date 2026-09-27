@@ -301,7 +301,15 @@ static int compound_assign_token (NodeType op)
 "+"                     { return '+'; }
 "-"                     { return '-'; }
 "*"                     { return '*'; }
-"//"                    { return TOKEN_FLOORDIV; }
+"//".*                  {
+                            /* PICO-8: `//` starts a line comment (PICO-8 has
+                               no floor-division operator; `\` divides). Lua:
+                               floor division -- give the rest of the line back. */
+                            if (!runtime_req.needs_pico8) {
+                                yyless (2);
+                                return TOKEN_FLOORDIV;
+                            }
+                        }
 "/"                     { return '/'; }
 "%"                     { return '%'; }
 "("                     { return '('; }

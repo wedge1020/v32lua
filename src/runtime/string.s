@@ -651,6 +651,15 @@ __tostring_passthrough:
     RET
 
 __tostring_table:
+    MOV   R0, R1                 ; a metatable's __tostring answers first
+    MOV   R1, __mm_str_tostring
+    OR    R1, BOXED_ROMSTRING
+    CALL  __table_unary_meta
+    JF    R1, __tostring_table_plain
+    MOV   SP, BP
+    POP   BP
+    RET
+__tostring_table_plain:
     MOV   R0, __const_str_table  ; Load result directly
     OR    R0, BOXED_ROMSTRING
     MOV   SP, BP                 ; Restore stack

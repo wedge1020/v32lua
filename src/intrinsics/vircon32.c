@@ -44,6 +44,8 @@ int  vircon32_sfx_channel_mask_base    = -1;
 // One word: how many values the last compiled Lua function returned (see
 // node_return() and __builtin_exec). Always allocated, like the above.
 int  ret_count_base                    = -1;
+// __call trampolines (exec.s): pending return addresses, a small stack.
+int  meta_call_base                    = -1;
 
 // ============================================================================
 // spr(region_id, x, y[, scale_x][, scale_y][, angle_deg][, color_mult][, blend_mode])

@@ -1248,6 +1248,19 @@ bool emit_pico8_rect_intrinsic (ASTNode *node, int dest_reg)
 }
 
 // atan2(dx, dy) -- PICO-8's: turns, screen space, atan2(0, 0) = 0.25
+bool emit_pico8_menu_hook_intrinsic (ASTNode *node, int dest_reg)
+{
+    static const char *names[1] = { "fn" };
+    return pico8_simple_call (node, dest_reg, 1, names, 1, "__builtin_pico8_menu_hook",
+                              "__p8_menu_hook(fn)");
+}
+
+bool emit_pico8_start_pressed_intrinsic (ASTNode *node, int dest_reg)
+{
+    return pico8_simple_call (node, dest_reg, 0, NULL, 0, "__builtin_pico8_start_pressed",
+                              "__p8_start_pressed()");
+}
+
 bool emit_pico8_split1_intrinsic (ASTNode *node, int dest_reg)
 {
     static const char *names[3] = { "s", "sep", "conv" };

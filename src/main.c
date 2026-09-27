@@ -364,6 +364,8 @@ int  main (int  argc, char** argv)
             expanded_source = pico8_append_prelude (expanded_source);
         }
 
+        g_uses_metatables = strstr (expanded_source, "setmetatable") != NULL;
+
         yyin = tmpfile ();
         if (yyin == NULL) {
             compiler_error (ERR_INTERNAL, -1,
@@ -506,7 +508,7 @@ int  main (int  argc, char** argv)
     }
 
 
-    // ALWAYS allocated (48 words), regardless of runtime_req.needs_vircon32.
+    // ALWAYS allocated (49 + META_CALL_STACK_SIZE words), regardless of runtime_req.needs_vircon32.
     // That flag is not final here: "--#api pico8/tic80" clears it, and the
     // sound/memcard/tilemap intrinsics set it again DURING codegen -- long
     // after this allocation. PICO-8 sfx()/music() did exactly that, and every
@@ -533,6 +535,8 @@ int  main (int  argc, char** argv)
         next_ram_address                  = next_ram_address + 1;
         ret_count_base                    = next_ram_address;   // RET_COUNT
         next_ram_address                  = next_ram_address + 1;
+        meta_call_base                    = next_ram_address;   // META_CALL_DEPTH
+        next_ram_address                  = next_ram_address + 1 + META_CALL_STACK_SIZE;
     }
     
     // Perform full symbol pre-pass before code generation

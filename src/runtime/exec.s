@@ -12,8 +12,57 @@ __builtin_exec:
     IEQ R1, BOXED_FUNCTION          ; Is this tagged as a boxed function pointer?
     JT  R1, __exec_valid            ; If valid, jump to unboxing and execution
 
-    ; 2. Tag validation failed! We attempted to call nil, a number, or a table.
+    ; 2. Not a function: a table whose metatable has __call is callable --
+    ;    __call(t, ...). Anything else is the runtime error.
+    MOV R1, R0
+    AND R1, BOXED_DATA
+    IEQ R1, BOXED_TABLE
+    JF  R1, __runtime_error_not_callable
+    PUSH R0
+    MOV R1, __mm_str_call
+    OR  R1, BOXED_ROMSTRING
+    CALL __table_metamethod          ; R0 = __call, or nil
+    MOV R1, R0
+    AND R1, BOXED_DATA
+    IEQ R1, BOXED_FUNCTION
+    JF  R1, __exec_call_not_callable
+    ;; The table becomes the first argument: it takes the return address's
+    ;; slot (right above the caller's arguments); the return address goes
+    ;; on a small side stack and the callee returns through
+    ;; __exec_call_return, which drops the table and goes back -- so the
+    ;; caller's own argument clean-up stays balanced.
+    MOV R2, R0                       ; R2 = __call
+    POP R0                           ; R0 = the table
+    POP R1                           ; R1 = caller's return address
+    PUSH R0                          ; the table: argument 1
+    MOV R0, [META_CALL_DEPTH]
+    MOV R3, R0
+    IGE R3, META_CALL_STACK_SIZE
+    JT  R3, __runtime_error_not_callable   ; nested too deep
+    IADD R0, META_CALL_STACK
+    MOV [R0], R1
+    MOV R0, [META_CALL_DEPTH]
+    IADD R0, 1
+    MOV [META_CALL_DEPTH], R0
+    MOV R1, __exec_call_return
+    PUSH R1
+    IADD R13, 1                      ; one more argument (variadic ABI)
+    MOV R0, R2
+    JMP __exec_valid
+__exec_call_not_callable:
+    POP R0
     JMP __runtime_error_not_callable
+
+;; A __call handler returns here: SP -> the table argument. Keeps R0, R2,
+;; R3 (the return values).
+__exec_call_return:
+    IADD SP, 1
+    MOV R1, [META_CALL_DEPTH]
+    ISUB R1, 1
+    MOV [META_CALL_DEPTH], R1
+    IADD R1, META_CALL_STACK
+    MOV R1, [R1]
+    JMP R1
 
 __exec_valid:
     ;; One return value unless the callee says otherwise: a compiled Lua

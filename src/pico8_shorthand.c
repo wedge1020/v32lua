@@ -118,6 +118,10 @@ static const char *match_paren (const char *p)
             else while (*p && *p != '\n') p++;
             continue;
         }
+        if (*p == '/' && p[1] == '/') {                 // PICO-8 line comment
+            while (*p && *p != '\n') p++;
+            continue;
+        }
         if (*p == '"' || *p == '\'') { p = skip_quoted (p); continue; }
         if ((lv = long_bracket_level (p)) >= 0) { p = skip_long (p, lv); continue; }
         if (*p == '(') depth++;
@@ -140,6 +144,7 @@ static bool body_follows (const char *p)
     while (*p == ' ' || *p == '\t') p++;
     if (*p == '\0' || *p == '\n' || *p == '\r') return false;
     if (p[0] == '-' && p[1] == '-') return false;             // comment: body on later lines
+    if (p[0] == '/' && p[1] == '/') return false;
     if (is_name_start (*p)) {
         static const char *cont[] = { "then", "do", "and", "or", NULL };
         for (int i = 0; cont[i]; i++) if (word_at (p, cont[i])) return false;
@@ -188,6 +193,11 @@ char *pico8_expand_shorthand (const char *src)
             } else {
                 while (*p && *p != '\n') p++;
             }
+            continue;
+        }
+        if (c == '/' && p[1] == '/') {                  // PICO-8 line comment
+            if (eol_insert == (size_t) -1) eol_insert = (size_t) (p - src);
+            while (*p && *p != '\n') p++;
             continue;
         }
         if (c == '"' || c == '\'') { p = skip_quoted (p); continue; }

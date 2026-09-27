@@ -769,6 +769,7 @@ void generate_global_setup (ASTNode *node)
         emit_asm ("MOV R1, 0 ; no channels claimed by either namespace yet\n");
         emit_asm ("MOV [VIRCON32_MUSIC_CHANNEL_MASK], R1\n");
         emit_asm ("MOV [VIRCON32_SFX_CHANNEL_MASK], R1\n");
+        emit_asm ("MOV [META_CALL_DEPTH], R1 ; no __call trampolines pending\n");
     }
 
     // NEW: Explicitly nil-initialize every plain (non-function) global.

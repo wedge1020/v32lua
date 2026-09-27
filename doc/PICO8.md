@@ -88,7 +88,7 @@ before `_init()`; the map and flags are already loaded then.
 | `split(s [, sep [, convert]])`, `unpack(t [, i])` | `unpack` returns up to 8 values. `split` with a one-character separator is one native pass (a 2 KB string used to take ~7M cycles). |
 | `deli(t [, i])`, `assert(v [, msg])` | A failed `assert` shows "assertion failed" and the message, and stops. |
 | `oval`, `ovalfill` | The ellipse inscribed in the box, drawn as one span per row. |
-| `menuitem(i [, label, fn])` | Recorded; the pause screen doesn't list custom items yet. |
+| `menuitem(i [, label, fn])` | Adds an entry to the pause menu (see [Pause](#pause)). |
 | `tostr(v [, hex])`, `tonum(s)`, `chr(n)`, `ord(s [, i])` | |
 | `peek`, `peek2`, `peek4`, `poke`, `poke2`, `poke4`, `memcpy`, `memset`, `@a %a $a` | On an emulated 64 KB RAM in PICO-8's layout (see [Memory](#memory)). `peek(a, n)` returns n values (up to 8); `poke(a, v1, v2, …)` writes several. |
 | `reload([dest, src, len])`, `cstore(…)` | `reload` copies from the cart's own data (as compiled, before any `poke`/`mset`/`fset`); no arguments restores all of 0x0000–0x42FF. `reload` from another cart file and `cstore` do nothing (with a warning). |
@@ -108,6 +108,17 @@ code stops, the SPU channels pause, the last frame stays on screen darkened
 with "- PAUSED -" over it, and Start again resumes. Music picks up where it
 stopped (the sequencer's clock is moved forward by the time spent paused).
 `flip()` loops check for the pause too.
+
+A cart that registers `menuitem()` entries gets PICO-8's pause menu
+instead of "- PAUSED -": "continue", the cart's items (slots 1–5), then
+"reset cart".
+* Up/down choose; O or X picks; Start closes the menu.
+* Picking an item calls its callback with 32. The menu stays open only if
+  the callback returns true.
+* Left/right on an item call its callback with 1 / 2, and the menu stays
+  open.
+* "reset cart" restarts the cart, as `run()` does.
+* The camera and pen color are restored when the menu closes.
 
 ## Memory
 
@@ -177,6 +188,17 @@ Glyph characters in strings — a `.p8` stores them as Unicode, e.g. 🅾️ ❎
 `#"🅾️" == 1`, `ord("❎") == 151`, `sub()` sees one character. Strings also
 take Lua's `\ddd` and `\xHH` escapes. (Kana, 154–253, stay UTF-8.)
 
+`//` starts a line comment, as in PICO-8 (outside PICO-8 mode it's Lua's
+floor division).
+
+Number literals take PICO-8's 16.16 fixed-point value, the nearest
+multiple of 1/65536: `0.1` is `0x0.199a` and `0.4` is `0x0.6666`. So is a
+number `split()` reads from a string. Numbers are still floats, but these
+values add and subtract exactly. For example, `v += 0.4` four times, then
+`v -= 0.4` four times, gives exactly 0, as in PICO-8. With plain float
+literals it gave 6e-8, and froggo's player kept creeping one pixel at a
+time. Products and quotients aren't rounded to the 16.16 grid.
+
 Bitwise operators work on PICO-8's 16.16 fixed-point representation, as in
 PICO-8: `& | ~` (or `^^`) `<< >> >>> <<> >><` and unary `~`, with the
 compound forms `&= |= ^^= <<= >>= >>>= <<>= >><=`. `>>` is arithmetic,
@@ -238,6 +260,14 @@ about 2.3× faster than before. With `--fast-circles` (or `--#fast-circles`)
 a filled circle larger than radius 31 is the radius-31 disc scaled up: one
 draw, with about 1.5% of its edge pixels differing from PICO-8's; outlines
 stay exact (a scaled ring would get thicker).
+
+Circles entirely off the 128×128 canvas aren't drawn, and one crossing an
+edge is drawn trimmed to it. The Vircon32 GPU charges every draw its
+whole size against a per-frame budget (9 screens), on screen or not, and
+silently skips every draw after the budget runs out. froggo's circle wipe
+(270 overlapping discs, many off the canvas) cost 21 screens and lost
+13,562 draws; trimmed, it costs 7.8. Trims at the left and top edges come
+in steps of 4 pixels (11 screen pixels), so the pixels keep their grid.
 
 ## Performance
 

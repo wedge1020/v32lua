@@ -29,6 +29,7 @@ extern int              vircon32_btn_prev_state_base;
 extern int              vircon32_music_channel_mask_base;
 extern int              vircon32_sfx_channel_mask_base;
 extern int              ret_count_base;
+extern int              meta_call_base;
 
 // Returns 1 if the node was an intrinsic and assembly was emitted; 0 otherwise.
 //
@@ -67,6 +68,8 @@ bool  emit_pico8_sqrt_intrinsic     (ASTNode *, int);
 bool  emit_pico8_flip_intrinsic     (ASTNode *, int);
 bool  emit_pico8_sgn_intrinsic      (ASTNode *, int);
 bool  emit_pico8_split1_intrinsic    (ASTNode *, int);
+bool  emit_pico8_menu_hook_intrinsic (ASTNode *, int);
+bool  emit_pico8_start_pressed_intrinsic (ASTNode *, int);
 bool  emit_pico8_atan2_intrinsic    (ASTNode *, int);
 bool  emit_pico8_mid_intrinsic      (ASTNode *, int);
 bool  emit_pico8_foreach_intrinsic  (ASTNode *, int);
@@ -74,6 +77,8 @@ bool  emit_pico8_sfx_intrinsic      (ASTNode *, int);
 bool  emit_pico8_music_intrinsic    (ASTNode *, int);
 bool pico8_fold_numeric_string_args (ASTNode *, const char *);
 bool emit_cart_restart_intrinsic (ASTNode *, int, const char *);
+double pico8_fix_literal (double);
+bool emit_runtime_call_intrinsic (ASTNode *, int, int, const char *);
 bool  emit_pico8_sspr_intrinsic     (ASTNode *, int);
 bool  emit_pico8_count_intrinsic    (ASTNode *, int);
 bool  emit_pico8_del_intrinsic      (ASTNode *, int);

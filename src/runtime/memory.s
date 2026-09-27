@@ -181,6 +181,15 @@ __builtin_len_string:
     JMP  __builtin_len_done
 
 __builtin_len_table:
+    MOV  R1, R0
+    AND  R1, BOXED_PAYLOAD
+    MOV  R1, [R1+4]            ; a metatable? its __len answers first
+    JF   R1, __builtin_len_raw
+    MOV  R1, __mm_str_len
+    OR   R1, BOXED_ROMSTRING
+    CALL __table_unary_meta    ; R1 = 1 when it did (R0 = its result)
+    JT   R1, __builtin_len_done
+__builtin_len_raw:
     PUSH R0                    ; need to repush the boxed pointer
     CALL __builtin_table_len   ; Table length handler
     ; R0 already contains float result from __builtin_table_len

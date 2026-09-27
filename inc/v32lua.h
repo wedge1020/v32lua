@@ -28,6 +28,7 @@
 #include "shapes.h"
 
 #define  VERSION             "20260927-dev"
+#define  META_CALL_STACK_SIZE  32   // nested calls of callable tables (__call)
 #define  AUTHOR              "Matthew Haas"
 #define  URL                 "https://github.com/wedge1020/v32lua"
 

@@ -97,7 +97,7 @@ __builtin_table_new:
     PUSH  R3
     PUSH  R6
 
-    MOV  R0, 4
+    MOV  R0, 5
     PUSH R0
     CALL __malloc
     IADD SP, 1
@@ -118,6 +118,7 @@ __builtin_table_new:
     MOV  [R0+1], R1          ; Word 1: length = 0
     MOV  [R0+2], R1          ; Word 2: array pointer = null
     MOV  [R0+3], R1          ; Word 3: hash pointer = null
+    MOV  [R0+4], R1          ; Word 4: metatable (boxed table) = none
 
     OR   R0, BOXED_TABLE
 
@@ -176,6 +177,9 @@ __builtin_table_get:
     IADD R5, R3
     ISUB R5, 1
     MOV  R0, [R5]
+    MOV  R4, R0
+    IEQ  R4, BOXED_NIL       ; a hole: the metatable's __index may answer
+    JT   R4, __builtin_table_get_not_found
     JMP  __builtin_table_get_done
 
 __builtin_table_get_hash_num:
@@ -194,6 +198,9 @@ __builtin_table_get_hash:
     IEQ  R4, 0
     JT   R4, __builtin_table_get_not_found
     MOV  R0, [R0+1]
+    MOV  R4, R0
+    IEQ  R4, BOXED_NIL       ; a deleted key: as absent
+    JT   R4, __builtin_table_get_not_found
     JMP  __builtin_table_get_done
 
 ;; --- Indexing a non-table: Lua strings index the string library --------
@@ -224,6 +231,9 @@ __table_get_string_method:
     JMP  __builtin_table_get_done
 
 __builtin_table_get_not_found:
+    MOV  R0, R1              ; absent: nil, or the metatable's __index
+    MOV  R0, [R0+4]          ; (R1 = the header here)
+    JT   R0, __builtin_table_get_meta
     MOV  R0, BOXED_NIL
 
 __builtin_table_get_done:
@@ -235,6 +245,11 @@ __builtin_table_get_done:
     MOV  SP, BP
     POP  BP
     RET
+__builtin_table_get_meta:
+    MOV  R0, [BP+3]
+    MOV  R1, [BP+2]
+    CALL __table_index_miss
+    JMP  __builtin_table_get_done
 
 ;; ---------------------------------------------------------------------------
 ;; __builtin_table_getk(t, k): t[k] for a string-LITERAL k (the compiler
@@ -315,8 +330,14 @@ __table_getk_not_rom:
     JMP  __table_getk_slow
 __table_getk_hit:
     MOV  R0, [R0+3]
-    JMP  __table_getk_done
+    MOV  R5, R0
+    IEQ  R5, BOXED_NIL       ; a deleted key: as absent
+    JF   R5, __table_getk_done
 __table_getk_nil:
+    MOV  R0, [SP+7]          ; absent: nil, or the metatable's __index
+    AND  R0, BOXED_PAYLOAD
+    MOV  R0, [R0+4]
+    JT   R0, __table_getk_meta
     MOV  R0, BOXED_NIL
 __table_getk_done:
     POP  R5
@@ -325,6 +346,11 @@ __table_getk_done:
     POP  R2
     POP  R1
     RET
+__table_getk_meta:
+    MOV  R0, [SP+7]
+    MOV  R1, [SP+6]
+    CALL __table_index_miss
+    JMP  __table_getk_done
 __table_getk_slow:
     MOV  R0, [SP+7]
     PUSH R0
@@ -368,8 +394,9 @@ __table_rawget_int_slow:
 ;; ===========================================================================
 ;; TABLE STORAGE (2026-09 rewrite)
 ;; ---------------------------------------------------------------------------
-;; Header (4 words): [0] array capacity (low 16 bits), [1] length (the
-;; border # reports), [2] array data pointer, [3] hash block pointer.
+;; Header (5 words): [0] array capacity (low 16 bits), [1] length (the
+;; border # reports), [2] array data pointer, [3] hash block pointer,
+;; [4] metatable (a boxed table, 0 = none -- see METATABLES below).
 ;;
 ;; ARRAY PART: keys 1..capacity live in a plain word array (nil = absent):
 ;; O(1) reads/writes. It grows by doubling (min 8) when a key lands at most
@@ -775,6 +802,11 @@ __builtin_table_set:
     IEQ  R4, BOXED_NIL
     JT   R4, __builtin_table_set_done
 
+    ;; a metatable: __newindex may take a key the table doesn't have
+    MOV  R4, [R1+4]
+    JT   R4, __builtin_table_set_meta
+__builtin_table_set_raw:
+
     ;; --- whole-number key >= 1? ---
     MOV  R4, R2
     AND  R4, NAN_VALUE
@@ -890,6 +922,12 @@ __builtin_table_set_hash_num:
     MOV  R2, 0
 __builtin_table_set_hash:
     CALL __table_hash_store
+
+    JMP  __builtin_table_set_done
+__builtin_table_set_meta:
+    MOV  R0, [BP+4]
+    CALL __table_newindex    ; R0 = 1 when __newindex took it
+    JF   R0, __builtin_table_set_raw
 
 __builtin_table_set_done:
     POP  R8
@@ -2435,3 +2473,395 @@ __unbox_table_ok:
     AND  R0, BOXED_PAYLOAD
     RET
 
+
+;; ===========================================================================
+;; METATABLES. A table's header word 4 holds its metatable (a boxed table)
+;; or 0. Supported: __index and __newindex (a table or a function),
+;; __call (exec.s), __tostring (string.s), __len (memory.s), __metatable
+;; (getmetatable). Not the arithmetic / comparison / concatenation events:
+;; operators compile to bare float instructions, and checking every one of
+;; them for a table would slow all arithmetic down.
+;;
+;; Everything here sits on MISS paths only: a key the table has is read and
+;; written exactly as before; the metatable is consulted when a read finds
+;; nothing (not found, a nil array slot, a deleted key) or a write adds a
+;; key the table doesn't have -- as in Lua. (The inline fast paths the
+;; compiler emits for t.k / t[i] return what the table holds without a
+;; call; they only differ from Lua for a key that holds nil after being
+;; set to nil inside the array part, which reads nil instead of asking
+;; __index.)
+;; ===========================================================================
+
+__mm_str_index:
+    string "__index"
+__mm_str_newindex:
+    string "__newindex"
+__mm_str_call:
+    string "__call"
+__mm_str_tostring:
+    string "__tostring"
+__mm_str_len:
+    string "__len"
+__mm_str_metatable:
+    string "__metatable"
+
+;; __table_rawget_rk (internal): R0 = boxed table, R1 = key -> R0 = t[k]
+;; without its metatable. Preserves R1-R13.
+__table_rawget_rk:
+    PUSH R2
+    PUSH R3
+    MOV  R2, R0
+    AND  R2, BOXED_PAYLOAD
+    MOV  R3, [R2+4]
+    PUSH R3                  ; the metatable, set aside for the raw read
+    MOV  R3, 0
+    MOV  [R2+4], R3
+    PUSH R2
+    PUSH R0
+    PUSH R1
+    CALL __builtin_table_get
+    IADD SP, 2
+    POP  R2
+    POP  R3
+    MOV  [R2+4], R3
+    POP  R3
+    POP  R2
+    RET
+
+;; __table_metamethod (internal): R0 = boxed table, R1 = event name (boxed
+;; ROM string) -> R0 = the table's metatable's handler, or nil.
+;; Preserves R1-R13.
+__table_metamethod:
+    PUSH R2
+    MOV  R2, R0
+    AND  R2, BOXED_PAYLOAD
+    MOV  R0, [R2+4]
+    JF   R0, __table_metamethod_none
+    CALL __table_rawget_rk
+    POP  R2
+    RET
+__table_metamethod_none:
+    MOV  R0, BOXED_NIL
+    POP  R2
+    RET
+
+;; __table_call_handler (internal): calls the Lua function R0 with R1
+;; arguments, pushed by the caller before the CALL (last argument first, so
+;; the first one sits right above the return address). R1-R13 are saved
+;; and restored around the call (a Lua function may use them all); the
+;; caller pops its arguments afterwards. -> R0 = the first result.
+__table_call_handler:
+    PUSH BP
+    MOV  BP, SP              ; [BP+1] return address, [BP+2 ..] arguments
+    PUSH R1
+    PUSH R2
+    PUSH R3
+    PUSH R4
+    PUSH R5
+    PUSH R6
+    PUSH R7
+    PUSH R8
+    PUSH R9
+    PUSH R10
+    PUSH R11
+    PUSH R12
+    PUSH R13
+    MOV  R3, R1              ; push them again above the saved registers
+__table_call_handler_copy:
+    JF   R3, __table_call_handler_go
+    ISUB R3, 1
+    MOV  R4, BP
+    IADD R4, 2
+    IADD R4, R3
+    MOV  R4, [R4]
+    PUSH R4
+    JMP  __table_call_handler_copy
+__table_call_handler_go:
+    MOV  R13, R1             ; argument count (variadic ABI)
+    CALL __builtin_exec
+    MOV  SP, BP
+    ISUB SP, 13
+    POP  R13
+    POP  R12
+    POP  R11
+    POP  R10
+    POP  R9
+    POP  R8
+    POP  R7
+    POP  R6
+    POP  R5
+    POP  R4
+    POP  R3
+    POP  R2
+    POP  R1
+    POP  BP
+    RET
+
+;; __table_index_miss (internal): R0 = boxed table, R1 = key, absent from
+;; it -> R0 = nil, or what the metatable's __index gives: __index is a
+;; table -> that table's [key] (its own metatable included, so chains
+;; work), a function -> __index(t, key). Preserves R1-R13.
+__table_index_miss:
+    PUSH R2
+    PUSH R3
+    MOV  R2, R0
+    AND  R2, BOXED_PAYLOAD
+    MOV  R2, [R2+4]
+    JF   R2, __table_index_miss_nil      ; no metatable: nil (the usual case)
+    MOV  R3, R0                          ; R3 = the table
+    PUSH R1
+    MOV  R1, __mm_str_index
+    OR   R1, BOXED_ROMSTRING
+    CALL __table_metamethod              ; R0 = __index
+    POP  R1
+    MOV  R2, R0
+    IEQ  R2, BOXED_NIL
+    JT   R2, __table_index_miss_done
+    MOV  R2, R0
+    AND  R2, BOXED_DATA
+    IEQ  R2, BOXED_TABLE
+    JF   R2, __table_index_miss_fn
+    PUSH R0
+    PUSH R1
+    CALL __builtin_table_get             ; __index[key]
+    IADD SP, 2
+    JMP  __table_index_miss_done
+__table_index_miss_fn:
+    PUSH R1                              ; (saved)
+    PUSH R1                              ; __index(t, key): key ...
+    PUSH R3                              ; ... then t, the first argument
+    MOV  R1, 2
+    CALL __table_call_handler
+    IADD SP, 2
+    POP  R1
+    JMP  __table_index_miss_done
+__table_index_miss_nil:
+    MOV  R0, BOXED_NIL
+__table_index_miss_done:
+    POP  R3
+    POP  R2
+    RET
+
+;; __table_newindex (internal): R0 = boxed table, R2 = key, R3 = value, the
+;; table having a metatable -> R0 = 1 if its __newindex took the store (the
+;; key is absent from the table and __newindex is set: a table -> stored
+;; there, with its own metatable; a function -> __newindex(t, key, value)),
+;; 0 for an ordinary store. Preserves R1-R13.
+__table_newindex:
+    PUSH R1
+    PUSH R4
+    MOV  R4, R0                          ; R4 = the table
+    MOV  R1, R2
+    CALL __table_rawget_rk
+    MOV  R1, R0
+    IEQ  R1, BOXED_NIL
+    JF   R1, __table_newindex_no         ; present: an ordinary store
+    MOV  R0, R4
+    MOV  R1, __mm_str_newindex
+    OR   R1, BOXED_ROMSTRING
+    CALL __table_metamethod
+    MOV  R1, R0
+    IEQ  R1, BOXED_NIL
+    JT   R1, __table_newindex_no
+    MOV  R1, R0
+    AND  R1, BOXED_DATA
+    IEQ  R1, BOXED_TABLE
+    JF   R1, __table_newindex_fn
+    PUSH R0                              ; __newindex[key] = value
+    PUSH R2
+    PUSH R3
+    CALL __builtin_table_set
+    IADD SP, 3
+    JMP  __table_newindex_yes
+__table_newindex_fn:
+    PUSH R3                              ; __newindex(t, key, value)
+    PUSH R2
+    PUSH R4
+    MOV  R1, 3
+    CALL __table_call_handler
+    IADD SP, 3
+__table_newindex_yes:
+    MOV  R0, 1
+    POP  R4
+    POP  R1
+    RET
+__table_newindex_no:
+    MOV  R0, 0
+    POP  R4
+    POP  R1
+    RET
+
+;; __table_unary_meta (internal): R0 = a value, R1 = event name -> if R0 is
+;; a table whose metatable has a function for the event: R0 = handler(t),
+;; R1 = 1; else R1 = 0 and R0 unchanged. Preserves R2-R13.
+__table_unary_meta:
+    PUSH R2
+    MOV  R2, R0
+    AND  R2, BOXED_DATA
+    IEQ  R2, BOXED_TABLE
+    JF   R2, __table_unary_meta_no
+    MOV  R2, R0
+    AND  R2, BOXED_PAYLOAD
+    MOV  R2, [R2+4]
+    JF   R2, __table_unary_meta_no
+    MOV  R2, R0                          ; the table
+    CALL __table_metamethod
+    MOV  R1, R0
+    AND  R1, BOXED_DATA
+    IEQ  R1, BOXED_FUNCTION
+    JF   R1, __table_unary_meta_restore  ; (a closure has the same tag)
+    PUSH R2
+    MOV  R1, 1
+    CALL __table_call_handler
+    IADD SP, 1
+    MOV  R1, 1
+    POP  R2
+    RET
+__table_unary_meta_restore:
+    MOV  R0, R2
+__table_unary_meta_no:
+    MOV  R1, 0
+    POP  R2
+    RET
+
+;; ---------------------------------------------------------------------------
+;; setmetatable(t, mt) -> t    getmetatable(v) -> mt (or its __metatable)
+;; rawget(t, k)  rawset(t, k, v) -> t  rawlen(v)  rawequal(a, b)
+;; Arguments pushed in order: the last one at [BP+2]. Preserve R1-R13.
+;; ---------------------------------------------------------------------------
+__builtin_setmetatable:              ; [BP+3] = t, [BP+2] = mt
+    PUSH BP
+    MOV  BP, SP
+    PUSH R1
+    PUSH R2
+    MOV  R0, [BP+3]
+    MOV  R1, R0
+    AND  R1, BOXED_DATA
+    IEQ  R1, BOXED_TABLE
+    JF   R1, __builtin_setmetatable_done ; not a table: nothing to set
+    MOV  R1, R0
+    AND  R1, BOXED_PAYLOAD
+    MOV  R2, [BP+2]
+    AND  R2, BOXED_DATA
+    IEQ  R2, BOXED_TABLE
+    JF   R2, __builtin_setmetatable_set  ; nil (or anything else): removed
+    MOV  R2, [BP+2]
+__builtin_setmetatable_set:
+    MOV  [R1+4], R2
+__builtin_setmetatable_done:
+    POP  R2
+    POP  R1
+    MOV  SP, BP
+    POP  BP
+    RET
+
+__builtin_getmetatable:              ; [BP+2] = v
+    PUSH BP
+    MOV  BP, SP
+    PUSH R1
+    MOV  R0, [BP+2]
+    MOV  R1, R0
+    AND  R1, BOXED_DATA
+    IEQ  R1, BOXED_TABLE
+    JF   R1, __builtin_getmetatable_nil
+    MOV  R1, R0
+    AND  R1, BOXED_PAYLOAD
+    MOV  R0, [R1+4]
+    JF   R0, __builtin_getmetatable_nil
+    PUSH R2
+    MOV  R2, R0                          ; a __metatable field answers instead
+    MOV  R1, __mm_str_metatable
+    OR   R1, BOXED_ROMSTRING
+    CALL __table_rawget_rk
+    MOV  R1, R0
+    IEQ  R1, BOXED_NIL
+    JF   R1, __builtin_getmetatable_mf   ; R0 = __metatable
+    MOV  R0, R2
+__builtin_getmetatable_mf:
+    POP  R2
+    JMP  __builtin_getmetatable_done
+__builtin_getmetatable_nil:
+    MOV  R0, BOXED_NIL
+__builtin_getmetatable_done:
+    POP  R1
+    MOV  SP, BP
+    POP  BP
+    RET
+
+__builtin_rawget:                    ; [BP+3] = t, [BP+2] = k
+    PUSH BP
+    MOV  BP, SP
+    PUSH R1
+    MOV  R0, [BP+3]
+    MOV  R1, R0
+    AND  R1, BOXED_DATA
+    IEQ  R1, BOXED_TABLE
+    JF   R1, __builtin_rawget_nil
+    MOV  R1, [BP+2]
+    CALL __table_rawget_rk
+    JMP  __builtin_rawget_done
+__builtin_rawget_nil:
+    MOV  R0, BOXED_NIL
+__builtin_rawget_done:
+    POP  R1
+    MOV  SP, BP
+    POP  BP
+    RET
+
+__builtin_rawset:                    ; [BP+4] = t, [BP+3] = k, [BP+2] = v
+    PUSH BP
+    MOV  BP, SP
+    PUSH R1
+    PUSH R2
+    MOV  R0, [BP+4]
+    MOV  R1, R0
+    AND  R1, BOXED_DATA
+    IEQ  R1, BOXED_TABLE
+    JF   R1, __builtin_rawset_done
+    MOV  R1, R0
+    AND  R1, BOXED_PAYLOAD
+    MOV  R2, [R1+4]
+    PUSH R2                              ; metatable set aside
+    MOV  R2, 0
+    MOV  [R1+4], R2
+    PUSH R0
+    MOV  R2, [BP+3]
+    PUSH R2
+    MOV  R2, [BP+2]
+    PUSH R2
+    CALL __builtin_table_set
+    IADD SP, 3
+    POP  R2
+    MOV  [R1+4], R2
+    MOV  R0, [BP+4]
+__builtin_rawset_done:
+    POP  R2
+    POP  R1
+    MOV  SP, BP
+    POP  BP
+    RET
+
+__builtin_rawlen:                    ; [BP+2] = v
+    PUSH BP
+    MOV  BP, SP
+    PUSH R1
+    PUSH R2
+    MOV  R0, [BP+2]
+    MOV  R1, R0
+    AND  R1, BOXED_DATA
+    IEQ  R1, BOXED_TABLE
+    JF   R1, __builtin_rawlen_plain
+    PUSH R0
+    CALL __builtin_table_len             ; the border, no __len
+    IADD SP, 1
+    JMP  __builtin_rawlen_done
+__builtin_rawlen_plain:
+    PUSH R0
+    CALL __builtin_len
+    IADD SP, 1
+__builtin_rawlen_done:
+    POP  R2
+    POP  R1
+    MOV  SP, BP
+    POP  BP
+    RET

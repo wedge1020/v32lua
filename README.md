@@ -663,6 +663,32 @@ returning the actual operand value rather than a strict boolean.
 
 ---
 
+**Metatables**
+
+`setmetatable`, `getmetatable`, `rawget`, `rawset`, `rawlen` and
+`rawequal`. These events are supported:
+
+* `__index`: a table, possibly with its own metatable (so class chains
+  work), or a function `(t, k)`.
+* `__newindex`: a table or a function `(t, k, v)`, used only for keys
+  the table doesn't have, as in Lua.
+* `__call`: calling the table, which is passed as the first argument.
+* `__tostring`, `__len`, `__metatable`.
+
+```lua
+Point = {}
+Point.__index = Point
+function Point.new(x, y) return setmetatable({x = x, y = y}, Point) end
+function Point:len2() return self.x * self.x + self.y * self.y end
+```
+
+The metatable is consulted only when a read finds nothing, or a write
+adds a new key. Tables without a metatable run the same code as before.
+The arithmetic, comparison and concatenation events (`__add`, `__eq`,
+`__lt`, `__concat`, …) are **not** supported: operators compile to bare
+float instructions, and checking each one for a table would slow down all
+arithmetic.
+
 ## Hardware I/O & Compiler Intrinsics
 
 One  of  the   most  powerful  features  of  `v32lua`   is  its  **static
@@ -861,7 +887,8 @@ deferred to keep initial development moving, or awaiting a design
 decision:
 
 * `pcall`/`error`/`assert`
-* `string.match`/`gmatch`, `setmetatable`
+* `string.match`/`gmatch`; the metatable events `__add`/`__sub`/… , `__eq`/`__lt`/`__le`,
+  `__concat`, `__unm` (see [Metatables](#supported-lua-language-features))
 * `select()`, and `next()` as a callable function (`pairs()` works)
 * Expanding a trailing multi-value call into a table constructor or an
   argument list: `{f()}` and `g(f())` keep only `f()`'s first value

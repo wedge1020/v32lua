@@ -702,13 +702,13 @@ static const yytype_int16 yyrline[] =
      533,   541,   547,   548,   552,   641,   685,   717,   721,   725,
      729,   730,   736,   737,   738,   739,   743,   744,   745,   757,
      760,   766,   769,   775,   778,   788,   821,   832,   839,   844,
-     861,   864,   867,   870,   875,   884,   887,   891,   892,   893,
-     894,   895,   896,   897,   898,   899,   900,   901,   902,   903,
-     904,   905,   906,   907,   908,   909,   910,   911,   912,   913,
-     914,   916,   917,   918,   919,   920,   921,   922,   923,   924,
-     925,   926,   927,   928,   929,   961,   969,   980,   986,   992,
-    1004,  1008,  1017,  1024,  1027,  1038,  1038,  1042,  1045,  1048,
-    1061,  1060,  1090,  1091
+     861,   864,   867,   870,   875,   884,   887,   897,   898,   899,
+     900,   901,   902,   903,   904,   905,   906,   907,   908,   909,
+     910,   911,   912,   913,   914,   915,   916,   917,   918,   919,
+     920,   922,   923,   924,   925,   926,   927,   928,   929,   930,
+     931,   932,   933,   934,   935,   967,   975,   986,   992,   998,
+    1010,  1014,  1023,  1030,  1033,  1044,  1044,  1048,  1051,  1054,
+    1067,  1066,  1096,  1097
 };
 #endif
 
@@ -2644,235 +2644,241 @@ yyreduce:
 #line 887 "parser.y"
                    {
         (yyval.ast_node) = make_node(NODE_NUMBER);
-        (yyval.ast_node)->as.number.val = (yyvsp[0].number_val);
+        // PICO-8 numbers are 16.16 fixed point: a literal holds the nearest
+        // multiple of 1/65536 (0.4 is 0x0.6666). Snapped here so the float
+        // holds exactly PICO-8's value -- and sums of such values stay
+        // exact: `v += 0.4` four times then `v -= 0.4` four times returns
+        // to 0, where plain float32 left 6e-8 and `if v > 0` never settled
+        // (froggo's player drifted a pixel at a time).
+        (yyval.ast_node)->as.number.val = runtime_req.needs_pico8 ? pico8_fix_literal ((yyvsp[0].number_val)) : (yyvsp[0].number_val);
     }
-#line 2650 "parser.c"
-    break;
-
-  case 77: /* expr: TOKEN_STRING  */
-#line 891 "parser.y"
-                        { (yyval.ast_node) = make_node_string((yyvsp[0].string_val)); }
 #line 2656 "parser.c"
     break;
 
-  case 78: /* expr: table_constructor  */
-#line 892 "parser.y"
-                        { (yyval.ast_node) = (yyvsp[0].ast_node); }
+  case 77: /* expr: TOKEN_STRING  */
+#line 897 "parser.y"
+                        { (yyval.ast_node) = make_node_string((yyvsp[0].string_val)); }
 #line 2662 "parser.c"
     break;
 
-  case 79: /* expr: prefix_expr  */
-#line 893 "parser.y"
+  case 78: /* expr: table_constructor  */
+#line 898 "parser.y"
                         { (yyval.ast_node) = (yyvsp[0].ast_node); }
 #line 2668 "parser.c"
     break;
 
-  case 80: /* expr: expr '+' expr  */
-#line 894 "parser.y"
-                        { (yyval.ast_node) = make_node_binary (NODE_ADD, (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
+  case 79: /* expr: prefix_expr  */
+#line 899 "parser.y"
+                        { (yyval.ast_node) = (yyvsp[0].ast_node); }
 #line 2674 "parser.c"
     break;
 
-  case 81: /* expr: expr '-' expr  */
-#line 895 "parser.y"
-                        { (yyval.ast_node) = make_node_binary (NODE_SUB, (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
+  case 80: /* expr: expr '+' expr  */
+#line 900 "parser.y"
+                        { (yyval.ast_node) = make_node_binary (NODE_ADD, (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
 #line 2680 "parser.c"
     break;
 
-  case 82: /* expr: expr '*' expr  */
-#line 896 "parser.y"
-                        { (yyval.ast_node) = make_node_binary (NODE_MUL, (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
+  case 81: /* expr: expr '-' expr  */
+#line 901 "parser.y"
+                        { (yyval.ast_node) = make_node_binary (NODE_SUB, (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
 #line 2686 "parser.c"
     break;
 
-  case 83: /* expr: expr TOKEN_FLOORDIV expr  */
-#line 897 "parser.y"
-                               { (yyval.ast_node) = make_node_binary (NODE_FLOORDIV, (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
+  case 82: /* expr: expr '*' expr  */
+#line 902 "parser.y"
+                        { (yyval.ast_node) = make_node_binary (NODE_MUL, (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
 #line 2692 "parser.c"
     break;
 
-  case 84: /* expr: expr '/' expr  */
-#line 898 "parser.y"
-                        { (yyval.ast_node) = make_node_binary (NODE_DIV, (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
+  case 83: /* expr: expr TOKEN_FLOORDIV expr  */
+#line 903 "parser.y"
+                               { (yyval.ast_node) = make_node_binary (NODE_FLOORDIV, (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
 #line 2698 "parser.c"
     break;
 
-  case 85: /* expr: expr '%' expr  */
-#line 899 "parser.y"
-                        { (yyval.ast_node) = make_node_binary (NODE_MOD, (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
+  case 84: /* expr: expr '/' expr  */
+#line 904 "parser.y"
+                        { (yyval.ast_node) = make_node_binary (NODE_DIV, (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
 #line 2704 "parser.c"
     break;
 
-  case 86: /* expr: expr '^' expr  */
-#line 900 "parser.y"
-                        { (yyval.ast_node) = make_node_binary (NODE_POW, (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
+  case 85: /* expr: expr '%' expr  */
+#line 905 "parser.y"
+                        { (yyval.ast_node) = make_node_binary (NODE_MOD, (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
 #line 2710 "parser.c"
     break;
 
-  case 87: /* expr: expr '&' expr  */
-#line 901 "parser.y"
-                            { (yyval.ast_node) = make_node_binary (NODE_BAND, (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
+  case 86: /* expr: expr '^' expr  */
+#line 906 "parser.y"
+                        { (yyval.ast_node) = make_node_binary (NODE_POW, (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
 #line 2716 "parser.c"
     break;
 
-  case 88: /* expr: expr '|' expr  */
-#line 902 "parser.y"
-                            { (yyval.ast_node) = make_node_binary (NODE_BOR,  (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
+  case 87: /* expr: expr '&' expr  */
+#line 907 "parser.y"
+                            { (yyval.ast_node) = make_node_binary (NODE_BAND, (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
 #line 2722 "parser.c"
     break;
 
-  case 89: /* expr: expr TOKEN_BXOR expr  */
-#line 903 "parser.y"
-                            { (yyval.ast_node) = make_node_binary (NODE_BXOR, (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
+  case 88: /* expr: expr '|' expr  */
+#line 908 "parser.y"
+                            { (yyval.ast_node) = make_node_binary (NODE_BOR,  (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
 #line 2728 "parser.c"
     break;
 
-  case 90: /* expr: expr TOKEN_SHL expr  */
-#line 904 "parser.y"
-                            { (yyval.ast_node) = make_node_binary (NODE_SHL,  (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
+  case 89: /* expr: expr TOKEN_BXOR expr  */
+#line 909 "parser.y"
+                            { (yyval.ast_node) = make_node_binary (NODE_BXOR, (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
 #line 2734 "parser.c"
     break;
 
-  case 91: /* expr: expr TOKEN_SHR expr  */
-#line 905 "parser.y"
-                            { (yyval.ast_node) = make_node_binary (NODE_SHR,  (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
+  case 90: /* expr: expr TOKEN_SHL expr  */
+#line 910 "parser.y"
+                            { (yyval.ast_node) = make_node_binary (NODE_SHL,  (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
 #line 2740 "parser.c"
     break;
 
-  case 92: /* expr: expr TOKEN_LSHR expr  */
-#line 906 "parser.y"
-                            { (yyval.ast_node) = make_node_binary (NODE_LSHR, (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
+  case 91: /* expr: expr TOKEN_SHR expr  */
+#line 911 "parser.y"
+                            { (yyval.ast_node) = make_node_binary (NODE_SHR,  (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
 #line 2746 "parser.c"
     break;
 
-  case 93: /* expr: expr TOKEN_ROTL expr  */
-#line 907 "parser.y"
-                            { (yyval.ast_node) = make_node_binary (NODE_ROTL, (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
+  case 92: /* expr: expr TOKEN_LSHR expr  */
+#line 912 "parser.y"
+                            { (yyval.ast_node) = make_node_binary (NODE_LSHR, (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
 #line 2752 "parser.c"
     break;
 
-  case 94: /* expr: expr TOKEN_ROTR expr  */
-#line 908 "parser.y"
-                            { (yyval.ast_node) = make_node_binary (NODE_ROTR, (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
+  case 93: /* expr: expr TOKEN_ROTL expr  */
+#line 913 "parser.y"
+                            { (yyval.ast_node) = make_node_binary (NODE_ROTL, (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
 #line 2758 "parser.c"
     break;
 
-  case 95: /* expr: TOKEN_BXOR expr  */
-#line 909 "parser.y"
-                                        { (yyval.ast_node) = make_node_unary (OP_BNOT, (yyvsp[0].ast_node)); }
+  case 94: /* expr: expr TOKEN_ROTR expr  */
+#line 914 "parser.y"
+                            { (yyval.ast_node) = make_node_binary (NODE_ROTR, (yyvsp[-2].ast_node), (yyvsp[0].ast_node)); }
 #line 2764 "parser.c"
     break;
 
-  case 96: /* expr: TOKEN_TRUE  */
-#line 910 "parser.y"
-                  { (yyval.ast_node) = make_node_boolean (true);  }
+  case 95: /* expr: TOKEN_BXOR expr  */
+#line 915 "parser.y"
+                                        { (yyval.ast_node) = make_node_unary (OP_BNOT, (yyvsp[0].ast_node)); }
 #line 2770 "parser.c"
     break;
 
-  case 97: /* expr: TOKEN_FALSE  */
-#line 911 "parser.y"
-                  { (yyval.ast_node) = make_node_boolean (false); }
+  case 96: /* expr: TOKEN_TRUE  */
+#line 916 "parser.y"
+                  { (yyval.ast_node) = make_node_boolean (true);  }
 #line 2776 "parser.c"
     break;
 
-  case 98: /* expr: TOKEN_NIL  */
-#line 912 "parser.y"
-                  { (yyval.ast_node) = make_node_nil ();          }
+  case 97: /* expr: TOKEN_FALSE  */
+#line 917 "parser.y"
+                  { (yyval.ast_node) = make_node_boolean (false); }
 #line 2782 "parser.c"
     break;
 
-  case 99: /* expr: TOKEN_LEN expr  */
-#line 913 "parser.y"
-                        { (yyval.ast_node) = make_node_unary  (OP_LEN,   (yyvsp[0].ast_node));     }
+  case 98: /* expr: TOKEN_NIL  */
+#line 918 "parser.y"
+                  { (yyval.ast_node) = make_node_nil ();          }
 #line 2788 "parser.c"
     break;
 
-  case 100: /* expr: '-' expr  */
-#line 914 "parser.y"
-                                 { (yyval.ast_node) = make_node_unary (OP_UNM, (yyvsp[0].ast_node)); }
+  case 99: /* expr: TOKEN_LEN expr  */
+#line 919 "parser.y"
+                        { (yyval.ast_node) = make_node_unary  (OP_LEN,   (yyvsp[0].ast_node));     }
 #line 2794 "parser.c"
     break;
 
-  case 101: /* expr: TOKEN_PEEK expr  */
-#line 916 "parser.y"
-                                         { (yyval.ast_node) = make_peek_call ("peek",  (yyvsp[0].ast_node)); }
+  case 100: /* expr: '-' expr  */
+#line 920 "parser.y"
+                                 { (yyval.ast_node) = make_node_unary (OP_UNM, (yyvsp[0].ast_node)); }
 #line 2800 "parser.c"
     break;
 
-  case 102: /* expr: '%' expr  */
-#line 917 "parser.y"
-                                         { (yyval.ast_node) = make_peek_call ("peek2", (yyvsp[0].ast_node)); }
+  case 101: /* expr: TOKEN_PEEK expr  */
+#line 922 "parser.y"
+                                         { (yyval.ast_node) = make_peek_call ("peek",  (yyvsp[0].ast_node)); }
 #line 2806 "parser.c"
     break;
 
-  case 103: /* expr: TOKEN_PEEK4 expr  */
-#line 918 "parser.y"
-                                         { (yyval.ast_node) = make_peek_call ("peek4", (yyvsp[0].ast_node)); }
+  case 102: /* expr: '%' expr  */
+#line 923 "parser.y"
+                                         { (yyval.ast_node) = make_peek_call ("peek2", (yyvsp[0].ast_node)); }
 #line 2812 "parser.c"
     break;
 
-  case 104: /* expr: TOKEN_NOT expr  */
-#line 919 "parser.y"
-                                 { (yyval.ast_node) = make_node_unary (OP_NOT, (yyvsp[0].ast_node)); }
+  case 103: /* expr: TOKEN_PEEK4 expr  */
+#line 924 "parser.y"
+                                         { (yyval.ast_node) = make_peek_call ("peek4", (yyvsp[0].ast_node)); }
 #line 2818 "parser.c"
     break;
 
-  case 105: /* expr: expr TOKEN_EQ expr  */
-#line 920 "parser.y"
-                              { (yyval.ast_node) = make_node(NODE_RELATIONAL); (yyval.ast_node)->as.binary.operator = OP_EQ;  (yyval.ast_node)->as.binary.left = (yyvsp[-2].ast_node); (yyval.ast_node)->as.binary.right = (yyvsp[0].ast_node); }
+  case 104: /* expr: TOKEN_NOT expr  */
+#line 925 "parser.y"
+                                 { (yyval.ast_node) = make_node_unary (OP_NOT, (yyvsp[0].ast_node)); }
 #line 2824 "parser.c"
     break;
 
-  case 106: /* expr: expr TOKEN_NEQ expr  */
-#line 921 "parser.y"
-                              { (yyval.ast_node) = make_node(NODE_RELATIONAL); (yyval.ast_node)->as.binary.operator = OP_NEQ; (yyval.ast_node)->as.binary.left = (yyvsp[-2].ast_node); (yyval.ast_node)->as.binary.right = (yyvsp[0].ast_node); }
+  case 105: /* expr: expr TOKEN_EQ expr  */
+#line 926 "parser.y"
+                              { (yyval.ast_node) = make_node(NODE_RELATIONAL); (yyval.ast_node)->as.binary.operator = OP_EQ;  (yyval.ast_node)->as.binary.left = (yyvsp[-2].ast_node); (yyval.ast_node)->as.binary.right = (yyvsp[0].ast_node); }
 #line 2830 "parser.c"
     break;
 
-  case 107: /* expr: expr TOKEN_LT expr  */
-#line 922 "parser.y"
-                              { (yyval.ast_node) = make_node(NODE_RELATIONAL); (yyval.ast_node)->as.binary.operator = OP_LT;  (yyval.ast_node)->as.binary.left = (yyvsp[-2].ast_node); (yyval.ast_node)->as.binary.right = (yyvsp[0].ast_node); }
+  case 106: /* expr: expr TOKEN_NEQ expr  */
+#line 927 "parser.y"
+                              { (yyval.ast_node) = make_node(NODE_RELATIONAL); (yyval.ast_node)->as.binary.operator = OP_NEQ; (yyval.ast_node)->as.binary.left = (yyvsp[-2].ast_node); (yyval.ast_node)->as.binary.right = (yyvsp[0].ast_node); }
 #line 2836 "parser.c"
     break;
 
-  case 108: /* expr: expr TOKEN_GT expr  */
-#line 923 "parser.y"
-                              { (yyval.ast_node) = make_node(NODE_RELATIONAL); (yyval.ast_node)->as.binary.operator = OP_GT;  (yyval.ast_node)->as.binary.left = (yyvsp[-2].ast_node); (yyval.ast_node)->as.binary.right = (yyvsp[0].ast_node); }
+  case 107: /* expr: expr TOKEN_LT expr  */
+#line 928 "parser.y"
+                              { (yyval.ast_node) = make_node(NODE_RELATIONAL); (yyval.ast_node)->as.binary.operator = OP_LT;  (yyval.ast_node)->as.binary.left = (yyvsp[-2].ast_node); (yyval.ast_node)->as.binary.right = (yyvsp[0].ast_node); }
 #line 2842 "parser.c"
     break;
 
-  case 109: /* expr: expr TOKEN_LE expr  */
-#line 924 "parser.y"
-                              { (yyval.ast_node) = make_node(NODE_RELATIONAL); (yyval.ast_node)->as.binary.operator = OP_LE;  (yyval.ast_node)->as.binary.left = (yyvsp[-2].ast_node); (yyval.ast_node)->as.binary.right = (yyvsp[0].ast_node); }
+  case 108: /* expr: expr TOKEN_GT expr  */
+#line 929 "parser.y"
+                              { (yyval.ast_node) = make_node(NODE_RELATIONAL); (yyval.ast_node)->as.binary.operator = OP_GT;  (yyval.ast_node)->as.binary.left = (yyvsp[-2].ast_node); (yyval.ast_node)->as.binary.right = (yyvsp[0].ast_node); }
 #line 2848 "parser.c"
     break;
 
-  case 110: /* expr: expr TOKEN_GE expr  */
-#line 925 "parser.y"
-                              { (yyval.ast_node) = make_node(NODE_RELATIONAL); (yyval.ast_node)->as.binary.operator = OP_GE;  (yyval.ast_node)->as.binary.left = (yyvsp[-2].ast_node); (yyval.ast_node)->as.binary.right = (yyvsp[0].ast_node); }
+  case 109: /* expr: expr TOKEN_LE expr  */
+#line 930 "parser.y"
+                              { (yyval.ast_node) = make_node(NODE_RELATIONAL); (yyval.ast_node)->as.binary.operator = OP_LE;  (yyval.ast_node)->as.binary.left = (yyvsp[-2].ast_node); (yyval.ast_node)->as.binary.right = (yyvsp[0].ast_node); }
 #line 2854 "parser.c"
     break;
 
-  case 111: /* expr: expr TOKEN_AND expr  */
-#line 926 "parser.y"
-                              { (yyval.ast_node) = make_node(NODE_AND);        (yyval.ast_node)->as.binary.left = (yyvsp[-2].ast_node);     (yyval.ast_node)->as.binary.right = (yyvsp[0].ast_node); }
+  case 110: /* expr: expr TOKEN_GE expr  */
+#line 931 "parser.y"
+                              { (yyval.ast_node) = make_node(NODE_RELATIONAL); (yyval.ast_node)->as.binary.operator = OP_GE;  (yyval.ast_node)->as.binary.left = (yyvsp[-2].ast_node); (yyval.ast_node)->as.binary.right = (yyvsp[0].ast_node); }
 #line 2860 "parser.c"
     break;
 
-  case 112: /* expr: expr TOKEN_OR expr  */
-#line 927 "parser.y"
-                              { (yyval.ast_node) = make_node(NODE_OR);         (yyval.ast_node)->as.binary.left = (yyvsp[-2].ast_node);     (yyval.ast_node)->as.binary.right = (yyvsp[0].ast_node); }
+  case 111: /* expr: expr TOKEN_AND expr  */
+#line 932 "parser.y"
+                              { (yyval.ast_node) = make_node(NODE_AND);        (yyval.ast_node)->as.binary.left = (yyvsp[-2].ast_node);     (yyval.ast_node)->as.binary.right = (yyvsp[0].ast_node); }
 #line 2866 "parser.c"
     break;
 
-  case 113: /* expr: expr TOKEN_CONCAT expr  */
-#line 928 "parser.y"
-                              { (yyval.ast_node) = make_node(NODE_CONCAT);     (yyval.ast_node)->as.binary.left = (yyvsp[-2].ast_node);     (yyval.ast_node)->as.binary.right = (yyvsp[0].ast_node); }
+  case 112: /* expr: expr TOKEN_OR expr  */
+#line 933 "parser.y"
+                              { (yyval.ast_node) = make_node(NODE_OR);         (yyval.ast_node)->as.binary.left = (yyvsp[-2].ast_node);     (yyval.ast_node)->as.binary.right = (yyvsp[0].ast_node); }
 #line 2872 "parser.c"
     break;
 
+  case 113: /* expr: expr TOKEN_CONCAT expr  */
+#line 934 "parser.y"
+                              { (yyval.ast_node) = make_node(NODE_CONCAT);     (yyval.ast_node)->as.binary.left = (yyvsp[-2].ast_node);     (yyval.ast_node)->as.binary.right = (yyvsp[0].ast_node); }
+#line 2878 "parser.c"
+    break;
+
   case 114: /* expr: func_start '(' parameter_list ')' statement_list TOKEN_END  */
-#line 930 "parser.y"
+#line 936 "parser.y"
     { g_func_depth--; 
         static int anon_counter = 0;
         char buf[64];
@@ -2901,11 +2907,11 @@ yyreduce:
 
         (yyval.ast_node) = func_ptr;
     }
-#line 2905 "parser.c"
+#line 2911 "parser.c"
     break;
 
   case 115: /* function_call: prefix_expr '(' argument_list ')'  */
-#line 961 "parser.y"
+#line 967 "parser.y"
                                       {
         ASTNode* node = make_node(NODE_FUNCTION_CALL);
         node->as.call.target = (yyvsp[-3].ast_node);
@@ -2914,11 +2920,11 @@ yyreduce:
         pico8_parse_rewrite_peek(node);   /* peek(a, n): several values */
         (yyval.ast_node) = node;
     }
-#line 2918 "parser.c"
+#line 2924 "parser.c"
     break;
 
   case 116: /* function_call: prefix_expr ':' TOKEN_IDENTIFIER '(' argument_list ')'  */
-#line 969 "parser.y"
+#line 975 "parser.y"
                                                              {
         ASTNode* node = make_node(NODE_FUNCTION_CALL);
         node->as.call.is_method_call = 1;
@@ -2929,33 +2935,33 @@ yyreduce:
         node->as.call.args_head = (yyvsp[-1].ast_node);
         (yyval.ast_node) = node;
     }
-#line 2933 "parser.c"
+#line 2939 "parser.c"
     break;
 
   case 117: /* function_call: prefix_expr TOKEN_STRING  */
-#line 980 "parser.y"
+#line 986 "parser.y"
                                {
         (yyval.ast_node) = make_node(NODE_FUNCTION_CALL);
         (yyval.ast_node)->as.call.target = (yyvsp[-1].ast_node);
         (yyval.ast_node)->as.call.is_method_call = 0;
         (yyval.ast_node)->as.call.args_head = make_node_string((yyvsp[0].string_val));
     }
-#line 2944 "parser.c"
+#line 2950 "parser.c"
     break;
 
   case 118: /* function_call: prefix_expr table_constructor  */
-#line 986 "parser.y"
+#line 992 "parser.y"
                                     {
         (yyval.ast_node) = make_node(NODE_FUNCTION_CALL);
         (yyval.ast_node)->as.call.target = (yyvsp[-1].ast_node);
         (yyval.ast_node)->as.call.is_method_call = 0;
         (yyval.ast_node)->as.call.args_head = (yyvsp[0].ast_node);
     }
-#line 2955 "parser.c"
+#line 2961 "parser.c"
     break;
 
   case 119: /* function_call: prefix_expr ':' TOKEN_IDENTIFIER TOKEN_STRING  */
-#line 992 "parser.y"
+#line 998 "parser.y"
                                                     {
         ASTNode* dynamic_lookup = make_node(NODE_TABLE_GET);
         dynamic_lookup->as.table_get.table_expr = (yyvsp[-3].ast_node);
@@ -2965,20 +2971,20 @@ yyreduce:
         (yyval.ast_node)->as.call.is_method_call = 1;
         (yyval.ast_node)->as.call.args_head = make_node_string((yyvsp[0].string_val));
     }
-#line 2969 "parser.c"
+#line 2975 "parser.c"
     break;
 
   case 120: /* field: expr  */
-#line 1004 "parser.y"
+#line 1010 "parser.y"
          {
         // Array-style: {value} -> implicit sequential key
         (yyval.ast_node) = (yyvsp[0].ast_node);
     }
-#line 2978 "parser.c"
+#line 2984 "parser.c"
     break;
 
   case 121: /* field: expr '=' expr  */
-#line 1008 "parser.y"
+#line 1014 "parser.y"
                     {
     // Record-style: {key = value}
     // Convert identifier key to string literal (Lua semantics: x=8 means key "x", not var x)
@@ -2988,28 +2994,28 @@ yyreduce:
     }
     (yyval.ast_node) = make_node_table_set(NULL, key_node, (yyvsp[0].ast_node));
 }
-#line 2992 "parser.c"
+#line 2998 "parser.c"
     break;
 
   case 122: /* field: '[' expr ']' '=' expr  */
-#line 1017 "parser.y"
+#line 1023 "parser.y"
                             {
         // Explicit key: {[key] = value}
         (yyval.ast_node) = make_node_table_set(NULL, (yyvsp[-3].ast_node), (yyvsp[0].ast_node));
     }
-#line 3001 "parser.c"
+#line 3007 "parser.c"
     break;
 
   case 123: /* field_list: field  */
-#line 1024 "parser.y"
+#line 1030 "parser.y"
           {
         (yyval.ast_node) = (yyvsp[0].ast_node);
     }
-#line 3009 "parser.c"
+#line 3015 "parser.c"
     break;
 
   case 124: /* field_list: field_list field_sep field  */
-#line 1027 "parser.y"
+#line 1033 "parser.y"
                                  {
         // Chain fields together via next pointer
         ASTNode* curr = (yyvsp[-2].ast_node);
@@ -3017,27 +3023,27 @@ yyreduce:
         curr->next = (yyvsp[0].ast_node);
         (yyval.ast_node) = (yyvsp[-2].ast_node);
     }
-#line 3021 "parser.c"
+#line 3027 "parser.c"
     break;
 
   case 127: /* table_constructor: '{' '}'  */
-#line 1042 "parser.y"
+#line 1048 "parser.y"
             {
         (yyval.ast_node) = make_node_table_constructor(NULL);
     }
-#line 3029 "parser.c"
+#line 3035 "parser.c"
     break;
 
   case 128: /* table_constructor: '{' field_list '}'  */
-#line 1045 "parser.y"
+#line 1051 "parser.y"
                          {
         (yyval.ast_node) = make_node_table_constructor((yyvsp[-1].ast_node));
     }
-#line 3037 "parser.c"
+#line 3043 "parser.c"
     break;
 
   case 129: /* table_constructor: '{' field_list field_sep '}'  */
-#line 1048 "parser.y"
+#line 1054 "parser.y"
                                    {
         // Trailing comma before the closing brace -- e.g.
         //   { [1] = a, [2] = b, }
@@ -3047,20 +3053,20 @@ yyreduce:
         // field must start with an expression token, which '}' is not.
         (yyval.ast_node) = make_node_table_constructor((yyvsp[-2].ast_node));
     }
-#line 3051 "parser.c"
+#line 3057 "parser.c"
     break;
 
   case 130: /* $@1: %empty  */
-#line 1061 "parser.y"
+#line 1067 "parser.y"
     {
         current_tic80_section = strdup((yyvsp[0].string_val));
         free((yyvsp[0].string_val));
     }
-#line 3060 "parser.c"
+#line 3066 "parser.c"
     break;
 
   case 131: /* tic80_section: TOKEN_TIC80_SECTION_HEADER $@1 tic80_asset_lines TOKEN_TIC80_SECTION_FOOTER  */
-#line 1067 "parser.y"
+#line 1073 "parser.y"
     {
         // === PROCESS SECTION IMMEDIATELY ===
         process_tic80_section(current_tic80_section, current_tic80_assets);
@@ -3081,17 +3087,17 @@ yyreduce:
         free((yyvsp[-1].ast_node));
         (yyval.ast_node) = NULL;
     }
-#line 3085 "parser.c"
-    break;
-
-  case 132: /* tic80_asset_lines: %empty  */
-#line 1090 "parser.y"
-                { (yyval.ast_node) = NULL; }
 #line 3091 "parser.c"
     break;
 
+  case 132: /* tic80_asset_lines: %empty  */
+#line 1096 "parser.y"
+                { (yyval.ast_node) = NULL; }
+#line 3097 "parser.c"
+    break;
+
   case 133: /* tic80_asset_lines: tic80_asset_lines TOKEN_TIC80_ASSET_DATA  */
-#line 1092 "parser.y"
+#line 1098 "parser.y"
     {
         TIC80AssetData *data = parse_tic80_asset_line((yyvsp[0].string_val));
         if (data != NULL) {  // <-- ADD THIS CHECK
@@ -3101,11 +3107,11 @@ yyreduce:
         free((yyvsp[0].string_val));
         (yyval.ast_node) = NULL;
     }
-#line 3105 "parser.c"
+#line 3111 "parser.c"
     break;
 
 
-#line 3109 "parser.c"
+#line 3115 "parser.c"
 
       default: break;
     }
@@ -3298,7 +3304,7 @@ yyreturnlab:
   return yyresult;
 }
 
-#line 1102 "parser.y"
+#line 1108 "parser.y"
 
 
 void yyerror(const char *s) {

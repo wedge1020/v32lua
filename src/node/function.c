@@ -324,6 +324,11 @@ void  node_function_def (ASTNode *node)
 // an argument's call (the last one emitted) never passes for it.
 ASTNode *g_last_exec_call = NULL;
 
+// Whether the program can have metatables at all (it mentions setmetatable):
+// without them, a nil read from an array slot is simply nil, and the inline
+// t[i] path skips the check that would ask __index (node/table.c).
+bool g_uses_metatables = false;
+
 void  node_function_call (ASTNode *node, int  dest_reg)
 {
     // -------------------------------------------------------------------------

@@ -136,12 +136,65 @@ static const PreludeFunc prelude[] = {
       "  return v\n"
       "end\n", NULL },
     // menuitem(index [, label, callback]): PICO-8's custom pause-menu
-    // entries. Recorded; the Vircon32 pause screen doesn't list them yet.
-    { "menuitem", NULL,
-      "__p8_menuitems = {}\n"
+    // entries, slots 1-5. The first call registers __p8_pausemenu as the
+    // pause screen (pico8.s __builtin_pico8_pause_check runs it on Start).
+    { "menuitem", "__p8_pausemenu",
+      // (the table is made on first use: the prelude runs after the cart's
+      // own top-level code, which may already call menuitem())
       "function menuitem(i, label, cb)\n"
+      "  if i == nil or i < 1 or i > 5 then return end\n"
+      "  if __p8_menuitems == nil then __p8_menuitems = {} end\n"
       "  if label == nil then __p8_menuitems[i] = nil\n"
       "  else __p8_menuitems[i] = {label, cb} end\n"
+      "  __p8_menu_hook(__p8_pausemenu)\n"
+      "end\n", NULL },
+    // The pause menu: continue, the cart's items, reset cart. Up/down
+    // choose; O/X pick (an item's callback gets 32, and the menu stays open
+    // only if it returns true); left/right on an item call it with 1 / 2
+    // and keep the menu open; Start closes it. Runs its own frames (a raw
+    // WAIT -- flip() would re-enter the pause check).
+    { "__p8_pausemenu", NULL,
+      "function __p8_pausemenu()\n"
+      "  local items = {{\"continue\"}}\n"
+      "  for i = 1, 5 do\n"
+      "    local m = __p8_menuitems[i]\n"
+      "    if m ~= nil then items[#items + 1] = {m[1], m[2]} end\n"
+      "  end\n"
+      "  items[#items + 1] = {\"reset cart\", nil, true}\n"
+      "  local cx, cy, pen = peek2(0x5f28), peek2(0x5f2a), peek(0x5f25)\n"
+      "  camera()\n"
+      "  local sel, prev = 1, 63\n"
+      "  while true do\n"
+      "    local h = #items * 8 + 7\n"
+      "    local y0 = 64 - flr(h / 2)\n"
+      "    rectfill(20, y0, 107, y0 + h, 0)\n"
+      "    rect(20, y0, 107, y0 + h, 7)\n"
+      "    for k = 1, #items do\n"
+      "      local y = y0 + 4 + (k - 1) * 8\n"
+      "      if k == sel then\n"
+      "        print(\">\", 25, y, 7)\n"
+      "        print(items[k][1], 31, y, 7)\n"
+      "      else\n"
+      "        print(items[k][1], 31, y, 6)\n"
+      "      end\n"
+      "    end\n"
+      "    __rawasm__(\"WAIT\")\n"
+      "    if __p8_start_pressed() then break end\n"
+      "    local b = btn()\n"
+      "    local p = b & ~prev\n"
+      "    prev = b\n"
+      "    if p & 4 ~= 0 then sel = sel - 1 if sel < 1 then sel = #items end end\n"
+      "    if p & 8 ~= 0 then sel = sel + 1 if sel > #items then sel = 1 end end\n"
+      "    local it = items[sel]\n"
+      "    if it[2] ~= nil and p & 3 ~= 0 then it[2](p & 3) end\n"
+      "    if p & 48 ~= 0 then\n"
+      "      if it[3] then run() end\n"
+      "      if it[2] == nil then break end\n"
+      "      if not it[2](32) then break end\n"
+      "    end\n"
+      "  end\n"
+      "  camera(cx, cy)\n"
+      "  color(pen)\n"
       "end\n", NULL },
     // poke(a, unpack(t)) with a run-time table -- see core.c
     { "__p8_pokeu", NULL,

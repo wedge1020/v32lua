@@ -231,6 +231,7 @@ _pico8_init_state:
     MOV   [PICO8_TICKS], R0                ; time() = 0 until the first frame
     MOV   [PICO8_RAM_PTR], R0              ; peek/poke RAM: created on first use
     MOV   [PICO8_CARTDATA], R0             ; no cartdata() yet
+    MOV   [PICO8_MENU_HOOK], R0            ; no menuitem() yet: plain pause
 
     CALL  __builtin_pico8_reload
     CALL  __pico8_audio_init
@@ -1567,29 +1568,132 @@ _pico8_circ_region:
     OUT   GPU_SelectedRegion, R1
     OUT   GPU_DrawingScaleX, R4
     OUT   GPU_DrawingScaleY, R4
-    MOV   R1, R8                  ; top-left pixel, placed as __pico8_fill does
-    ISUB  R1, R10
-    CIF   R1
+    ;; top-left pixel on the canvas (camera applied), PICO-8 pixels
+    MOV   R2, R8
+    ISUB  R2, R10
+    CIF   R2
     MOV   R0, [PICO8_CAMERA_X]
-    FSUB  R1, R0
-    FMUL  R1, PICO8_SCALE
-    FADD  R1, 0.5
-    FLR   R1
-    CFI   R1
-    IADD  R1, PICO8_OFFSET_X
-    OUT   GPU_DrawingPointX, R1
-    MOV   R1, R9
-    ISUB  R1, R10
-    CIF   R1
+    FSUB  R2, R0                  ; R2 = fx
+    MOV   R5, R9
+    ISUB  R5, R10
+    CIF   R5
     MOV   R0, [PICO8_CAMERA_Y]
-    FSUB  R1, R0
-    FMUL  R1, PICO8_SCALE
-    FADD  R1, 0.5
-    FLR   R1
-    CFI   R1
-    IADD  R1, PICO8_OFFSET_Y
-    OUT   GPU_DrawingPointY, R1
+    FSUB  R5, R0                  ; R5 = fy
+    MOV   R0, R3
+    IEQ   R0, R10
+    JF    R0, _pico8_circ_place   ; --fast-circles' scaled disc: unclipped
+
+    ;; The GPU charges a draw's whole size against its per-frame pixel
+    ;; budget (9 screens), on screen or not, and drops every later draw
+    ;; once that's spent (froggo's circle wipe: 270 radius-20 discs, 21
+    ;; screens). So: nothing off the 128x128 canvas, and a circle crossing
+    ;; an edge is drawn through a trimmed copy of its region (4095).
+    MOV   R0, R10
+    SHL   R0, 1
+    IADD  R0, 1
+    CIF   R0                      ; R0 = d (size in pixels)
+    MOV   R3, R2
+    FADD  R3, R0
+    FLE   R3, 0.0
+    JT    R3, _pico8_circ_off     ; left of the canvas
+    MOV   R3, R5
+    FADD  R3, R0
+    FLE   R3, 0.0
+    JT    R3, _pico8_circ_off     ; above it
+    MOV   R3, R2
+    FGE   R3, 128.0
+    JT    R3, _pico8_circ_off     ; right of it
+    MOV   R3, R5
+    FGE   R3, 128.0
+    JT    R3, _pico8_circ_off     ; below it
+    MOV   R3, R2
+    FLT   R3, 0.0
+    JT    R3, _pico8_circ_clip
+    MOV   R3, R5
+    FLT   R3, 0.0
+    JT    R3, _pico8_circ_clip
+    MOV   R3, R2
+    FADD  R3, R0
+    FGT   R3, 128.0
+    JT    R3, _pico8_circ_clip
+    MOV   R3, R5
+    FADD  R3, R0
+    FGT   R3, 128.0
+    JF    R3, _pico8_circ_place   ; fully on the canvas: the shape's own region
+
+_pico8_circ_clip:
+    ;; --- x: columns fx + k, k = 0 .. 2r ---
+    IN    R12, GPU_RegionMinX
+    MOV   R3, 128.0
+    FSUB  R3, R2
+    FSGN  R3
+    FLR   R3
+    FSGN  R3                      ; ceil(128 - fx): columns left of x = 128
+    CFI   R3
+    ISUB  R3, 1
+    MOV   R0, R10
+    SHL   R0, 1
+    IMIN  R3, R0
+    IADD  R3, R12                 ; MaxX
+    MOV   R0, R2
+    FSGN  R0
+    FLR   R0
+    CFI   R0                      ; floor(-fx): columns left of x = 0
+    MOV   R4, 0
+    IMAX  R0, R4
+    AND   R0, 0xFFFFFFFC          ; whole multiples of 4 (4 * 2.75 = 11
+                                  ; screen pixels): the pixel grid stays put
+    IADD  R12, R0
+    CIF   R0
+    FADD  R2, R0                  ; fx of the first column kept
+    OUT   GPU_SelectedRegion, 4095
+    OUT   GPU_RegionMinX, R12
+    OUT   GPU_RegionHotspotX, R12
+    OUT   GPU_RegionMaxX, R3
+    ;; --- y, the same ---
+    OUT   GPU_SelectedRegion, R1
+    IN    R12, GPU_RegionMinY
+    MOV   R3, 128.0
+    FSUB  R3, R5
+    FSGN  R3
+    FLR   R3
+    FSGN  R3
+    CFI   R3
+    ISUB  R3, 1
+    MOV   R0, R10
+    SHL   R0, 1
+    IMIN  R3, R0
+    IADD  R3, R12                 ; MaxY
+    MOV   R0, R5
+    FSGN  R0
+    FLR   R0
+    CFI   R0
+    MOV   R4, 0
+    IMAX  R0, R4
+    AND   R0, 0xFFFFFFFC
+    IADD  R12, R0
+    CIF   R0
+    FADD  R5, R0
+    OUT   GPU_SelectedRegion, 4095
+    OUT   GPU_RegionMinY, R12
+    OUT   GPU_RegionHotspotY, R12
+    OUT   GPU_RegionMaxY, R3
+
+_pico8_circ_place:
+    FMUL  R2, PICO8_SCALE         ; placed as __pico8_fill does
+    FADD  R2, 0.5
+    FLR   R2
+    CFI   R2
+    IADD  R2, PICO8_OFFSET_X
+    OUT   GPU_DrawingPointX, R2
+    FMUL  R5, PICO8_SCALE
+    FADD  R5, 0.5
+    FLR   R5
+    CFI   R5
+    IADD  R5, PICO8_OFFSET_Y
+    OUT   GPU_DrawingPointY, R5
     OUT   GPU_Command, GPUCommand_DrawRegionZoomed
+_pico8_circ_off:
     OUT   GPU_SelectedTexture, R7
     OUT   GPU_MultiplyColor, R6
     JMP   _pico8_circ_done
@@ -2943,6 +3047,8 @@ _pico8_pause_enter:
     OUT   GPU_Command, GPUCommand_DrawRegionZoomed
     MOV   R0, 0xFFFFFFFF
     OUT   GPU_MultiplyColor, R0
+    MOV   R0, [PICO8_MENU_HOOK]
+    JT    R0, _pico8_pause_menu
     MOV   R0, 270
     PUSH  R0
     MOV   R0, 172
@@ -2952,7 +3058,40 @@ _pico8_pause_enter:
     PUSH  R0
     CALL  __builtin_print
     IADD  SP, 3
+    JMP   _pico8_pause_restore
 
+    ;; menuitem() entries: the prelude's __p8_pausemenu (Lua) draws the menu
+    ;; and runs it -- its own frames, input, the items' callbacks -- until
+    ;; "continue"/Start. A Lua call may use every register: all saved.
+_pico8_pause_menu:
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
+    PUSH  R7
+    PUSH  R8
+    PUSH  R9
+    PUSH  R10
+    PUSH  R11
+    PUSH  R12
+    PUSH  R13
+    MOV   R13, 0                         ; no arguments (variadic ABI)
+    CALL  __builtin_exec
+    POP   R13
+    POP   R12
+    POP   R11
+    POP   R10
+    POP   R9
+    POP   R8
+    POP   R7
+    POP   R6
+    POP   R5
+    POP   R4
+    POP   R3
+    MOV   R0, 1
+    MOV   [PICO8_START_PREV], R0         ; the Start that closed it is held
+
+_pico8_pause_restore:
     POP   R0
     OUT   GPU_MultiplyColor, R0
     POP   R0
@@ -2968,10 +3107,13 @@ _pico8_pause_enter:
     POP   R0
     OUT   GPU_SelectedTexture, R0
 
+    MOV   R0, [PICO8_MENU_HOOK]
+    JT    R0, _pico8_pause_done          ; the menu already waited
 _pico8_pause_wait:
     WAIT
     CALL  __pico8_start_edge
     JF    R0, _pico8_pause_wait
+_pico8_pause_done:
 
     OUT   SPU_Command, SPUCommand_ResumeAllChannels
     IN    R0, TIM_FrameCounter
@@ -4312,6 +4454,11 @@ _p8split_copied:
     MOV   R1, R0
     IEQ   R1, BOXED_NIL
     JT    R1, _p8split_store
+    ;; snap to PICO-8's 16.16 grid, as number literals are (parser.y)
+    FMUL  R0, 65536.0
+    FADD  R0, 0.5
+    FLR   R0
+    FDIV  R0, 65536.0
     MOV   [BP-8], R0
 _p8split_store:
     MOV   R6, [BP-8]
@@ -4326,4 +4473,40 @@ _p8split_store:
     CALL  __builtin_table_set
     IADD  SP, 3
 _p8split_token_done:
+    RET
+
+;; __builtin_pico8_menu_hook(fn): the pause menu to run on Start (see
+;; __builtin_pico8_pause_check); nil removes it.
+__builtin_pico8_menu_hook:
+    PUSH  BP
+    MOV   BP, SP
+    MOV   R0, [BP+2]
+    PUSH  R1
+    MOV   R1, R0
+    IEQ   R1, BOXED_NIL
+    JF    R1, _pico8_menu_hook_set
+    MOV   R0, 0
+_pico8_menu_hook_set:
+    MOV   [PICO8_MENU_HOOK], R0
+    POP   R1
+    MOV   R0, BOXED_NIL
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; __builtin_pico8_start_pressed(): true on the first check after Start
+;; goes down (the pause's own edge detector), for the pause menu.
+__builtin_pico8_start_pressed:
+    PUSH  R1
+    IN    R1, INP_SelectedGamepad
+    PUSH  R1
+    CALL  __pico8_start_edge
+    POP   R1
+    OUT   INP_SelectedGamepad, R1
+    POP   R1
+    JT    R0, _pico8_start_pressed_yes
+    MOV   R0, BOXED_FALSE
+    RET
+_pico8_start_pressed_yes:
+    MOV   R0, BOXED_TRUE
     RET

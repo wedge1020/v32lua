@@ -634,6 +634,33 @@ plutôt qu'un booléen strict.
 
 ---
 
+**Métatables**
+
+`setmetatable`, `getmetatable`, `rawget`, `rawset`, `rawlen` et
+`rawequal`. Ces événements sont pris en charge :
+
+* `__index` : une table, qui peut avoir sa propre métatable (les chaînes
+  de classes fonctionnent), ou une fonction `(t, k)`.
+* `__newindex` : une table ou une fonction `(t, k, v)`, uniquement pour
+  les clés absentes de la table, comme en Lua.
+* `__call` : appeler la table, qui est passée en premier argument.
+* `__tostring`, `__len`, `__metatable`.
+
+```lua
+Point = {}
+Point.__index = Point
+function Point.new(x, y) return setmetatable({x = x, y = y}, Point) end
+function Point:len2() return self.x * self.x + self.y * self.y end
+```
+
+La métatable n'est consultée que lorsqu'une lecture ne trouve rien ou
+qu'une écriture ajoute une nouvelle clé. Les tables sans métatable
+exécutent le même code qu'avant. Les événements arithmétiques, de
+comparaison et de concaténation (`__add`, `__eq`, `__lt`, `__concat`, …)
+ne sont **pas** pris en charge : les opérateurs sont compilés en
+instructions flottantes directes, et vérifier à chacune s'il s'agit d'une
+table ralentirait toute l'arithmétique.
+
 ## E/S Matérielle et Intrinsèques du Compilateur
 
 L'une des fonctionnalités les plus puissantes de `v32lua` est son
@@ -854,7 +881,8 @@ soit reportées pour maintenir l'élan du développement initial, soit en
 attente d'une décision de conception :
 
 * `pcall`/`error`/`assert`
-* `string.match`/`gmatch`, `setmetatable`
+* `string.match`/`gmatch` ; les événements de métatable `__add`/`__sub`/…, `__eq`/`__lt`/`__le`,
+  `__concat`, `__unm`
 * `select()`, et `next()` comme fonction appelable (`pairs()` fonctionne)
 * L'expansion d'un appel final à valeurs multiples dans un constructeur de
   table ou une liste d'arguments : `{f()}` et `g(f())` ne gardent que la

@@ -578,7 +578,15 @@ void emit_index_lookup (int table_reg, int key_reg, ASTNode *key, int dest_reg)
         emit_asm ("MOV  R0, [R0+2] ; array data\n");
         emit_asm ("IADD R0, R%d\n", a);
         emit_asm ("ISUB R0, 1\n");
-        emit_asm ("MOV  R%d, [R0]\n", dest_reg);
+        emit_asm ("MOV  R0, [R0]\n");
+        // a hole (nil) goes the slow way: a metatable's __index may answer
+        // (only in programs that can have metatables at all)
+        if (g_uses_metatables) {
+            emit_asm ("MOV  R%d, R0\n", a);
+            emit_asm ("IEQ  R%d, BOXED_NIL\n", a);
+            emit_asm ("JT   R%d, __%s_idx_slow_%d ; nil: ask the metatable, if any\n", a, ctx, id);
+        }
+        emit_asm ("MOV  R%d, R0\n", dest_reg);
         emit_asm ("JMP  __%s_idx_done_%d\n", ctx, id);
         unlock_register (a);
     }

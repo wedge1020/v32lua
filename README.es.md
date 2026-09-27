@@ -623,6 +623,33 @@ booleano estricto.
 
 ---
 
+**Metatablas**
+
+`setmetatable`, `getmetatable`, `rawget`, `rawset`, `rawlen` y
+`rawequal`. Se admiten estos eventos:
+
+* `__index`: una tabla, que puede tener su propia metatabla (así
+  funcionan las cadenas de clases), o una función `(t, k)`.
+* `__newindex`: una tabla o una función `(t, k, v)`, solo para claves
+  que la tabla no tiene, como en Lua.
+* `__call`: llamar a la tabla, que se pasa como primer argumento.
+* `__tostring`, `__len`, `__metatable`.
+
+```lua
+Point = {}
+Point.__index = Point
+function Point.new(x, y) return setmetatable({x = x, y = y}, Point) end
+function Point:len2() return self.x * self.x + self.y * self.y end
+```
+
+La metatabla solo se consulta cuando una lectura no encuentra nada o una
+escritura añade una clave nueva. Las tablas sin metatabla ejecutan el
+mismo código que antes. Los eventos aritméticos, de comparación y de
+concatenación (`__add`, `__eq`, `__lt`, `__concat`, …) **no** están
+soportados: los operadores se compilan a instrucciones de coma flotante
+directas, y comprobar en cada una si hay una tabla ralentizaría toda la
+aritmética.
+
 ## E/S de Hardware e Intrínsecos del Compilador
 
 Una de las características más poderosas de `v32lua` es su **motor de
@@ -837,7 +864,8 @@ diferidas para mantener avanzando el desarrollo inicial, o pendientes de
 una decisión de diseño:
 
 * `pcall`/`error`/`assert`
-* `string.match`/`gmatch`, `setmetatable`
+* `string.match`/`gmatch`; los eventos de metatabla `__add`/`__sub`/…, `__eq`/`__lt`/`__le`,
+  `__concat`, `__unm`
 * `select()`, y `next()` como función invocable (`pairs()` funciona)
 * Expandir una llamada final de múltiples valores dentro de un constructor
   de tabla o una lista de argumentos: `{f()}` y `g(f())` conservan solo el

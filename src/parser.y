@@ -886,7 +886,13 @@ expr:
     }
     | TOKEN_NUMBER {
         $$ = make_node(NODE_NUMBER);
-        $$->as.number.val = $1;
+        // PICO-8 numbers are 16.16 fixed point: a literal holds the nearest
+        // multiple of 1/65536 (0.4 is 0x0.6666). Snapped here so the float
+        // holds exactly PICO-8's value -- and sums of such values stay
+        // exact: `v += 0.4` four times then `v -= 0.4` four times returns
+        // to 0, where plain float32 left 6e-8 and `if v > 0` never settled
+        // (froggo's player drifted a pixel at a time).
+        $$->as.number.val = runtime_req.needs_pico8 ? pico8_fix_literal ($1) : $1;
     }
     | TOKEN_STRING      { $$ = make_node_string($1); }
     | table_constructor { $$ = $1; }

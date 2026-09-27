@@ -179,6 +179,29 @@ static void pico8_spread_vararg_args (ASTNode *node, const char *func_name)
     if (prev) prev->next = head; else node->as.call.args_head = head;
 }
 
+// A call to a runtime routine taking exactly nargs values, pushed in order
+// (the last at [BP+2]): missing ones are nil, extra ones are evaluated and
+// dropped. -> dest_reg = R0.
+bool emit_runtime_call_intrinsic (ASTNode *node, int dest_reg, int nargs, const char *routine)
+{
+    int n = 0;
+    int r = allocate_pinned_register ();
+    for (ASTNode *a = node->as.call.args_head; a != NULL; a = a->next, n++) {
+        generate_asm (a, r);
+        ensure_in_register (r);
+        if (n < nargs) emit_asm ("    PUSH R%d\n", r);
+    }
+    for (; n < nargs; n++) {
+        emit_asm ("    MOV R%d, BOXED_NIL\n", r);
+        emit_asm ("    PUSH R%d\n", r);
+    }
+    unlock_pinned_register (r);
+    emit_asm ("    CALL %s\n", routine);
+    emit_asm ("    IADD SP, %d\n", nargs);
+    if (dest_reg != 0) emit_asm ("    MOV R%d, R0\n", dest_reg);
+    return true;
+}
+
 // TIC-80 reset() / PICO-8 run([param]): hardware back to its defaults, a
 // black frame, then the cart from its first instruction with a fresh stack
 // (exec.s __builtin_cart_restart). Arguments are evaluated for their side
@@ -194,6 +217,15 @@ bool emit_cart_restart_intrinsic (ASTNode *node, int dest_reg, const char *name)
     }
     emit_asm ("    JMP __builtin_cart_restart ; never returns\n");
     return true;
+}
+
+// The 16.16 fixed-point value of a PICO-8 literal: the nearest multiple of
+// 1/65536 (PICO-8 rounds: 0.1 is 0x0.199a). Values outside PICO-8's range
+// are left alone.
+double pico8_fix_literal (double v)
+{
+    if (!(v > -32768.0 && v < 32768.0)) return v;
+    return round (v * 65536.0) / 65536.0;
 }
 
 // Parses a whole string as a PICO-8 number literal (decimal, 0x hex,
@@ -252,7 +284,7 @@ static void pico8_expand_unpack_arg (ASTNode *node)
             ASTNode *n;
             if (pico8_parse_number_string (item, &v)) {
                 n = make_node (NODE_NUMBER);
-                n->as.number.val = v;
+                n->as.number.val = pico8_fix_literal (v);
                 free (item);
             } else {
                 n = make_node_string (item);
@@ -322,7 +354,7 @@ bool pico8_fold_numeric_string_args (ASTNode *node, const char *func_name)
         if (a->type == NODE_STRING && pico8_parse_number_string (a->as.string_val.value, &v)) {
             ASTNode *next = a->next;
             a->type = NODE_NUMBER;
-            a->as.number.val = v;
+            a->as.number.val = pico8_fix_literal (v);
             a->next = next;
         }
     }
@@ -702,6 +734,16 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         if (strcmp (func_name, "cos") == 0)
         {
             return (emit_pico8_cos_intrinsic (node, dest_reg));
+        }
+
+        // the pause menu's plumbing (pico8_prelude.c __p8_pausemenu)
+        if (strcmp (func_name, "__p8_menu_hook") == 0)
+        {
+            return (emit_pico8_menu_hook_intrinsic (node, dest_reg));
+        }
+        if (strcmp (func_name, "__p8_start_pressed") == 0)
+        {
+            return (emit_pico8_start_pressed_intrinsic (node, dest_reg));
         }
 
         // run([param]) -- start the cart over (exec.s __builtin_cart_restart)
@@ -1084,6 +1126,25 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     {
         runtime_req.needs_strings          = true;
         return emit_tonumber_intrinsic(node, dest_reg);
+    }
+
+    // Metatables (table.s): setmetatable / getmetatable / rawget / rawset /
+    // rawlen / rawequal
+    {
+        static const struct { const char *name; int nargs; const char *routine; } mt[] = {
+            { "setmetatable", 2, "__builtin_setmetatable" },
+            { "getmetatable", 1, "__builtin_getmetatable" },
+            { "rawget",       2, "__builtin_rawget" },
+            { "rawset",       3, "__builtin_rawset" },
+            { "rawlen",       1, "__builtin_rawlen" },
+            { "rawequal",     2, "__builtin_eq" },
+        };
+        for (size_t i = 0; i < sizeof (mt) / sizeof (mt[0]); i++) {
+            if (strcmp (func_name, mt[i].name) == 0) {
+                if (strcmp (mt[i].name, "rawequal") == 0) runtime_req.needs_strings = true;
+                return emit_runtime_call_intrinsic (node, dest_reg, mt[i].nargs, mt[i].routine);
+            }
+        }
     }
 
     // string.format(format, ...)

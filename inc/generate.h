@@ -38,6 +38,7 @@ void  node_for_numeric         (ASTNode *);
 void  node_for_generic         (ASTNode *);
 void  node_function_call       (ASTNode *, int);
 extern ASTNode *g_last_exec_call;
+extern bool     g_uses_metatables;   // the source calls setmetatable() (main.c)
 void  node_function_def        (ASTNode *);
 void  node_function_pointer    (ASTNode *, int);
 void  node_identifier          (ASTNode *, int);
