@@ -403,6 +403,11 @@ __builtin_pico8_map:
     ;; Only the cells that can land on the 128x128 screen are visited, and
     ;; each is drawn inline (one region draw, no spr() call): at 2.75x a map
     ;; cell is exactly 22 screen px, so cell (c, r) sits at X0 + 22c, Y0 + 22r.
+    ;; The visible range is clipped to the map once, so the cell loop keeps
+    ;; the cell index, screen x and count in registers with no bounds
+    ;; checks, reads each map word (4 cells) once, and steps over a word of
+    ;; 4 empty cells in one go: ~12 cycles per cell, ~16 per drawn one,
+    ;; ~16 per 4 empty cells (was ~70 per cell).
     ;; Frame: [BP-1]=row [BP-2]=col [BP-3]=celx [BP-4]=cely [BP-5]=col_end
     ;;        [BP-6]=row_end [BP-7]=layer [BP-8]=X0 [BP-9]=Y0 [BP-10]=col_start
     PUSH  BP
@@ -510,80 +515,142 @@ _pico8_map_rs_ok:
     IMIN  R2, R3
     MOV   [BP-6], R2
 
+    ;; --- clip the visible range to the map itself, so the cell loop
+    ;;     needs no bounds checks: 0 <= celx+col < 128, 0 <= cely+row < 64
+    MOV   R1, [BP-3]
+    ISGN  R1                     ; first column inside the map: -celx
+    MOV   R2, [BP-10]
+    IMAX  R2, R1
+    MOV   [BP-10], R2
+    MOV   R1, PICO8_MAP_WIDTH
+    MOV   R2, [BP-3]
+    ISUB  R1, R2                 ; one past the last: 128 - celx
+    MOV   R2, [BP-5]
+    IMIN  R2, R1
+    MOV   [BP-5], R2
+    MOV   R1, [BP-4]
+    ISGN  R1
+    MOV   R2, [BP-1]
+    IMAX  R2, R1
+    MOV   [BP-1], R2
+    MOV   R1, PICO8_MAP_HEIGHT
+    MOV   R2, [BP-4]
+    ISUB  R1, R2
+    MOV   R2, [BP-6]
+    IMIN  R2, R1
+    MOV   [BP-6], R2
+
     OUT   GPU_SelectedTexture, 0
     MOV   R1, PICO8_SCALE
     OUT   GPU_DrawingScaleX, R1
     OUT   GPU_DrawingScaleY, R1
 
+    PUSH  R5
+    PUSH  R6
+    PUSH  R7
+    PUSH  R8
+    MOV   R8, [BP-7]             ; layer (0: no filter)
+
+    ;; cells per row; nothing to draw when the column range is empty
+    MOV   R3, [BP-5]
+    MOV   R1, [BP-10]
+    ISUB  R3, R1
+    MOV   R1, R3
+    ILT   R1, 1
+    JT    R1, _pico8_map_rows_done
+    MOV   [BP-5], R3             ; [BP-5] = cells per row from here on
+
 _pico8_map_row:
     MOV   R1, [BP-1]
     MOV   R2, [BP-6]
     ILT   R1, R2
-    JF    R1, _pico8_map_done
+    JF    R1, _pico8_map_rows_done
     ;; screen y of this row
     MOV   R1, [BP-1]
     IMUL  R1, 22
     MOV   R2, [BP-9]
     IADD  R1, R2
     OUT   GPU_DrawingPointY, R1
+    ;; R5 = cell index of the first visible cell, R6 = its screen x,
+    ;; R7 = cells left in the row, R4 = the map word holding the current
+    ;; cell, shifted so that cell is its low byte
+    MOV   R5, [BP-4]
+    MOV   R1, [BP-1]
+    IADD  R5, R1
+    IMUL  R5, PICO8_MAP_WIDTH
+    MOV   R1, [BP-3]
+    IADD  R5, R1
     MOV   R1, [BP-10]
-    MOV   [BP-2], R1             ; col = first visible column
+    IADD  R5, R1
+    MOV   R6, R1
+    IMUL  R6, 22
+    MOV   R1, [BP-8]
+    IADD  R6, R1
+    MOV   R7, [BP-5]
+    MOV   R4, R5
+    SHL   R4, -2
+    IADD  R4, PICO8_MAP_RAM
+    MOV   R4, [R4]
+    MOV   R2, R5
+    AND   R2, 3
+    SHL   R2, 3
+    ISGN  R2
+    SHL   R4, R2
+    JMP   _pico8_map_cell
 
 _pico8_map_col:
-    MOV   R1, [BP-2]
-    MOV   R2, [BP-5]
-    ILT   R1, R2
-    JF    R1, _pico8_map_next_row
+    ;; at a word boundary: load the next 4 cells; skip all 4 at once when
+    ;; they are empty (tile 0) and the row has 4 left
+    MOV   R2, R5
+    AND   R2, 3
+    JT    R2, _pico8_map_cell
+    MOV   R4, R5
+    SHL   R4, -2
+    IADD  R4, PICO8_MAP_RAM
+    MOV   R4, [R4]
+    JT    R4, _pico8_map_cell
+    MOV   R2, R7
+    ILT   R2, 4
+    JT    R2, _pico8_map_cell
+    IADD  R5, 4
+    IADD  R6, 88
+    ISUB  R7, 4
+    JT    R7, _pico8_map_col
+    JMP   _pico8_map_row_end
 
-    ;; tile = map[celx+col][cely+row]
-    MOV   R1, [BP-3]
-    MOV   R2, [BP-2]
-    IADD  R1, R2
-    MOV   R2, [BP-4]
-    MOV   R3, [BP-1]
-    IADD  R2, R3
-    CALL  __pico8_map_addr
-    JF    R0, _pico8_map_next_col
-    MOV   R3, [R1]
-    ISGN  R2
-    SHL   R3, R2
-    AND   R3, 0xFF               ; R3 = tile id
-    MOV   R0, R3
-    IEQ   R0, 0
-    JT    R0, _pico8_map_next_col   ; tile 0 is never drawn
-
-    ;; layer filter: (flags[tile] & layer) != 0, when layer != 0
-    MOV   R1, [BP-7]
-    MOV   R0, R1
-    IEQ   R0, 0
-    JT    R0, _pico8_map_draw
-    MOV   R2, R3
+_pico8_map_cell:
+    MOV   R1, R4
+    AND   R1, 0xFF               ; R1 = tile id
+    SHL   R4, -8
+    JF    R1, _pico8_map_next_col   ; tile 0 is never drawn
+    JF    R8, _pico8_map_draw
+    ;; layer filter: (flags[tile] & layer) != 0
+    MOV   R2, R1
     IADD  R2, PICO8_FLAGS_RAM
     MOV   R2, [R2]
-    AND   R2, R1
-    IEQ   R2, 0
-    JT    R2, _pico8_map_next_col
-
+    AND   R2, R8
+    JF    R2, _pico8_map_next_col
 _pico8_map_draw:
-    OUT   GPU_SelectedRegion, R3
-    MOV   R1, [BP-2]
-    IMUL  R1, 22
-    MOV   R2, [BP-8]
-    IADD  R1, R2
-    OUT   GPU_DrawingPointX, R1
+    OUT   GPU_SelectedRegion, R1
+    OUT   GPU_DrawingPointX, R6
     OUT   GPU_Command, GPUCommand_DrawRegionZoomed
-
 _pico8_map_next_col:
-    MOV   R1, [BP-2]
-    IADD  R1, 1
-    MOV   [BP-2], R1
-    JMP   _pico8_map_col
+    IADD  R5, 1
+    IADD  R6, 22
+    ISUB  R7, 1
+    JT    R7, _pico8_map_col
 
-_pico8_map_next_row:
+_pico8_map_row_end:
     MOV   R1, [BP-1]
     IADD  R1, 1
     MOV   [BP-1], R1
     JMP   _pico8_map_row
+
+_pico8_map_rows_done:
+    POP   R8
+    POP   R7
+    POP   R6
+    POP   R5
 
 _pico8_map_done:
     MOV   R0, BOXED_NIL
@@ -624,6 +691,84 @@ __builtin_pico8_spr:
 
     OUT   GPU_SelectedTexture, 0
 
+    ;; --- fast path: one 8x8 sprite (w and h nil or 1), the usual call.
+    ;;     Same placement as the general loop below, without the frame
+    ;;     slots, the row/column loop and the truthy() calls.
+    MOV   R1, [BP+5]
+    MOV   R2, R1
+    IEQ   R2, BOXED_NIL
+    JT    R2, _pico8_spr_f_w
+    IEQ   R1, 0x3F800000         ; 1.0
+    JF    R1, _pico8_spr_general
+_pico8_spr_f_w:
+    MOV   R1, [BP+6]
+    MOV   R2, R1
+    IEQ   R2, BOXED_NIL
+    JT    R2, _pico8_spr_f_h
+    IEQ   R1, 0x3F800000         ; 1.0
+    JF    R1, _pico8_spr_general
+_pico8_spr_f_h:
+    MOV   R1, [BP+2]
+    CALL  __pico8_to_int
+    MOV   R2, R1
+    ILT   R2, 0
+    JT    R2, _pico8_spr_done
+    MOV   R2, R1
+    IGT   R2, 255
+    JT    R2, _pico8_spr_done
+    OUT   GPU_SelectedRegion, R1
+
+    ;; x: round((x - cam_x) * SCALE) + OFFSET_X, + 22 and a mirrored scale
+    ;; when flip_x is truthy
+    MOV   R1, [BP+3]
+    CALL  __pico8_to_int
+    CIF   R1
+    MOV   R2, [PICO8_CAMERA_X]
+    FSUB  R1, R2
+    FMUL  R1, PICO8_SCALE
+    FADD  R1, 0.5
+    FLR   R1
+    CFI   R1
+    IADD  R1, PICO8_OFFSET_X
+    MOV   R3, PICO8_SCALE
+    MOV   R2, [BP+7]
+    IEQ   R2, BOXED_NIL
+    JT    R2, _pico8_spr_f_x
+    MOV   R2, [BP+7]
+    IEQ   R2, BOXED_FALSE
+    JT    R2, _pico8_spr_f_x
+    FSGN  R3
+    IADD  R1, 22
+_pico8_spr_f_x:
+    OUT   GPU_DrawingScaleX, R3
+    OUT   GPU_DrawingPointX, R1
+
+    MOV   R1, [BP+4]
+    CALL  __pico8_to_int
+    CIF   R1
+    MOV   R2, [PICO8_CAMERA_Y]
+    FSUB  R1, R2
+    FMUL  R1, PICO8_SCALE
+    FADD  R1, 0.5
+    FLR   R1
+    CFI   R1
+    IADD  R1, PICO8_OFFSET_Y
+    MOV   R3, PICO8_SCALE
+    MOV   R2, [BP+8]
+    IEQ   R2, BOXED_NIL
+    JT    R2, _pico8_spr_f_y
+    MOV   R2, [BP+8]
+    IEQ   R2, BOXED_FALSE
+    JT    R2, _pico8_spr_f_y
+    FSGN  R3
+    IADD  R1, 22
+_pico8_spr_f_y:
+    OUT   GPU_DrawingScaleY, R3
+    OUT   GPU_DrawingPointY, R1
+    OUT   GPU_Command, GPUCommand_DrawRegionZoomed
+    JMP   _pico8_spr_done
+
+_pico8_spr_general:
     MOV   R1, [BP+2]
     CALL  __pico8_to_int
     MOV   [BP-1], R1
@@ -988,6 +1133,9 @@ __builtin_pico8_all_step:
 
     MOV   R1, [BP+2]
     MOV   R4, R1
+    IEQ   R4, BOXED_NIL          ; all(nil): no elements, as in PICO-8
+    JT    R4, _pico8_all_nil
+    MOV   R4, R1
     AND   R4, BOXED_DATA
     IEQ   R4, BOXED_TABLE
     JF    R4, __runtime_error_not_table
@@ -1042,6 +1190,8 @@ _pico8_all_next:
     IADD  R3, 1
     JMP   _pico8_all_skip
 
+_pico8_all_nil:
+    MOV   R3, [BP+3]
 _pico8_all_end:
     MOV   R0, BOXED_NIL
 _pico8_all_found:

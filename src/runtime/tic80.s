@@ -399,12 +399,21 @@ _tic80_spr_or_done:
     FLR   R7
     CFI   R7                  ; id
 
+    ;; TIC-80 takes x, y as whole pixels (a C cast: truncated toward
+    ;; zero), so a fractional position lands on the same pixel as TIC-80
+    ;; draws it. Scaling the fraction instead put a player standing at
+    ;; y = 112.0 / 112.2 / 112.6 (gravity, then the ground snap) on screen
+    ;; rows 294, 295, 296: superblock_adventure's ground vibration.
     MOV   R8, [BP+3]
+    CFI   R8
+    CIF   R8
     FMUL  R8, 2.625
     FADD  R8, 0.5
     FLR   R8
     CFI   R8                  ; base x (screen px)
     MOV   R9, [BP+4]
+    CFI   R9
+    CIF   R9
     FMUL  R9, 2.625
     FADD  R9, 0.5
     FLR   R9
@@ -1791,7 +1800,11 @@ __builtin_tic80_pix:
     PUSH  R6                 ; callee-saved, we use it as scratch below
 
     MOV   R1, [BP+2]
+    CFI   R1                  ; whole pixels, as TIC-80 (see spr)
+    CIF   R1
     MOV   R2, [BP+3]
+    CFI   R2
+    CIF   R2
     MOV   R5, [BP+4]
     CFI   R5
     AND   R5, 15              ; clamp to valid swatch 0-15
@@ -2595,12 +2608,16 @@ __builtin_tic80_print:
     MOV   R1, [R1]
     OUT   GPU_MultiplyColor, R1
 
-    MOV   R1, [BP+4]                     ; x
+    MOV   R1, [BP+4]                     ; x: whole pixels, as TIC-80
+    CFI   R1
+    CIF   R1
     FMUL  R1, 2.625
     FADD  R1, 0.5
     FLR   R1
     CFI   R1
     MOV   R2, [BP+3]                     ; y
+    CFI   R2
+    CIF   R2
     FMUL  R2, 2.625
     FADD  R2, 0.5
     FLR   R2

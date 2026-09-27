@@ -17,7 +17,7 @@ for p in rows:
     if len(p) >= 4 and p[3]:
         ln = int(p[2])
         nxt = src[ln-1].strip() if 0 < ln <= len(src) else ''
-        if (nxt.startswith('PUSH') and 'BP' in nxt) or p[3].startswith('__function_') or p[3].startswith('__builtin_') or p[3] in ('__unbox_string','__table_key_streq','__malloc'):
+        if (nxt.startswith('PUSH') and 'BP' in nxt) or p[3].startswith('__function_') or p[3].startswith(('__builtin_','__pico8_','__tic80_','__shapes_')) or p[3] in ('__unbox_string','__table_key_streq','__malloc'):
             last = p[3]
         elif last == '?':
             last = p[3]

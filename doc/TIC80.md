@@ -69,6 +69,15 @@ tracks of 25–83 s, 29 SFX renders), about half that at 11025.
 
 ## Sprites
 
+TIC-80 draws at whole pixels: `spr`, `pix`, `print`, `map`, `rect` and the
+circles take their x and y as integers (TIC-80's API truncates them toward
+zero), and so does this layer before scaling to the Vircon32 screen. A
+sprite at y = 112.6 is drawn at row 112, like on TIC-80. (Before, fractional
+positions were rounded at the 2.625× screen scale, so a sprite settling on
+the ground at 112.0 / 112.2 / 112.6 was drawn one screen row apart each
+frame: superblock_adventure's ground-contact vibration.) `line` keeps
+fractional endpoints, as TIC-80's does.
+
 `spr(id, x, y, colorkey, scale, flip, rotate, w, h)` follows TIC-80's
 `drawSprite()`: flips are negative GPU scales; the 90°/270° orientations are
 drawn with `DrawRegionRotozoomed`, and multi-tile sprites pick their source

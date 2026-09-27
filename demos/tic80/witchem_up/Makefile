@@ -1,6 +1,6 @@
 # --- Configuration ---
 DEMO          = witchem_up
-LUA_COMPILER  = ../../../bin/v32lua
+LUA_COMPILER  = ../../../bin/v32lua --rate 11025
 ASSEMBLER     = assemble
 TEXTURE_TOOL  = png2vircon
 PACKER        = packrom

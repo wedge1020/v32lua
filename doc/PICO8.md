@@ -274,7 +274,32 @@ in steps of 4 pixels (11 screen pixels), so the pixels keep their grid.
 Table field access, arrays and `all()` loops are the hot paths in most
 carts. Celeste runs at a full 30 updates per second in the test harness.
 evercore-style engines that test every object against every object, several
-times per object per frame, run at about a third of full speed.
+times per object per frame, run at about half of full speed.
+
+What the layer does to keep the common calls cheap:
+
+* `map` visits only the cells that can land on the screen, clipped to the
+  map once, and draws each one itself (no `spr` call). The cell loop keeps
+  the cell index, screen x and count in registers and reads each map word
+  (4 cells) once; a word of 4 empty cells is stepped over in one go. About
+  19 cycles per cell with a layer filter, ~12 without (was ~55 plus a
+  helper call): Celeste's 16×16 room layers went from ~14,000 to ~4,800
+  cycles per call.
+* `spr` with one 8×8 sprite (`w`/`h` omitted or 1, the usual call) takes a
+  short path: 75 cycles instead of 128 in Celeste.
+* `for v in all(t)` steps through the array part inline (~25 cycles per
+  element instead of ~70); the end of the loop, deletions and holes fall
+  back to the runtime step, so PICO-8's deletion-safe order is unchanged.
+  `all(nil)` is an empty loop, as in PICO-8.
+* `x == "literal"` (and `~=`) is decided inline: string literals are
+  interned, so two different literals are never equal and only a string
+  built at run time needs a content compare. froggo's
+  `if obj.name == "ant" then …` chains went from ~12M cycles per 1,800
+  frames to nothing measurable.
+
+Measured on the harness with the same random input over 1,800 frames:
+Celeste 127k → 100k cycles per update; froggo 383k → 327k (766 overrun
+frames → 21); evercore 919k → 811k (13% more updates per second).
 
 ## Not supported (yet)
 

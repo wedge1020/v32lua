@@ -393,6 +393,61 @@ static void node_for_all (ASTNode *node, int label_id, const char *ctx)
         register_pinned[i] = 0;
     }
 
+    // Inline fast path (the common step): t is a table, the element at i
+    // is still prev (not deleted), and the next element is a non-nil
+    // array-part entry within #t. Anything else -- the end of the loop,
+    // deletions, holes, a hash-part array, a non-table -- takes the
+    // __builtin_pico8_all_step call below, which starts from the same
+    // (i, prev) state. ~25 cycles instead of ~70 per iteration.
+    char slow_label[128], got_label[128];
+    snprintf (slow_label, sizeof (slow_label), "__%s_all_slow_%d", ctx, label_id);
+    snprintf (got_label,  sizeof (got_label),  "__%s_all_got_%d",  ctx, label_id);
+    {
+        int ra = allocate_register ();   // header, then &t[i]
+        int rb = allocate_register ();   // i
+        int rc = allocate_register ();   // scratch
+        int rd = allocate_register ();   // limit = min(#t, capacity)
+        emit_asm ("MOV R%d, %s ; all(): inline step\n", ra, acc_t);
+        emit_asm ("MOV R%d, R%d\n", rc, ra);
+        emit_asm ("AND R%d, BOXED_DATA\n", rc);
+        emit_asm ("IEQ R%d, BOXED_TABLE\n", rc);
+        emit_asm ("JF R%d, %s\n", rc, slow_label);
+        emit_asm ("AND R%d, BOXED_PAYLOAD\n", ra);
+        emit_asm ("MOV R%d, %s\n", rb, acc_i);
+        emit_asm ("MOV R%d, [R%d]\n", rc, ra);
+        emit_asm ("AND R%d, TABLE_ARRAYSIZE\n", rc);
+        emit_asm ("MOV R%d, [R%d+1]\n", rd, ra);
+        emit_asm ("IMIN R%d, R%d\n", rd, rc);
+        emit_asm ("MOV R%d, R%d\n", rc, rb);
+        emit_asm ("IGT R%d, R%d\n", rc, rd);
+        emit_asm ("JT R%d, %s\n", rc, slow_label);
+        emit_asm ("MOV R%d, [R%d+2]\n", ra, ra);
+        emit_asm ("ISUB R%d, 1\n", ra);
+        emit_asm ("IADD R%d, R%d ; &t[i]\n", ra, rb);
+        emit_asm ("MOV R%d, [R%d]\n", rc, ra);
+        emit_asm ("MOV R0, %s\n", acc_prev);
+        emit_asm ("IEQ R%d, R0 ; current element survived?\n", rc);
+        emit_asm ("JF R%d, %s_cur\n", rc, slow_label);
+        emit_asm ("IADD R%d, 1\n", rb);
+        emit_asm ("IADD R%d, 1\n", ra);
+        emit_asm ("MOV R%d, R%d\n", rc, rb);
+        emit_asm ("IGT R%d, R%d\n", rc, rd);
+        emit_asm ("JT R%d, %s\n", rc, slow_label);
+        emit_asm ("%s_cur:\n", slow_label);
+        emit_asm ("MOV R0, [R%d]\n", ra);
+        emit_asm ("MOV R%d, R0\n", rc);
+        emit_asm ("IEQ R%d, BOXED_NIL\n", rc);
+        emit_asm ("JT R%d, %s\n", rc, slow_label);
+        emit_asm ("MOV %s, R%d ; all(): save index\n", acc_i, rb);
+        emit_asm ("MOV %s, R0 ; all(): save element as prev\n", acc_prev);
+        emit_asm ("JMP %s\n", got_label);
+        unlock_register (rd);
+        unlock_register (rc);
+        unlock_register (rb);
+        unlock_register (ra);
+    }
+    emit_asm ("%s:\n", slow_label);
+
     reg = allocate_register ();
     emit_asm ("MOV R%d, %s\n", reg, acc_prev);
     emit_asm ("PUSH R%d ; prev -> [BP+4]\n", reg);
@@ -412,6 +467,7 @@ static void node_for_all (ASTNode *node, int label_id, const char *ctx)
     emit_asm ("IEQ R%d, BOXED_NIL ; nil ends the loop (false does not)\n", reg);
     emit_asm ("JT R%d, %s\n", reg, end_label);
     unlock_register (reg);
+    emit_asm ("%s:\n", got_label);
 
     for (int i = 0; i < var_count; i++) {
         reg = allocate_register ();

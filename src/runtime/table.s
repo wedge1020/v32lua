@@ -266,7 +266,8 @@ __builtin_table_getk:
     PUSH R3
     PUSH R4
     PUSH R5
-    MOV  R1, [SP+7]          ; table (SP: 5 saved regs + return address)
+    PUSH R6
+    MOV  R1, [SP+8]          ; table (SP: 6 saved regs + return address)
     MOV  R2, R1
     AND  R2, BOXED_DATA
     IEQ  R2, BOXED_TABLE
@@ -276,7 +277,7 @@ __builtin_table_getk:
     MOV  R2, R1
     IEQ  R2, 0
     JT   R2, __table_getk_nil
-    MOV  R3, [SP+6]          ; key (pooled literal)
+    MOV  R3, [SP+7]          ; key (pooled literal)
     MOV  R2, R3
     AND  R2, BOXED_PAYLOAD
     OR   R2, V32_CART_PAGE
@@ -285,33 +286,34 @@ __builtin_table_getk:
     MOV  R4, [R1]
     ISUB R4, 1               ; mask
     AND  R2, R4
-    ;; R1 = block, R2 = slot index, R3 = key, R4 = mask; R0 = slot - 2
+    ;; R1 = block, R2 = slot index, R3 = key, R4 = mask; R0 = slot - 2,
+    ;; R5 = the stored key (loaded once per probe), R6 = scratch
 __table_getk_probe:
     MOV  R0, R2
     SHL  R0, 1
     IADD R0, R1
     MOV  R5, [R0+2]          ; stored key
-    IEQ  R5, R3
-    JT   R5, __table_getk_hit
-    MOV  R5, [R0+2]
-    IEQ  R5, BOXED_NIL
-    JT   R5, __table_getk_nil ; empty slot: absent
-    MOV  R5, [R0+2]
-    AND  R5, BOXED_DATA
-    IEQ  R5, BOXED_ROMSTRING
-    JF   R5, __table_getk_not_rom
+    MOV  R6, R5
+    IEQ  R6, R3
+    JT   R6, __table_getk_hit
+    MOV  R6, R5
+    IEQ  R6, BOXED_NIL
+    JT   R6, __table_getk_nil ; empty slot: absent
+    MOV  R6, R5
+    AND  R6, BOXED_DATA
+    IEQ  R6, BOXED_ROMSTRING
+    JF   R6, __table_getk_not_rom
     ;; a ROM string: another pooled literal is a different string; a ROM
     ;; string from outside the pool (type() names, ...) may be equal by
     ;; content -> general routine
-    MOV  R5, [R0+2]
     AND  R5, BOXED_PAYLOAD
     OR   R5, V32_CART_PAGE
-    MOV  R0, __string_pool_start
-    IGT  R0, R5
-    JT   R0, __table_getk_slow
-    MOV  R0, __string_pool_end
-    IGT  R0, R5
-    JF   R0, __table_getk_slow
+    MOV  R6, __string_pool_start
+    IGT  R6, R5
+    JT   R6, __table_getk_slow
+    MOV  R6, __string_pool_end
+    IGT  R6, R5
+    JF   R6, __table_getk_slow
 __table_getk_next:
     IADD R2, 1
     AND  R2, R4
@@ -319,11 +321,10 @@ __table_getk_next:
 __table_getk_not_rom:
     ;; tables, functions, numbers, booleans: a different key. A run-time
     ;; string (RAM, payload >= 4) may be equal by content -> general routine
-    MOV  R5, [R0+2]
-    AND  R5, BOXED_DATA
-    IEQ  R5, BOXED_RAMSTRING
-    JF   R5, __table_getk_next
-    MOV  R5, [R0+2]
+    MOV  R6, R5
+    AND  R6, BOXED_DATA
+    IEQ  R6, BOXED_RAMSTRING
+    JF   R6, __table_getk_next
     AND  R5, BOXED_PAYLOAD
     ILT  R5, 4
     JT   R5, __table_getk_next
@@ -334,12 +335,13 @@ __table_getk_hit:
     IEQ  R5, BOXED_NIL       ; a deleted key: as absent
     JF   R5, __table_getk_done
 __table_getk_nil:
-    MOV  R0, [SP+7]          ; absent: nil, or the metatable's __index
+    MOV  R0, [SP+8]          ; absent: nil, or the metatable's __index
     AND  R0, BOXED_PAYLOAD
     MOV  R0, [R0+4]
     JT   R0, __table_getk_meta
     MOV  R0, BOXED_NIL
 __table_getk_done:
+    POP  R6
     POP  R5
     POP  R4
     POP  R3
@@ -347,14 +349,14 @@ __table_getk_done:
     POP  R1
     RET
 __table_getk_meta:
-    MOV  R0, [SP+7]
-    MOV  R1, [SP+6]
+    MOV  R0, [SP+8]
+    MOV  R1, [SP+7]
     CALL __table_index_miss
     JMP  __table_getk_done
 __table_getk_slow:
-    MOV  R0, [SP+7]
+    MOV  R0, [SP+8]
     PUSH R0
-    MOV  R0, [SP+7]          ; key (one more word on the stack now)
+    MOV  R0, [SP+8]          ; key (one more word on the stack now)
     PUSH R0
     CALL __builtin_table_get
     IADD SP, 2

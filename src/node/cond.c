@@ -142,6 +142,66 @@ static void compare_jump (ASTNode *node, bool when_true, const char *label)
             return;
         }
 
+        // x == "literal" (either side). Literals are interned in the
+        // string pool, so a different pooled literal is a different string:
+        // `o.name == "ant"` is decided inline (identity, then a pool range
+        // check) and only a run-time or non-pool string calls __builtin_eq.
+        ASTNode *str = (right && right->type == NODE_STRING) ? right
+                     : (left && left->type == NODE_STRING) ? left : NULL;
+        if (str != NULL)
+        {
+            other = (str == right) ? left : right;
+            int id = add_string_literal (str->as.string_val.value);
+            int r = allocate_register ();
+            mark_register_live (r, 2);
+            generate_asm (other, r);
+            ensure_in_register (r);
+            int sr = allocate_register ();
+            mark_register_live (sr, 2);
+            char skip[128], maybe[128], reload[128];
+            fresh_label (skip, sizeof skip, "streq_skip");
+            fresh_label (maybe, sizeof maybe, "streq_maybe");
+            fresh_label (reload, sizeof reload, "streq_reload");
+            const char *on_eq = jump_on_equal ? label : skip;
+            const char *on_ne = jump_on_equal ? skip : label;
+            emit_asm ("MOV  R%d, __string_%d\n", sr, id);
+            emit_asm ("OR   R%d, BOXED_ROMSTRING\n", sr);
+            emit_asm ("MOV  R0, R%d\n", r);
+            emit_asm ("IEQ  R0, R%d ; the same literal?\n", sr);
+            emit_asm ("JT   R0, %s\n", on_eq);
+            emit_asm ("MOV  R0, R%d\n", r);
+            emit_asm ("AND  R0, BOXED_DATA\n");
+            emit_asm ("IEQ  R0, BOXED_ROMSTRING\n");
+            emit_asm ("JF   R0, %s\n", maybe);
+            emit_asm ("MOV  R0, R%d\n", r);
+            emit_asm ("AND  R0, BOXED_PAYLOAD\n");
+            emit_asm ("OR   R0, V32_CART_PAGE\n");
+            emit_asm ("MOV  R%d, __string_pool_start\n", sr);
+            emit_asm ("IGT  R%d, R0\n", sr);
+            emit_asm ("JT   R%d, %s\n", sr, reload);
+            emit_asm ("MOV  R%d, __string_pool_end\n", sr);
+            emit_asm ("IGT  R%d, R0\n", sr);
+            emit_asm ("JT   R%d, %s ; another pooled literal: different\n", sr, on_ne);
+            emit_asm ("%s:\n", reload);
+            emit_asm ("MOV  R%d, __string_%d\n", sr, id);
+            emit_asm ("OR   R%d, BOXED_ROMSTRING\n", sr);
+            emit_asm ("%s:\n", maybe);
+            emit_asm ("MOV  R0, R%d\n", r);
+            emit_asm ("AND  R0, 0x7FC00000\n");
+            emit_asm ("IEQ  R0, 0x7FC00000\n");
+            emit_asm ("JF   R0, %s ; not a string\n", on_ne);
+            emit_asm ("PUSH R%d\n", r);
+            emit_asm ("PUSH R%d\n", sr);
+            emit_asm ("CALL __builtin_eq\n");
+            emit_asm ("IADD SP, 2\n");
+            emit_asm ("IEQ  R0, BOXED_TRUE\n");
+            emit_asm ("%s   R0, %s\n", jump_on_equal ? "JT" : "JF", label);
+            emit_asm ("%s:\n", skip);
+            unlock_register (sr);
+            unlock_register (r);
+            return;
+        }
+
         // general equality
         int lr, rr;
         eval_pair (left, right, &lr, &rr);
