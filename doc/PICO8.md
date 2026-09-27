@@ -50,6 +50,47 @@ with a ship and a ringed planet (left) and a sunset over a perspective grid
 cart's title. They are generated at compile time into spare rows of the
 sprite texture. `--no-bezel` (or `--#bezel off`) restores the black margins.
 
+#### Custom panel art
+
+`--bezel art.png` on the command line, or `--#bezel "art.png"` in the
+source, replaces both panels with your own image (a default for every
+cart can be set in `inc/config.h`, `V32LUA_DEFAULT_PICO8_BEZEL_FILE`).
+
+* **One image, both panels side by side.** The left half is the left
+  panel, the right half the right panel. Each panel covers 144×360 screen
+  pixels, so the image has the proportions **4:5** (width : height).
+* **Size.** 288×360 is drawn pixel for pixel. Smaller images are scaled
+  up by 360 ÷ height with no smoothing, which suits pixel art: 96×120 at
+  3× (the built-in panels' own size), 144×180 at 2×, 192×240 at 1.5×
+  (fractional scales repeat some pixel rows and columns unevenly; prefer
+  whole ones). At most 816×1020 (a Vircon32 texture is at most
+  1024×1024). The width must be even. Any other size is a compile error
+  that says what was expected.
+* **Colors.** Any colors (32-bit RGBA); the PICO-8 palette isn't
+  required. Transparent pixels show black: the panels are drawn over
+  black margins then, which also hide anything the cart draws off its
+  screen. Keep it opaque to save those two draws.
+* **The inner edges** touch the 352×352 game screen at x = 144 and
+  x = 496: a dark frame line in the art's innermost columns reads well.
+  The top and bottom 4 pixels of the screen columns between the panels
+  stay black.
+* **File format.** A PNG — grayscale, RGB, palette (with transparency),
+  gray+alpha or RGBA, 8-bit (palette and grayscale also 1/2/4-bit;
+  16-bit is reduced to 8), *not interlaced* (most editors don't
+  interlace by default; GIMP: uncheck "Interlacing (Adam7)" on export).
+  A `.vtex` made by Vircon32's `png2vircon` works too. A relative path is
+  looked up in the current directory first, then next to the source file.
+* The art becomes its own texture (`<cart>_bezel.vtex`, listed in the
+  cart's XML), so it doesn't take room from the sprite sheet. The cart's
+  title isn't drawn on custom art — put it in the image if you want it.
+
+A template: start from a 96×120 canvas (or 288×360), draw a vertical guide
+at the middle, and export both halves in one PNG:
+
+```
+v32lua --bezel panels.png game.p8
+```
+
 ## Main loop
 
 `_init()` once, then per tick `_update()` → `_draw()` →
@@ -229,7 +270,9 @@ ends on starts the next one late, at the position it would have reached.
 
 Sample rate (`--rate N` on the command line, or `--#rate` at the top of
 the file with `--#api`/`--#p8`; `--p8rate`/`--#p8rate` are the old names,
-still accepted). The same setting applies to TIC-80 carts:
+still accepted; the default when neither is given is
+`V32LUA_DEFAULT_PICO8_RATE` in `inc/config.h`, 22050 as shipped). The same
+option applies to TIC-80 carts:
 
 | `--rate` | Celeste's sound data | Notes |
 |---|---|---|
@@ -300,6 +343,21 @@ What the layer does to keep the common calls cheap:
 Measured on the harness with the same random input over 1,800 frames:
 Celeste 127k → 100k cycles per update; froggo 383k → 327k (766 overrun
 frames → 21); evercore 919k → 811k (13% more updates per second).
+
+## Lua details that carts rely on
+
+* **Multi-value lists.** `unpack(t [, i [, j]])` returns every value from
+  `t[i]` to `t[j]` (it used to stop at 8), and `...`, `unpack(...)` or a
+  call returning several values expand in full as the last argument,
+  return value, table field or assignment value: `fn(unpack(args))`,
+  `ctx[name](ctx, ...)`, `return x, unpack(list, 2)`, `{"move",
+  unpack(params)}`. A cart's own recursive `unpack` works too (just one
+  boss's promise chains are built this way). Up to 32 values.
+* **Numeric strings in arithmetic** become numbers, as in PICO-8:
+  `("0x".."ff") + 0` is 255, `"12" + 1` is 13 (nanoman's level data).
+* `add`, `del`, `count` and `foreach` on `nil` do nothing (`count` is 0),
+  as in PICO-8 — just one boss adds its first entities before the list
+  exists. `all(nil)` is an empty loop.
 
 ## Not supported (yet)
 

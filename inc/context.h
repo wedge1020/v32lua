@@ -18,6 +18,9 @@ typedef struct SymbolNode
     int         is_variadic;
     int         is_cart_resource;
     int         return_count;
+    bool        returns_mv;   // some `return` ends in `...`, unpack() or a
+                              // call of unknown count: RET_COUNT says how
+                              // many values came back (node/multivalue.c)
     bool        is_boxed;     // slot holds a box pointer, not the value
     ASTNode    *def_node;     // for is_function symbols
     char       *fn_alias;     // local/upvalue bound to a `local function`

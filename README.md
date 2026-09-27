@@ -202,6 +202,17 @@ works):
 * `--rate 11025|22050|44100`: Sample rate of the sound synthesized from a
   PICO-8 or TIC-80 cart (default 22050; see [doc/PICO8.md](doc/PICO8.md#sound)
   and [doc/TIC80.md](doc/TIC80.md#sound)). `--p8rate` is the old name.
+* `--bezel art.png`: PICO-8 side panels from your own art instead of the
+  built-in ones (see [doc/PICO8.md](doc/PICO8.md#side-panels));
+  `--no-bezel`: black margins.
+* `--fast-circles`: TIC-80/PICO-8 filled circles above radius 31 drawn as
+  a scaled disc.
+
+The defaults of these options (sample rates per API, side panels on/off
+and a default panel art file, fast circles, warnings) are set in
+`inc/config.h`: change them there and rebuild, or pass them at build time
+(`make CFLAGS="... -DV32LUA_DEFAULT_PICO8_RATE=11025"`). Precedence:
+command-line option, then the `--#` hint in the source, then `config.h`.
 
 ```bash
 $ v32lua celeste.p8 --title "celeste" --rate 11025     # API detected from .p8
@@ -890,12 +901,9 @@ decision:
 * `string.match`/`gmatch`; the metatable events `__add`/`__sub`/… , `__eq`/`__lt`/`__le`,
   `__concat`, `__unm` (see [Metatables](#supported-lua-language-features))
 * `select()`, and `next()` as a callable function (`pairs()` works)
-* Expanding a trailing multi-value call into a table constructor or an
-  argument list: `{f()}` and `g(f())` keep only `f()`'s first value
-  (`{...}` and `local a, b = f()` do expand). The calling convention
-  carries no return count; this needs one.
-* Arithmetic on numeric strings (`"10" + 5`): Lua coerces the string; here
-  the result is not a number. Convert with `tonumber()` first.
+* Multi-value lists are capped at 32 values: a call's return values, a
+  spread `...` or `unpack(t)` beyond that are dropped (`f(...)`,
+  `{g()}`, `return x, ...`, `local a, b = ...` all expand, up to 32).
 * Bitwise operators work on 32-bit words (numbers are float32): `x << 32`
   and wider results, and `>>` of a negative number, differ from Lua's
   64-bit integers, and a result with more than 24 significant bits
@@ -904,7 +912,10 @@ decision:
   `string.format(...)`.
 * Garbage collection: the heap is a bump allocator, so every table,
   closure and runtime string lives until reset. Long-running games should
-  reuse tables rather than create them per frame.
+  reuse tables rather than create them per frame. Strings take one word
+  per character, so building a long string one piece at a time
+  (`s = s .. c` in a loop) uses memory quadratically: nanoman decodes its
+  levels that way and fills the 4M-word RAM after about 100 s of play.
 * Smaller PICO-8 audio, further: a cart's sound is now its 64 SFX at
   22050 Hz (Celeste: 18 MB, from 66 MB). Sequencing single notes instead
   of whole SFX would roughly halve that again (about half of Celeste's

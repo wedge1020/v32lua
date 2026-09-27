@@ -49,6 +49,7 @@ static const long g_gpu_capacity = 9L * 640 * 360;
 static long g_gpu_rem = g_gpu_capacity;
 static int  g_gpu_dropped = 0, g_gpu_drop_frames = 0, g_gpu_last_drop = -1, g_gpu_first_drop = -1;
 static string memdump;
+static bool bpwatch = false;
 static const char* profpath = nullptr; static int profstart = 0;
 static map<uint32_t, long long> g_prof;
 
@@ -240,6 +241,7 @@ int main(int argc, char** argv)
         else if (a == "-m") { memdump = argv[++i]; }
         else if (a == "-G") dirty = true;
         else if (a == "-c") maxcycles = atoll(argv[++i]);
+        else if (a == "-B") bpwatch = true;
         else if (a == "-t") { stringstream ts(argv[++i]); string t; while (getline(ts, t, ',')) if (!t.empty()) traps.push_back(strtoll(t.c_str(), nullptr, 16)); }
         else vbin = argv[i];
     }
@@ -302,7 +304,10 @@ int main(int argc, char** argv)
     }
 
     long long cyc = 0;
-    static int32_t hist[48]; long long hpos = 0;
+    static int32_t hist[4096]; long long hpos = 0;
+    int trailn = getenv("V32_TRAIL") ? atoi(getenv("V32_TRAIL")) : 48;
+    if (trailn < 1 || trailn > 4096) trailn = 48;
+    vector<int32_t> shadow;                  // -B: BP at each CALL
     string status = "FRAMES_EXHAUSTED";
     for (g_frame = 0; g_frame < frames; g_frame++) {
         g_gpu_rem = g_gpu_capacity;            // V32GPU::ChangeFrame
@@ -311,14 +316,30 @@ int main(int argc, char** argv)
         if (pad.count(g_frame)) for (auto& e : pad[g_frame]) PAD.state[0][e.first] = e.second > 0 ? 1 : -1;
         for (int i = 0; i < Constants::CyclesPerFrame; i++) {
             if (profpath && g_frame >= profstart) g_prof[(uint32_t) CPU.InstructionPointer.AsInteger]++;
+            if (bpwatch) {
+                // -B: a routine must return with the caller's BP. Report the
+                // first RET where BP differs from its value at the CALL.
+                VirconWord w; MB.ReadAddress(CPU.InstructionPointer.AsInteger, w);
+                int op = (int) ((w.AsBinary >> 26) & 63);
+                if (op == 3) shadow.push_back(CPU.BasePointer.AsInteger);
+                else if (op == 4 && !shadow.empty()) {
+                    int32_t want = shadow.back(); shadow.pop_back();
+                    if (want != CPU.BasePointer.AsInteger && traps.empty()) {
+                        printf("BPWATCH ret at %08X: BP=%08X, was %08X at the CALL (frame %d)\n",
+                               (uint32_t) CPU.InstructionPointer.AsInteger,
+                               (uint32_t) CPU.BasePointer.AsInteger, (uint32_t) want, g_frame);
+                        traps.push_back(CPU.InstructionPointer.AsInteger);
+                    }
+                }
+            }
             if (!traps.empty()) {
-                hist[hpos++ % 48] = CPU.InstructionPointer.AsInteger;
+                hist[hpos++ % 4096] = CPU.InstructionPointer.AsInteger;
                 bool hit = false;
                 for (long long t : traps) if (CPU.InstructionPointer.AsInteger == (int32_t) t) hit = true;
                 if (hit) {
                     status = "TRAPPED";
                     printf("TRAP at %08X\nTRAIL", (uint32_t) CPU.InstructionPointer.AsInteger);
-                    for (int k = 48; k >= 1; k--) if (hpos - k >= 0) printf(" %08X", (uint32_t) hist[(hpos - k) % 48]);
+                    for (int k = trailn; k >= 1; k--) if (hpos - k >= 0) printf(" %08X", (uint32_t) hist[(hpos - k) % 4096]);
                     printf("\nSTACK");
                     int32_t bp = CPU.BasePointer.AsInteger;
                     for (int d = 0; d < 32 && bp > 0 && bp < Constants::RAMSize - 1; d++) {
@@ -341,7 +362,7 @@ int main(int argc, char** argv)
     }
     if (CPU.Halted && status != "TRAPPED" && !traps.empty()) {
         printf("HALT TRAIL");
-        for (int k = 48; k >= 1; k--) if (hpos - k >= 0) printf(" %08X", (uint32_t) hist[(hpos - k) % 48]);
+        for (int k = trailn; k >= 1; k--) if (hpos - k >= 0) printf(" %08X", (uint32_t) hist[(hpos - k) % 4096]);
         printf("\n");
     }
     if (CPU.Halted && status != "TRAPPED") {

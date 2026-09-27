@@ -3501,3 +3501,48 @@ __tnb_skip_one:
     JMP   __tnb_skip_space
 __tnb_skip_done:
     RET
+
+;; ---------------------------------------------------------------------------
+;; __arith_coerce: R0 = an arithmetic operand that is not a number (the
+;; compiler only calls this for NaN-boxed values). A numeric string becomes
+;; its number, as Lua and PICO-8 do ("12" + 1 == 13, ("0x".."ff") + 0 ==
+;; 255); anything else is returned unchanged. Preserves R1-R13.
+;; ---------------------------------------------------------------------------
+__arith_coerce:
+    PUSH R1
+    PUSH R2
+    PUSH R3
+    PUSH R4
+    PUSH R5
+    PUSH R6
+    PUSH R7
+    PUSH R8
+    PUSH R9
+    PUSH R10
+    PUSH R11
+    PUSH R12
+    PUSH R13
+    PUSH R0
+    PUSH R0
+    CALL __builtin_string_to_number
+    IADD SP, 1
+    POP  R1                      ; the original value
+    MOV  R2, R0
+    IEQ  R2, BOXED_NIL
+    JF   R2, __arith_coerce_done
+    MOV  R0, R1                  ; not a numeric string: unchanged
+__arith_coerce_done:
+    POP  R13
+    POP  R12
+    POP  R11
+    POP  R10
+    POP  R9
+    POP  R8
+    POP  R7
+    POP  R6
+    POP  R5
+    POP  R4
+    POP  R3
+    POP  R2
+    POP  R1
+    RET

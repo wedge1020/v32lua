@@ -189,6 +189,7 @@ void  node_function_def (ASTNode *node)
     SymbolNode *sym = resolve_symbol(func_name);
     if (sym) {
         sym->is_variadic = is_variadic;
+        if (body_returns_mv (node->as.function_def.body)) sym->returns_mv = true;
         // Fixed parameter count for variadic functions too: call sites pad
         // omitted fixed parameters with nil (the count register still says
         // how many were really passed).
@@ -598,7 +599,65 @@ void  node_function_call (ASTNode *node, int  dest_reg)
     }
     bool last_arg_is_unpack = (last_arg != NULL && is_table_unpack_call(last_arg));
 
-    if (last_arg_is_unpack && expected_arity >= 0) {
+    // A multi-value last argument (`...`, unpack(t), a call returning an
+    // unknown number of values): its values are pushed at run time, as many
+    // as there are (node/multivalue.c). The stack pointer from before the
+    // arguments and the real argument count are kept in pinned registers
+    // (spilled to their frame slots across the other arguments' calls):
+    // after the call, SP is restored instead of popping a known count.
+    bool mv_args = !is_c_call && last_arg != NULL && mv_is_tail (last_arg);
+    int  mv_sp_reg = -1, mv_cnt_reg = -1;
+    if (mv_args) {
+        int self_slot = node->as.call.is_method_call ? 1 : 0;
+        int fixed     = explicit_arg_count - 1;
+        int need      = (expected_arity >= 0) ? expected_arity - self_slot - fixed : 0;
+        int p2 = register_pinned[2], p3 = register_pinned[3];
+        register_pinned[2] = register_pinned[3] = 1;     // R2/R3: return values after the call
+        mv_sp_reg  = allocate_pinned_register ();
+        mv_cnt_reg = allocate_pinned_register ();
+        register_pinned[2] = p2; register_pinned[3] = p3;
+        emit_asm ("MOV R%d, SP ; stack before the arguments (multi-value call)\n", mv_sp_reg);
+        force_spill_register (mv_sp_reg);
+
+        emit_mv_to_buf (last_arg);
+
+        int rt = allocate_register ();
+        int rv = allocate_register ();
+        int id = get_next_label ();
+        const char *ctx = get_current_function_name ();
+        emit_asm ("MOV R%d, [RET_COUNT] ; values in the list\n", mv_cnt_reg);
+        if (need > 1) {
+            // nil for the parameters the list doesn't reach
+            emit_asm ("MOV R%d, %d\n", rt, need);
+            emit_asm ("ISUB R%d, R%d ; parameters left without a value\n", rt, mv_cnt_reg);
+            emit_asm ("__%s_mvpad_%d:\n", ctx, id);
+            emit_asm ("MOV R%d, R%d\n", rv, rt);
+            emit_asm ("IGT R%d, 0\n", rv);
+            emit_asm ("JF  R%d, __%s_mvpad_end_%d\n", rv, ctx, id);
+            emit_asm ("MOV R%d, BOXED_NIL\n", rv);
+            emit_asm ("PUSH R%d\n", rv);
+            emit_asm ("ISUB R%d, 1\n", rt);
+            emit_asm ("JMP __%s_mvpad_%d\n", ctx, id);
+            emit_asm ("__%s_mvpad_end_%d:\n", ctx, id);
+        }
+        emit_asm ("MOV R%d, R%d\n", rt, mv_cnt_reg);
+        emit_asm ("__%s_mvarg_%d:\n", ctx, id);
+        emit_asm ("JF  R%d, __%s_mvarg_end_%d\n", rt, ctx, id);
+        emit_asm ("ISUB R%d, 1\n", rt);
+        emit_asm ("MOV R%d, R%d\n", rv, rt);
+        emit_asm ("IADD R%d, MV_BUF\n", rv);
+        emit_asm ("MOV R%d, [R%d]\n", rv, rv);
+        emit_asm ("PUSH R%d ; list value (last first)\n", rv);
+        emit_asm ("JMP __%s_mvarg_%d\n", ctx, id);
+        emit_asm ("__%s_mvarg_end_%d:\n", ctx, id);
+        emit_asm ("IADD R%d, %d ; + the other arguments -> argument count\n",
+                  mv_cnt_reg, fixed + self_slot);
+        unlock_register (rv);
+        unlock_register (rt);
+        force_spill_register (mv_cnt_reg);
+    }
+
+    if (last_arg_is_unpack && expected_arity >= 0 && !mv_args) {
         int self_slot = node->as.call.is_method_call ? 1 : 0;
         int needed = expected_arity - self_slot - (explicit_arg_count - 1);
         if (needed > 1) {
@@ -613,7 +672,7 @@ void  node_function_call (ASTNode *node, int  dest_reg)
                             (node->as.call.is_method_call ? 1 : 0) +
                             unpack_extra_slots;
 
-    if (expected_arity > actual_passed_count) {
+    if (expected_arity > actual_passed_count && !mv_args) {
         int missing_args = expected_arity - actual_passed_count;
         emit_asm("    ; --- Padding %d omitted arguments ---\n",
                  missing_args, is_c_call ? "with 0 (C ABI)" : "with Nil");
@@ -653,6 +712,9 @@ void  node_function_call (ASTNode *node, int  dest_reg)
         emit_asm("    ; --- Pushing explicit arguments Right-to-Left ---\n");
 
         for (int i = explicit_arg_count - 1; i >= 0; i--) {
+            if (i == explicit_arg_count - 1 && mv_args) {
+                continue;       // already pushed, above
+            }
             if (i == explicit_arg_count - 1 && unpack_extra_slots > 0) {
                 // --- Trailing table.unpack(...) expanding into ---
                 // --- (1 + unpack_extra_slots) argument slots. Pushed in ---
@@ -763,7 +825,11 @@ void  node_function_call (ASTNode *node, int  dest_reg)
         // Unlock target_reg now that we've moved its value to R0
         unlock_pinned_register(target_reg);
 
-        if (pass_arg_count) {
+        if (mv_args) {
+            ensure_in_register (mv_cnt_reg);
+            emit_asm("MOV R%d, R%d ; argument count (variadic ABI)\n", VARARG_COUNT_REG, mv_cnt_reg);
+            unlock_pinned_register (mv_cnt_reg);
+        } else if (pass_arg_count) {
             emit_asm("MOV R%d, %d ; argument count (variadic ABI)\n",
                      VARARG_COUNT_REG, actual_passed_count);
         }
@@ -773,7 +839,11 @@ void  node_function_call (ASTNode *node, int  dest_reg)
         g_last_exec_call = node;   // RET_COUNT is valid right after this call
 
         // Clean up arguments from stack
-        if (total_arg_count > 0) {
+        if (mv_args) {
+            ensure_in_register (mv_sp_reg);
+            emit_asm("MOV SP, R%d ; drop the arguments (multi-value call)\n", mv_sp_reg);
+            unlock_pinned_register (mv_sp_reg);
+        } else if (total_arg_count > 0) {
             emit_asm("IADD SP, %d ; Clean up call arguments\n", total_arg_count);
         }
 

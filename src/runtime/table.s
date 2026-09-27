@@ -2867,3 +2867,158 @@ __builtin_rawlen_done:
     MOV  SP, BP
     POP  BP
     RET
+
+;; ===========================================================================
+;; SECTION: MULTI-VALUE LISTS (node/multivalue.c)
+;; ===========================================================================
+;; MV_BUF holds value k of the current multi-value list -- a function's
+;; return values, a spread `...`, unpack() -- and [RET_COUNT] says how many
+;; (at most MV_MAX; more are dropped). A compiled function returns values
+;; 0-2 in R0/R2/R3 and the rest in MV_BUF[3..]; the compiler copies R0/R2/R3
+;; into MV_BUF[0..2] when it needs the whole list in memory.
+
+;; __mv_from_mem: R1 = address of the first value, R2 = count (int, may be
+;; <= 0). Copies the values into MV_BUF and sets RET_COUNT. Clobbers R0-R3.
+__mv_from_mem:
+    MOV  R0, R2
+    ILT  R0, 0
+    JF   R0, __mv_from_mem_pos
+    MOV  R2, 0
+__mv_from_mem_pos:
+    IMIN R2, MV_MAX
+    MOV  [RET_COUNT], R2
+    MOV  R3, MV_BUF
+__mv_from_mem_loop:
+    JF   R2, __mv_from_mem_done
+    MOV  R0, [R1]
+    MOV  [R3], R0
+    IADD R1, 1
+    IADD R3, 1
+    ISUB R2, 1
+    JMP  __mv_from_mem_loop
+__mv_from_mem_done:
+    RET
+
+;; __mv_shift: R1 = k >= 1. Moves the list up by k slots (MV_BUF[i + k] =
+;; MV_BUF[i]) so k leading values can be stored in front of it, and adds k
+;; to RET_COUNT (capped at MV_MAX). Clobbers R0, R2, R3.
+__mv_shift:
+    MOV  R2, [RET_COUNT]
+    IADD R2, R1
+    IMIN R2, MV_MAX
+    MOV  [RET_COUNT], R2         ; R2 = one past the destination slot
+__mv_shift_loop:
+    MOV  R0, R2
+    IGT  R0, R1                  ; destination R2 - 1 >= k?
+    JF   R0, __mv_shift_done
+    ISUB R2, 1
+    MOV  R3, R2
+    ISUB R3, R1
+    IADD R3, MV_BUF
+    MOV  R0, [R3]
+    MOV  R3, R2
+    IADD R3, MV_BUF
+    MOV  [R3], R0
+    JMP  __mv_shift_loop
+__mv_shift_done:
+    RET
+
+;; __mv_unpack(t, i, j): [BP+4] = t, [BP+3] = i, [BP+2] = j (nil: 1 and #t).
+;; t[i], ..., t[j] into MV_BUF, RET_COUNT = their number. Preserves R1-R5.
+__mv_unpack:
+    PUSH BP
+    MOV  BP, SP
+    PUSH R1
+    PUSH R2
+    PUSH R3
+    PUSH R4
+    PUSH R5
+    MOV  R1, [BP+4]
+    MOV  R2, R1
+    AND  R2, BOXED_DATA
+    IEQ  R2, BOXED_TABLE
+    JF   R2, __runtime_error_not_table
+    AND  R1, BOXED_PAYLOAD       ; raw header
+    MOV  R3, [BP+3]              ; i
+    MOV  R2, R3
+    IEQ  R2, BOXED_NIL
+    JF   R2, __mv_unpack_have_i
+    MOV  R3, 1.0
+__mv_unpack_have_i:
+    FLR  R3
+    CFI  R3
+    MOV  R4, [BP+2]              ; j
+    MOV  R2, R4
+    IEQ  R2, BOXED_NIL
+    JF   R2, __mv_unpack_have_j
+    MOV  R4, [R1+1]              ; #t
+    JMP  __mv_unpack_count
+__mv_unpack_have_j:
+    FLR  R4
+    CFI  R4
+__mv_unpack_count:
+    ISUB R4, R3
+    IADD R4, 1                   ; count = j - i + 1
+    MOV  R2, R4
+    ILT  R2, 0
+    JF   R2, __mv_unpack_pos
+    MOV  R4, 0
+__mv_unpack_pos:
+    IMIN R4, MV_MAX
+    MOV  [RET_COUNT], R4
+    MOV  R5, MV_BUF
+__mv_unpack_loop:
+    JF   R4, __mv_unpack_done
+    CALL __table_rawget_int      ; R0 = t[R3]
+    MOV  [R5], R0
+    IADD R3, 1
+    IADD R5, 1
+    ISUB R4, 1
+    JMP  __mv_unpack_loop
+__mv_unpack_done:
+    POP  R5
+    POP  R4
+    POP  R3
+    POP  R2
+    POP  R1
+    MOV  SP, BP
+    POP  BP
+    RET
+
+;; __mv_to_table(t, base): [BP+3] = t, [BP+2] = first key (raw int).
+;; t[base + k] = MV_BUF[k] for every value of the list. Preserves R1-R4.
+__mv_to_table:
+    PUSH BP
+    MOV  BP, SP
+    PUSH R1
+    PUSH R2
+    PUSH R3
+    PUSH R4
+    MOV  R3, [RET_COUNT]
+    MOV  R2, 0
+__mv_to_table_loop:
+    MOV  R1, R2
+    ILT  R1, R3
+    JF   R1, __mv_to_table_done
+    MOV  R1, [BP+3]
+    PUSH R1                      ; table
+    MOV  R1, [BP+2]
+    IADD R1, R2
+    CIF  R1
+    PUSH R1                      ; key
+    MOV  R1, R2
+    IADD R1, MV_BUF
+    MOV  R1, [R1]
+    PUSH R1                      ; value
+    CALL __builtin_table_set
+    IADD SP, 3
+    IADD R2, 1
+    JMP  __mv_to_table_loop
+__mv_to_table_done:
+    POP  R4
+    POP  R3
+    POP  R2
+    POP  R1
+    MOV  SP, BP
+    POP  BP
+    RET

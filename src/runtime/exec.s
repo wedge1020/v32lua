@@ -92,7 +92,8 @@ __exec_valid:
 ; ----------------------------------------------------------------------------
 __exec_closure:
     MOV R1, R0
-    AND R1, CLOSURE_ADDR_MASK        ; R1 = closure record address
+    AND R1, CLOSURE_ADDR_MASK
+    SHL R1, 1                        ; R1 = closure record address (boxed / 2)
 
     ; "CALL __builtin_exec" already pushed a return address before we got
     ; here. Pushing upvalues now would land them ON TOP of it instead of

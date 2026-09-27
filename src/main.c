@@ -69,7 +69,9 @@ static void  print_usage (const char *prog_name)
     fprintf (stdout, "                   comment line) or the file name, prefixed with\n");
     fprintf (stdout, "                   [PICO8] / [TIC80] in those API modes\n");
     fprintf (stdout, "  --rate <hz>      Sample rate of sounds synthesized from a PICO-8 or TIC-80\n");
-    fprintf (stdout, "                   cart: 11025, 22050 (default), 44100 (--p8rate: same)\n");
+    fprintf (stdout, "                   cart: 11025, 22050, 44100. Default 22050 (inc/config.h)\n");
+    fprintf (stdout, "  --bezel <file>   PICO-8: custom side-panel art -- a PNG (or .vtex) with both\n");
+    fprintf (stdout, "                   panels side by side, 4:5 (288x360 1:1, 96x120 at 3x...)\n");
     fprintf (stdout, "  --no-bezel       PICO-8: black side margins instead of the side panels\n");
     fprintf (stdout, "  --fast-circles   TIC-80/PICO-8: draw filled circles above radius 31 as a\n");
     fprintf (stdout, "                   scaled disc (1 draw instead of ~1.2 per radius; about\n");
@@ -166,12 +168,13 @@ int  main (int  argc, char** argv)
     char *input_filename        = NULL;
     char  output_filename[256]  = { 0 };
     int   verbose               = 0;
-    int   o_dowarnings          = 1; // display warnings by default
+    int   o_dowarnings          = V32LUA_DEFAULT_WARNINGS;   // inc/config.h
     const char *cli_api         = NULL;
     const char *cli_title       = NULL;
     int         cli_rate      = 0;
 
     g_verbose_debug             = false;
+    g_suppress_warnings         = !V32LUA_DEFAULT_WARNINGS;
 
     // --- Command Line Argument Parsing ---
     for (int i = 1; i < argc; i++) {
@@ -192,6 +195,10 @@ int  main (int  argc, char** argv)
                 fprintf(stderr, "Compiler Error: --rate must be 11025, 22050 or 44100 (got '%s')\n", val);
                 return 1;
             }
+        } else if ((val = option_value(argc, argv, &i, "--bezel")) != NULL) {
+            pico8_bezel_file = strdup(val);
+            pico8_bezel_enabled = true;
+            g_cli_bezel_set = true;
         } else if (strcmp(argv[i], "--no-bezel") == 0) {
             pico8_bezel_enabled = false;
             g_cli_bezel_set = true;
@@ -409,6 +416,12 @@ int  main (int  argc, char** argv)
         fprintf (stdout, "cart title: \"%s\"\n", cart_title);
     }
 
+    // Sound sample rate: --rate > --#rate > the API's default in config.h
+    if (synth_audio_rate == 0) {
+        synth_audio_rate = runtime_req.needs_tic80 ? V32LUA_DEFAULT_TIC80_RATE
+                                                   : V32LUA_DEFAULT_PICO8_RATE;
+    }
+
     if (runtime_req.needs_tic80)
     {
         process_all_tic80_sections();
@@ -487,6 +500,7 @@ int  main (int  argc, char** argv)
                               0, "pico8_spritesheet", sheet_path);
         next_texture_id++;
         register_shapes_texture (program_text, base_path, false);
+        pico8_bezel_register_custom (base_path);   // --bezel FILE: after the atlas
     }
 
     // --- Stage 4: Semantic Analyzer ---
@@ -508,7 +522,7 @@ int  main (int  argc, char** argv)
     }
 
 
-    // ALWAYS allocated (49 + META_CALL_STACK_SIZE words), regardless of runtime_req.needs_vircon32.
+    // ALWAYS allocated (49 + MV_MAX + META_CALL_STACK_SIZE words), regardless of runtime_req.needs_vircon32.
     // That flag is not final here: "--#api pico8/tic80" clears it, and the
     // sound/memcard/tilemap intrinsics set it again DURING codegen -- long
     // after this allocation. PICO-8 sfx()/music() did exactly that, and every
@@ -535,6 +549,8 @@ int  main (int  argc, char** argv)
         next_ram_address                  = next_ram_address + 1;
         ret_count_base                    = next_ram_address;   // RET_COUNT
         next_ram_address                  = next_ram_address + 1;
+        mv_buf_base                       = next_ram_address;   // MV_BUF
+        next_ram_address                  = next_ram_address + MV_MAX;
         meta_call_base                    = next_ram_address;   // META_CALL_DEPTH
         next_ram_address                  = next_ram_address + 1 + META_CALL_STACK_SIZE;
     }

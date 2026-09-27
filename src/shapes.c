@@ -29,7 +29,7 @@
 #define SHAPES_GAP 1                       // transparent pixel between regions
 
 int  shapes_texture_id = -1;               // texture index, -1: no atlas
-bool shapes_fast       = false;            // --fast-circles: scale the largest disc
+bool shapes_fast       = V32LUA_DEFAULT_FAST_CIRCLES;            // --fast-circles: scale the largest disc
 static int shapes_regions[SHAPES_REGIONS][4];   // min x, min y, max x, max y
 
 // Marks the outline of radius r in a (2r+1)^2 grid (row-major, 1 = set).

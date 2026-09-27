@@ -55,10 +55,10 @@ static const PreludeFunc prelude[] = {
       "  return v\n"
       "end\n", NULL },
     { "unpack", NULL,
-      // up to 8 values (the calling convention has no return count)
-      "function unpack(t, i)\n"
-      "  if i == nil then i = 1 end\n"
-      "  return t[i], t[i + 1], t[i + 2], t[i + 3], t[i + 4], t[i + 5], t[i + 6], t[i + 7]\n"
+      // every value from t[i] to t[j] (a multi-value list, node/multivalue.c;
+      // calls and constructors ending in unpack(...) spread it inline)
+      "function unpack(t, i, j)\n"
+      "  return __mv_unpack(t, i, j)\n"
       "end\n", NULL },
     { "tostr", NULL,
       "function tostr(v, hex)\n"

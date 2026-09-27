@@ -23,6 +23,14 @@ extern bool  g_cli_bezel_set;
 void         pico8_bezel_build      (const char *);
 int          pico8_bezel_index      (int, int);
 
+// Custom side-panel art (--bezel FILE / --#bezel "FILE", pico8_bezel.c)
+extern char *pico8_bezel_file;
+extern int   pico8_bezel_texture_id;
+extern int   pico8_bezel_panel_w, pico8_bezel_panel_h;
+extern bool  pico8_bezel_has_alpha;
+bool         pico8_bezel_register_custom (const char *base_path);
+uint8_t     *png_load_rgba          (const char *, int *, int *, const char **);
+
 // PICO-8 sound: sfx()/music(), via a small bank of generic placeholder
 // tones layered on the native music.play/sfx.play/sfx.stop machinery --
 // see the block above emit_pico8_sfx_intrinsic() in pico8.c.

@@ -434,9 +434,8 @@ void get_extra_return_slot_access(int extra_index, char *output_buffer)
         return;
     }
 
-    char slot_name[32];
-    snprintf(slot_name, sizeof(slot_name), "__extra_ret_%d", extra_index);
-    get_variable_access_string(slot_name, output_buffer);
+    // MV_BUF[3 + extra_index] (see MV_MAX in register.h)
+    sprintf(output_buffer, "[0x%08X]", mv_buf_base + 3 + extra_index);
 }
 
 // ============================================================================
@@ -978,6 +977,10 @@ void settle_return_counts (void)
             int n = count_max_return_values (s->def_node->as.function_def.body);
             if (n > s->return_count) {
                 s->return_count = n;
+                changed = true;
+            }
+            if (!s->returns_mv && body_returns_mv (s->def_node->as.function_def.body)) {
+                s->returns_mv = true;
                 changed = true;
             }
         }

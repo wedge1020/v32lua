@@ -173,6 +173,14 @@ void  node_table_constructor (ASTNode *node, int dest_reg)
                 continue;
             }
 
+            // `{a, g()}`: a trailing call that may return several values
+            // stores all of them (node/multivalue.c)
+            if (field->type == NODE_FUNCTION_CALL && field->next == NULL && mv_is_tail(field)) {
+                emit_mv_table_tail(field, dest_reg, array_index);
+                field = field->next;
+                continue;
+            }
+
             // Handle array-style initializer (just a value expression)
             if (field->type != NODE_TABLE_SET) {
                 int val_reg = allocate_pinned_register();

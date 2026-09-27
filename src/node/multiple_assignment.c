@@ -106,10 +106,35 @@ void node_multiple_assignment(ASTNode *node)
         return;
     }
 
+    // A multi-value last expression that must fill two or more targets
+    // (`local a, b = ...`, `x, y, z, w = obj:m()`, `a, b = 1, g()` with g
+    // returning an unknown count) goes through the multi-value list
+    // (node/multivalue.c) in the general path below.
+    bool mv_assign = false;
+    {
+        int nt = 0, nv = 0;
+        ASTNode *lastv = NULL;
+        for (ASTNode *t = curr_tgt; t != NULL; t = t->next) nt++;
+        for (ASTNode *v = curr_val; v != NULL; v = v->next) { nv++; lastv = v; }
+        if (lastv != NULL && nt - (nv - 1) >= 2 && mv_is_tail(lastv) && !is_table_unpack_call(lastv)) {
+            if (lastv->type == NODE_VARIADIC_EXPR || nv > 1 || nt > 3) {
+                mv_assign = true;
+            } else {
+                char path[256] = {0};
+                SymbolNode *s = NULL;
+                if (lastv->as.call.target->type == NODE_IDENTIFIER)
+                    s = resolve_function_symbol(lastv->as.call.target->as.id.name);
+                else if (!lastv->as.call.is_method_call && resolve_static_path(lastv->as.call.target, path))
+                    s = resolve_symbol(path);
+                if (s != NULL && s->is_function && s->returns_mv) mv_assign = true;
+            }
+        }
+    }
+
     // =========================================================================
     // Check if RHS is a single function call that returns multiple values
     // =========================================================================
-    if (curr_val != NULL && curr_val->next == NULL && curr_val->type == NODE_FUNCTION_CALL) {
+    if (!mv_assign && curr_val != NULL && curr_val->next == NULL && curr_val->type == NODE_FUNCTION_CALL) {
         // Determine the return count STATICALLY. First check the builtin
         // table (math.modf/frexp/etc.), then -- if that comes back as the
         // default of 1 -- check whether it's a call to a user-defined
@@ -398,6 +423,14 @@ void node_multiple_assignment(ASTNode *node)
         ASTNode *values_arr[64];
         for (int i = 0; i < n; i++) {
             values_arr[i] = scan_val;
+
+            if (mv_assign && scan_val != NULL && scan_val->next == NULL && n - i >= 2) {
+                // the last expression's values fill every remaining target
+                emit_mv_to_buf(scan_val);
+                emit_mv_push_values(n - i);
+                for (int k = i; k < n; k++) values_arr[k] = NULL;
+                break;
+            }
 
             // `local function f` (desugared to `local f; f = function`) and
             // plain re-assignment of an existing local/upvalue: record (or

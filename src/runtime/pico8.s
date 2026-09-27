@@ -206,6 +206,36 @@ _pico8_init_glyph_loop:
     JMP   _pico8_init_glyph_loop
 
 _pico8_init_state:
+    ;; custom side-panel art (--bezel, pico8_bezel.c): its own texture,
+    ;; region 0 = left panel, 1 = right panel, each PANEL_W x PANEL_H
+    MOV   R0, PICO8_BEZEL
+    IEQ   R0, 2
+    JF    R0, _pico8_init_rng
+    MOV   R0, PICO8_BEZEL_TEXTURE
+    OUT   GPU_SelectedTexture, R0
+    MOV   R1, 0
+    MOV   R2, PICO8_BEZEL_PW
+    MOV   R3, PICO8_BEZEL_PH
+    ISUB  R3, 1
+_pico8_init_bezel_loop:
+    OUT   GPU_SelectedRegion, R1
+    MOV   R0, R1
+    IMUL  R0, R2
+    OUT   GPU_RegionMinX, R0
+    OUT   GPU_RegionHotspotX, R0
+    IADD  R0, R2
+    ISUB  R0, 1
+    OUT   GPU_RegionMaxX, R0
+    OUT   GPU_RegionMinY, 0
+    OUT   GPU_RegionHotspotY, 0
+    OUT   GPU_RegionMaxY, R3
+    IADD  R1, 1
+    MOV   R0, R1
+    ILT   R0, 2
+    JT    R0, _pico8_init_bezel_loop
+    OUT   GPU_SelectedTexture, 0
+
+_pico8_init_rng:
     ;; PICO-8 seeds its RNG randomly at boot; Vircon32's RNG always boots
     ;; with seed 1, so every run of a cart would roll identical numbers.
     ;; Seed from the clock (date*86400-ish mix + time), forced non-zero.
@@ -1214,7 +1244,23 @@ _pico8_all_found:
 ;; next object and then handed the callback nil at the end.
 ;; Frame slots: [BP-1] = i (raw), [BP-2] = prev
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; add(t, v [, i]) as PICO-8: add(nil, v) does nothing and returns nil.
+;; [SP+3] = t, [SP+2] = i, [SP+1] = v (the table.insert arguments)
+__pico8_add:
+    MOV   R0, [SP+3]
+    IEQ   R0, BOXED_NIL
+    JF    R0, __builtin_table_insert
+    MOV   R0, BOXED_NIL
+    RET
+
 __builtin_pico8_foreach:
+    ;; foreach(nil, f): nothing, as in PICO-8
+    MOV   R0, [SP+2]
+    IEQ   R0, BOXED_NIL
+    JF    R0, __builtin_pico8_foreach_t
+    MOV   R0, BOXED_NIL
+    RET
+__builtin_pico8_foreach_t:
     PUSH  BP
     MOV   BP, SP
     ISUB  SP, 2
@@ -1268,6 +1314,13 @@ _pico8_foreach_done:
 ;; count(tbl) is the table's length), read from the table header.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 __builtin_pico8_count:
+    ;; count(nil) is 0, as in PICO-8
+    MOV   R0, [SP+1]
+    IEQ   R0, BOXED_NIL
+    JF    R0, __builtin_pico8_count_t
+    MOV   R0, 0.0
+    RET
+__builtin_pico8_count_t:
     PUSH  BP
     MOV   BP, SP
     PUSH  R1
@@ -1319,6 +1372,13 @@ _pico8_count_done:
 ;; Frame slots: [BP-1] = i (raw), [BP-2] = n
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 __builtin_pico8_del:
+    ;; del(nil, v): nothing, as in PICO-8
+    MOV   R0, [SP+2]
+    IEQ   R0, BOXED_NIL
+    JF    R0, __builtin_pico8_del_t
+    MOV   R0, BOXED_NIL
+    RET
+__builtin_pico8_del_t:
     PUSH  BP
     MOV   BP, SP
     ISUB  SP, 2
@@ -2547,6 +2607,8 @@ __builtin_pico8_present:
     OUT   GPU_DrawingPointX, 0
     MOV   R1, PICO8_BEZEL
     JF    R1, _pico8_present_black
+    IEQ   R1, 2
+    JT    R1, _pico8_present_custom
     MOV   R1, 272
     OUT   GPU_SelectedRegion, R1
     MOV   R1, 3.0
@@ -2559,6 +2621,34 @@ __builtin_pico8_present:
     OUT   GPU_Command, GPUCommand_DrawRegionZoomed
     MOV   R1, PICO8_SWATCH_REGION_BASE
     OUT   GPU_SelectedRegion, R1          ; color 0 swatch for the bars below
+    JMP   _pico8_present_bars
+_pico8_present_custom:
+    ;; custom art (--bezel): black first when the art has transparent pixels
+    ;; (the panels also hide anything drawn off the canvas)
+    MOV   R1, PICO8_BEZEL_ALPHA
+    JF    R1, _pico8_present_custom_art
+    MOV   R1, 48.0
+    OUT   GPU_DrawingScaleX, R1
+    MOV   R1, 120.0
+    OUT   GPU_DrawingScaleY, R1
+    OUT   GPU_Command, GPUCommand_DrawRegionZoomed
+    OUT   GPU_DrawingPointX, 496
+    OUT   GPU_Command, GPUCommand_DrawRegionZoomed
+    OUT   GPU_DrawingPointX, 0
+_pico8_present_custom_art:
+    MOV   R1, PICO8_BEZEL_TEXTURE
+    OUT   GPU_SelectedTexture, R1
+    OUT   GPU_SelectedRegion, 0
+    MOV   R1, PICO8_BEZEL_SCALE
+    OUT   GPU_DrawingScaleX, R1
+    OUT   GPU_DrawingScaleY, R1
+    OUT   GPU_Command, GPUCommand_DrawRegionZoomed
+    OUT   GPU_SelectedRegion, 1
+    OUT   GPU_DrawingPointX, 496
+    OUT   GPU_Command, GPUCommand_DrawRegionZoomed
+    OUT   GPU_SelectedTexture, 0
+    MOV   R1, PICO8_SWATCH_REGION_BASE
+    OUT   GPU_SelectedRegion, R1
     JMP   _pico8_present_bars
 _pico8_present_black:
     MOV   R1, 48.0                        ; 144 / 3

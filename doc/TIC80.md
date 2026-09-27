@@ -63,7 +63,7 @@ Differences from TIC-80:
 
 Programs without sound data keep the placeholder tone bank.
 
-Sample rate: `--rate 11025|22050|44100` (or `--#rate`), 22050 Hz by default
+Sample rate: `--rate 11025|22050|44100` (or `--#rate`), 22050 Hz by default (`V32LUA_DEFAULT_TIC80_RATE` in `inc/config.h`)
 and shared with the PICO-8 layer. witchem_up: 16.5 MB at 22050 Hz (three
 tracks of 25–83 s, 29 SFX renders), about half that at 11025.
 

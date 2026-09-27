@@ -23,7 +23,14 @@
 // up travel through a small bank of dedicated global words instead (see
 // get_extra_return_slot_access() in v32lua.c). Total max return values
 // per function is therefore 3 + MAX_EXTRA_RETURN_SLOTS.
-#define MAX_EXTRA_RETURN_SLOTS 16
+#define MAX_EXTRA_RETURN_SLOTS 29
+
+// The multi-value buffer (MV_BUF, MV_MAX words of RAM, always allocated):
+// value k of the current multi-value list -- a function's return values, a
+// spread `...`, unpack() -- with [RET_COUNT] saying how many. A compiled
+// function returns values 0-2 in R0/R2/R3 and the rest in MV_BUF[3..], so
+// the "extra return slots" ARE MV_BUF[3..]. See node/multivalue.c.
+#define MV_MAX (3 + MAX_EXTRA_RETURN_SLOTS)
 
 // Track which registers should NOT be spilled
 extern int  register_pinned[NUM_GPRS];

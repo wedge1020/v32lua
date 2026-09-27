@@ -39,7 +39,7 @@
 
 // Sample rate of the rendered sounds: 22050 (default), or 11025 / 44100
 // with --rate / --#rate. They play at channel speed rate / 44100.
-int synth_audio_rate = 22050;
+int synth_audio_rate = 0;       // 0: not set by --rate / --#rate yet -> config.h default (main.c)
 #define P8A_RATE        synth_audio_rate
 #define P8A_TICK        (synth_audio_rate / 120.0)   // samples per tick = half a frame
 #define P8A_MAX_SECONDS 300                 // safety cap per rendered sound

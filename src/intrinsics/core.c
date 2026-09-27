@@ -255,8 +255,13 @@ static bool pico8_parse_number_string (const char *str, double *out)
 // PICO-8 token-saving idiom: sspr(unpack(split"72,32,56,32,36,32"))) is
 // expanded at compile time into the literal values. A computed table can't
 // be expanded -- only its first value would be passed -- so that's an error.
-static void pico8_expand_unpack_arg (ASTNode *node)
+static void pico8_expand_unpack_arg (ASTNode *node, const char *func_name)
 {
+    // only for the drawing/sound builtins (a user function's unpack()
+    // argument is spread at run time, node/multivalue.c)
+    if (node->as.call.is_method_call || strchr (func_name, '.') || strchr (func_name, ':') ||
+        resolve_symbol (func_name) != NULL) return;
+    if (!pico8_prelude_builtin ("unpack")) return;   // the cart's own unpack
     ASTNode **link = &node->as.call.args_head;
     while (*link != NULL && (*link)->next != NULL) link = &(*link)->next;
     ASTNode *last = *link;
@@ -342,7 +347,7 @@ static bool pico8_rewrite_poke_unpack (ASTNode *node, const char *func_name)
 bool pico8_fold_numeric_string_args (ASTNode *node, const char *func_name)
 {
     if (pico8_rewrite_poke_unpack (node, func_name)) return true;
-    pico8_expand_unpack_arg (node);
+    pico8_expand_unpack_arg (node, func_name);
 
     bool numeric = false;
     for (int i = 0; pico8_numeric_builtins[i] != NULL; i++) {

@@ -188,8 +188,22 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
     }
     else if (strcmp(action, "bezel") == 0 && tokens >= 2) {
         // --#bezel off | on -- PICO-8 side panels (pico8_bezel.c)
+        // --#bezel "art.png" -- custom panel art (see pico8_bezel.c)
         const char *v = param1[0] == '"' ? param1 + 1 : param1;
-        if (!g_cli_bezel_set) pico8_bezel_enabled = (strncmp (v, "off", 3) != 0);
+        if (!g_cli_bezel_set) {
+            if (strncmp (v, "off", 3) == 0) {
+                pico8_bezel_enabled = false;
+            } else if (strncmp (v, "on", 2) == 0 && (v[2] == '\0' || v[2] == '"')) {
+                pico8_bezel_enabled = true;
+            } else {
+                char file[256];
+                snprintf (file, sizeof file, "%s", v);
+                size_t n = strlen (file);
+                if (n > 0 && file[n - 1] == '"') file[n - 1] = '\0';
+                pico8_bezel_enabled = true;
+                pico8_bezel_file = strdup (file);
+            }
+        }
         node->as.cart_hint.value = strdup (param1);
     }
     else if (strcmp(action, "fast-circles") == 0) {

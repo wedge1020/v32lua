@@ -1,5 +1,41 @@
 #include "v32lua.h"
 
+// ----------------------------------------------------------------------------
+// String coercion in arithmetic: Lua (and PICO-8) turn a numeric string
+// operand into its number -- "12" + 1 is 13, ("0x".."ff") + 0 is 255
+// (nanoman decodes its levels that way). An operand that isn't known to be
+// a number is tested (4 instructions: is it NaN-boxed?) and, only then,
+// converted by __arith_coerce; numbers pass straight through.
+// ----------------------------------------------------------------------------
+static bool is_static_number (ASTNode *e)
+{
+    if (e == NULL) return false;
+    switch (e->type) {
+        case NODE_NUMBER: case NODE_ADD: case NODE_SUB: case NODE_MUL:
+        case NODE_DIV: case NODE_MOD: case NODE_POW: case NODE_FLOORDIV:
+            return true;
+        case NODE_UNARY:
+            return e->as.unary.operator == OP_LEN || e->as.unary.operator == OP_UNM;
+        default:
+            return false;
+    }
+}
+
+void emit_arith_coerce (int reg, ASTNode *e)
+{
+    if (is_static_number (e)) return;
+    int id = get_next_label ();
+    const char *ctx = get_current_function_name ();
+    emit_asm ("MOV  R0, R%d\n", reg);
+    emit_asm ("AND  R0, NAN_VALUE\n");
+    emit_asm ("IEQ  R0, NAN_VALUE ; not a number?\n");
+    emit_asm ("JF   R0, __%s_num_%d\n", ctx, id);
+    emit_asm ("MOV  R0, R%d\n", reg);
+    emit_asm ("CALL __arith_coerce ; a numeric string -> its number\n");
+    emit_asm ("MOV  R%d, R0\n", reg);
+    emit_asm ("__%s_num_%d:\n", ctx, id);
+}
+
 void  node_add (ASTNode *node, int  dest_reg)
 {
     generate_asm (node -> as.binary.left, dest_reg);
@@ -37,6 +73,8 @@ void  node_add (ASTNode *node, int  dest_reg)
     ensure_in_register (right_reg);
 
     emit_asm ("POP R%d ; reload spilled left operand\n", dest_reg);
+    emit_arith_coerce (dest_reg, node -> as.binary.left);
+    emit_arith_coerce (right_reg, node -> as.binary.right);
 
     emit_asm("FADD R%d, R%d\n", dest_reg, right_reg);
     unlock_register(right_reg);
@@ -57,6 +95,8 @@ void  node_mul (ASTNode *node, int  dest_reg)
     ensure_in_register (right_reg);
 
     emit_asm ("POP R%d ; reload spilled left operand\n", dest_reg);
+    emit_arith_coerce (dest_reg, node -> as.binary.left);
+    emit_arith_coerce (right_reg, node -> as.binary.right);
 
     emit_asm ("FMUL R%d, R%d\n", dest_reg, right_reg);
     unlock_register (right_reg);
@@ -75,6 +115,8 @@ void  node_sub (ASTNode *node, int  dest_reg)
     ensure_in_register (right_reg);
 
     emit_asm ("POP R%d ; reload spilled left operand\n", dest_reg);
+    emit_arith_coerce (dest_reg, node -> as.binary.left);
+    emit_arith_coerce (right_reg, node -> as.binary.right);
 
     emit_asm ("FSUB R%d, R%d\n", dest_reg, right_reg);
     unlock_register (right_reg);
@@ -92,6 +134,8 @@ void  node_div (ASTNode *node, int  dest_reg)
     ensure_in_register (right_reg);
 
     emit_asm ("POP R%d ; reload spilled left operand\n", dest_reg);
+    emit_arith_coerce (dest_reg, node -> as.binary.left);
+    emit_arith_coerce (right_reg, node -> as.binary.right);
 
     // -------------------------------------------------------------------
     // FIX: guard against division by zero. Vircon32's FDIV instruction
@@ -170,6 +214,8 @@ void  node_mod (ASTNode *node, int  dest_reg)
     ensure_in_register (right_reg);
 
     emit_asm ("POP R%d ; reload spilled left operand\n", dest_reg);
+    emit_arith_coerce (dest_reg, node -> as.binary.left);
+    emit_arith_coerce (right_reg, node -> as.binary.right);
 
     // Lua's % is FLOOR modulo: a % b == a - floor(a/b)*b -- NOT C's
     // truncating modulo, which the old CFI->IMOD->CIF implementation
@@ -221,6 +267,8 @@ void node_floordiv (ASTNode *node, int  dest_reg)
     ensure_in_register (right_reg);
 
     emit_asm ("POP R%d ; reload spilled left operand\n", dest_reg);
+    emit_arith_coerce (dest_reg, node -> as.binary.left);
+    emit_arith_coerce (right_reg, node -> as.binary.right);
 
     // Use float division, then floor - matches Lua // semantics. FDIV by
     // zero is a Vircon32 hardware error: a // 0 is floor(a / 0), with the
@@ -260,6 +308,8 @@ void node_floordiv (ASTNode *node, int  dest_reg)
     ensure_in_register (right_reg);
 
     emit_asm ("POP R%d ; reload spilled left operand\n", dest_reg);
+    emit_arith_coerce (dest_reg, node -> as.binary.left);
+    emit_arith_coerce (right_reg, node -> as.binary.right);
 
     emit_asm ("CFI R%d ; Cast left to int\n",  dest_reg);
     emit_asm ("CFI R%d ; Cast right to int\n", right_reg);
@@ -316,6 +366,8 @@ void node_pow (ASTNode *node, int dest_reg)
     ensure_in_register (right_reg);
 
     emit_asm ("POP R%d ; reload spilled left operand\n", dest_reg);
+    emit_arith_coerce (dest_reg, node -> as.binary.left);
+    emit_arith_coerce (right_reg, node -> as.binary.right);
 
     ASTNode *r = node -> as.binary.right;
     emit_safe_pow (dest_reg, right_reg,

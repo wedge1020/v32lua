@@ -182,7 +182,7 @@ bool emit_pico8_add_intrinsic(ASTNode *node, int dest_reg)
     emit_asm("    PUSH R%d ; Table Pointer\n", t_reg);
     emit_asm("    PUSH R%d ; Position\n", pos_reg);
     emit_asm("    PUSH R%d ; Value\n", val_reg);
-    emit_asm("    CALL __builtin_table_insert\n");
+    emit_asm("    CALL __pico8_add ; table.insert, but add(nil, v) is a no-op\n");
     emit_asm("    IADD SP, 3\n");
 
     if (dest_reg != 0) {

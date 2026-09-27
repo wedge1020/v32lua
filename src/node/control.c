@@ -36,6 +36,18 @@ void  node_return (ASTNode *node)
     int ret_idx = 0;
     bool forwarded = false;
 
+    // `return ...`, `return x, unpack(t)`, `return g()` with g's count
+    // unknown: the last expression's values follow the others, however
+    // many there are (node/multivalue.c).
+    if (expr != NULL) {
+        ASTNode *last = expr;
+        while (last->next != NULL) last = last->next;
+        if (mv_is_tail (last)) {
+            emit_mv_return (expr);
+            return;
+        }
+    }
+
     if (expr != NULL && expr->next == NULL && expr->type == NODE_FUNCTION_CALL) {
         ASTNode    *call_target = expr->as.call.target;
         SymbolNode *callee_sym  = NULL;

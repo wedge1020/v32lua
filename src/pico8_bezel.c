@@ -15,7 +15,7 @@
 // controls legend, and the cart's title.
 // ============================================================================
 
-bool pico8_bezel_enabled = true;
+bool pico8_bezel_enabled = V32LUA_DEFAULT_PICO8_BEZEL;
 bool g_cli_bezel_set     = false;        // --no-bezel given: the hint is ignored
 
 static uint8_t bz[PICO8_BEZEL_H][PICO8_BEZEL_W];   // palette indexes
@@ -305,6 +305,99 @@ void pico8_bezel_build (const char *title)
     fill (48, 0, 1, PICO8_BEZEL_H, 5);
     fill (46, 0, 1, PICO8_BEZEL_H, 0);
     fill (49, 0, 1, PICO8_BEZEL_H, 0);
+}
+
+// ============================================================================
+// Custom side-panel art: --bezel FILE (or --#bezel "FILE" in the source)
+// ----------------------------------------------------------------------------
+// FILE is a PNG (or a .vtex made by png2vircon) holding BOTH panels side by
+// side: left panel in the left half, right panel in the right half. The
+// panels cover 144x360 screen pixels each, so the whole image has the
+// proportions 288:360 = 4:5 -- 288x360 is drawn 1:1, 96x120 at 3x (pixel
+// art, like the built-in panels), 192x240 at 1.5x, and so on (at most
+// 816x1020: a Vircon32 texture is at most 1024x1024). It becomes its own
+// texture; transparent pixels show black.
+// ============================================================================
+char *pico8_bezel_file        = V32LUA_DEFAULT_PICO8_BEZEL_FILE;
+int   pico8_bezel_texture_id  = -1;
+int   pico8_bezel_panel_w     = 48;
+int   pico8_bezel_panel_h     = 120;
+bool  pico8_bezel_has_alpha   = false;
+
+static uint8_t *vtex_load_rgba (const char *path, int *w, int *h, const char **err)
+{
+    FILE *f = fopen (path, "rb");
+    if (f == NULL) { *err = "cannot open the file"; return NULL; }
+    VTEXHeader hdr;
+    if (fread (&hdr, sizeof hdr, 1, f) != 1 || memcmp (hdr.magic, "V32-VTEX", 8) != 0 ||
+        hdr.width == 0 || hdr.height == 0 || hdr.width > 1024 || hdr.height > 1024) {
+        fclose (f); *err = "not a Vircon32 .vtex texture"; return NULL;
+    }
+    size_t n = (size_t) hdr.width * hdr.height * 4;
+    uint8_t *p = malloc (n);
+    if (p == NULL || fread (p, 1, n, f) != n) { fclose (f); free (p); *err = "truncated .vtex"; return NULL; }
+    fclose (f);
+    *w = (int) hdr.width; *h = (int) hdr.height;
+    return p;
+}
+
+// Loads pico8_bezel_file (relative to the source file when not found as
+// given), writes <base>_bezel.vtex and registers it as the next texture.
+bool pico8_bezel_register_custom (const char *base_path)
+{
+    if (pico8_bezel_file == NULL || !pico8_bezel_enabled) return true;
+    const char *path = pico8_bezel_file;
+    char alt[1024];
+    FILE *t = fopen (path, "rb");
+    if (t == NULL && path[0] != '/' && g_lua_filename != NULL && strrchr (g_lua_filename, '/')) {
+        const char *slash = strrchr (g_lua_filename, '/');
+        snprintf (alt, sizeof alt, "%.*s/%s", (int) (slash - g_lua_filename), g_lua_filename, path);
+        t = fopen (alt, "rb");
+        if (t != NULL) path = alt;
+    }
+    if (t != NULL) fclose (t);
+
+    int w = 0, h = 0;
+    const char *err = NULL;
+    size_t len = strlen (path);
+    uint8_t *rgba = (len > 5 && strcasecmp (path + len - 5, ".vtex") == 0)
+                  ? vtex_load_rgba (path, &w, &h, &err)
+                  : png_load_rgba (path, &w, &h, &err);
+    if (rgba == NULL) {
+        compiler_error (ERR_SEMANTIC, -1, "bezel art '%s': %s", pico8_bezel_file, err);
+        return false;
+    }
+    if (w % 2 != 0 || w * 5 != h * 4 || w > 1024 || h > 1024) {
+        free (rgba);
+        compiler_error (ERR_SEMANTIC, -1,
+            "bezel art '%s' is %dx%d: it must hold both 144x360 side panels side by side, "
+            "in the proportions 4:5 (288x360 drawn 1:1, 96x120 at 3x, 192x240 at 1.5x, ...; "
+            "at most 816x1020)", pico8_bezel_file, w, h);
+        return false;
+    }
+    pico8_bezel_panel_w = w / 2;
+    pico8_bezel_panel_h = h;
+    pico8_bezel_has_alpha = false;
+    for (int i = 0; i < w * h; i++) if (rgba[i * 4 + 3] != 0xFF) { pico8_bezel_has_alpha = true; break; }
+
+    char name[300], vtex[310];
+    snprintf (name, sizeof name, "%s_bezel", base_path);
+    snprintf (vtex, sizeof vtex, "%s.vtex", name);
+    FILE *f = fopen (vtex, "wb");
+    if (f == NULL) {
+        free (rgba);
+        compiler_error (ERR_INTERNAL, -1, "could not write '%s'", vtex);
+        return false;
+    }
+    VTEXHeader hdr = { .width = (uint32_t) w, .height = (uint32_t) h };
+    memcpy (hdr.magic, "V32-VTEX", 8);
+    fwrite (&hdr, sizeof hdr, 1, f);
+    fwrite (rgba, 4, (size_t) w * h, f);
+    fclose (f);
+    free (rgba);
+    pico8_bezel_texture_id = next_texture_id;
+    cart_resource_append (&textures_head, &textures_tail, next_texture_id++, "pico8_bezel", name);
+    return true;
 }
 
 // Palette index of panel pixel (x, y): x 0-47 left panel, 48-95 right.

@@ -67,6 +67,18 @@ void  node_return              (ASTNode *);
 void  node_string              (ASTNode *, int);
 void  node_sub                 (ASTNode *, int);
 void  node_table_constructor   (ASTNode *, int);
+
+// node/math.c: a numeric-string operand becomes its number
+void  emit_arith_coerce        (int, ASTNode *);
+
+// node/multivalue.c
+bool  mv_is_tail               (ASTNode *);
+bool  mv_is_unpack             (ASTNode *);
+bool  body_returns_mv          (ASTNode *);
+void  emit_mv_to_buf           (ASTNode *);
+void  emit_mv_return           (ASTNode *);
+void  emit_mv_table_tail       (ASTNode *, int, int);
+void  emit_mv_push_values      (int);
 void  node_table_get           (ASTNode *, int);
 void  node_table_set           (ASTNode *);
 void  node_unary               (ASTNode *, int);

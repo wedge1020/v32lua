@@ -625,7 +625,14 @@ int   emit_variable_map (void)
         fprintf (out(), "%%define  PICO8_MAP_RAM            0x%.8X\n", next_ram_address);
         next_ram_address    = next_ram_address + (PICO8_MAP_WIDTH * PICO8_MAP_HEIGHT) / 4;
         fprintf (out(), "%%define  PICO8_FRAME_STEP         %d\n", pico8_frame_step);
-        fprintf (out(), "%%define  PICO8_BEZEL              %d\n", pico8_bezel_enabled ? 1 : 0);
+        fprintf (out(), "%%define  PICO8_BEZEL              %d\n",
+                 !pico8_bezel_enabled ? 0 : pico8_bezel_texture_id >= 0 ? 2 : 1);
+        // custom art (pico8_bezel.c): its texture, panel size, scale to 144x360
+        fprintf (out(), "%%define  PICO8_BEZEL_TEXTURE      %d\n", pico8_bezel_texture_id >= 0 ? pico8_bezel_texture_id : 0);
+        fprintf (out(), "%%define  PICO8_BEZEL_PW           %d\n", pico8_bezel_panel_w);
+        fprintf (out(), "%%define  PICO8_BEZEL_PH           %d\n", pico8_bezel_panel_h);
+        fprintf (out(), "%%define  PICO8_BEZEL_SCALE        %.7f\n", 360.0 / pico8_bezel_panel_h);
+        fprintf (out(), "%%define  PICO8_BEZEL_ALPHA        %d\n", pico8_bezel_has_alpha ? 1 : 0);
         lines_printed      += 6;
     }
 
@@ -644,6 +651,8 @@ int   emit_variable_map (void)
         fprintf (out(), "%%define  VIRCON32_MUSIC_CHANNEL_MASK 0x%.8X\n", vircon32_music_channel_mask_base);
         fprintf (out(), "%%define  VIRCON32_SFX_CHANNEL_MASK   0x%.8X\n", vircon32_sfx_channel_mask_base);
         fprintf (out(), "%%define  RET_COUNT                0x%.8X\n", ret_count_base);
+        fprintf (out(), "%%define  MV_BUF                   0x%.8X\n", mv_buf_base);
+        fprintf (out(), "%%define  MV_MAX                   %d\n", MV_MAX);
         fprintf (out(), "%%define  META_CALL_DEPTH          0x%.8X\n", meta_call_base);
         fprintf (out(), "%%define  META_CALL_STACK          0x%.8X\n", meta_call_base + 1);
         fprintf (out(), "%%define  META_CALL_STACK_SIZE     %d\n", META_CALL_STACK_SIZE);
@@ -1151,13 +1160,19 @@ void emit_load_function_value (ASTNode *func_def_node, const char *mangled_name,
     // -------------------------------------------------------------------
     emit_asm("PUSH R0 ; preserve caller's R0 across this closure's own malloc scratch");
 
-    emit_asm("MOV R0, %d", 2 + upvalue_count);
+    // One spare word: the record starts at an even address, so the box
+    // can hold address / 2 -- the payload has 21 bits next to the closure
+    // flag, and a record above 2M words (a cart that has used half of RAM,
+    // nanoman after its level decoding) used to lose its top bit.
+    emit_asm("MOV R0, %d", 3 + upvalue_count);
     emit_asm("PUSH R0");
     emit_asm("CALL __malloc");
     emit_asm("IADD SP, 1 ; clean up malloc argument");
 
     int rec_reg = allocate_pinned_register();
     emit_asm("MOV R%d, R0 ; closure record base", rec_reg);
+    emit_asm("IADD R%d, 1", rec_reg);
+    emit_asm("AND R%d, 0xFFFFFFFE ; even address", rec_reg);
 
     emit_asm("MOV R0, __function_%s", mangled_name);
     emit_asm("MOV [R%d], R0 ; word 0: code address", rec_reg);
@@ -1181,6 +1196,7 @@ void emit_load_function_value (ASTNode *func_def_node, const char *mangled_name,
     }
 
     emit_asm("MOV R%d, R%d ; box the closure record", dest_reg, rec_reg);
+    emit_asm("SHL R%d, -1 ; address / 2 (see above)", dest_reg);
     emit_asm("OR R%d, BOXED_FUNCTION", dest_reg);
     emit_asm("OR R%d, BOXED_CLOSURE_FLAG ; mark payload as a closure record, not raw code", dest_reg);
     unlock_pinned_register(rec_reg);

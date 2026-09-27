@@ -29,6 +29,7 @@ extern int              vircon32_btn_prev_state_base;
 extern int              vircon32_music_channel_mask_base;
 extern int              vircon32_sfx_channel_mask_base;
 extern int              ret_count_base;
+extern int              mv_buf_base;
 extern int              meta_call_base;
 
 // Returns 1 if the node was an intrinsic and assembly was emitted; 0 otherwise.
