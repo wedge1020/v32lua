@@ -146,6 +146,10 @@ typedef struct astnode {
             char* value;     // e.g., "filename.png" or "1.0"
             int resource_id; // Assigned sequential ID (0, 1, 2...)
         } cart_hint;
+
+        struct {
+            int index;       // NODE_VARIADIC_EXPR: which vararg (0 = the first)
+        } vararg;
     } as;
 } ASTNode;
 

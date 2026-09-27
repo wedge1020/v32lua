@@ -122,6 +122,57 @@ void  node_table_constructor (ASTNode *node, int dest_reg)
                 continue;
             }
 
+            // `{a, unpack(t)}`: a trailing unpack(t [, i [, j]]) stores
+            // every value from t[i] to t[j], not just the first (Lua's rule
+            // for a multi-value expression last in a constructor). The
+            // table pointer rides on the stack across the get/set CALLs.
+            if (field->type != NODE_TABLE_SET && field->next == NULL &&
+                is_table_unpack_call(field)) {
+                char t_name[48], i_name[48], j_name[48];
+                emit_asm("PUSH R%d ; table being constructed (the bounds CALL #t)", dest_reg);
+                emit_table_unpack_resolve_bounds(field, t_name, i_name, j_name, sizeof(t_name));
+                int id = get_next_label();
+                const char *ctx = get_current_function_name();
+                int r1 = allocate_register(), r2 = allocate_register(), r3 = allocate_register();
+                // key = array_index + (i - i0), with i0 kept on the stack too
+                emit_load_variable(i_name, r1);
+                emit_asm("PUSH R%d ; first index i0", r1);
+                emit_asm("__%s_cunpack_loop_%d:", ctx, id);
+                emit_load_variable(i_name, r1);
+                emit_load_variable(j_name, r2);
+                emit_asm("FGT R%d, R%d ; past j?", r1, r2);
+                emit_asm("JT  R%d, __%s_cunpack_end_%d", r1, ctx, id);
+                emit_load_variable(t_name, r1);
+                emit_load_variable(i_name, r2);
+                emit_asm("PUSH R%d", r1);
+                emit_asm("PUSH R%d", r2);
+                emit_asm("CALL __builtin_table_get");
+                emit_asm("IADD SP, 2");
+                emit_asm("MOV R%d, R0 ; t[i]", r3);
+                emit_load_variable(i_name, r2);
+                emit_asm("MOV R%d, [SP] ; i0", r1);
+                emit_asm("FSUB R%d, R%d", r2, r1);
+                emit_asm("FADD R%d, %d.0 ; key = array_index + (i - i0)", r2, array_index);
+                emit_asm("MOV R%d, [SP+1] ; the table", r1);
+                emit_asm("PUSH R%d", r1);
+                emit_asm("PUSH R%d", r2);
+                emit_asm("PUSH R%d", r3);
+                emit_asm("CALL __builtin_table_set");
+                emit_asm("IADD SP, 3");
+                emit_load_variable(i_name, r1);
+                emit_asm("FADD R%d, 1.0", r1);
+                emit_store_variable(i_name, r1);
+                emit_asm("JMP __%s_cunpack_loop_%d", ctx, id);
+                emit_asm("__%s_cunpack_end_%d:", ctx, id);
+                emit_asm("IADD SP, 1 ; drop i0");
+                emit_asm("POP R%d ; table being constructed", dest_reg);
+                unlock_register(r1);
+                unlock_register(r2);
+                unlock_register(r3);
+                field = field->next;
+                continue;
+            }
+
             // Handle array-style initializer (just a value expression)
             if (field->type != NODE_TABLE_SET) {
                 int val_reg = allocate_pinned_register();

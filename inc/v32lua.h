@@ -27,7 +27,7 @@
 #include "closures.h"
 #include "shapes.h"
 
-#define  VERSION             "20260926-dev"
+#define  VERSION             "20260927-dev"
 #define  AUTHOR              "Matthew Haas"
 #define  URL                 "https://github.com/wedge1020/v32lua"
 

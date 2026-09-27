@@ -4199,3 +4199,131 @@ _pico8_atan2_done:
     MOV   SP, BP
     POP   BP
     RET
+
+;; ===========================================================================
+;; __builtin_pico8_split1(s, sep, conv): split() for a one-character separator
+;; on a string, in one pass. The Lua version called sub(s, i, i) for every
+;; character, and each sub() measures the whole NUL-terminated string first:
+;; quadratic, ~7M cycles for a 2 KB font string (ppwr.p8's poke(0x5600,
+;; unpack(split(font)))). Tokens that read as numbers become numbers unless
+;; conv is false (PICO-8's split rule, as __p8_conv).
+;;   [BP+2] s   [BP+3] sep (1 char)   [BP+4] conv
+;; Locals: [BP-1] table  [BP-2] scan  [BP-3] token start  [BP-4] sep char
+;;         [BP-5] count  [BP-6] convert?  [BP-7] token end  [BP-8] token value
+;; Returns the table in R0; preserves R1-R6.
+;; ===========================================================================
+__builtin_pico8_split1:
+    PUSH  BP
+    MOV   BP, SP
+    ISUB  SP, 8                   ; [BP-8]: the token's value
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
+
+    CALL  __builtin_table_new
+    MOV   [BP-1], R0
+    MOV   R0, [BP+3]
+    CALL  __unbox_string
+    MOV   R1, [R0]
+    MOV   [BP-4], R1
+    MOV   R0, [BP+2]
+    CALL  __unbox_string
+    MOV   [BP-2], R0
+    MOV   [BP-3], R0
+    MOV   R1, 0
+    MOV   [BP-5], R1
+    MOV   R1, [BP+4]
+    IEQ   R1, BOXED_FALSE
+    XOR   R1, 1                   ; convert unless conv == false
+    MOV   [BP-6], R1
+
+_p8split_loop:
+    MOV   R1, [BP-2]
+    MOV   R2, [R1]
+    MOV   R3, R2
+    IEQ   R3, 0
+    JT    R3, _p8split_last
+    MOV   R4, [BP-4]
+    IEQ   R2, R4
+    JF    R2, _p8split_next
+    MOV   [BP-7], R1
+    CALL  _p8split_token
+    MOV   R1, [BP-2]
+    IADD  R1, 1
+    MOV   [BP-3], R1
+_p8split_next:
+    MOV   R1, [BP-2]
+    IADD  R1, 1
+    MOV   [BP-2], R1
+    JMP   _p8split_loop
+
+_p8split_last:
+    MOV   [BP-7], R1
+    CALL  _p8split_token
+    MOV   R0, [BP-1]
+    POP   R6
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; one token, [BP-3] .. [BP-7] (exclusive): copied to a new RAM string,
+;; converted, stored at t[++count]. Runs in the frame above.
+_p8split_token:
+    MOV   R1, [BP-7]
+    MOV   R2, [BP-3]
+    ISUB  R1, R2                  ; length
+    IADD  R1, 1
+    PUSH  R1
+    CALL  __malloc
+    IADD  SP, 1
+    MOV   R1, R0
+    IEQ   R1, 0
+    JT    R1, _p8split_token_done ; out of memory: token dropped
+    MOV   R2, [BP-3]
+    MOV   R3, [BP-7]
+    MOV   R4, R0
+_p8split_copy:
+    MOV   R5, R2
+    ILT   R5, R3
+    JF    R5, _p8split_copied
+    MOV   R5, [R2]
+    MOV   [R4], R5
+    IADD  R2, 1
+    IADD  R4, 1
+    JMP   _p8split_copy
+_p8split_copied:
+    MOV   R5, 0
+    MOV   [R4], R5
+    OR    R0, BOXED_RAMSTRING
+    MOV   [BP-8], R0              ; (string_to_number uses R1-R6 as scratch)
+    MOV   R1, [BP-6]
+    JF    R1, _p8split_store
+    PUSH  R0
+    CALL  __builtin_string_to_number
+    IADD  SP, 1
+    MOV   R1, R0
+    IEQ   R1, BOXED_NIL
+    JT    R1, _p8split_store
+    MOV   [BP-8], R0
+_p8split_store:
+    MOV   R6, [BP-8]
+    MOV   R1, [BP-5]
+    IADD  R1, 1
+    MOV   [BP-5], R1
+    CIF   R1
+    MOV   R2, [BP-1]
+    PUSH  R2
+    PUSH  R1
+    PUSH  R6
+    CALL  __builtin_table_set
+    IADD  SP, 3
+_p8split_token_done:
+    RET

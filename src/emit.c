@@ -1235,7 +1235,17 @@ void emit_env_table (FILE *f)
     i = 0;
     for (SymbolNode *c = global_scope ? global_scope->symbols : NULL; c; c = c->next) {
         if (c->type != SYM_GLOBAL || c->location <= 0) continue;
-        fprintf (f, "__env_name_%d:\n    string \"%s\"\n", i++, c->name);
+        // PICO-8 builtin wrappers (pico8_prelude.c) answer to the builtin's
+        // own name -- unless the program has a global of that name itself
+        const char *name = c->name;
+        if (strncmp (name, "__p8env_", 8) == 0) {
+            bool shadowed = false;
+            for (SymbolNode *d = global_scope->symbols; d; d = d->next)
+                if (d->type == SYM_GLOBAL && d->location > 0 && strcmp (d->name, name + 8) == 0)
+                    shadowed = true;
+            if (!shadowed) name += 8;
+        }
+        fprintf (f, "__env_name_%d:\n    string \"%s\"\n", i++, name);
     }
     fputs (
 ";; __env_find: R1 = boxed key -> R2 = global's RAM address, or -1\n"

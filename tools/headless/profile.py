@@ -11,7 +11,7 @@ last = '?'
 rows = [l.strip().split(',') for l in open(dbg)]
 asmf = rows[0][1] if rows and len(rows[0]) > 1 else None
 import os
-src = open(os.path.join(os.path.dirname(dbg), asmf)).read().split('\n') if asmf else []
+src = open(os.path.join(os.path.dirname(dbg), asmf), errors="replace").read().split('\n') if asmf else []
 for p in rows:
     if len(p) < 3: continue
     if len(p) >= 4 and p[3]:

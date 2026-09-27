@@ -137,6 +137,48 @@ static const char *pico8_numeric_builtins[] = {
     "pal", "palt", "clip", "fillp", NULL
 };
 
+// `rectfill(...)` in a variadic function (a cart's drawing wrapper): the
+// builtins take a fixed argument list, counted at compile time, so a final
+// `...` is spread into explicit arguments -- vararg #0, #1, ... up to the
+// builtin's largest arity. Each reads nil when the caller passed fewer,
+// which the builtins take as "omitted", as PICO-8 does.
+static const struct { const char *name; int max_args; } pico8_arity[] = {
+    { "spr", 7 }, { "sspr", 10 }, { "map", 7 }, { "rectfill", 5 }, { "rect", 5 },
+    { "circfill", 4 }, { "circ", 4 }, { "line", 5 }, { "pset", 3 }, { "pget", 2 },
+    { "print", 4 }, { "mget", 2 }, { "mset", 3 }, { "fget", 2 }, { "fset", 3 },
+    { "sget", 2 }, { "sset", 3 }, { "sfx", 4 }, { "music", 3 }, { "camera", 2 },
+    { "color", 1 }, { "cls", 1 }, { "btn", 2 }, { "btnp", 2 }, { "pal", 3 },
+    { "palt", 2 }, { "clip", 5 }, { "fillp", 1 }, { NULL, 0 }
+};
+
+static void pico8_spread_vararg_args (ASTNode *node, const char *func_name)
+{
+    int max_args = 0;
+    for (int i = 0; pico8_arity[i].name; i++)
+        if (strcmp (pico8_arity[i].name, func_name) == 0) max_args = pico8_arity[i].max_args;
+    if (max_args == 0) return;
+
+    ASTNode *prev = NULL, *last = node->as.call.args_head;
+    int before = 0;
+    if (last == NULL) return;
+    while (last->next != NULL) { prev = last; last = last->next; before++; }
+    if (last->type != NODE_VARIADIC_EXPR || last->as.vararg.index != 0) return;
+
+    ASTNode *head = NULL, *tail = NULL;
+    for (int k = 0; k < max_args - before; k++) {
+        ASTNode *v = make_node (NODE_VARIADIC_EXPR);
+        v->line_number     = last->line_number;
+        v->as.vararg.index = k;
+        if (tail) tail->next = v; else head = v;
+        tail = v;
+    }
+    if (head == NULL) {                  // no room left: drop the `...`
+        if (prev) prev->next = NULL; else node->as.call.args_head = NULL;
+        return;
+    }
+    if (prev) prev->next = head; else node->as.call.args_head = head;
+}
+
 // Parses a whole string as a PICO-8 number literal (decimal, 0x hex,
 // optional sign). Returns false if anything but the number is present.
 static bool pico8_parse_number_string (const char *str, double *out)
@@ -212,15 +254,52 @@ static void pico8_expand_unpack_arg (ASTNode *node)
         "index the table instead (t[1], t[2], ...)");
 }
 
-void pico8_fold_numeric_string_args (ASTNode *node, const char *func_name)
+// poke(a, unpack(t)) / poke2 / poke4 with a table only known at run time
+// (a custom font: `poke(0x5600, unpack(split(font)))`): becomes the prelude's
+// __p8_pokeu(width, a, t), which writes t's values one after another.
+// Returns true when the call was rewritten into that ordinary call.
+static bool pico8_rewrite_poke_unpack (ASTNode *node, const char *func_name)
 {
+    int w = strcmp (func_name, "poke")  == 0 ? 1 :
+            strcmp (func_name, "poke2") == 0 ? 2 :
+            strcmp (func_name, "poke4") == 0 ? 4 : 0;
+    if (w == 0) return false;
+    ASTNode *a = node->as.call.args_head;
+    if (a == NULL || a->next == NULL || a->next->next != NULL) return false;
+    ASTNode *u = a->next;
+    if (u->type != NODE_FUNCTION_CALL || u->as.call.target == NULL ||
+        u->as.call.target->type != NODE_IDENTIFIER ||
+        strcmp (u->as.call.target->as.id.name, "unpack") != 0 ||
+        u->as.call.args_head == NULL || u->as.call.args_head->next != NULL) return false;
+    ASTNode *t = u->as.call.args_head;
+    // a literal split"..." is expanded at compile time instead
+    if (t->type == NODE_FUNCTION_CALL && t->as.call.target &&
+        t->as.call.target->type == NODE_IDENTIFIER &&
+        strcmp (t->as.call.target->as.id.name, "split") == 0 &&
+        t->as.call.args_head && t->as.call.args_head->type == NODE_STRING) return false;
+
+    ASTNode *wn = make_node (NODE_NUMBER);
+    wn->as.number.val = w;
+    wn->line_number = node->line_number;
+    wn->next = a;
+    a->next = t;
+    t->next = NULL;
+    node->as.call.args_head = wn;
+    node->as.call.target = make_node_ident ("__p8_pokeu");
+    node->as.call.target->line_number = node->line_number;
+    return true;
+}
+
+bool pico8_fold_numeric_string_args (ASTNode *node, const char *func_name)
+{
+    if (pico8_rewrite_poke_unpack (node, func_name)) return true;
     pico8_expand_unpack_arg (node);
 
     bool numeric = false;
     for (int i = 0; pico8_numeric_builtins[i] != NULL; i++) {
         if (strcmp (func_name, pico8_numeric_builtins[i]) == 0) { numeric = true; break; }
     }
-    if (!numeric) return;
+    if (!numeric) return false;
     for (ASTNode *a = node->as.call.args_head; a != NULL; a = a->next) {
         double v;
         if (a->type == NODE_STRING && pico8_parse_number_string (a->as.string_val.value, &v)) {
@@ -230,6 +309,7 @@ void pico8_fold_numeric_string_args (ASTNode *node, const char *func_name)
             a->next = next;
         }
     }
+    return false;
 }
 
 int try_emit_action_intrinsic (const char *action, int  dest_reg)
@@ -498,7 +578,10 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         // token-saving carts lean on it: rnd"128", sfx"38", music"-1".
         // Literal arguments are folded to numbers here; a runtime string
         // reaching a numeric argument is converted by the runtime helpers.
-        pico8_fold_numeric_string_args (node, func_name);
+        if (pico8_fold_numeric_string_args (node, func_name)) {
+            return 0;       // rewritten into an ordinary call (see above)
+        }
+        pico8_spread_vararg_args (node, func_name);
 
         // spr()
         if (strcmp (func_name, "spr") == 0)
@@ -602,6 +685,12 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         if (strcmp (func_name, "cos") == 0)
         {
             return (emit_pico8_cos_intrinsic (node, dest_reg));
+        }
+
+        // __p8_split1(s, sep, conv) -- the prelude split()'s native fast path
+        if (strcmp (func_name, "__p8_split1") == 0)
+        {
+            return (emit_pico8_split1_intrinsic (node, dest_reg));
         }
 
         // atan2(dx, dy) -- PICO-8 turns-based, screen space
@@ -729,6 +818,8 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         if (strcmp (func_name, "fset")  == 0) return (emit_pico8_fset_intrinsic  (node, dest_reg));
         if (strcmp (func_name, "pal")   == 0) return (emit_pico8_pal_intrinsic   (node, dest_reg, "pal"));
         if (strcmp (func_name, "palt")  == 0) return (emit_pico8_pal_intrinsic   (node, dest_reg, "palt"));
+        if (strcmp (func_name, "clip")  == 0) return (emit_pico8_pal_intrinsic   (node, dest_reg, "clip"));
+        if (strcmp (func_name, "fillp") == 0) return (emit_pico8_pal_intrinsic   (node, dest_reg, "fillp"));
 
         // sub(s, i [, j]) -- PICO-8's bare name for string.sub
         if (strcmp (func_name, "sub") == 0)

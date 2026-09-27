@@ -17,12 +17,25 @@ typedef struct {
     const char *name;
     const char *needs;      // another prelude function this one calls, or NULL
     const char *code;
+    const char *trigger;    // also included when the source contains this text
 } PreludeFunc;
+
+// _ENV["rectfill"]: carts that look builtins up by name (a picture-drawing
+// interpreter: `_ENV[modes[cmd]](unpack(args))`). Builtins are intrinsics,
+// not globals, so these wrappers are; emit_env_table() lists each one under
+// the builtin's own name.
+#define P8ENV(name, params) \
+    { "__p8env_" name, NULL, \
+      "function __p8env_" name "(" params ") " name "(" params ") end\n", "_ENV[" }
 
 static const PreludeFunc prelude[] = {
     { "split", "__p8_conv",
       "function split(s, sep, conv)\n"
       "  if sep == nil then sep = \",\" end\n"
+      // the common case in one native pass (pico8.s __builtin_pico8_split1)
+      "  if type(s) == \"string\" and type(sep) == \"string\" and #sep == 1 then\n"
+      "    return __p8_split1(s, sep, conv)\n"
+      "  end\n"
       "  local t, n, start, len = {}, 0, 1, #s\n"
       "  if sep == \"\" then\n"
       "    for i = 1, len do n = n + 1 t[n] = __p8_conv(sub(s, i, i), conv) end\n"
@@ -35,18 +48,18 @@ static const PreludeFunc prelude[] = {
       "  end\n"
       "  n = n + 1 t[n] = __p8_conv(sub(s, start, len), conv)\n"
       "  return t\n"
-      "end\n" },
+      "end\n", NULL },
     { "__p8_conv", NULL,
       "function __p8_conv(v, conv)\n"
       "  if conv ~= false then local x = tonumber(v) if x ~= nil then return x end end\n"
       "  return v\n"
-      "end\n" },
+      "end\n", NULL },
     { "unpack", NULL,
       // up to 8 values (the calling convention has no return count)
       "function unpack(t, i)\n"
       "  if i == nil then i = 1 end\n"
       "  return t[i], t[i + 1], t[i + 2], t[i + 3], t[i + 4], t[i + 5], t[i + 6], t[i + 7]\n"
-      "end\n" },
+      "end\n", NULL },
     { "tostr", NULL,
       "function tostr(v, hex)\n"
       "  if hex and type(v) == \"number\" then\n"
@@ -62,29 +75,29 @@ static const PreludeFunc prelude[] = {
       "  end\n"
       "  if v == nil then return \"[nil]\" end\n"
       "  return tostring(v)\n"
-      "end\n" },
+      "end\n", NULL },
     { "tonum", NULL,
-      "function tonum(v) return tonumber(v) end\n" },
+      "function tonum(v) return tonumber(v) end\n", NULL },
     { "stat", NULL,
       // no system state to report; carts also use `stat` as a no-op function
-      "function stat(n) return 0 end\n" },
+      "function stat(n) return 0 end\n", NULL },
     { "printh", NULL,
-      "function printh(s) end\n" },
+      "function printh(s) end\n", NULL },
     { "ord", NULL,
-      "function ord(s, i) if i == nil then i = 1 end return string.byte(s, i) end\n" },
+      "function ord(s, i) if i == nil then i = 1 end return string.byte(s, i) end\n", NULL },
     { "chr", NULL,
-      "function chr(n) return string.char(n) end\n" },
+      "function chr(n) return string.char(n) end\n", NULL },
     // Function forms of the bitwise operators (node/bitops.c): same 16.16
     // results as the operators, and usable as values.
-    { "band", NULL, "function band(a, b) return a & b end\n" },
-    { "bor",  NULL, "function bor(a, b) return a | b end\n" },
-    { "bxor", NULL, "function bxor(a, b) return a ^^ b end\n" },
-    { "bnot", NULL, "function bnot(a) return ~a end\n" },
-    { "shl",  NULL, "function shl(a, n) return a << n end\n" },
-    { "shr",  NULL, "function shr(a, n) return a >> n end\n" },
-    { "lshr", NULL, "function lshr(a, n) return a >>> n end\n" },
-    { "rotl", NULL, "function rotl(a, n) return a <<> n end\n" },
-    { "rotr", NULL, "function rotr(a, n) return a >>< n end\n" },
+    { "band", NULL, "function band(a, b) return a & b end\n", NULL },
+    { "bor",  NULL, "function bor(a, b) return a | b end\n", NULL },
+    { "bxor", NULL, "function bxor(a, b) return a ^^ b end\n", NULL },
+    { "bnot", NULL, "function bnot(a) return ~a end\n", NULL },
+    { "shl",  NULL, "function shl(a, n) return a << n end\n", NULL },
+    { "shr",  NULL, "function shr(a, n) return a >> n end\n", NULL },
+    { "lshr", NULL, "function lshr(a, n) return a >>> n end\n", NULL },
+    { "rotl", NULL, "function rotl(a, n) return a <<> n end\n", NULL },
+    { "rotr", NULL, "function rotr(a, n) return a >>< n end\n", NULL },
     // peek(a, n) / peek2(a, n) / peek4(a, n): n values, up to 8 (the
     // calling convention has no return count, as for unpack()); the
     // intrinsics handle the single-value form, see pico8mem.c
@@ -97,11 +110,103 @@ static const PreludeFunc prelude[] = {
       "    a = a + w\n"
       "  end\n"
       "  return v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8]\n"
-      "end\n" },
-    { "peek",  "__p8_peekn", "" },
-    { "peek2", "__p8_peekn", "" },
-    { "peek4", "__p8_peekn", "" },
-    { NULL, NULL, NULL }
+      "end\n", NULL },
+    // deli(t [, i]): removes t[i] (default: the last), closing the gap, and
+    // returns it
+    { "deli", NULL,
+      "function deli(t, i)\n"
+      "  local n = #t\n"
+      "  if i == nil then i = n end\n"
+      "  if i < 1 or i > n then return nil end\n"
+      "  local v = t[i]\n"
+      "  for k = i, n - 1 do t[k] = t[k + 1] end\n"
+      "  t[n] = nil\n"
+      "  return v\n"
+      "end\n", NULL },
+    // assert(v [, msg]): as PICO-8, a failure stops the cart with the
+    // message on screen
+    { "assert", NULL,
+      "function assert(v, msg)\n"
+      "  if not v then\n"
+      "    cls(0)\n"
+      "    print(\"assertion failed\", 0, 0, 8)\n"
+      "    if msg ~= nil then print(tostring(msg), 0, 8, 7) end\n"
+      "    while true do flip() end\n"
+      "  end\n"
+      "  return v\n"
+      "end\n", NULL },
+    // menuitem(index [, label, callback]): PICO-8's custom pause-menu
+    // entries. Recorded; the Vircon32 pause screen doesn't list them yet.
+    { "menuitem", NULL,
+      "__p8_menuitems = {}\n"
+      "function menuitem(i, label, cb)\n"
+      "  if label == nil then __p8_menuitems[i] = nil\n"
+      "  else __p8_menuitems[i] = {label, cb} end\n"
+      "end\n", NULL },
+    // poke(a, unpack(t)) with a run-time table -- see core.c
+    { "__p8_pokeu", NULL,
+      "function __p8_pokeu(w, a, t)\n"
+      "  for i = 1, #t do\n"
+      "    if w == 1 then poke(a, t[i]) elseif w == 2 then poke2(a, t[i]) else poke4(a, t[i]) end\n"
+      "    a = a + w\n"
+      "  end\n"
+      "end\n", "unpack" },
+    // oval(x0, y0, x1, y1 [, col]) / ovalfill: the ellipse inscribed in the
+    // box, one horizontal span per row
+    { "__p8_oval", NULL,
+      "function __p8_oval(x0, y0, x1, y1, col, fill)\n"
+      "  x0 = flr(x0) y0 = flr(y0) x1 = flr(x1) y1 = flr(y1)\n"
+      "  if x0 > x1 then x0, x1 = x1, x0 end\n"
+      "  if y0 > y1 then y0, y1 = y1, y0 end\n"
+      "  local cx, cy = (x0 + x1) / 2, (y0 + y1) / 2\n"
+      "  local rx, ry = (x1 - x0) / 2 + 0.5, (y1 - y0) / 2 + 0.5\n"
+      "  local a = {}\n"
+      "  for y = y0, y1 do\n"
+      "    local d = (y - cy) / ry\n"
+      "    local w = rx * sqrt(1 - d * d)\n"
+      "    a[y - y0] = flr(cx - w + 0.5)\n"
+      "  end\n"
+      "  for y = y0, y1 do\n"
+      "    local xa = a[y - y0]\n"
+      "    local xb = x0 + x1 - xa\n"
+      "    if fill then rectfill(xa, y, xb, y, col)\n"
+      "    else\n"
+      "      local up, dn = a[y - y0 - 1], a[y - y0 + 1]\n"
+      "      if up == nil then up = xb + 1 end\n"
+      "      if dn == nil then dn = xb + 1 end\n"
+      "      local la = min(up, dn) - 1\n"
+      "      if la < xa then la = xa end\n"
+      "      if la > xb then la = xb end\n"
+      "      rectfill(xa, y, la, y, col)\n"
+      "      rectfill(x0 + x1 - la, y, xb, y, col)\n"
+      "    end\n"
+      "  end\n"
+      "end\n", NULL },
+    { "oval", "__p8_oval",
+      "function oval(x0, y0, x1, y1, col) __p8_oval(x0, y0, x1, y1, col, false) end\n", NULL },
+    { "ovalfill", "__p8_oval",
+      "function ovalfill(x0, y0, x1, y1, col) __p8_oval(x0, y0, x1, y1, col, true) end\n", NULL },
+    P8ENV ("rect",     "a, b, c, d, e"),
+    P8ENV ("rectfill", "a, b, c, d, e"),
+    P8ENV ("line",     "a, b, c, d, e"),
+    P8ENV ("pset",     "a, b, c"),
+    P8ENV ("circ",     "a, b, c, d"),
+    P8ENV ("circfill", "a, b, c, d"),
+    P8ENV ("spr",      "a, b, c, d, e, f, g"),
+    P8ENV ("sspr",     "a, b, c, d, e, f, g, h, i, j"),
+    P8ENV ("map",      "a, b, c, d, e, f, g"),
+    P8ENV ("print",    "a, b, c, d"),
+    P8ENV ("pal",      "a, b, c"),
+    P8ENV ("palt",     "a, b"),
+    P8ENV ("clip",     "a, b, c, d, e"),
+    P8ENV ("fillp",    "a"),
+    P8ENV ("camera",   "a, b"),
+    P8ENV ("color",    "a"),
+    P8ENV ("cls",      "a"),
+    { "peek",  "__p8_peekn", "", NULL },
+    { "peek2", "__p8_peekn", "", NULL },
+    { "peek4", "__p8_peekn", "", NULL },
+    { NULL, NULL, NULL, NULL }
 };
 
 // Is `name` used as a whole identifier in src?
@@ -128,24 +233,25 @@ static bool defines (const char *src, const char *name)
 
 // Which prelude names the program uses as the built-in (mentioned, not
 // defined by the program itself) -- set by pico8_append_prelude().
-static bool prelude_builtin[64];
+static bool prelude_builtin[96];
 
 bool pico8_prelude_builtin (const char *name)
 {
-    for (int i = 0; prelude[i].name && i < 64; i++)
+    for (int i = 0; prelude[i].name && i < 96; i++)
         if (strcmp (prelude[i].name, name) == 0) return prelude_builtin[i];
     return false;
 }
 
 char *pico8_append_prelude (char *src)
 {
-    bool want[64] = { false };
+    bool want[96] = { false };
     int  count = 0;
     for (int i = 0; prelude[i].name; i++) count++;
 
     for (int i = 0; i < count; i++) {
-        if (prelude[i].name[0] != '_' && mentions (src, prelude[i].name) &&
-            !defines (src, prelude[i].name)) {
+        bool used = (prelude[i].name[0] != '_' && mentions (src, prelude[i].name)) ||
+                    (prelude[i].trigger != NULL && strstr (src, prelude[i].trigger) != NULL);
+        if (used && !defines (src, prelude[i].name)) {
             want[i] = true;
             prelude_builtin[i] = true;
             for (int j = 0; j < count; j++)

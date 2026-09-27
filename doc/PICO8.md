@@ -85,7 +85,10 @@ before `_init()`; the map and flags are already loaded then.
 | `flip()` | Shows the frame drawn so far and waits one PICO-8 frame (1/30 s, or 1/60 s with `_update60`), keeping music on time — for carts that run their own loop. |
 | `sspr(sx, sy, sw, sh, dx, dy [, dw, dh [, flip_x, flip_y]])` | Stretched blit from the sprite sheet. |
 | `sfx(n [, channel])`, `music(n)` | The cart's own `__sfx__`/`__music__`, synthesized at compile time (below). Without that data: a placeholder tone bank — see [PICO8_SFX_SOUND_BANK.md](PICO8_SFX_SOUND_BANK.md). |
-| `split(s [, sep [, convert]])`, `unpack(t [, i])` | `unpack` returns up to 8 values. |
+| `split(s [, sep [, convert]])`, `unpack(t [, i])` | `unpack` returns up to 8 values. `split` with a one-character separator is one native pass (a 2 KB string used to take ~7M cycles). |
+| `deli(t [, i])`, `assert(v [, msg])` | A failed `assert` shows "assertion failed" and the message, and stops. |
+| `oval`, `ovalfill` | The ellipse inscribed in the box, drawn as one span per row. |
+| `menuitem(i [, label, fn])` | Recorded; the pause screen doesn't list custom items yet. |
 | `tostr(v [, hex])`, `tonum(s)`, `chr(n)`, `ord(s [, i])` | |
 | `peek`, `peek2`, `peek4`, `poke`, `poke2`, `poke4`, `memcpy`, `memset`, `@a %a $a` | On an emulated 64 KB RAM in PICO-8's layout (see [Memory](#memory)). `peek(a, n)` returns n values (up to 8); `poke(a, v1, v2, …)` writes several. |
 | `reload([dest, src, len])`, `cstore(…)` | `reload` copies from the cart's own data (as compiled, before any `poke`/`mset`/`fset`); no arguments restores all of 0x0000–0x42FF. `reload` from another cart file and `cstore` do nothing (with a warning). |
@@ -93,8 +96,9 @@ before `_init()`; the map and flags are already loaded then.
 | `cartdata(id)`, `dget(n)`, `dset(n, v)` | 64 persistent numbers at 0x5E00, saved on the memory card (see [Memory](#memory)). |
 | `time()`, `t()` | Seconds since the cart started, counted in PICO-8 frames (1/30 s each, 1/60 s with `_update60`) as PICO-8 does, so it stands still while paused. |
 | `stat(n)`, `printh(s)` | Stubs (`stat` returns 0) — real functions, so `stat` works as a no-op value. |
-| `_ENV[name]` | Reads or writes the global called `name` (only globals the program uses by name exist). |
+| `_ENV[name]` | Reads or writes the global called `name` (only globals the program uses by name exist). The drawing builtins (`rect`, `rectfill`, `line`, `pset`, `circ`, `circfill`, `spr`, `sspr`, `map`, `print`, `pal`, `palt`, `clip`, `fillp`, `camera`, `color`, `cls`) are there too, for carts that call them by name. |
 | `pal`, `palt` | Accepted as no-ops (one warning): sprite colors are baked into the texture. |
+| `clip`, `fillp` | Accepted as no-ops (one warning) for now: drawing isn't clipped, and fill patterns draw solid. |
 
 ## Pause
 
@@ -142,12 +146,30 @@ the session, and nothing is saved.
 ## Syntax
 
 With `--#api pico8` (or a `.p8`): `!=`, `+= -= *= /= %= ..= ^= \=`, `a\b`
-(integer division), `if (cond) statement`, `?expr, ...` (print), button
+(integer division), then-less `if (cond) ...` and do-less `while (cond) ...`
+(below), `?expr, ...` (print), button
 glyphs ⬅️ ➡️ ⬆️ ⬇️ 🅾️ ❎ as the numbers 0–5, `f"str"` and `f{...}` calls
 (standard Lua), and numeric strings wherever a builtin expects a number
 (`rnd"128"`, `sfx"38"`, `music"-1"`). `unpack(split"72,32,56")` as the
 last argument of a builtin is expanded at compile time. The peek operators
 `@a`, `%a` and `$a` are `peek(a)`, `peek2(a)` and `peek4(a)`.
+
+`if (cond) body` without `then`, and `while (cond) body` without `do`,
+take the **rest of the line** as the body, as in PICO-8: several
+statements, `return` with a value, `else`, and further shorthand all work
+(`if (n==1) return 12`, `if (a) x=1 else x=2`). A body that opens a bracket
+or a block (`if (x) run(function()` …) runs until the line where that
+closes; an `end` that closes an enclosing block ends the body first
+(`function f(a) if (a) return 1 end`). The condition must be one
+parenthesized expression followed on the same line by a statement: in
+`if (a) < (b) then` the parentheses are just part of the condition. This
+is a source rewrite before parsing (pico8_shorthand.c) on the same lines,
+so error line numbers don't move.
+
+`unpack(t)` as the last argument of a call or the last item of a table
+constructor passes all its values, as in Lua (`f(unpack(t))`,
+`{unpack(t)}`); `...` as the last argument of a builtin is spread the same
+way (`function box(...) rectfill(...) end`).
 
 Glyph characters in strings — a `.p8` stores them as Unicode, e.g. 🅾️ ❎ ⬅️
 ♥ ★ — become their single P8SCII character (128–153), as in PICO-8:
@@ -225,7 +247,8 @@ times per object per frame, run at about a third of full speed.
 
 ## Not supported (yet)
 
-`clip`, real `stat` values, `menuitem`, the text cursor (`print` without
-coordinates prints at 0,0), palette remapping, fractional `spr` widths
-(`spr(n, x, y, 0.5)`), `pget`, `oval`/`ovalfill`, loading data from other
+`clip` and `fillp` (accepted, no effect), real `stat` values, custom
+`menuitem` entries in the pause screen, custom fonts (poked to 0x5600), the
+text cursor (`print` without coordinates prints at 0,0), palette remapping,
+fractional `spr` widths (`spr(n, x, y, 0.5)`), `pget`, loading data from other
 cart files (`reload` with a file name, multi-cart games), and `cstore`.

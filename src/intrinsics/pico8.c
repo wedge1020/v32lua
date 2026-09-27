@@ -1248,6 +1248,14 @@ bool emit_pico8_rect_intrinsic (ASTNode *node, int dest_reg)
 }
 
 // atan2(dx, dy) -- PICO-8's: turns, screen space, atan2(0, 0) = 0.25
+bool emit_pico8_split1_intrinsic (ASTNode *node, int dest_reg)
+{
+    static const char *names[3] = { "s", "sep", "conv" };
+    runtime_req.needs_strings = true;
+    return pico8_simple_call (node, dest_reg, 3, names, 2, "__builtin_pico8_split1",
+                              "__p8_split1(s, sep [, conv])");
+}
+
 bool emit_pico8_atan2_intrinsic (ASTNode *node, int dest_reg)
 {
     static const char *names[2] = { "dx", "dy" };
@@ -1300,12 +1308,23 @@ bool emit_pico8_fset_intrinsic (ASTNode *node, int dest_reg)
 // side effects.
 bool emit_pico8_pal_intrinsic (ASTNode *node, int dest_reg, const char *name)
 {
-    static int warned_pal = 0, warned_palt = 0;
-    int *flag = (strcmp (name, "palt") == 0) ? &warned_palt : &warned_pal;
-    char msg[160];
-    snprintf (msg, sizeof (msg),
-              "%s() is not supported on Vircon32 (palette remapping of baked sprite "
-              "colors); calls compile to no-ops", name);
+    static int warned_pal = 0, warned_palt = 0, warned_clip = 0, warned_fillp = 0;
+    int *flag = (strcmp (name, "palt")  == 0) ? &warned_palt :
+                (strcmp (name, "clip")  == 0) ? &warned_clip :
+                (strcmp (name, "fillp") == 0) ? &warned_fillp : &warned_pal;
+    char msg[200];
+    if (strcmp (name, "clip") == 0)
+        snprintf (msg, sizeof (msg),
+                  "clip() is not supported yet (the Vircon32 GPU has no clip rectangle); "
+                  "calls compile to no-ops and drawing is not clipped");
+    else if (strcmp (name, "fillp") == 0)
+        snprintf (msg, sizeof (msg),
+                  "fillp() is not supported yet (the Vircon32 GPU has no fill patterns); "
+                  "calls compile to no-ops and shapes are drawn solid");
+    else
+        snprintf (msg, sizeof (msg),
+                  "%s() is not supported on Vircon32 (palette remapping of baked sprite "
+                  "colors); calls compile to no-ops", name);
     pico8_warn_unsupported_once (flag, node->line_number, msg);
 
     for (ASTNode *a = node->as.call.args_head; a != NULL; a = a->next) {

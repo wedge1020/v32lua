@@ -42,6 +42,7 @@ void         generate_vtex_from_pico8 (const char *, uint8_t (*) (int, int), int
 // .p8 cartridge support -- see pico8_assets.c
 bool         pico8_is_cart_text     (const char *);
 char        *pico8_split_cart       (const char *);
+char        *pico8_expand_shorthand (const char *);   // pico8_shorthand.c
 bool         pico8_load_cart_assets (const char *, const char *);
 uint8_t      pico8_gfx_pixel        (int, int);
 bool         pico8_has_gfx          (void);

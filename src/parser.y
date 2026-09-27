@@ -446,7 +446,10 @@ statement:
     }
     | if_start expr statement {
         // PICO-8's then-less, end-less single-statement if: `if (cond) stmt`.
-        // Not standard Lua. Gated on runtime_req.needs_pico8, which is
+        // Not standard Lua. NOTE: PICO-8 source is now rewritten before
+        // parsing (pico8_shorthand.c: `if (c) ...` -> `if (c) then ... end`,
+        // the body being the rest of the line), so these rules only see
+        // what that pass leaves alone. Gated on runtime_req.needs_pico8, which is
         // already set by the time this reduces IF --#api pico8 appears
         // before this line in the source (the same single-pass ordering
         // constraint the compound-assignment tokens rely on in lexer.l).

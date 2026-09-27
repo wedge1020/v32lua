@@ -353,6 +353,14 @@ int  main (int  argc, char** argv)
              (strstr (expanded_source, "--#api pico8") ||
               strstr (expanded_source, "--#api \"pico8\"") ||
               strstr (expanded_source, "--#p8")))) {
+            // then-less `if (c) ...` / do-less `while (c) ...`: the body
+            // is the rest of the line (see pico8_shorthand.c)
+            char *expanded = pico8_expand_shorthand (expanded_source);
+            if (expanded == NULL) {
+                compiler_error (ERR_INTERNAL, -1, "Out of memory expanding PICO-8 shorthand");
+            }
+            free (expanded_source);
+            expanded_source = expanded;
             expanded_source = pico8_append_prelude (expanded_source);
         }
 

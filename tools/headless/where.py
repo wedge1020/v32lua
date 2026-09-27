@@ -9,7 +9,7 @@ for l in open(dbg):
     if len(p) < 3: continue
     if len(p) >= 4 and p[3]: last_label = p[3]
     addrs.append(int(p[0], 16)); lines.append(int(p[2])); labels.append(last_label)
-src = open(asmf).read().split('\n')
+src = open(asmf, errors="replace").read().split('\n')
 for a in sys.argv[3:]:
     a = int(a, 16)
     i = bisect.bisect_right(addrs, a) - 1

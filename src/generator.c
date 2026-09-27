@@ -618,11 +618,14 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                         emit_asm("MOV R%d, [R%d]\n", cnt, addr);
                         emit_asm("ISUB R%d, %d ; -> vararg count\n",
                                  cnt, context_stack_head->fixed_param_count);
-                        emit_asm("IGT R%d, 0\n", cnt);
+                        // vararg #index (0 unless an intrinsic call spread
+                        // `...` into explicit arguments, see core.c)
+                        int vi = node->as.vararg.index;
+                        emit_asm("IGT R%d, %d\n", cnt, vi);
                         emit_asm("JF R%d, %s\n", cnt, done);
                         emit_asm("MOV R%d, BP\n", addr);
-                        emit_asm("IADD R%d, %d ; first vararg\n",
-                                 addr, context_stack_head->vararg_first_offset);
+                        emit_asm("IADD R%d, %d ; vararg #%d\n",
+                                 addr, context_stack_head->vararg_first_offset + vi, vi);
                         emit_asm("MOV R%d, [R%d]\n", dest_reg, addr);
                         emit_asm("%s:\n", done);
                         unlock_register(addr);
