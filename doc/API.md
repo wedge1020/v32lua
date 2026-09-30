@@ -6,19 +6,21 @@ Under those modes, `spr()`/`btn()`/etc. are that console's own API instead
 (see the PICO-8 / TIC-80 compatibility docs), and the calls below are not
 available.
 
-Files: `v32lua_sound_intrinsics.c`, `v32lua_sound_namespaces.c`,
-`v32lua_spu_cmd_intrinsic.c`, `v32lua_ioport_boolean.c`,
-`intrinsics_vircon32.c`, `intrinsics_vircon32_memcard.c`,
-`runtime_vircon32_sound.s`, `runtime_vircon32_sfx.s`, `runtime_vircon32_spr.s`,
-`runtime_vircon32_input.s`, `runtime_vircon32_memcard.s`.
+The [Quick reference](#quick-reference) below lists every intrinsic and
+every `ioports.*` port on one page; the sections after it cover each part
+in detail.
 
-See also `vircon32-spu-port-ordering.md` — the SPU port write order is
-important and every sound emitter here depends on it.
+The SPU port write order matters for sound; see
+[Sound: music.\* / sfx.\*](#sound-music--sfx).
 
 ---
 
 ## Table of Contents
 
+- [Quick reference](#quick-reference)
+  - [Intrinsic functions](#intrinsic-functions)
+  - [ioports.\* — every hardware port](#ioports--every-hardware-port)
+  - [Standard library](#standard-library)
 - [Sound: music.\* / sfx.\*](#sound-music--sfx)
 - [ioports.spu.cmd() — the raw escape hatch](#ioportsspucmd--the-raw-escape-hatch)
 - [Boolean IO ports](#boolean-io-ports)
@@ -28,6 +30,181 @@ important and every sound emitter here depends on it.
 - [Tilemap: tilemap.\*](#tilemap-tilemap)
 - [Memory card: memcard.\*](#memory-card-memcard)
 - [Other raw IO ports](#other-raw-io-ports)
+
+---
+
+## Quick reference
+
+An **intrinsic** is a name the compiler recognizes and turns into inline
+instructions or a call to a runtime routine: there is no Lua table or
+function behind it. A function of your own with the same name (`spr`,
+`rgba`, `color`, …) replaces the intrinsic.
+
+### Intrinsic functions
+
+*Graphics*
+
+| Call | Returns | What it does |
+|---|---|---|
+| `spr(region, x, y [, sx [, sy [, angle [, color [, blend]]]]])` | nil | Draws a texture region; picks the plain, zoomed, rotated or rotozoomed draw from the arguments. [Details](#graphics-spr) |
+| `print(x, y, value)` | nil | Draws `value` (converted with `tostring`) at pixel `x, y` with the BIOS font. |
+| `ioports.gpu.clear([color])` / `clear(r, g, b [, a])` | nil | Sets the clear color (optional) and clears the screen. [Details](#gpu-clear) |
+| `ioports.gpu.draw([mode])` | nil | Draws the selected region at `gpu.x, gpu.y`. `mode`: `"draw"` (default), `"zoom"`, `"rotate"`, `"rotozoom"`, or `0`–`3`. |
+| `ioports.gpu.blending(mode)` | nil | Sets the blending mode: `"alpha"`/`"default"`, `"add"`, `"subtract"` (string literal). |
+| `ioports.gpu.sync()` | nil | Waits for the next frame (`WAIT`); same as `system.wait()`. |
+| `rgba(r, g, b [, a])` | packed word | Packs a color into the GPU's `0xAABBGGRR` word. Components clamped to 0–255, alpha defaults to 255. [Details](#colors-rgba) |
+| `color(n)` | packed word | Turns a number holding a packed color into the word (for colors you computed or loaded). [Details](#colors-color) |
+| `hex("0x…")` | packed word | A string literal of hex digits as the exact 32-bit word. |
+
+*Input*
+
+| Call | Returns | What it does |
+|---|---|---|
+| `btn(id [, pad])` | boolean | Button `id` (0–10, hardware order) is held. [Details](#input-btn--btnp) |
+| `btnp(id [, pad])` | boolean | Button `id` was pressed this frame. |
+
+*Sound* — [details](#sound-music--sfx)
+
+| Call | Returns | What it does |
+|---|---|---|
+| `music.play(snd [, ch [, loop [, vol [, start]]]])` | channel | Plays a sound, on channel 0 by default. |
+| `music.pause([ch])`, `music.resume([ch])`, `music.stop([ch])` | nil | Channel control. |
+| `music.playing([ch])` | boolean | Is the channel playing. |
+| `music.volume(vol [, ch])` | nil | Channel volume. |
+| `sfx.play(snd [, ch [, vol [, speed]]])` | channel | Plays an effect on the next of channels 1–15. |
+| `sfx.stop([ch])`, `sfx.volume(vol [, ch])` | nil | Stops effects (channels 1–15), sets volume. |
+| `ioports.spu.cmd(mode)` (or `.command`) | nil | Raw SPU command on the selected channel. [Details](#ioportsspucmd--the-raw-escape-hatch) |
+
+*Tilemaps, memory card, system*
+
+| Call | Returns | What it does |
+|---|---|---|
+| `tilemap.get(MAP, x, y)` | number / nil | Tile at `x, y` of a `--#tilemap`. [Details](#tilemap-tilemap) |
+| `tilemap.set(MAP, x, y, v)` | v | Changes a tile (the map is copied to RAM on the first write). |
+| `tilemap.render(MAP, sx, sy, w, h, x, y, tw, th [, skip])` | nil | Draws a block of tiles. |
+| `memcard.save(v [, pos])`, `memcard.load([pos])` | v | Reads/writes one word on the memory card. [Details](#memory-card-memcard) |
+| `memcard.load_table(pos)` | table / nil | Loads a table saved with `memcard.save(t)`. |
+| `memcard.title(str)` | nil | Sets the card's save title. |
+| `memcard[pos]`, `memcard[pos] = v` | | Same as `load` / `save`. |
+| `system.wait()` / `system.halt()` | nil | `WAIT` for the next frame / `HLT`. [Details](#system-system) |
+| `system.date()` / `system.time()` | string, 3 numbers | `"YYYY-MM-DD", y, m, d` / `"HH:MM:SS", h, m, s`. |
+| `system.frames()` / `system.cycles()` | number | Frames since power-on / CPU cycles in the current frame (also without `()`). |
+
+*Language and inline assembly*
+
+| Call | What it does |
+|---|---|
+| `tostring(v)`, `tonumber(s [, base])`, `type(v)` | As in Lua. |
+| `pairs(t)`, `ipairs(t)` | Iterators for `for k, v in …`. |
+| `setmetatable`, `getmetatable`, `rawget`, `rawset`, `rawlen`, `rawequal` | Metatables: `__index`, `__newindex`, `__call`, `__tostring`, `__len`, `__metatable`. |
+| `__asm__("…")` | Inline assembly with `{var}` substitution; registers and stack are saved around it. |
+| `__rawasm__("…")` | Assembly copied into the output as is. |
+
+`print` and `ioports.*` are native-mode names; under `--#api pico8` or
+`--#api tic80`, `print`, `spr`, `btn` and so on are that console's
+functions instead (see [PICO8.md](PICO8.md) and [TIC80.md](TIC80.md)).
+Not available: `printf`, `pcall`/`error`/`assert`, `select`, `next`,
+`string.match`/`gmatch`, `os.*`, `io.*`, `coroutine.*`.
+
+### ioports.\* — every hardware port
+
+Each property reads or writes one Vircon32 I/O port directly (`IN`/`OUT`),
+with no table lookup. Types:
+
+* **int** — a whole number. Reading gives a Lua number; writing a number
+  truncates it toward zero (`CFI`). A numeric literal is written as the
+  exact 32-bit word instead, so `ioports.gpu.bgcolor = 0xFF003366` and
+  `ioports.gpu.x = -5` both store what you wrote (see
+  [Integer ports and literals](#integer-ports-and-literals)).
+* **float** — a Lua number, stored as is.
+* **bool** — a Lua boolean: reads give `true`/`false`, writes test Lua
+  truthiness. See [Boolean IO ports](#boolean-io-ports).
+* **color** — an int port that holds a packed `0xAABBGGRR` word. Write a
+  literal, `rgba()`, `color()` or `hex()`; a runtime number is converted to
+  an integer, which is not the same bits.
+
+R = read, W = write.
+
+**ioports.gpu.\* — graphics**
+
+| Property | Port | Access | Type | Meaning |
+|---|---|---|---|---|
+| `ioports.gpu.texture` | `GPU_SelectedTexture` | R/W | int | Texture used by region settings and draws (`--#texture` names, or -1 for the BIOS texture). |
+| `ioports.gpu.region` | `GPU_SelectedRegion` | R/W | int | Region (0–4095) of the selected texture to define or draw. |
+| `ioports.gpu.minX`, `minY` | `GPU_RegionMinX/Y` | R/W | int | Region top-left corner, in texture pixels. Writing one also sets `hotX`/`hotY` to the same value. |
+| `ioports.gpu.maxX`, `maxY` | `GPU_RegionMaxX/Y` | R/W | int | Region bottom-right corner (inclusive). |
+| `ioports.gpu.hotX`, `hotY` | `GPU_RegionHotSpotX/Y` | R/W | int | Region hotspot: the point placed at `gpu.x, gpu.y`. Set after `minX/minY`. |
+| `ioports.gpu.x`, `y` | `GPU_DrawingPointX/Y` | R/W | int | Screen position of the next draw. |
+| `ioports.gpu.scaleX`, `scaleY` | `GPU_DrawingScaleX/Y` | R/W | float | Scale for zoomed draws. |
+| `ioports.gpu.angle` | `GPU_DrawingAngle` | R/W | float | Angle for rotated draws, in radians. |
+| `ioports.gpu.bgcolor` | `GPU_ClearColor` | R/W | color | Color used by `clear()`. |
+| `ioports.gpu.multiply` | `GPU_MultiplyColor` | R/W | color | Color every draw is multiplied by (`0xFFFFFFFF` = unchanged). |
+| `ioports.gpu.blending` | `GPU_ActiveBlending` | R/W | int | Blending mode number (alpha `0x20`, add `0x21`, subtract `0x22`); or call `ioports.gpu.blending("add")`. |
+| `ioports.gpu.pixels` | `GPU_RemainingPixels` | R | int | Pixels the GPU can still draw this frame. |
+
+Methods: `ioports.gpu.clear()`, `ioports.gpu.draw()`,
+`ioports.gpu.blending()`, `ioports.gpu.sync()` (see the table above).
+
+**ioports.inp.\* — gamepads**
+
+| Property | Port | Access | Type | Meaning |
+|---|---|---|---|---|
+| `ioports.inp.gamepad` | `INP_SelectedGamepad` | R/W | int | Gamepad (0–3) the other properties read. |
+| `ioports.inp.status` | `INP_GamepadConnected` | R | bool | Is the selected gamepad connected. |
+| `ioports.inp.left`, `right`, `up`, `down` | `INP_GamepadLeft/…` | R | int | D-pad: frames held (> 0) or frames since release (< 0). |
+| `ioports.inp.A`, `B`, `X`, `Y`, `L`, `R`, `START` | `INP_GamepadButton*` | R | int | Buttons, same encoding. |
+| `ioports.inp.inputs` | (all of the above) | R | int | Every button of the selected gamepad as one bitmask, held = 1: bit 10 left, 9 right, 8 up, 7 down, 6 START, 5 A, 4 B, 3 X, 2 Y, 1 L, 0 R. |
+
+**ioports.spu.\* — sound**
+
+| Property | Port | Access | Type | Meaning |
+|---|---|---|---|---|
+| `ioports.spu.volume` | `SPU_GlobalVolume` | R/W | float | Master volume. |
+| `ioports.spu.channel` | `SPU_SelectedChannel` | R/W | int | Channel (0–15) the `chan*` properties and `cmd()` act on. |
+| `ioports.spu.sound` | `SPU_SelectedSound` | R/W | int | Sound (`--#sound` name) the sound properties act on. |
+| `ioports.spu.length` | `SPU_SoundLength` | R | int | Length of the selected sound, in samples. |
+| `ioports.spu.soundloop` | `SPU_SoundPlayWithLoop` | R/W | bool | Selected sound loops by default. |
+| `ioports.spu.loopstart`, `loopend` | `SPU_SoundLoopStart/End` | R/W | int | Loop points of the selected sound, in samples. |
+| `ioports.spu.state` | `SPU_ChannelState` | R | int | Selected channel: 0x40 stopped, 0x41 paused, 0x42 playing. |
+| `ioports.spu.chansound` | `SPU_ChannelAssignedSound` | R/W | int | Sound assigned to the selected channel. |
+| `ioports.spu.chanvolume` | `SPU_ChannelVolume` | R/W | float | Channel volume. |
+| `ioports.spu.chanspeed` | `SPU_ChannelSpeed` | R/W | float | Channel playback speed (1.0 = normal). |
+| `ioports.spu.chanloop` | `SPU_ChannelLoopEnabled` | R/W | bool | Channel loops. Set **after** `cmd("play")`. |
+| `ioports.spu.chanpos` | `SPU_ChannelPosition` | R/W | int | Channel playback position, in samples. |
+
+Method: `ioports.spu.cmd(mode)` / `ioports.spu.command(mode)` —
+`"play"`, `"pause"`, `"stop"`, `"resume"`, `"pauseall"`, `"stopall"`,
+`"resumeall"`.
+
+**ioports.tim.\*, rng, car, mem — timer, random numbers, cartridge, memory card**
+
+| Property | Port | Access | Type | Meaning |
+|---|---|---|---|---|
+| `ioports.tim.date` | `TIM_CurrentDate` | R | int | Year × 65536 + day of the year (`system.date()` decodes it). |
+| `ioports.tim.time` | `TIM_CurrentTime` | R | int | Seconds since midnight (`system.time()` decodes it). |
+| `ioports.tim.frames` | `TIM_FrameCounter` | R | int | Frames since power-on (= `system.frames`). |
+| `ioports.tim.cycles` | `TIM_CycleCounter` | R | int | CPU cycles this frame (= `system.cycles`). |
+| `ioports.rng.value` | `RNG_CurrentValue` | R | int | Next hardware random number. |
+| `ioports.rng.seed` | `RNG_CurrentValue` | W | int | Seeds the hardware generator. |
+| `ioports.car.connected` | `CAR_Connected` | R | bool | A cartridge is inserted. |
+| `ioports.car.romsize` | `CAR_ProgramROMSize` | R | int | Program ROM size, in words. |
+| `ioports.car.numvtex`, `numvsnd` | `CAR_NumberOfTextures/Sounds` | R | int | Textures / sounds in the cartridge. |
+| `ioports.mem.connected` | `MEM_Connected` | R | bool | A memory card is inserted. |
+
+Writing a read-only port, reading a write-only one, or an unknown name
+(`ioports.gpu.colour`) is a compile error that lists the valid names.
+
+### Standard library
+
+| Library | Functions |
+|---|---|
+| `math` | `abs acos asin atan atan2 ceil cos cosh deg exp floor fmod frexp ldexp log log10 max min modf pow rad random randomseed sin sinh sqrt tan tanh`, constants `pi huge e` |
+| `string` | `byte char find format gsub len lower rep reverse sub upper` (also as methods: `s:sub(1, 3)`) |
+| `table` | `concat insert move pack remove sort unpack` |
+| operators | `+ - * / % ^ //`, `..`, `#`, `== ~= < > <= >=`, `and or not`, `& | ~ << >>` (see the README) |
+
+Numbers are float32 (24 significant bits); strings that look like numbers
+are converted in arithmetic (`"5" + 1` is 6), as in Lua.
 
 ---
 
@@ -333,15 +510,17 @@ hardware register, not a general date library.
 
 ```lua
 local f = system.frames()   -- TIM_FrameCounter -- frames since power-on
-local c = system.cycles()   -- TIM_CycleCounter -- CPU cycles since power-on
+local c = system.cycles()   -- TIM_CycleCounter -- CPU cycles since this frame began
 ```
 
-Both are read-only hardware counters, monotonic since boot — unlike
-`system.date()`/`system.time()`, these are **not** wall-clock: they measure
-the console's own running time, not the real-time clock. `system.frames()`
-is the natural fit for "every N frames, do X" timing (this is exactly what
-the tilemap scroll demo uses to pace its scroll speed) since it free-runs
-regardless of what the program does, unlike a hand-rolled counter variable
+Both are read-only hardware counters, and neither is wall-clock time.
+`system.frames()` counts frames since power-on; `system.cycles()` counts
+CPU cycles since the current frame began and restarts at 0 every frame,
+so reading it just before `system.wait()` shows how much of the frame's
+CPU budget the frame used. `system.frames()` is the natural fit for "every
+N frames, do X" timing (this is exactly what the tilemap scroll demo uses
+to pace its scroll speed) since it free-runs regardless of what the
+program does, unlike a hand-rolled counter variable
 that has to be remembered and incremented every frame. Both are also
 reachable as raw ports (`ioports.tim.frames`, `ioports.tim.cycles`) — see
 [Other raw IO ports](#other-raw-io-ports) — the `system.*` names are
@@ -440,6 +619,7 @@ being omitted entirely — both fall back to the default. A call sitting in
 an expression context (`local unused = spr(1, 10, 10)`) correctly gets
 `nil` assigned, matching every other intrinsic in this file.
 
+<a id="gpu-clear"></a>
 **ioports.gpu.clear([color]) / ioports.gpu.clear(r, g, b [, a])**
 
 Clears the screen: writes `GPU_ClearColor` (if a color is given) then
@@ -516,6 +696,48 @@ value deletes the key), testing it (`if c then`), or comparing it with
 `nil` is not. `hex()` has the same issue. The safe idiom is to keep the
 components as numbers and call `rgba()` where the color is used, as in
 the examples above.
+
+<a id="colors-color"></a>
+**Colors: color(n)**
+
+Turns a number that holds a packed `0xAABBGGRR` color into the raw word,
+for colors you have as a number rather than as components: one computed
+with arithmetic, read from a table of colors, or loaded from the memory
+card.
+
+```lua
+local palette = { 0xFF1D2B53, 0xFF7E2553, 0xFF008751 }
+ioports.gpu.multiply = color(palette[i])
+spr(id, x, y, 1, 1, 0, color(base + fade * 0x01000000))
+```
+
+* One argument (any other count is a compile error; a string, `nil` or
+  boolean literal is too).
+* The number is floored and wrapped into 32 bits, so negative numbers
+  give their two's-complement word (`color(-1)` is `0xFFFFFFFF`). Values
+  outside `[-2^31, 2^32)` saturate.
+* A literal folds at compile time and is exact: `color(0x802040FF)` is
+  `0x802040FF`.
+* At runtime the number is a float32, which holds only 24 significant
+  bits, so a color whose bits span more than 24 is rounded before
+  `color()` sees it: a variable holding `0x802040FF` gives `0x80204100`.
+  Colors with alpha `0xFF` and many other common values are exact
+  (`0xFF003366`, `0x80FFFFFF`), but when the exact bits matter, keep
+  the components and use `rgba()`.
+* Same caveat as `rgba()` about words that look like `nil` or a table.
+* Native Vircon32 mode only. A function of your own named `color` takes
+  precedence (PICO-8's `color()` is PICO-8's own function).
+
+<a id="integer-ports-and-literals"></a>
+**Integer ports and literals**
+
+A number written to an integer port (`ioports.gpu.x`, `bgcolor`,
+`multiply`, …) is converted with `CFI`, truncating toward zero. A
+**numeric literal** is instead written as its exact 32-bit word, computed
+at compile time: `ioports.gpu.bgcolor = 0xFF003366` stores `0xFF003366`
+(a float conversion would saturate it), `ioports.gpu.x = -5` stores `-5`,
+and `ioports.gpu.y = 12.7` stores `12`. Literals outside `[-2^31, 2^32)`
+saturate with a warning.
 
 **Defining texture regions**
 
@@ -847,7 +1069,7 @@ form, since Lua's bracket syntax has no "no index" spelling.
 ```lua
 memcard[0] = 1234
 local hi = memcard[0]        -- 1234
-memcard[-1]                  -- reads the auto-append cursor
+local cursor = memcard[-1]    -- reads the auto-append cursor
 ```
 
 **memcard.title(str) -> nil**
@@ -875,7 +1097,7 @@ local highscores = { alice = 500, bob = 350, carol = 900 }
 memcard.save(highscores)
 
 local restored = memcard.load_table(0)
-print(restored.alice)   -- 500
+print(10, 10, restored.alice)   -- 500
 ```
 
 `memcard.save(a_table, position)` (the **explicit-position** form) is
@@ -1000,13 +1222,13 @@ whichever one it isn't currently addressing.
 ## Other raw IO ports
 
 Every `ioports.*` port lives in one table (`core.c`'s `IOPortMap`),
-organized under six categories: `tim`, `rng`, `gpu`, `spu`, `inp`, `car`,
+organized under seven categories: `tim`, `rng`, `gpu`, `spu`, `inp`, `car`,
 `mem`. The sound (`spu`), graphics (`gpu`, partially — see
 **Defining texture regions**), and input (`inp`,
 partially — see [btn()/btnp()](#input-btn--btnp)) categories are covered
 above where they have a higher-level wrapper. What's left is either raw
 hardware with no wrapper at all, or a wrapper that only covers part of a
-category.
+category. The complete table of ports is in the [Quick reference](#ioports--every-hardware-port).
 
 An unknown category or property name is a compile error listing the valid
 categories, not a silent no-op or an undeclared-global read — see
@@ -1015,10 +1237,10 @@ categories, not a silent no-op or an undeclared-global read — see
 **ioports.tim.\* — raw timer**
 
 ```lua
-ioports.tim.date     -- TIM_CurrentDate,   read-only, packed integer
-ioports.tim.time     -- TIM_CurrentTime,   read-only, packed integer
-ioports.tim.frames    -- TIM_FrameCounter, read-only -- same as system.frames()
-ioports.tim.cycles    -- TIM_CycleCounter, read-only -- same as system.cycles()
+local d = ioports.tim.date    -- TIM_CurrentDate:  year * 65536 + day of the year
+local t = ioports.tim.time    -- TIM_CurrentTime:  seconds since midnight
+local f = ioports.tim.frames  -- TIM_FrameCounter: same as system.frames()
+local c = ioports.tim.cycles  -- TIM_CycleCounter: same as system.cycles()
 ```
 
 `ioports.tim.date`/`ioports.tim.time` are the packed raw registers
@@ -1030,7 +1252,7 @@ memory card instead of three separate fields).
 **ioports.rng.\* — hardware RNG**
 
 ```lua
-ioports.rng.value            -- RNG_CurrentValue, read: the current random value
+local r = ioports.rng.value   -- RNG_CurrentValue, read: the next random value
 ioports.rng.seed = 12345      -- RNG_CurrentValue, write: reseed the generator
 ```
 
@@ -1043,10 +1265,10 @@ not share state and will not produce the same sequence from the same seed.
 **ioports.car.\* — cartridge info**
 
 ```lua
-ioports.car.connected  -- CAR_Connected,          boolean, read-only
-ioports.car.romsize    -- CAR_ProgramROMSize,     integer, read-only
-ioports.car.numvtex    -- CAR_NumberOfTextures,   integer, read-only
-ioports.car.numvsnd    -- CAR_NumberOfSounds,     integer, read-only
+local ok   = ioports.car.connected  -- CAR_Connected,        boolean
+local size = ioports.car.romsize    -- CAR_ProgramROMSize,   integer
+local ntex = ioports.car.numvtex    -- CAR_NumberOfTextures, integer
+local nsnd = ioports.car.numvsnd    -- CAR_NumberOfSounds,   integer
 ```
 
 Read-only introspection of the currently-inserted cartridge itself — its

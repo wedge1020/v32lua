@@ -87,6 +87,7 @@ static void require_pico8 (const char *what)
     }
 }
 
+static int long_comment_level;   // the n of --[==[ (n '='s) being skipped
 static int compound_assign_token (NodeType op)
 {
     if (!runtime_req.needs_pico8) {
@@ -103,6 +104,7 @@ static int compound_assign_token (NodeType op)
 %option yylineno
 /* Add these options to disable the unused functions */
 %option nounput noinput
+%x LONGCOMMENT
 
 %%
 
@@ -184,7 +186,35 @@ static int compound_assign_token (NodeType op)
 }
 
     /* 4. Standard Single-Line Comment: Matches '--' with text, or a bare '--' */
-"--".* { /* Skip standard single-line comments safely */ }
+"--".* {
+    // A comment to the end of the line -- unless it opens a long comment,
+    // --[[ ... ]] or --[==[ ... ]==]. The rule above only catches a --[[
+    // that runs past the end of its line; on one line (`--[[ x ]] end`)
+    // this rule's match is longer and used to swallow the code after the
+    // comment, and a --[==[ comment was never recognized at all.
+    if (yytext[2] == '[') {
+        int n = 0;
+        while (yytext[3 + n] == '=') n++;
+        if (yytext[3 + n] == '[') {
+            long_comment_level = n;
+            yyless (4 + n);          // rescan everything after the opener
+            BEGIN (LONGCOMMENT);
+        }
+    }
+}
+
+<LONGCOMMENT>"]"=*"]" {
+    if ((int) yyleng - 2 == long_comment_level) BEGIN (INITIAL);
+    else yyless (1);                 // a ] of another level: skip just it
+}
+<LONGCOMMENT>[^\]\n]+  { }
+<LONGCOMMENT>\n        { }
+<LONGCOMMENT>"]"        { }
+<LONGCOMMENT><<EOF>>   {
+    compiler_error (ERR_SYNTAX, yylineno, "unfinished long comment (missing ]%.*s])",
+                    long_comment_level, "==========================");
+    yyterminate ();
+}
 
 "while"                 { return TOKEN_WHILE;    }
 "repeat"                { return TOKEN_REPEAT;   }

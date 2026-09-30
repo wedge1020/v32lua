@@ -1,4 +1,4 @@
-.TH V32LUA 1 "September 2026" "v32lua 20260915-dev" "User Commands"
+.TH V32LUA 1 "September 2026" "v32lua 20260930-dev" "User Commands"
 .SH NAME
 v32lua \- compile a subset of Lua to Vircon32 assembly and cartridge XML
 .SH SYNOPSIS
@@ -16,7 +16,9 @@ v32lua \- compile a subset of Lua to Vircon32 assembly and cartridge XML
 .RB [ \-\-rate
 .IR hz ]
 .RB [ \-\-fast\-circles ]
-.RB [ \-\-no\-bezel ]
+.RB [ \-\-bezel
+.IR art.png " | "
+.BR \-\-no\-bezel ]
 .IR input.lua " | " cart.p8 " | " cart.tic
 .br
 .B v32lua
@@ -179,6 +181,15 @@ console's). Outlines are always exact. Same as a
 .B \-\-#fast\-circles
 hint.
 .TP
+.BI \-\-bezel " art.png"
+PICO-8: draw the side panels from your own art instead of the built-in
+panels: a PNG (or
+.IR .vtex )
+with both panels side by side, 4:5 (for example 288\(mu360, or
+96\(mu120 scaled 3\(mu). Overrides a
+.B \-\-#bezel
+hint.
+.TP
 .B \-\-no\-bezel
 PICO-8: leave the screen margins beside the canvas black instead of
 drawing the side panels. Overrides a
@@ -304,7 +315,7 @@ string interpolation of Lua variables; a native, zero-cost hardware
 intrinsic surface
 .RI ( ioports.gpu.* ", " ioports.spu.* ", " ioports.inp.* ", "
 .IR music.*/sfx.* ", " tilemap.* ", " system.* );
-a TIC-80- and an (earlier-stage) PICO-8-compatible API layer, selected
+TIC-80- and PICO-8-compatible API layers, selected
 per-cartridge with a
 .B \-\-#api
 hint; and a
@@ -334,6 +345,18 @@ or one of the string literals
 .BR \(dqalpha\(dq " (or " \(dqdefault\(dq "), " \(dqadd\(dq ", or " \(dqsubtract\(dq ,
 resolved at compile time; for example
 .BR "spr(id, x, y, nil, nil, nil, nil, \(dqadd\(dq)" .
+.BI rgba( r ", " g ", " b " [, " a ])
+returns the packed color word (components clamped to 0\(en255, alpha
+255 by default), and
+.BI color( n )
+turns a number holding a packed color into the word; both are what
+.BR spr() 's
+color, the color form of
+.BR clear() ,
+and
+.BR ioports.gpu.multiply / bgcolor
+expect. A numeric literal written to an integer port is stored as its
+exact 32-bit word.
 .PP
 Explicit, permanent deviations from standard Lua, made to suit
 Vircon32's freestanding environment: IEEE-754 float32 only, with no
@@ -375,21 +398,35 @@ sections become the sprite sheet, sprite flags and map. A
 program can take those assets from a cart with
 .BR \-\-#p8\ \(dqcart.p8\(dq .
 .PP
+Also supported: numeric and generic
+.B for
+(with
+.BR pairs / ipairs ),
+.BR repeat ... until ,
+closures with upvalues, variadic functions
+.RB ( ... ),
+multiple return values (a trailing call or
+.B ...
+expands in argument lists, table constructors and
+.BR return ,
+up to 32 values), metatables
+.RB ( __index ", " __newindex ", " __call ", " __tostring ", " __len ,
+.BR __metatable ),
+the bitwise operators on 32-bit words, arithmetic on numeric strings,
+.BI tonumber( s ", " base ),
+and most of the
+.BR math ", " string " and " table
+libraries.
+.PP
 Not yet implemented:
 .BR pcall / error / assert ;
-.BR string.match / gmatch ", " setmetatable ;
+.BR string.match / gmatch ;
 .BR select() ,
 and
 .B next()
 as a callable function;
-expansion of a trailing multi-value call inside a table constructor or
-argument list
-.RB ( {f()} ", " g(f()) " keep only the first value);"
-arithmetic coercion of numeric strings;
-bitwise operators;
+the arithmetic, comparison and concatenation metatable events;
 garbage collection (the heap only grows);
-the two-argument, explicit-base form of
-.BR tonumber() " (an explicit numeric base);"
 and a diagnostic for reading, from inside a function, a
 .B local
 declared in a block lexically outside any function at chunk level
@@ -404,7 +441,17 @@ Cartridge metadata and resources are declared with
 line comments, parsed by the preprocessor stage and used to generate
 the companion XML file:
 .BR \-\-#version ", " \-\-#title ", " \-\-#api ", " \-\-#texture ,
-.BR \-\-#sound ", " \-\-#tilemap ", " \-\-#p8 ", " \-\-#rate ", and " \-\-#include .
+.BR \-\-#sound ", " \-\-#tilemap ", " \-\-#p8 ", " \-\-#rate ,
+.BR \-\-#bezel ", " \-\-#fast\-circles ", and " \-\-#include .
+The XML names the
+.I .vtex
+and
+.I .vsnd
+files made from each hint's
+.I .png
+or
+.I .wav
+file (same folder, same name).
 A
 .B \-\-#texture
 or
@@ -424,6 +471,10 @@ as in a monolithic file.
 .TP
 .I *.lua
 Input source, in the Lua subset this tool accepts.
+.TP
+.I *.tic
+A TIC-80 cartridge (Lua carts only), compiled directly: its code and
+bank 0's tiles, sprites, map, flags, palette, waveforms and SFX are read.
 .TP
 .I *.p8
 A PICO-8 cartridge, compiled directly (see
@@ -470,11 +521,18 @@ original Lua source lines and enclosing function names, for use by a
 debugger such as
 .BR v32sim (1).
 .PP
-Texture and sound source assets
-.RI ( .png ", " .wav ", and similarly " .vsnd )
-referenced by cartridge hints are read directly by
-.B v32lua
-at compile time and are not themselves an output of this tool.
+Texture and sound assets named by cartridge hints are not read by
+.BR v32lua ;
+convert them with
+.BR png2vircon (1)
+and
+.BR wav2vircon (1)
+before running
+.BR packrom (1).
+.TP
+.I inc/config.h
+(in the source tree) Build-time defaults of the sample rates, side panels,
+fast circles and warnings.
 .SH SEE ALSO
 .BR v32c++ (1),
 the Vircon32 C compiler and assembler documentation,

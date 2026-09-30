@@ -379,19 +379,32 @@ int try_emit_action_intrinsic (const char *action, int  dest_reg)
 // ============================================================================
 // --- Helper: Check if an AST node produces a raw hardware integer ---
 // ============================================================================
-// rgba(...) in native Vircon32 mode, not a function the program defines
-bool is_rgba_intrinsic_call (ASTNode *node)
+// A call to the native-mode intrinsic `name` (not a function the program
+// defines itself)
+static bool is_native_intrinsic_call (ASTNode *node, const char *name)
 {
     return node != NULL && node->type == NODE_FUNCTION_CALL &&
            node->as.call.target != NULL && node->as.call.target->type == NODE_IDENTIFIER &&
-           strcmp (node->as.call.target->as.id.name, "rgba") == 0 &&
+           strcmp (node->as.call.target->as.id.name, name) == 0 &&
            runtime_req.needs_vircon32 && !runtime_req.needs_pico8 && !runtime_req.needs_tic80 &&
-           resolve_symbol ("rgba") == NULL;
+           resolve_symbol (name) == NULL;
+}
+
+// rgba(...) in native Vircon32 mode
+bool is_rgba_intrinsic_call (ASTNode *node)
+{
+    return is_native_intrinsic_call (node, "rgba");
+}
+
+// color(n) in native Vircon32 mode
+bool is_color_intrinsic_call (ASTNode *node)
+{
+    return is_native_intrinsic_call (node, "color");
 }
 
 bool is_raw_integer_expression (ASTNode *node) {
-    // rgba() gives a raw packed word too
-    if (is_rgba_intrinsic_call (node)) return true;
+    // rgba() and color() give a raw word too
+    if (is_rgba_intrinsic_call (node) || is_color_intrinsic_call (node)) return true;
     if (node != NULL)
     {
         // 1. Check if the expression is a direct call to the hex() intrinsic
@@ -547,6 +560,21 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         return 1;
     }
 
+    // system.frames() / system.cycles(): the same read as the properties
+    // system.frames / system.cycles (TIM_FrameCounter / TIM_CycleCounter)
+    if (strcmp(func_name, "system.frames") == 0 || strcmp(func_name, "system.cycles") == 0) {
+        if (node->as.call.args_head != NULL) {
+            compiler_error(ERR_SEMANTIC, node->line_number, "%s() takes no arguments", func_name);
+            return 0;
+        }
+        if (dest_reg != 0) {
+            emit_asm("IN R%d, %s ; %s()\n", dest_reg,
+                     func_name[7] == 'f' ? "TIM_FrameCounter" : "TIM_CycleCounter", func_name);
+            emit_asm("CIF R%d\n", dest_reg);
+        }
+        return 1;
+    }
+
     // system.wait / ioports.gpu.sync
     if (strcmp(func_name, "system.wait") == 0 ) {
         emit_system_wait_intrinsic();
@@ -583,6 +611,12 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         (runtime_req.needs_tic80    == false))
     {
         //try_emit_call_vircon32_instinsic (node, dest_reg);
+
+        // color(n) -> the number as a raw 32-bit word (gpu.c)
+        if (strcmp (func_name, "color") == 0)
+        {
+            return (emit_color_intrinsic (node, dest_reg));
+        }
 
         // rgba(r, g, b [, a]) -> raw packed 0xAABBGGRR word (gpu.c)
         if (strcmp (func_name, "rgba") == 0)
@@ -1106,12 +1140,13 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     }
 
     // printf()
-    if (strcmp(func_name, "printf") == 0) {
-        runtime_req.needs_print      = true;
-        runtime_req.needs_strings    = true;
-        if (emit_printf_intrinsic(node, dest_reg)) {
-            return 1;
-        }
+    // There is no printf runtime routine: the call used to compile to a
+    // CALL of an undefined label and fail only in the assembler. A user
+    // function named printf is still called normally.
+    if (strcmp(func_name, "printf") == 0 && resolve_function_symbol ("printf") == NULL
+        && resolve_symbol ("printf") == NULL) {
+        compiler_error (ERR_SEMANTIC, node->line_number,
+            "printf() is not available: use print(x, y, string.format(fmt, ...))");
     }
 
     //////////////////////////////////////////////////////////////////////////
@@ -1515,7 +1550,7 @@ int  try_emit_table_set_intrinsic (ASTNode *table_expr, ASTNode *key_expr, ASTNo
     }
 
     // Validate ioports path structure
-    validate_ioports_path(base_path, key_expr->as.string_val.value, yylineno);
+    validate_ioports_path(base_path, key_expr->as.string_val.value, (key_expr->line_number > 0 ? key_expr->line_number : yylineno));
 
     char full_path[512];
     snprintf(full_path, sizeof(full_path), "%s.%s", base_path, key_expr->as.string_val.value);
@@ -1537,7 +1572,7 @@ int  try_emit_table_set_intrinsic (ASTNode *table_expr, ASTNode *key_expr, ASTNo
     for (int i = 0; ioports[i].lua_path != NULL; i++) {
         if (strcmp(full_path, ioports[i].lua_path)  == 0) {
             if ((ioports[i].mode & IOPORT_WRITE)    != IOPORT_WRITE) {
-                compiler_error (ERR_SEMANTIC, yylineno,
+                compiler_error (ERR_SEMANTIC, (key_expr->line_number > 0 ? key_expr->line_number : yylineno),
                                 "%s: port cannot be written to", full_path);
             }
 
@@ -1567,6 +1602,32 @@ int  try_emit_table_set_intrinsic (ASTNode *table_expr, ASTNode *key_expr, ASTNo
                 emit_asm("    ;; --- Intrinsic: Literal Boolean Hardware Write (%s) ---\n", full_path);
                 emit_asm("OUT %s, %d ; %s\n", ioports[i].asm_port, truth,
                          truth ? "true" : (val_node->type == NODE_NIL ? "nil -> false" : "false"));
+                return 1;
+            }
+
+            // A numeric literal into an integer port: the word, folded here.
+            // (A float32 CFI of 0xFF003366 is out of range -- host-dependent,
+            // 0x80000000 on x86 -- so `ioports.gpu.bgcolor = 0xFF003366`
+            // used to set the wrong color.) Truncated toward zero like CFI;
+            // negative values are two's complement, 2^31..2^32-1 unsigned.
+            double lit;
+            if ((ioports[i].type & IOPORT_TYPE_INTEGER) == IOPORT_TYPE_INTEGER &&
+                spu_static_number (val_node, &lit)) {
+                double t = trunc (lit);
+                unsigned int word;
+                if (t >= 4294967296.0 || t < -2147483648.0) {
+                    word = (t < 0.0) ? 0x80000000u : 0xFFFFFFFFu;
+                    compiler_warning (ERR_SEMANTIC, val_node->line_number,
+                        "%s = %g does not fit in 32 bits; saturated to 0x%08X", full_path, lit, word);
+                } else if (t < 0.0) {
+                    word = (unsigned int) (long long) (t + 4294967296.0);
+                } else {
+                    word = (unsigned int) (long long) t;
+                }
+                emit_asm("    ;; --- Intrinsic: Literal Hardware Write (%s = %g) ---\n", full_path, lit);
+                emit_asm("OUT %s, 0x%08X\n", ioports[i].asm_port, word);
+                if (paired_hotspot_port != NULL)
+                    emit_asm("OUT %s, 0x%08X\n", paired_hotspot_port, word);
                 return 1;
             }
 
@@ -1641,7 +1702,7 @@ int  try_emit_table_set_intrinsic (ASTNode *table_expr, ASTNode *key_expr, ASTNo
 
     // Category was valid but property not found - emit specific error
     if (strncmp(base_path, "ioports.", 8) == 0) {
-        compiler_error(ERR_SEMANTIC, yylineno,
+        compiler_error(ERR_SEMANTIC, (key_expr->line_number > 0 ? key_expr->line_number : yylineno),
             "Unknown ioports property '%s.%s'", base_path, key_expr->as.string_val.value);
     }
 
@@ -1746,13 +1807,13 @@ int  try_emit_table_get_intrinsic (ASTNode *table_expr, ASTNode *key_expr, int d
     snprintf(full_path, sizeof(full_path), "%s.%s", base_path, key_expr->as.string_val.value);
 
     // Validate ioports path structure (for error messages only)
-    validate_ioports_path(base_path, key_expr->as.string_val.value, yylineno);
+    validate_ioports_path(base_path, key_expr->as.string_val.value, (key_expr->line_number > 0 ? key_expr->line_number : yylineno));
 
     // Scan ENTIRE IOPortMap table for a match
     for (int i = 0; ioports[i].lua_path != NULL; i++) {
         if (strcmp(full_path, ioports[i].lua_path) == 0) {
             if ((ioports[i].mode & IOPORT_READ) != IOPORT_READ) {
-                compiler_error(ERR_SEMANTIC, yylineno, "%s: port cannot be read from", full_path);
+                compiler_error(ERR_SEMANTIC, (key_expr->line_number > 0 ? key_expr->line_number : yylineno), "%s: port cannot be read from", full_path);
             }
 
             if ((ioports[i].mode & IOPORT_ACTION) == IOPORT_ACTION) {
@@ -1804,7 +1865,7 @@ int  try_emit_table_get_intrinsic (ASTNode *table_expr, ASTNode *key_expr, int d
 
     // ioports-specific error for invalid properties
     if (strncmp(base_path, "ioports.", 8) == 0) {
-        compiler_error(ERR_SEMANTIC, yylineno,
+        compiler_error(ERR_SEMANTIC, (key_expr->line_number > 0 ? key_expr->line_number : yylineno),
             "Unknown ioports property '%s.%s'", base_path, key_expr->as.string_val.value);
         return 0;
     }

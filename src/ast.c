@@ -457,6 +457,17 @@ bool try_get_immediate_operand(ASTNode *node, char *imm_buffer, size_t buf_size)
         return false;
     }
 
+    // CASE 1c: color() of a literal -> its word
+    if (is_color_intrinsic_call(node)) {
+        unsigned int word;
+        ASTNode *arg = node->as.call.args_head;
+        if (arg != NULL && arg->next == NULL && color_static_word(arg, &word)) {
+            snprintf(imm_buffer, buf_size, "0x%08X", word);
+            return true;
+        }
+        return false;
+    }
+
     // CASE 1: The node is a function call like hex("0xFF000000")
     if (node->type == NODE_FUNCTION_CALL)
     {

@@ -10,6 +10,12 @@
 
 **API Reference:** [doc/API.md](doc/API.md) —  the full native Vircon32
 API (sound, graphics, input, tilemaps, memory card, and raw I/O ports).
+Start with its [Quick reference](doc/API.md#quick-reference): every
+intrinsic and every `ioports.*` port in one place.
+
+**Building a cartridge:** [doc/USAGE.md](doc/USAGE.md) — command line,
+`--#` hints, the generated XML, and the Vircon32 tools that finish the
+job.
 
 `v32lua` is  a Lua compiler  written in  C that targets  the **Vircon32**
 fantasy console. Instead of embedding a heavyweight bytecode interpreter,
@@ -99,15 +105,37 @@ any  other  Vircon32  project  (assemble  →  `packrom`  →  run  under
 
 *Reference Table of Makefile Targets*
 
-| Target | Description | Core Actions & Dependencies |
-| --- | --- | --- |
-| **`all`** | **Default target.** Builds the main compiler executable. | Invokes the compilation process natively inside the `src/` subdirectory. |
-| **`clean`** | Standard workspace cleanup utility. | Recursively wipes intermediate build artifacts out of `src/` and removes generated files from `testing/` and `demos/`. |
-| **`install`** | Installs the compiler binary onto the host system. | Passes the target down to the `src/` directory's localized installation scripts. |
-| **`tests`** | Executes the automated compilation testing suite. | Depends on the compiler binary (`bin/v32lua`) being built first, then triggers the test routines inside `testing/`. |
-| **`demos`** | Builds the collection of available demos. | Depends on the compiler binary (`bin/v32lua`) being built first, then builds each demo under `demos/`. |
-| **`asmcheck`** | Validates assembly correctness. | Requires `bin/v32lua` to be present, then processes assembly validations via the `testing/` suite. |
-| **`monofiles`** | Builds streamlined monolithic file variants (used for pasting the whole project into a single-file conversation). | Runs the `monofile` creation workflow sequentially inside both `src/` and `testing/`. |
+| Target | Description |
+| --- | --- |
+| **`all`** | **Default target.** Builds the compiler (`bin/v32lua`) inside `src/`. |
+| **`clean`** | Removes build artifacts from `src/` and generated files from `testing/` and `demos/`. |
+| **`install`** | Copies `bin/v32lua` to `~/bin/bin.$(ARCH)/` if that exists, else to `~/bin/`. |
+| **`sysinstall`** | Copies `bin/v32lua` to `/usr/local/bin/` (usually needs `sudo`). |
+| **`tests`** | Runs the compilation test suite in `testing/` (builds the compiler first). |
+| **`asmcheck`** | Compiles the tests and assembles every result (`.vbin`), checking the generated assembly. |
+| **`v32check`** | Like `asmcheck`, and also packs every test into a `.v32` cartridge. |
+| **`demos`** | Builds every demo under `demos/` (see [Building the demos](#building-the-demos)). |
+| **`version`** | Prints the version from `inc/v32lua.h` and stamps it into `man/v32lua.1` and `doc/DEBUGGING.md` (run before a release). |
+| **`monofiles`**, **`context`**, **`put`** | Gather the sources into `put/` as single text files, for pasting into a conversation. |
+| **`archive`** | Cleans, then zips the project into `v32lua-project.zip`. |
+
+The version string lives in one place, `#define VERSION` in
+`inc/v32lua.h`; `v32lua --version` prints it and `make version` copies it
+into the man page and the debugging guide.
+
+<a id="building-the-demos"></a>
+**Building the demos**
+
+Each demo under `demos/pico8/` and `demos/tic80/` has a Makefile that
+compiles, assembles and packs the cart into `bin/<demo>.v32`. If the
+[v32opt](https://github.com/wedge1020/v32opt) assembly optimizer is in
+your `PATH`, the same run also builds an optimized cart, `bin/<demo>Opt.v32`
+(from `obj/<demo>Opt.asm` and `<demo>Opt.xml`). The optimized steps are
+allowed to fail: if `v32opt` or the assembler rejects the optimized code,
+`make` prints the error and carries on, and the regular cart is still
+built. Without `v32opt` the optimized build is skipped with a note; force
+it off with `make HAVE_OPTIMIZER=`, or change the flags with
+`make OPTIMIZER="v32opt -O2"`.
 
 **Your First Cartridge**
 
@@ -136,11 +164,12 @@ function init()
 end
 
 function game_loop()
+    ioports.gpu.clear()             -- wipe the screen with bgcolor
 
     -- Update state using pure floating-point math
-    if ioports.inp.left > 1 then
+    if ioports.inp.left > 0 then    -- > 0: frames held; < 0: released
         x_pos = x_pos - speed
-    else if ioports.inp.right > 1 then
+    elseif ioports.inp.right > 0 then
         x_pos = x_pos + speed
     end
 
@@ -149,11 +178,10 @@ function game_loop()
     ioports.gpu.y = y_pos
     ioports.gpu.draw()
 
-    -- Table access and built-in string concatenation
+    -- Built-in string concatenation; print() takes x, y first
     local frame = system.frames
     if frame > 1000 then
-        local msg = "Demo Running: Frame " .. frame
-        print(msg)
+        print(10, 10, "Demo Running: Frame " .. frame)
     end
 end
 ```
@@ -305,8 +333,10 @@ Supported hints:
 | `--#api "tic80"` / `--#api "pico8"` | Selects a compatibility API layer (see above). |
 | `--#p8 "cart.p8"` | PICO-8: take the sprite sheet, sprite flags and map from a `.p8` cart (implies `--#api pico8`). |
 | `--#rate 11025` \| `22050` \| `44100` | Sample rate of the sound synthesized from a PICO-8 or TIC-80 cart (default 22050; `--#p8rate` is the old name; see [doc/PICO8.md](doc/PICO8.md#sound)). |
-| `--#texture NAME "path/image.png"` | Registers a texture resource and binds it to a compile-time constant `NAME`. |
-| `--#sound NAME "path/sound.vsnd"` | Registers a sound resource and binds it to a compile-time constant `NAME`. |
+| `--#bezel off` \| `on` \| `"art.png"` | PICO-8: the side panels beside the 128×128 screen — none, the built-in art, or your own (see [doc/PICO8.md](doc/PICO8.md#side-panels)). |
+| `--#fast-circles` | TIC-80/PICO-8: filled circles above radius 31 are drawn as one scaled disc (faster, edges differ slightly). |
+| `--#texture NAME "path/image.png"` | Registers a texture resource and binds it to a compile-time constant `NAME`. The XML names the `.vtex` file (`image.vtex`) that `png2vircon` makes from the PNG. |
+| `--#sound NAME "path/sound.wav"` | Registers a sound resource and binds it to a compile-time constant `NAME`. The XML names the `.vsnd` file that `wav2vircon` makes. |
 | `--#tilemap NAME "path/map.csv"` | Registers a tilemap from a CSV file, embedded directly into the ROM image (see [doc/API.md](doc/API.md#tilemap-tilemap)). |
 | `--#include "file.lua"` | Textually splices another Lua file in at this point, before parsing begins (see below). |
 
@@ -449,7 +479,9 @@ objects** (tables):
 | **Boolean False** | `0xFFC00001` | Short-circuit falsy value. |
 | **Boolean True** | `0xFFC00002` | Short-circuit truthy value. |
 | **ROM String** | `0x7FC00000` | Pointers to read-only string data sections (`__string_%d`) in ROM. |
-| **Table / Boxed Object** | `0xFF800000` | Boxed heap memory addresses (Bit 31=1, Bit 22=0). |
+| **RAM String** | `0xFFC00000` | Strings built at run time, on the heap (payload 4 and up). |
+| **Function** | `0x7F800000` | Code address in ROM, or (with bit 21 set) a closure record in RAM. |
+| **Table** | `0xFF800000` | Boxed heap memory addresses (Bit 31=1, Bit 22=0). |
 | **Number** | IEEE 754 Float | Unboxed native Vircon32 floating-point values for direct math. |
 
 **Hardware Intrinsics & I/O Mapping**
@@ -581,7 +613,7 @@ literals (`1 << 4`) are folded at compile time.
   property:
 
 ```lua
-function Player.move(dx, dy) ... end
+function Player.move(dx, dy) --[[ body ]] end
 -- Desugars to: Player["move"] = __function_Player_move
 ```
 
@@ -596,8 +628,10 @@ Player:move(5, -2)
 
 **Control Flow**
 
-* **Loops:** `while <cond> do ... end` statements supported with full
-  block scoping.
+* **Loops:** `while ... do ... end`, `repeat ... until ...`, numeric
+  `for i = a, b [, step]` and generic `for k, v in pairs(t)` /
+  `ipairs(t)` (or your own iterator function), each with its own block
+  scope.
 
 * **Loop Control:** `break` statements jump immediately to the end label
   of the current innermost loop (tracked via an internal compilation loop
@@ -613,8 +647,10 @@ Player:move(5, -2)
 **Operators & Expressions**
 
 * **Arithmetic:** `+`, `-`, `*`, `/` (mapped to Vircon32 floating-point
-  hardware instructions `FADD`, `FSUB`, `FMUL`, `FDIV`), and unary minus
-  (`-` via `__builtin_unm`).
+  hardware instructions `FADD`, `FSUB`, `FMUL`, `FDIV`), `%`, `^`, `//`
+  (floor division), and unary minus. A string that holds a number is
+  converted in arithmetic, as in Lua (`"5" + 1` is 6). There is no error
+  for other operands (`"abc" + 1`, `nil + 1`): the result is meaningless.
 
 * **Relational:** `==`, `~=` (via `__builtin_eq` with NaN unboxing), `<`,
   `>`, `<=`, `>=` (via hardware `FLT`, `FLE`, `FGT`, `FGE`).
@@ -641,11 +677,14 @@ Player:move(5, -2)
 
 **Functions & Multi-Value Returns**
 
-Functions  can   return  multiple  values  simultaneously.   The  calling
-convention optimizes the first three returned expressions by placing them
-directly  into registers  `R0`,  `R2`, and  `R3`.  Any additional  return
-values  (4th and  beyond) are  spilled directly  onto the  caller's stack
-frame.
+Arguments are passed on the stack. Functions can return several values:
+the first three come back in registers `R0`, `R2` and `R3`, and any more
+go through a reserved RAM buffer. As in Lua, a call or `...` at the end
+of a list expands to all its values — in arguments (`f(a, g())`), table
+constructors (`{g()}`), `return x, ...` and `local a, b = ...` — up to 32
+values. Variadic functions (`function f(...)`), closures with upvalues
+(captured locals shared between the closures that capture them), and
+recursion all work.
 
 **String Literal Pooling**
 
@@ -737,8 +776,10 @@ The full, authoritative reference for every intrinsic — `ioports.gpu.*`,
 `ioports.inp.*`, `ioports.spu.*`, `ioports.tim.*`, `ioports.rng.*`,
 `ioports.car.*`, `ioports.mem.*`, `music.*`/`sfx.*`, `tilemap.*`,
 `memcard.*`, and `system.*` — lives in [doc/API.md](doc/API.md), including
-port-ordering caveats, call signatures, and worked examples. A short
-sample of the most commonly used entries:
+port-ordering caveats, call signatures, and worked examples. Its
+[Quick reference](doc/API.md#quick-reference) lists every intrinsic and
+every `ioports.*` port (all of `ioports.gpu.*` included) on one page. A
+short sample of the most commonly used entries:
 
 *GPU Control & Drawing (`ioports.gpu.*`)*
 
@@ -752,6 +793,7 @@ sample of the most commonly used entries:
 | **`ioports.gpu.draw([mode])`** | `GPU_Command` | Function Call | Executes a hardware draw command: `"zoom"`, `"rotate"`, `"rotozoom"`, or default. |
 | **`ioports.gpu.clear([color])`**<br>**`ioports.gpu.clear(r, g, b [, a])`** | `GPU_ClearColor` + `GPU_Command` | Function Call | Sets the clear color and wipes the screen. Supports preset color strings (`"black"`, `"white"`, `"blue"`, `"red"`, `"green"`), a packed `0xAABBGGRR` value (a literal, or `rgba()`/`hex()` for a runtime value), or separate components: `clear(r, g, b [, a])`, each `0`–`255`, alpha defaulting to opaque. |
 | **`rgba(r, g, b [, a])`** | — | Intrinsic | The packed `0xAABBGGRR` word (raw, not a Lua number) for `spr()`'s `color_mult`, `ioports.gpu.clear(color)`, `ioports.gpu.multiply` / `bgcolor`. Components clamped to `0`–`255` and truncated, alpha defaults to 255; folded at compile time when all are literals. Keep colors as components and call `rgba()` where they're drawn — see [doc/API.md](doc/API.md#colors-rgba) for why. |
+| **`color(n)`** | — | Intrinsic | A number holding a packed color (computed, or read from a table) as the raw word. Floored and wrapped to 32 bits; literals are exact, runtime values keep float32's 24 significant bits ([details](doc/API.md#colors-color)). |
 
 *Gamepad & Input (`ioports.inp.*`)*
 
@@ -769,8 +811,8 @@ sample of the most commonly used entries:
 | --- | --- | --- | --- |
 | **`system.halt()`** | `HLT` | Function Call | Emits the hardware `HLT` instruction, immediately terminating CPU execution or freezing the frame until the next interrupt/frame cycle. |
 | **`system.wait()`** | `WAIT` | Function Call | Emits the hardware `WAIT` instruction, pausing execution until the next interrupt/frame cycle. |
-| **`system.frames`** / **`system.cycles`** | `TIM_FrameCounter` / `TIM_CycleCounter` | Read Only | Running frame/cycle counters. |
-| **`print(x, y, ...)`** | `__builtin_tostring` + `__builtin_print` | Function Call | Coerces arguments to string representation and outputs them to the console debug terminal. First two parameters are the X, Y position on screen, in pixels. |
+| **`system.frames()`** / **`system.cycles()`** | `TIM_FrameCounter` / `TIM_CycleCounter` | Read Only | Frames since power-on / CPU cycles used so far this frame (the `()` is optional). |
+| **`print(x, y, value)`** | `__builtin_tostring` + `__builtin_print` | Function Call | Converts `value` to a string and draws it on screen with the BIOS font, at pixel position `x`, `y`. |
 
 ---
 
@@ -788,16 +830,15 @@ assembly registers:
 
 ```lua
 local speed = 5.0
-__asm__( "MOV R0, {speed}\n" ..
-         "FADD R0, 1.5\n" ..
-         "MOV {speed}, R0" )
+__asm__("MOV R0, {speed}\nFADD R0, 1.5\nMOV {speed}, R0")
 ```
 
 * **How it works:** Any identifier wrapped in braces (e.g., `{speed}`) is
-  dynamically resolved by `emit_interpolated_asm` at compile time. If
-  `speed` is a local variable at stack offset 1, `{speed}` is
-  automatically replaced with `[BP - 1]`. If it is a global, it resolves
-  to `[var_speed]`.
+  replaced at compile time by the variable's memory operand: `[BP - n]`
+  for a local, `[BP + n]` for a parameter, `[var_speed]` for a global.
+  The code must be one string literal (write line breaks as `\n`). A
+  local that a closure captures holds a pointer to its box rather than
+  the value.
 
 * Each line of interpolated assembly is passed through the compiler's
   formatting engine, ensuring consistent indentation and comment alignment
@@ -890,7 +931,10 @@ space savings by eliminating redundant instructions.
 At time of writing this tool is still very much in development, but is showing
 promise and will likely work for standard scenarios under the `-O1`, `-O2`, 
 and even `-O3` optimization levels. It is meant to be inserted into the build
-chain after the compiling and before assembling.
+chain after the compiling and before assembling. The demo Makefiles use it
+when it is installed, building an optimized `bin/<demo>Opt.v32` next to the
+regular cart (see [Building the demos](#building-the-demos) and
+[doc/USAGE.md](doc/USAGE.md#5-optional-the-optimizer)).
 
 ## Roadmap / Not Yet Implemented
 

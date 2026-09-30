@@ -10,7 +10,12 @@
 
 **Référence de l'API :** [doc/API.fr.md](doc/API.fr.md) — l'API native complète
 de Vircon32 (son, graphismes, entrées, tuiles/tilemaps, carte mémoire, et
-ports d'E/S bruts).
+ports d'E/S bruts). Commencez par sa [Référence rapide](doc/API.fr.md#quick-reference) :
+chaque intrinsèque et chaque port `ioports.*` réunis en un seul endroit.
+
+**Construire une cartouche :** [doc/USAGE.md](doc/USAGE.md) — la ligne de
+commande, les indices `--#`, le XML généré, et les outils Vircon32 qui
+terminent le travail.
 
 `v32lua` est un compilateur Lua écrit en C qui cible la console de
 fantaisie **Vircon32**. Plutôt que d'embarquer un interpréteur de bytecode
@@ -29,24 +34,22 @@ comportements du Compilateur C de Vircon32 afin de rendre la substitution
 de compilateur plus transparente.
 
 Conçu dès le départ en tenant compte des contraintes d'une console de
-fantaisie rétro, `v32lua` propose des intrinsèques matériels à coût nul,
-un [NaN-boxing](doc/NaN_boxing.md) personnalisé, et — au-delà de l'API
-native de Vircon32 — deux couches de compatibilité d'API afin que les
-cartouches écrites pour **TIC-80** et **PICO-8** puissent être compilées et
-exécutées sur le matériel Vircon32 avec peu ou pas de modification du code
-source.
+fantaisie rétro, `v32lua` propose des intrinsèques « matériels » de bas
+niveau à coût nul, un [NaN-boxing](doc/NaN_boxing.md) personnalisé, et —
+au-delà de l'API native de Vircon32 — deux couches de compatibilité d'API
+afin que les cartouches écrites pour **TIC-80** et **PICO-8** puissent être
+compilées et exécutées dans l'environnement Vircon32 avec peu ou pas de
+modification du code source.
 
 ```
 +------------------+     +-------------------+     +------------------+
-| Source (.lua)    | --> | Lexer & Parseur   | --> | Construction de   |
-+------------------+     | (Flex / Bison)    |     | l'AST             |
-                         +-------------------+     +------------------+
-                                                            |
+| Source (.lua)    | --> | Lexer & Parseur   | --> | Construction AST |
++------------------+     | (Flex / Bison)    |     +------------------+
+                         +-------------------+              |
                                                             v
 +------------------+     +-------------------+     +------------------+
-| Configuration     | <-- | Assembleur         | <-- | Émetteur          |
-| de Cartouche      |     | Vircon32 (.asm)    |     | Sémantique        |
-| (.xml)            |     |                    |     |                   |
+| Config Cartouche | <-- | Émetteur Vircon32 | <-- | Émetteur         |
+| (.xml)           |     | assembleur (.asm) |     | Sémantique       |
 +------------------+     +-------------------+     +------------------+
 ```
 
@@ -74,15 +77,16 @@ source.
 
 **Prérequis**
 
-* Une chaîne d'outils C (`gcc`/`clang` + `make`) capable de compiler des
-  sources générées par `flex`/`bison`.
-* `flex` et `bison` eux-mêmes, pour régénérer le lexer/parseur si vous
-  compilez depuis l'arborescence de sources séparées plutôt que depuis une
-  version pré-générée.
-* La chaîne d'outils Vircon32 (assembleur et `packrom`) si vous comptez
+* Une chaîne d'outils C (`gcc`/`clang` + `make`)
+* Si le lexer/parseur est modifié, les outils `flex` et `bison` sont
+  nécessaires pour régénérer les routines C du lexer/parseur. Les routines
+  C déjà générées par `flex` et `bison` sont incluses dans le dépôt pour
+  simplifier la compilation, ce qui évite dans la plupart des cas d'avoir
+  réellement besoin de `flex`/`bison`
+* La chaîne d'outils [Vircon32 DevTools](https://github.com/vircon32/ComputerSoftware/releases) (assembleur et `packrom`) si vous comptez
   aller jusqu'au bout, du `.lua` à une cartouche `.v32` exécutable, plus
   [v32sim](https://github.com/g7n-org/v32sim) si vous souhaitez exécuter ou
-  déboguer le résultat.
+  déboguer le résultat (également utilisé pour les tests unitaires).
 
 **Compiler le Compilateur**
 
@@ -95,23 +99,47 @@ sources, exécutez la cible par défaut depuis la racine du dépôt :
 make
 ```
 
-Ceci produit le binaire `v32lua` (sous `bin/`), qui transforme un fichier
-source `.lua` en un fichier `.asm` Vircon32 accompagné d'un `.xml` de
-cartouche. À partir de là, l'assemblage et l'empaquetage suivent les mêmes
-étapes que n'importe quel autre projet Vircon32 (assembler → `packrom` →
-exécuter sous [v32sim](https://github.com/g7n-org/v32sim) ou sur du matériel réel).
+Ceci compile les différents fichiers sources et produit le binaire
+`v32lua` (sous `bin/`), qui transforme un fichier source `.lua` en un
+fichier `.asm` Vircon32 accompagné d'un `.xml` de cartouche. À partir de
+là, l'assemblage et l'empaquetage suivent les mêmes étapes que n'importe
+quel autre projet Vircon32 (assembler → `packrom` → exécuter sous
+[v32sim](https://github.com/g7n-org/v32sim) ou sur l'émulateur officiel).
 
 *Tableau de Référence des Cibles du Makefile*
 
-| Cible | Description | Actions Principales & Dépendances |
-| --- | --- | --- |
-| **`all`** | **Cible par défaut.** Compile l'exécutable principal du compilateur. | Invoque le processus de compilation nativement dans le sous-répertoire `src/`. |
-| **`clean`** | Utilitaire standard de nettoyage de l'espace de travail. | Efface récursivement les artefacts de compilation intermédiaires de `src/` et supprime les fichiers générés dans `testing/` et `demos/`. |
-| **`install`** | Installe le binaire du compilateur sur le système hôte. | Transmet la cible aux scripts d'installation localisés du répertoire `src/`. |
-| **`tests`** | Exécute la suite de tests de compilation automatisée. | Dépend de la compilation préalable du binaire du compilateur (`bin/v32lua`), puis déclenche les routines de test dans `testing/`. |
-| **`demos`** | Compile la collection de démos disponibles. | Dépend de la compilation préalable du binaire du compilateur (`bin/v32lua`), puis compile chaque démo sous `demos/`. |
-| **`asmcheck`** | Valide la correction de l'assembleur. | Nécessite que `bin/v32lua` soit présent, puis traite les validations d'assembleur via la suite `testing/`. |
-| **`monofiles`** | Génère des variantes de fichier monolithique simplifiées (utilisées pour coller l'ensemble du projet dans une conversation à fichier unique). | Exécute le flux de création `monofile` séquentiellement dans `src/` et `testing/`. |
+| Cible | Description |
+| --- | --- |
+| **`all`** | **Cible par défaut.** Compile le compilateur (`bin/v32lua`) dans `src/`. |
+| **`clean`** | Supprime les artefacts de compilation de `src/` et les fichiers générés dans `testing/` et `demos/`. |
+| **`install`** | Copie `bin/v32lua` dans `~/bin/bin.$(ARCH)/` si ce répertoire existe, sinon dans `~/bin/`. |
+| **`sysinstall`** | Copie `bin/v32lua` dans `/usr/local/bin/` (nécessite généralement `sudo`). |
+| **`tests`** | Exécute la suite de tests de compilation dans `testing/` (compile d'abord le compilateur). |
+| **`asmcheck`** | Compile les tests et assemble chaque résultat (`.vbin`), ce qui vérifie l'assembleur généré. |
+| **`v32check`** | Comme `asmcheck`, et empaquette en plus chaque test dans une cartouche `.v32`. |
+| **`demos`** | Compile toutes les démos sous `demos/` (voir [Compiler les démos](#building-the-demos)). |
+| **`version`** | Affiche la version tirée de `inc/v32lua.h` et l'inscrit dans `man/v32lua.1` et `doc/DEBUGGING.md` (à lancer avant une publication). |
+| **`monofiles`**, **`context`**, **`put`** | Rassemblent les sources dans `put/` sous forme de fichiers texte uniques, à coller dans une conversation. |
+| **`archive`** | Nettoie, puis compresse le projet dans `v32lua-project.zip`. |
+
+La chaîne de version se trouve à un seul endroit, `#define VERSION` dans
+`inc/v32lua.h` ; `v32lua --version` l'affiche et `make version` la copie
+dans la page de manuel et le guide de débogage.
+
+<a id="building-the-demos"></a>
+**Compiler les démos**
+
+Chaque démo sous `demos/pico8/` et `demos/tic80/` possède un Makefile qui
+compile, assemble et empaquette la cartouche dans `bin/<demo>.v32`. Si
+l'optimiseur d'assembleur [v32opt](https://github.com/wedge1020/v32opt) est
+dans votre `PATH`, la même exécution produit aussi une cartouche optimisée,
+`bin/<demo>Opt.v32` (à partir de `obj/<demo>Opt.asm` et `<demo>Opt.xml`).
+Les étapes optimisées ont le droit d'échouer : si `v32opt` ou l'assembleur
+rejette le code optimisé, `make` affiche l'erreur et continue, et la
+cartouche normale est tout de même produite. Sans `v32opt`, la compilation
+optimisée est sautée avec un message ; désactivez-la de force avec
+`make HAVE_OPTIMIZER=`, ou changez les options avec
+`make OPTIMIZER="v32opt -O2"`.
 
 **Votre Première Cartouche**
 
@@ -140,11 +168,12 @@ function init()
 end
 
 function game_loop()
+    ioports.gpu.clear()             -- efface l'écran avec bgcolor
 
     -- Met à jour l'état en utilisant des calculs en virgule flottante purs
-    if ioports.inp.left > 1 then
+    if ioports.inp.left > 0 then    -- > 0 : maintenu (en images) ; < 0 : relâché
         x_pos = x_pos - speed
-    else if ioports.inp.right > 1 then
+    elseif ioports.inp.right > 0 then
         x_pos = x_pos + speed
     end
 
@@ -153,11 +182,10 @@ function game_loop()
     ioports.gpu.y = y_pos
     ioports.gpu.draw()
 
-    -- Accès aux tables et concaténation de chaînes intégrée
+    -- Concaténation de chaînes intégrée ; print() prend d'abord x, y
     local frame = system.frames
     if frame > 1000 then
-        local msg = "Demo Running: Frame " .. frame
-        print(msg)
+        print(10, 10, "Demo Running: Frame " .. frame)
     end
 end
 ```
@@ -196,6 +224,48 @@ Options disponibles :
 * `--help`, `-h` : Affiche les instructions d'utilisation de la ligne de
   commande.
 
+Options de cartouche — chacune remplace l'indice `--#` correspondant dans
+le source, de sorte qu'une cartouche PICO-8 ou TIC-80 se compile sans
+modification (`--opt=valeur` fonctionne aussi) :
+
+* `--api pico8|tic80|vircon32` : Sélectionne la couche d'API. Sans elle,
+  l'API est détectée : un `.p8` est PICO-8, un `.tic` est TIC-80, et un
+  `.lua` utilise son propre indice `--#api`/`--#p8` — ou, à défaut, ses
+  points d'entrée (`TIC()` → tic80 ; `_draw()`/`_update()`/`_update60()`
+  → pico8 ; sinon natif).
+* `--title "texte"` : Titre de la cartouche, utilisé tel quel. Sans elle :
+  l'indice `--#title`, sinon le titre propre à la cartouche (la métadonnée
+  `-- title:` de TIC-80, la première ligne de commentaire de PICO-8) ou le
+  nom du fichier — préfixé par `[PICO8] ` ou `[TIC80] ` dans ces modes
+  d'API.
+* `--rate 11025|22050|44100` : Fréquence d'échantillonnage du son
+  synthétisé à partir d'une cartouche PICO-8 ou TIC-80 (22050 par défaut ;
+  voir [doc/PICO8.md](doc/PICO8.md#sound) et
+  [doc/TIC80.md](doc/TIC80.md#sound)). `--p8rate` est l'ancien nom.
+* `--bezel art.png` : panneaux latéraux PICO-8 tirés de vos propres images
+  au lieu de ceux intégrés (voir [doc/PICO8.md](doc/PICO8.md#side-panels)) ;
+  `--no-bezel` : marges noires.
+* `--fast-circles` : les cercles pleins TIC-80/PICO-8 de rayon supérieur à
+  31 sont dessinés comme un disque mis à l'échelle.
+
+Les valeurs par défaut de ces options (fréquences d'échantillonnage par
+API, panneaux latéraux activés ou non et fichier d'image de panneau par
+défaut, cercles rapides, avertissements) sont définies dans
+`inc/config.h` : modifiez-les là et recompilez, ou passez-les à la
+compilation (`make CFLAGS="... -DV32LUA_DEFAULT_PICO8_RATE=11025"`).
+Priorité : l'option de ligne de commande, puis l'indice `--#` dans le
+source, puis `config.h`.
+
+```bash
+$ v32lua celeste.p8 --title "celeste" --rate 11025     # API détectée depuis .p8
+$ v32lua game.tic                                        # cartouche binaire TIC-80
+```
+
+Fichiers d'entrée : `.lua`, `.p8` (cartouche PICO-8), `.tic` (cartouche
+TIC-80, cartouches Lua uniquement ; le code ainsi que les tuiles, sprites,
+carte, drapeaux, palette, formes d'onde et SFX de la banque 0 sont lus —
+les mêmes données que contient un export `.lua` de TIC-80).
+
 ---
 
 ## Couches de Compatibilité d'API
@@ -209,8 +279,8 @@ par défaut lorsqu'aucun indice `--#api` n'est présent) :
 --#api "pico8"   -- opte pour la surface d'API compatible PICO-8
 ```
 
-* **API native Vircon32** (par défaut) — accès direct et à coût nul au
-  matériel propre de la console : `ioports.gpu.*`, `ioports.spu.*`,
+* **API native Vircon32** (par défaut) — accès direct et à coût nul aux
+  IOPorts propres de la console : `ioports.gpu.*`, `ioports.spu.*`,
   `ioports.inp.*`, `music.*`/`sfx.*`, `system.*`, et l'API native
   `tilemap.*`. Entièrement documentée dans [doc/API.fr.md](doc/API.fr.md).
 * **Couche de compatibilité TIC-80** (`--#api "tic80"`) — les appels au
@@ -219,9 +289,26 @@ par défaut lorsqu'aucun indice `--#api` n'est présent) :
   fantaisie) compilés en instructions natives Vircon32, y compris la mise
   à l'échelle des coordonnées nécessaire pour faire correspondre l'écran
   logique 240×136 de TIC-80 à la résolution physique de Vircon32.
-  `sfx()`/`music()` utilisent la même banque de sons provisoires générée
-  que la couche PICO-8 ; `print()` respecte sa couleur et renvoie la
-  largeur du texte.
+  `sfx()`/`music()` jouent les `WAVES`/`SFX`/`PATTERNS`/`TRACKS` de la
+  cartouche elle-même, synthétisés à la compilation par un portage du
+  moteur sonore de TIC-80 (voir [doc/TIC80.md](doc/TIC80.md)) ; `spr()`
+  gère la rotation ; Start met le jeu en pause (comme sur la couche
+  PICO-8). `print()` respecte sa couleur et renvoie la largeur du texte.
+  `map()` accepte tous les arguments optionnels de TIC-80, y compris
+  `scale` (mais pas la fonction de remappage) ; `fget()` renvoie un booléen
+  et `fset()` en prend un. `peek`/`peek1`/`peek2`/`peek4`,
+  `poke`/`poke1`/`poke2`/`poke4`, `memcpy` et `memset` agissent sur une RAM
+  TIC-80 émulée de 96 Ko, créée à la première utilisation avec la palette,
+  les tuiles, les sprites et la carte de la cartouche ; les zones de la
+  carte (0x08000), de la manette (0x0FF80) et des drapeaux de sprites
+  (0x14404) sont des vues directes de `mget`/`mset`, des boutons et de
+  `fget`/`fset`. Les autres écritures sont stockées mais ne modifient ni
+  l'écran ni le son. `pmem` dispose des 256 emplacements 32 bits de TIC-80
+  sur la carte mémoire. Sur les deux couches de console de fantaisie, les
+  cercles jusqu'au rayon 31 coûtent un seul dessin GPU chacun (pré-rendus à
+  la compilation, identiques au pixel près à ceux des consoles). Une
+  fonction que le programme définit lui-même (`function pal(...)`)
+  remplace la fonction intégrée du même nom, comme en Lua.
 * **Couche de compatibilité PICO-8** (`--#api "pico8"`) — l'équivalent au
   format PICO-8 : `spr`/`map`/`mget`/`mset`/`fget`/`fset`, `cls`,
   `rectfill`/`rect`/`circfill`/`circ`/`line`/`pset`/`print` (avec
@@ -231,7 +318,12 @@ par défaut lorsqu'aucun indice `--#api` n'est présent) :
   tours, ...), `sspr`, `split`, `tostr`/`tonum`, `_ENV[nom]`, les
   raccourcis de syntaxe PICO-8 (`?`, `\`, `f"chaîne"`, glyphes des
   boutons, ...), `sfx`/`music` qui jouent le `__sfx__`/`__music__` de la
-  cartouche elle-même (synthétisé à la compilation), et
+  cartouche elle-même (synthétisé à la compilation), `time`/`t`,
+  `peek`/`poke` (8/16/32 bits, et les opérateurs `@ % $`), `memcpy`/
+  `memset`/`reload`/`sget`/`sset` sur une RAM émulée de 64 Ko organisée
+  comme celle de PICO-8 (carte, drapeaux, stylo, caméra et boutons en
+  direct ; écritures à l'écran dessinées), `cartdata`/`dget`/`dset`
+  sauvegardés sur la carte mémoire, et
   `_init`/`_update` (30 i/s)/`_update60`/`_draw`. L'écran 128×128 est mis à
   l'échelle 2,75× et centré ; ce qui est dessiné en dehors est masqué.
   **Une cartouche `.p8` se compile directement** (`v32lua jeu.p8`) : sa
@@ -261,9 +353,11 @@ Indices pris en charge :
 | `--#title "TITRE"` | Définit le titre de la cartouche. |
 | `--#api "tic80"` / `--#api "pico8"` | Sélectionne une couche de compatibilité d'API (voir ci-dessus). |
 | `--#p8 "cart.p8"` | PICO-8 : prend la planche de sprites, les drapeaux de sprites et la carte d'une cartouche `.p8` (implique `--#api pico8`). |
-| `--#p8rate 11025` \| `22050` \| `44100` | PICO-8 : fréquence d'échantillonnage des sons synthétisés à partir du `__sfx__` de la cartouche (22050 par défaut ; voir [doc/PICO8.md](doc/PICO8.md#sound)). |
-| `--#texture NOM "chemin/image.png"` | Enregistre une ressource de texture et la lie à une constante `NOM` à la compilation. |
-| `--#sound NOM "chemin/son.vsnd"` | Enregistre une ressource sonore et la lie à une constante `NOM` à la compilation. |
+| `--#rate 11025` \| `22050` \| `44100` | Fréquence d'échantillonnage du son synthétisé à partir d'une cartouche PICO-8 ou TIC-80 (22050 par défaut ; `--#p8rate` est l'ancien nom ; voir [doc/PICO8.md](doc/PICO8.md#sound)). |
+| `--#bezel off` \| `on` \| `"art.png"` | PICO-8 : les panneaux latéraux à côté de l'écran 128×128 — aucun, les images intégrées, ou les vôtres (voir [doc/PICO8.md](doc/PICO8.md#side-panels)). |
+| `--#fast-circles` | TIC-80/PICO-8 : les cercles pleins de rayon supérieur à 31 sont dessinés comme un seul disque mis à l'échelle (plus rapide, bords légèrement différents). |
+| `--#texture NOM "chemin/image.png"` | Enregistre une ressource de texture et la lie à une constante `NOM` à la compilation. Le XML nomme le fichier `.vtex` (`image.vtex`) que `png2vircon` produit à partir du PNG. |
+| `--#sound NOM "chemin/son.wav"` | Enregistre une ressource sonore et la lie à une constante `NOM` à la compilation. Le XML nomme le fichier `.vsnd` que produit `wav2vircon`. |
 | `--#tilemap NOM "chemin/carte.csv"` | Enregistre une tilemap depuis un fichier CSV, intégrée directement dans l'image ROM (voir [doc/API.fr.md](doc/API.fr.md#tilemap--tilemap)). |
 | `--#include "fichier.lua"` | Insère textuellement un autre fichier Lua à cet endroit, avant le début de l'analyse (voir ci-dessous). |
 
@@ -308,15 +402,25 @@ le `#include` du C :
   fonction — de sorte qu'une `local` de niveau supérieur dans un fichier
   inclus se comporte exactement comme une `local` déclarée dans le fichier
   d'entrée.
-* Les chemins sont résolus par rapport au fichier qui inclut ; les
-  inclusions cycliques sont détectées, et chaque chemin absolu n'est
+* Les cibles d'inclusion sont recherchées, dans l'ordre : dans le
+  répertoire du fichier qui inclut ; dans le répertoire de travail courant
+  du compilateur ; dans chaque entrée de la variable d'environnement
+  `V32LUA_INCLUDE` si elle est définie (une liste séparée par des
+  deux-points) ; et enfin dans le chemin d'inclusion par défaut intégré
+  `/usr/local/Vircon32/v32lua/include` (modifiable à la compilation avec
+  `-DV32LUA_INCLUDE_PATH=...`, voir `inc/config.h`). C'est là qu'est censée
+  se trouver une copie installée des portages de la bibliothèque standard
+  de `lib/`, de sorte que n'importe quel projet peut faire
+  `--#include "string.lua"` sans avoir à copier la bibliothèque. Les
+  chemins absolus sont utilisés tels quels.
+* Les inclusions cycliques sont détectées, et chaque fichier résolu n'est
   inclus qu'une seule fois sur l'ensemble de l'expansion.
 * Les indices de ressources de cartouche (`--#texture`, `--#sound`,
   `--#tilemap`) déclarés dans un fichier inclus reçoivent des identifiants
   de ressources corrects et un ordre correct dans le XML.
 * Les messages d'erreur à l'intérieur d'un fichier inclus rapportent le
   fichier source et le numéro de ligne corrects, via une table interne de
-  reremappage de lignes.
+  remappage de lignes.
 * Deux fichiers inclus qui déclarent chacun une `local` de niveau
   supérieur portant le même nom partagent une seule variable globale —
   identique à ce que ferait le code monolithique équivalent.
@@ -370,23 +474,27 @@ Lorsque `-v` est activé, `v32lua` rapporte sa progression à travers ses
 **Modèles d'Exécution Flexibles : `main()` vs. `game_loop()`**
 
 Pour s'adapter à différents styles d'architecture de jeu, le compilateur
-prend en charge deux paradigmes distincts de point d'entrée :
+prend en charge deux points d'entrée de fonction distincts :
 
-* **Le Harnais à Tic Automatique (`game_loop`)** : Si votre programme
+* **La Fonction à Attente Automatique (`game_loop`)** : Si votre programme
   déclare une fonction `game_loop()`, le compilateur génère automatiquement
   un harnais d'exécution continu. Le CPU appelle `game_loop()`, suspend
-  l'exécution pour l'image en cours à l'aide de l'instruction matérielle
-  `WAIT`, et boucle indéfiniment. Ceci est idéal pour les jeux d'arcade et
+  l'exécution pour l'image en cours à l'aide de l'instruction `WAIT` du
+  CPU, et boucle indéfiniment. Ceci est idéal pour les jeux d'arcade et
   démos standards, et imite le comportement de diverses autres consoles de
   fantaisie.
 
 * **Contrôle Manuel (`main`)** : Si votre programme déclare une fonction
-  `main()`, le contrôle est remis directement à `__function_main`. Vous
-  prenez alors l'entière responsabilité du cycle d'image et devez exécuter
-  manuellement de l'assembleur en ligne ou des attentes matérielles. Le
-  compilateur vérifie si une instruction `WAIT` est émise à l'intérieur de
-  `main()` ; si elle est absente, `v32lua` émet un avertissement sémantique
-  à la compilation.
+  `main()`, le CPU s'arrête à la fin de la fonction `main()`, un
+  comportement semblable à celui de la fonction `main()` du C. Si vous
+  souhaitez que l'exécution continue, vous devez mettre en place une
+  forme de boucle de jeu, et exécuter les instructions `WAIT` nécessaires
+  pour assurer un traitement continu et un affichage fluide des éléments à
+  l'écran. Le compilateur vérifie si une instruction `WAIT` est émise à
+  l'intérieur de `main()` ; si elle est absente, `v32lua` émet un
+  avertissement sémantique à la compilation.
+
+De plus, en préalable à l'un ou l'autre des modèles ci-dessus :
 
 * **Point d'Initialisation** : Dans les deux modèles, si une fonction
   `init()` est présente, il est garanti qu'elle s'exécute exactement une
@@ -411,7 +519,9 @@ pointeurs de fonction) des **objets de tas (heap) RAM** dynamiques
 | **Booléen Faux** | `0xFFC00001` | Valeur fausse de court-circuit. |
 | **Booléen Vrai** | `0xFFC00002` | Valeur vraie de court-circuit. |
 | **Chaîne ROM** | `0x7FC00000` | Pointeurs vers des sections de données de chaînes en lecture seule (`__string_%d`) en ROM. |
-| **Table / Objet Encapsulé** | `0xFF800000` | Adresses mémoire de tas encapsulées (bit 31=1, bit 22=0). |
+| **Chaîne RAM** | `0xFFC00000` | Chaînes construites à l'exécution, sur le tas (charge utile 4 et plus). |
+| **Fonction** | `0x7F800000` | Adresse de code en ROM, ou (avec le bit 21 à 1) un enregistrement de fermeture en RAM. |
+| **Table** | `0xFF800000` | Adresses mémoire de tas encapsulées (bit 31=1, bit 22=0). |
 | **Nombre** | Flottant IEEE 754 | Valeurs en virgule flottante natives de Vircon32, non encapsulées, pour les calculs directs. |
 
 **Intrinsèques Matériels et Mappage E/S**
@@ -502,7 +612,7 @@ développement de jeux sur matériel embarqué.
 * **Variables Locales :** Déclarées avec le mot-clé `local`. À portée
   lexicale limitée au bloc englobant (corps de fonction, boucles, ou
   conditionnelles) et associées à des décalages de pile
-  (`[BP - offset]`). Une `local` déclarée au véritable niveau supérieur
+  (`[BP - offset]`). Une `local` déclarée au propre niveau supérieur
   d'un chunk — en dehors de toute fonction — est promue en variable
   globale à la place, car son stockage résiderait sinon dans un cadre de
   pile qui retourne avant que tout code de jeu ne s'exécute ; ceci
@@ -523,6 +633,32 @@ local x, y, z = 10, 20, 30
 x, y = y, x -- Synthétise des chaînes de registres temporaires pour échanger les valeurs en toute sécurité
 ```
 
+**Opérateurs bit à bit**
+
+Les opérateurs `&`, `|`, `~` (ou exclusif), `<<`, `>>` et `~` unaire
+(non) de Lua 5.3/5.4. Chaque nombre est un float32, donc chaque opération
+prend ses opérandes comme des mots de 32 bits et reconvertit le résultat :
+
+* **Natif / TIC-80 :** des entiers. Les opérandes sont arrondis à l'entier
+  inférieur et pris modulo 2^32, donc `0xFFFFFFFF` et `-1` sont le même
+  mot. Le signe de la valeur complète est conservé, de sorte que `&`, `|`,
+  `~` correspondent au Lua 64 bits pour des opérandes dans
+  [-2^31, 2^32) : `-1 & 0xFF` vaut 255, `~0` vaut -1, `0xFF << 24` vaut
+  4278190080. `>>` est logique ; un décalage de 32 ou plus donne 0.
+* **PICO-8 :** virgule fixe 16.16, exactement comme le fait PICO-8 — les
+  fractions participent (`0.5 | 1` vaut 1.5, `~0` vaut -1/65536), `>>` est
+  arithmétique, et le `^^` (ou exclusif), le `>>>` (décalage logique à
+  droite), les `<<>` / `>><` (rotation) de PICO-8, les formes composées
+  (`&= |= ^^= <<= >>= >>>= <<>= >><=`), les fonctions `band`/`bor`/
+  `bxor`/`bnot`/`shl`/`shr`/`lshr`/`rotl`/`rotr` et les littéraux binaires
+  `0b1010` sont tous acceptés. Les littéraux hexadécimaux
+  `0x8000`–`0xffff` sont négatifs, comme dans PICO-8 (`0xffff == -1`).
+
+Limite : un float32 contient 24 bits significatifs, donc un résultat comme
+`0xDEADBEEF` revient arrondi ; les masques et les champs regroupés ayant
+moins de bits significatifs (`0xFF000000`, `0xF0F0`) sont exacts. Les
+expressions de littéraux (`1 << 4`) sont calculées à la compilation.
+
 **Programmation Orientée Objet et Tables**
 
 `v32lua` fournit un sucre syntaxique transparent pour les modèles de POO
@@ -533,7 +669,7 @@ basés sur des tables :
   propriété du pointeur de fonction :
 
 ```lua
-function Player.move(dx, dy) ... end
+function Player.move(dx, dy) --[[ corps ]] end
 -- Se désucre en : Player["move"] = __function_Player_move
 ```
 
@@ -548,8 +684,10 @@ Player:move(5, -2)
 
 **Flux de Contrôle**
 
-* **Boucles :** Les instructions `while <cond> do ... end` sont prises en
-  charge avec une portée de bloc complète.
+* **Boucles :** `while ... do ... end`, `repeat ... until ...`, le `for`
+  numérique `for i = a, b [, step]` et le `for` générique
+  `for k, v in pairs(t)` / `ipairs(t)` (ou votre propre fonction
+  d'itération), chacune avec sa propre portée de bloc.
 
 * **Contrôle de Boucle :** Les instructions `break` sautent immédiatement
   vers l'étiquette de fin de la boucle la plus interne actuelle (suivie
@@ -567,7 +705,10 @@ Player:move(5, -2)
 
 * **Arithmétiques :** `+`, `-`, `*`, `/` (associés aux instructions
   matérielles en virgule flottante de Vircon32 `FADD`, `FSUB`, `FMUL`,
-  `FDIV`), et le moins unaire (`-` via `__builtin_unm`).
+  `FDIV`), `%`, `^`, `//` (division entière) et le moins unaire. Une
+  chaîne contenant un nombre est convertie dans les calculs, comme en Lua
+  (`"5" + 1` vaut 6). Il n'y a pas d'erreur pour les autres opérandes
+  (`"abc" + 1`, `nil + 1`) : le résultat n'a pas de sens.
 
 * **Relationnels :** `==`, `~=` (via `__builtin_eq` avec désencapsulation
   de NaN), `<`, `>`, `<=`, `>=` (via le matériel `FLT`, `FLE`, `FGT`,
@@ -598,11 +739,15 @@ Player:move(5, -2)
 
 **Fonctions et Retours de Valeurs Multiples**
 
-Les fonctions peuvent retourner plusieurs valeurs simultanément. La
-convention d'appel optimise les trois premières expressions retournées en
-les plaçant directement dans les registres `R0`, `R2`, et `R3`. Toute
-valeur de retour supplémentaire (4ème et suivantes) est déversée
-directement sur le cadre de pile de l'appelant.
+Les arguments sont passés sur la pile. Les fonctions peuvent retourner
+plusieurs valeurs : les trois premières reviennent dans les registres
+`R0`, `R2` et `R3`, et les suivantes passent par un tampon réservé en RAM.
+Comme en Lua, un appel ou `...` en fin de liste se développe en toutes ses
+valeurs — dans les arguments (`f(a, g())`), les constructeurs de table
+(`{g()}`), `return x, ...` et `local a, b = ...` — jusqu'à 32 valeurs.
+Les fonctions variadiques (`function f(...)`), les fermetures avec
+upvalues (des locales capturées, partagées entre les fermetures qui les
+capturent) et la récursivité fonctionnent toutes.
 
 **Regroupement des Littéraux de Chaîne**
 
@@ -705,8 +850,11 @@ La référence complète et faisant autorité pour chaque intrinsèque —
 `ioports.rng.*`, `ioports.car.*`, `ioports.mem.*`, `music.*`/`sfx.*`,
 `tilemap.*`, `memcard.*`, et `system.*` — se trouve dans
 [doc/API.fr.md](doc/API.fr.md), avec les mises en garde sur l'ordre des ports,
-les signatures d'appel, et des exemples détaillés. Voici un bref
-échantillon des entrées les plus couramment utilisées :
+les signatures d'appel, et des exemples détaillés. Sa
+[Référence rapide](doc/API.fr.md#quick-reference) liste chaque intrinsèque
+et chaque port `ioports.*` (tous les `ioports.gpu.*` compris) sur une
+seule page. Voici un bref échantillon des entrées les plus couramment
+utilisées :
 
 *Contrôle et Dessin GPU (`ioports.gpu.*`)*
 
@@ -718,7 +866,9 @@ les signatures d'appel, et des exemples détaillés. Voici un bref
 | **`ioports.gpu.minX/minY/maxX/maxY`** | `GPU_RegionMin/MaxX/Y` | Lecture / Écriture | Définit les limites en pixels de la région de texture active. |
 | **`ioports.gpu.hotX/hotY`** | `GPU_RegionHotSpotX/Y` | Lecture / Écriture | Définit l'origine de dessin (hotspot) relative à la région du sprite. |
 | **`ioports.gpu.draw([mode])`** | `GPU_Command` | Appel de Fonction | Exécute une commande de dessin matérielle : `"zoom"`, `"rotate"`, `"rotozoom"`, ou la valeur par défaut. |
-| **`ioports.gpu.clear([couleur])`**<br>**`ioports.gpu.clear(r, g, b [, a])`** | `GPU_ClearColor` + `GPU_Command` | Appel de Fonction | Définit la couleur d'effacement et efface l'écran. Prend en charge des chaînes de couleurs prédéfinies (`"black"`, `"white"`, `"blue"`, `"red"`, `"green"`), une valeur compressée `0xAABBGGRR` (un littéral, ou `hex()` pour une variable), ou des composantes séparées : `clear(r, g, b [, a])`, chacune de `0` à `255`, alpha opaque par défaut. |
+| **`ioports.gpu.clear([couleur])`**<br>**`ioports.gpu.clear(r, g, b [, a])`** | `GPU_ClearColor` + `GPU_Command` | Appel de Fonction | Définit la couleur d'effacement et efface l'écran. Prend en charge des chaînes de couleurs prédéfinies (`"black"`, `"white"`, `"blue"`, `"red"`, `"green"`), une valeur compressée `0xAABBGGRR` (un littéral, ou `rgba()`/`hex()` pour une valeur calculée à l'exécution), ou des composantes séparées : `clear(r, g, b [, a])`, chacune de `0` à `255`, alpha opaque par défaut. |
+| **`rgba(r, g, b [, a])`** | — | Intrinsèque | Le mot compressé `0xAABBGGRR` (brut, pas un nombre Lua) pour le `color_mult` de `spr()`, `ioports.gpu.clear(couleur)`, `ioports.gpu.multiply` / `bgcolor`. Composantes limitées à `0`–`255` et tronquées, alpha à 255 par défaut ; calculé à la compilation quand toutes sont des littéraux. Gardez les couleurs sous forme de composantes et appelez `rgba()` là où elles sont dessinées — voir [doc/API.fr.md](doc/API.fr.md#colors-rgba) pour savoir pourquoi. |
+| **`color(n)`** | — | Intrinsèque | Un nombre contenant une couleur compressée (calculée, ou lue dans une table), sous forme de mot brut. Arrondi à l'entier inférieur et ramené sur 32 bits ; les littéraux sont exacts, les valeurs d'exécution gardent les 24 bits significatifs du float32 ([détails](doc/API.fr.md#colors-color)). |
 
 *Manette et Entrées (`ioports.inp.*`)*
 
@@ -727,7 +877,7 @@ les signatures d'appel, et des exemples détaillés. Voici un bref
 | **`ioports.inp.gamepad`** | `INP_SelectedGamepad` | Lecture / Écriture | Sélectionne l'index de la manette active (`0`-`3`) pour le sondage des entrées. |
 | **`ioports.inp.status`** | `INP_GamepadConnected` | Lecture Seule | Retourne un booléen Lua : la manette sélectionnée est-elle connectée. |
 | **`ioports.inp.left/right/up/down`** | `INP_Gamepad*` | Lecture Seule | État directionnel de la croix directionnelle (`> 0` pressé, `< 0` relâché). |
-| **`ioports.inp.A/B/X/Y/L/R/start`** | `INP_GamepadButton*` | Lecture Seule | État des boutons d'action/gâchettes (`> 0` pressé, `< 0` relâché). |
+| **`ioports.inp.A/B/X/Y/L/R/START`** | `INP_GamepadButton*` | Lecture Seule | État des boutons d'action/gâchettes (`> 0` pressé, `< 0` relâché). |
 | **`ioports.inp.inputs`** | *Sous-routine d'Action Personnalisée* | Lecture Seule | **Intrinsèque de regroupement :** sonde tous les boutons/axes de la manette en une seule passe, les regroupe en un unique masque de bits sur 32 bits, et le convertit en flottant Lua. |
 
 *Utilitaires Système et d'Exécution*
@@ -736,8 +886,8 @@ les signatures d'appel, et des exemples détaillés. Voici un bref
 | --- | --- | --- | --- |
 | **`system.halt()`** | `HLT` | Appel de Fonction | Émet l'instruction matérielle `HLT`, terminant immédiatement l'exécution du CPU ou figeant l'image jusqu'au prochain cycle d'interruption/image. |
 | **`system.wait()`** | `WAIT` | Appel de Fonction | Émet l'instruction matérielle `WAIT`, mettant en pause l'exécution jusqu'au prochain cycle d'interruption/image. |
-| **`system.frames`** / **`system.cycles`** | `TIM_FrameCounter` / `TIM_CycleCounter` | Lecture Seule | Compteurs continus d'images/cycles. |
-| **`print(x, y, ...)`** | `__builtin_tostring` + `__builtin_print` | Appel de Fonction | Convertit les arguments en leur représentation sous forme de chaîne et les envoie au terminal de débogage de la console. Les deux premiers paramètres sont la position X, Y à l'écran, en pixels. |
+| **`system.frames()`** / **`system.cycles()`** | `TIM_FrameCounter` / `TIM_CycleCounter` | Lecture Seule | Images écoulées depuis la mise sous tension / cycles CPU utilisés jusqu'ici dans l'image en cours (les `()` sont facultatives). |
+| **`print(x, y, valeur)`** | `__builtin_tostring` + `__builtin_print` | Appel de Fonction | Convertit `valeur` en chaîne et la dessine à l'écran avec la police du BIOS, à la position en pixels `x`, `y`. |
 
 ---
 
@@ -757,17 +907,16 @@ d'assembleur :
 
 ```lua
 local speed = 5.0
-__asm__( "MOV R0, {speed}\n" ..
-         "FADD R0, 1.5\n" ..
-         "MOV {speed}, R0" )
+__asm__("MOV R0, {speed}\nFADD R0, 1.5\nMOV {speed}, R0")
 ```
 
 * **Comment ça fonctionne :** Tout identifiant entouré d'accolades (par
-  exemple, `{speed}`) est résolu dynamiquement par
-  `emit_interpolated_asm` à la compilation. Si `speed` est une variable
-  locale au décalage de pile 1, `{speed}` est automatiquement remplacé
-  par `[BP - 1]`. S'il s'agit d'une globale, il est résolu en
-  `[var_speed]`.
+  exemple, `{speed}`) est remplacé à la compilation par l'opérande mémoire
+  de la variable : `[BP - n]` pour une locale, `[BP + n]` pour un
+  paramètre, `[var_speed]` pour une globale. Le code doit être un seul
+  littéral de chaîne (écrivez les sauts de ligne sous la forme `\n`). Une
+  locale capturée par une fermeture contient un pointeur vers sa boîte
+  plutôt que la valeur.
 
 * Chaque ligne d'assembleur interpolé passe par le moteur de formatage du
   compilateur, garantissant une indentation et un alignement des
@@ -797,7 +946,7 @@ des points d'arrêt sous [v32sim](https://github.com/g7n-org/v32sim).
 
 | Adresse RAM | Désignation | Utilisation |
 | --- | --- | --- |
-| `0` | `HEAP_POINTER` | Stocke l'adresse de départ dynamique pour les allocations de tables à l'exécution. |
+| `0` | `HEAP_POINTER` | Stocke l'adresse de départ dynamique pour les allocations de tables/chaînes à l'exécution. |
 | `1`, `2` | `FTOA_SCRATCH_PTR_A`/`B` | Mots de travail (scratch) réservés utilisés par la routine de conversion flottant-vers-chaîne. |
 | `3` à `HEAP_START - 1` | RAM Globale | Emplacements alloués séquentiellement pour les variables globales Lua, les identifiants de ressources, et les `local`s de niveau supérieur promues. |
 | `HEAP_START` et au-delà | Tas (Heap) Dynamique | Mémoire d'exécution gérée par l'allocateur de tables et les routines de chaînes. |
@@ -861,7 +1010,7 @@ s'éloigner de l'outil qu'il est censé être.
 
 Au tout début du développement du compilateur, tout le code
 d'optimisation a été retiré et transféré dans un outil séparé,
-[`v32opt`](https://github.com/wedge1020/v32opt). Celui-ci est conçu comme
+[v32opt](https://github.com/wedge1020/v32opt). Celui-ci est conçu comme
 un optimiseur d'assembleur Vircon32 à usage général, destiné à être
 utilisé avec le compilateur C et le compilateur Lua (ainsi qu'avec de
 l'assembleur écrit à la main). Les premiers tests ont montré de légères
@@ -872,7 +1021,11 @@ Au moment d'écrire ces lignes, cet outil est encore très en cours de
 développement, mais il montre des promesses et fonctionnera probablement
 pour des scénarios standards sous les niveaux d'optimisation `-O1`,
 `-O2`, et même `-O3`. Il est conçu pour être inséré dans la chaîne de
-compilation après la compilation et avant l'assemblage.
+compilation après la compilation et avant l'assemblage. Les Makefiles des
+démos l'utilisent lorsqu'il est installé, en produisant une cartouche
+optimisée `bin/<demo>Opt.v32` à côté de la cartouche normale (voir
+[Compiler les démos](#building-the-demos) et
+[doc/USAGE.md](doc/USAGE.md#5-optional-the-optimizer)).
 
 ## Feuille de Route / Pas Encore Implémenté
 
@@ -882,28 +1035,32 @@ attente d'une décision de conception :
 
 * `pcall`/`error`/`assert`
 * `string.match`/`gmatch` ; les événements de métatable `__add`/`__sub`/…, `__eq`/`__lt`/`__le`,
-  `__concat`, `__unm`
+  `__concat`, `__unm` (voir [Métatables](#fonctionnalités-lua-prises-en-charge))
 * `select()`, et `next()` comme fonction appelable (`pairs()` fonctionne)
-* L'expansion d'un appel final à valeurs multiples dans un constructeur de
-  table ou une liste d'arguments : `{f()}` et `g(f())` ne gardent que la
-  première valeur de `f()` (`{...}` et `local a, b = f()` sont bien
-  développés). La convention d'appel ne transmet pas le nombre de valeurs
-  renvoyées ; il en faudrait un.
-* L'arithmétique sur des chaînes numériques (`"10" + 5`) : Lua convertit
-  la chaîne ; ici le résultat n'est pas un nombre. Convertissez d'abord
-  avec `tonumber()`.
-* Les opérateurs bit à bit (`&`, `|`, `~`, `<<`, `>>`) et les `band`/
-  `bor`/... de PICO-8 ; `string.format` comme méthode
-  (`("%d"):format(x)`) — utilisez `string.format(...)`.
+* Les listes de valeurs multiples sont limitées à 32 valeurs : au-delà,
+  les valeurs de retour d'un appel, un `...` développé ou `unpack(t)` sont
+  perdus (`f(...)`, `{g()}`, `return x, ...`, `local a, b = ...` se
+  développent tous, jusqu'à 32).
+* Les opérateurs bit à bit agissent sur des mots de 32 bits (les nombres
+  sont des float32) : `x << 32` et les résultats plus larges, ainsi que
+  `>>` d'un nombre négatif, diffèrent des entiers 64 bits de Lua, et un
+  résultat de plus de 24 bits significatifs (`0xDEADBEEF`) est arrondi.
+  Voir **Opérateurs bit à bit** ci-dessus.
+* `string.format` comme méthode (`("%d"):format(x)`) — utilisez
+  `string.format(...)`.
+* Le ramasse-miettes : le tas est un allocateur linéaire, donc chaque
+  table, fermeture et chaîne créée à l'exécution vit jusqu'à la
+  réinitialisation. Les jeux qui tournent longtemps devraient réutiliser
+  leurs tables plutôt que d'en créer à chaque image. Les chaînes occupent
+  un mot par caractère, donc construire une longue chaîne morceau par
+  morceau (`s = s .. c` dans une boucle) consomme de la mémoire de façon
+  quadratique : nanoman décode ses niveaux ainsi et remplit les 4M mots de
+  RAM après environ 100 s de jeu.
 * Un audio PICO-8 encore plus léger : le son d'une cartouche se limite
   désormais à ses 64 SFX à 22050 Hz (Celeste : 18 Mo, contre 66 Mo).
   Séquencer des notes isolées plutôt que des SFX entiers le réduirait
   encore de moitié environ (près de la moitié des notes de Celeste se
   répètent), au prix d'un séquenceur par note.
-* Le ramasse-miettes : le tas est un allocateur linéaire, donc chaque
-  table, fermeture et chaîne créée à l'exécution vit jusqu'à la
-  réinitialisation. Les jeux qui tournent longtemps devraient réutiliser
-  leurs tables plutôt que d'en créer à chaque image.
 * PICO-8 : `pal`/`palt` (compilés en no-op avec un avertissement),
   `clip`, les vraies valeurs de `stat`, les largeurs fractionnaires de
   `spr`, `pget`, `oval`/`ovalfill`, `menuitem`, le chargement multi-
@@ -911,10 +1068,17 @@ attente d'une décision de conception :
   mémoire des sprites ou du son est sans effet et lire la mémoire écran ne
   rend que ce qui y a été écrit (pas de relecture GPU) ; les filtres de
   l'éditeur de SFX dans le son synthétisé
-* TIC-80 : `tri`/`trib`, `elli`/`ellib`, `clip`, `key`/`keyp`, `mouse`,
-  `font`, la fonction de remappage de `map()` ; l'argument de vitesse de
-  `sfx()` et les arguments tempo/vitesse/sustain de `music()` (voir
-  [doc/TIC80.md](doc/TIC80.md#sound))
+* TIC-80 : `tri`/`trib`, `elli`/`ellib`, `clip`, `mouse`, `font`, la
+  fonction de remappage de `map()` ; l'argument de vitesse de `sfx()` et
+  les arguments tempo/vitesse/sustain de `music()` (voir
+  [doc/TIC80.md](doc/TIC80.md#sound)). `peek`/`poke` agissent sur une RAM
+  émulée, mais écrire dans l'écran, la palette, les tuiles ou les
+  registres sonores n'a aucun effet visible ni audible. `key`/`keyp`
+  signalent toujours qu'aucune touche n'est pressée (il n'y a pas de
+  clavier) ; `trace` ne fait rien.
+* Les `circ`/`circb`/`rectb` de TIC-80 dessinent un quad GPU par pixel :
+  une cartouche qui dessine beaucoup de grands contours à chaque image
+  (l'écran titre de witchem_up) tourne en dessous de la pleine vitesse
 * Un diagnostic (avertissement/erreur) pour la lecture, depuis
   l'intérieur d'une fonction, d'une `local` déclarée dans un bloc
   lexicalement en dehors de toute fonction au niveau du chunk (voir

@@ -348,6 +348,83 @@ bool emit_rgba_intrinsic (ASTNode *node, int dest_reg)
     return true;
 }
 
+// The raw word color(n) gives for a compile-time number: floor, then wrap
+// into 32 bits (negative numbers count down from 2^32, so -1 is
+// 0xFFFFFFFF); outside -2^31 .. 2^32 it saturates, as __bit_in does.
+bool color_static_word (ASTNode *arg, unsigned int *word)
+{
+    double v;
+    if (!spu_static_number (arg, &v)) return false;
+    v = floor (v);
+    if (v >= 4294967296.0)       *word = 0xFFFFFFFFu;
+    else if (v < -2147483648.0)  *word = 0x80000000u;
+    else if (v < 0.0)            *word = (unsigned int) (long long) (v + 4294967296.0);
+    else                         *word = (unsigned int) (long long) v;
+    return true;
+}
+
+/**
+ * color(n) -- native Vircon32 mode: a number as the RAW 32-bit word
+ * (0xAABBGGRR for a color), for color_mult, ioports.gpu.clear(color),
+ * ioports.gpu.multiply ... The number is floored and wrapped into 32 bits
+ * (-1 -> 0xFFFFFFFF), the same conversion the bitwise operators use
+ * (__bit_in). A literal folds at compile time, exactly. At run time a
+ * v32lua number is a float32, which holds only 24 significant bits: a
+ * computed 0x802040FF has already been rounded (to 0x80204100) before
+ * color() sees it -- use rgba() or hex() for full 32-bit colors, and
+ * color() for words that fit in 24 significant bits (small integers,
+ * 0xAA000000-style alpha-only words, colors with low bytes that are
+ * zero). Same NaN-box caveat as rgba(): pass the result on, don't store
+ * or test it.
+ */
+bool emit_color_intrinsic (ASTNode *node, int dest_reg)
+{
+    ASTNode *arg = node->as.call.args_head;
+    int argc = 0;
+    for (ASTNode *a = arg; a != NULL; a = a->next) argc++;
+    if (argc != 1) {
+        compiler_error (ERR_SEMANTIC, node->line_number,
+            "color(): expected 1 argument (color(n)), got %d", argc);
+        return false;
+    }
+    if (arg->type == NODE_STRING || arg->type == NODE_NIL || arg->type == NODE_BOOLEAN) {
+        compiler_error (ERR_SEMANTIC, node->line_number, "color(): the argument must be a number");
+        return false;
+    }
+    unsigned int word;
+    if (color_static_word (arg, &word)) {
+        double v;
+        spu_static_number (arg, &v);
+        if (v >= 4294967296.0 || v < -2147483648.0)
+            compiler_warning (ERR_SEMANTIC, node->line_number,
+                "color(): %g does not fit in 32 bits; saturated to 0x%08X", v, word);
+        if (dest_reg != 0)
+            emit_asm ("MOV R%d, 0x%08X ; color(%.0f)\n", dest_reg, word, v);
+        return true;
+    }
+    runtime_req.needs_math = true;       // __bit_in lives in math.s
+    int r = allocate_register ();
+    generate_asm (arg, r);
+    ensure_in_register (r);
+    emit_asm ("    ;; --- Intrinsic: color() -> raw 32-bit word (floor, wrap) ---\n");
+    emit_asm ("PUSH R1\n");
+    emit_asm ("PUSH R2\n");
+    emit_asm ("PUSH R3\n");
+    emit_asm ("PUSH R7\n");
+    emit_asm ("MOV R1, R%d\n", r);
+    emit_asm ("MOV R7, 0 ; integer (not 16.16) conversion\n");
+    emit_asm ("CALL __bit_in\n");
+    emit_asm ("MOV R0, R1\n");
+    emit_asm ("POP R7\n");
+    emit_asm ("POP R3\n");
+    emit_asm ("POP R2\n");
+    emit_asm ("POP R1\n");
+    if (dest_reg != 0)
+        emit_asm ("MOV R%d, R0 ; color() result (a raw word, not a number)\n", dest_reg);
+    unlock_register (r);
+    return true;
+}
+
 /**
  * Emits assembly for ioports.gpu.clear().
  *

@@ -285,8 +285,12 @@ void  emit_interpolated_asm (const char *raw_code)
             if (*p == '}') p++; 
             
             // Format the variable and append it to our buffer
+            // {name} is the variable's memory operand: [BP - n] for a
+            // local or parameter in scope, [var_name] for a global (it
+            // used to be [var_name] always, so a local silently read and
+            // wrote a global of the same name instead).
             char formatted_var[EMIT_BUFFER_SIZE+8];
-            sprintf(formatted_var, "[var_%s]", var_name);
+            get_variable_access_string(var_name, formatted_var);
             for (int j = 0; formatted_var[j] != '\0' && buf_idx < 2047; j++) {
                 buffer[buf_idx++] = formatted_var[j];
             }

@@ -2,7 +2,17 @@
 TARGET = v32lua
 ARCH = $(shell uname -m)
 
-.PHONY: all clean install tests
+# The compiler version: inc/v32lua.h's VERSION is the single source.
+# `make version` shows it and stamps it into the other files that print it
+# (the man page header and doc/DEBUGGING.md's footer); `v32lua --version`
+# reads it from the header directly.
+# Portable between GNU and BSD/macOS tools: no `sed -i` (BSD sed takes
+# the script as the backup suffix), no \t in brackets, no `date +%-d`.
+VERSION := $(shell sed -n 's/^\#define[[:space:]]*VERSION[[:space:]]*"\(.*\)".*/\1/p' inc/v32lua.h)
+MONTH   := $(shell LC_ALL=C date +"%B %Y")
+TODAY   := $(shell LC_ALL=C date +"%B %d, %Y" | sed 's/ 0\([0-9]\),/ \1,/')
+
+.PHONY: all clean install tests version
 
 # Default target: build the main compiler executable inside src/
 all:
@@ -23,16 +33,25 @@ install: bin/$(TARGET)
 		echo "Installing $(TARGET) to ~/bin/"; \
 		install -m 755 bin/$(TARGET) ~/bin/$(TARGET); \
 	else \
-		@echo "Skipping: neither ~/bin/bin.$(ARCH) nor ~/bin exist"; \
+		echo "Skipping: neither ~/bin/bin.$(ARCH) nor ~/bin exist"; \
 	fi
 
 sysinstall: bin/$(TARGET)
 	@if [ -d /usr/local/bin ]; then \
 		echo "Installing $(TARGET) to /usr/local/bin/"; \
-		install -m 755 $(TARGET) /usr/local/bin/$(TARGET); \
+		install -m 755 bin/$(TARGET) /usr/local/bin/$(TARGET); \
 	else \
-		@echo "Skipping: /usr/local/bin does not exist"; \
+		echo "Skipping: /usr/local/bin does not exist"; \
 	fi
+
+# Show the version (from inc/v32lua.h) and stamp it into the man page and
+# doc/DEBUGGING.md. Run after changing VERSION, before a release.
+version:
+	@echo "v32lua $(VERSION)"
+	@sed 's/^\.TH V32LUA 1 "[^"]*" "v32lua [^"]*"/.TH V32LUA 1 "$(MONTH)" "v32lua $(VERSION)"/' man/v32lua.1 > man/v32lua.1.tmp && mv man/v32lua.1.tmp man/v32lua.1
+	@sed 's/Last updated: [^|]*| Compiler: [^*]*\*/Last updated: $(TODAY) | Compiler: $(VERSION)*/' doc/DEBUGGING.md > doc/DEBUGGING.md.tmp && mv doc/DEBUGGING.md.tmp doc/DEBUGGING.md
+	@grep -H "^\.TH" man/v32lua.1
+	@grep -H "Compiler: " doc/DEBUGGING.md
 
 # Run the test compilations. 
 # We explicitly depend on the compiler binary ('src/compiler') being built first!

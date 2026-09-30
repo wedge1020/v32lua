@@ -1,157 +1,88 @@
-# NaN-Boxing Architecture
+# Compiler internals: value representation and the embedded runtime
 
-This compiler infrastructure utilizes **32-bit NaN-Boxing** (Not-a-Number Boxing) to represent all dynamically typed Lua values within a single machine word. By exploiting the architectural specification of IEEE 754 floating-point numbers, the runtime compresses primitives, object references, and floating-point numeric values into a unified, highly optimized format tailored specifically for the Vircon32 processor.
-
----
-
-## Why NaN-Boxing for Vircon32?
-
-In traditional dynamically typed language runtimes, a variable must store both its **type tag** and its **actual data/payload**. On a 32-bit architecture like the Vircon32, a naive implementation requires a "tagged union" structure spanning at least two words (64 bits): one word for the type enum and one word for the value or pointer.
-
-NaN-boxing eliminates this overhead by taking advantage of how IEEE 754 single-precision (32-bit) floating-point numbers represent undefined values (NaNs). In standard IEEE 754, any 32-bit word where all 8 exponent bits are set to `1` and the 23-bit mantissa is non-zero is evaluated by the hardware as a NaN. This leaves millions of unique bit patterns that the hardware considers "Not a Number," providing a vast, unused space where custom type tags and memory addresses can be safely stored.
-
-By repurposing these unused NaN payloads, **every Lua value takes up exactly 1 word (32 bits) of RAM and register space.**
+Two design choices shape everything `v32lua` generates: every Lua value
+is one 32-bit word (NaN boxing), and the runtime library is built into
+the compiler binary. This page gives an overview of both;
+[NaN_boxing.md](NaN_boxing.md) has the full bit-level reasoning.
 
 ---
 
-## Bit-Level Implementation & Tag Registry
+## One word per value: NaN boxing
 
-The Vircon32 Lua runtime reserves the upper **10 bits** of the 32-bit word for type tagging and uses the lower **22 bits** (`0x003FFFFF`) to store raw memory pointers or immediate primitive payloads.
+A Lua variable can hold any type, so a value must carry its type with it.
+The obvious layout, a type word plus a data word, doubles the memory and
+the moves for every value. `v32lua` fits both into one word instead, using
+the fact that an IEEE 754 float32 whose 8 exponent bits are all 1 is a
+NaN (or an infinity): those bit patterns are never ordinary numbers, so
+they can carry a type and a 22-bit payload (an address, or a small
+constant) instead.
 
-When a value is a standard floating-point number, its upper bits will not match any reserved NaN tags, allowing the CPU's native floating-point instructions to operate on it directly without modification or unboxing overhead.
+* A **number** is a plain float32, so arithmetic is the CPU's own `FADD`,
+  `FMUL`, … with no unboxing.
+* Everything else has all exponent bits set; bit 31 selects RAM (1) or
+  ROM (0), bit 22 selects string (1) or table/function (0), and the low 22
+  bits are the payload.
 
-### Runtime Tag Registry
+| Type | Tag (`value & 0xFFC00000`) | Payload |
+|---|---|---|
+| number | not one of the tags below | the float itself |
+| string literal (ROM) | `0x7FC00000` | ROM offset of the string |
+| function | `0x7F800000` | ROM offset of the code; with bit 21 (`0x00200000`) set, the RAM address / 2 of a closure record |
+| table | `0xFF800000` | RAM address of the table |
+| string built at run time (RAM) | `0xFFC00000` | RAM address (≥ 4) |
+| `nil` | `0xFFC00000` | 0 |
+| `false` / `true` | `0xFFC00000` | 1 / 2 |
 
-The following table details the canonical bit masks and tags implemented in the assembly runtime (`runtime.s`):
+What this buys:
 
-| Lua Data Type | Upper Tag Mask | Canonical Hex Tag | Payload Area (Lower 22 Bits) | Assembly Usage Reference |
-| --- | --- | --- | --- | --- |
-| **Number (Float)** | *Varied* | *Standard IEEE 754* | Native Float Mantissa | Zero-cost native execution |
-| **String** | `0xFFC00000` | `0x7FC00000`<br> | Raw Heap Address
+* **Every value is one word** in a register, a stack slot, a table entry
+  or a global, and moves with one `MOV`.
+* **Equality is mostly one compare.** Identical bit patterns are equal
+  values; `__builtin_eq` only does more work for strings, which compare by
+  content.
+* **Type tests are a mask and a compare** (`AND R, 0xFFC00000` then
+  `IEQ`), which is how `type()`, `#`, `tostring()` and table indexing
+  dispatch.
 
- | `__builtin_strcat`, `__tostring`<br> |
-| **Table** | `0xFFC00000` | `0x7F800000`<br> | Raw Heap Address
+Limits that follow from it:
 
- | `__builtin_table_new`<br> |
-| **Function** | `0xFFC00000` | `0xFF800000`<br> | Code/Closure Address
+* **22-bit payloads.** RAM is exactly 4M words, so every RAM address fits.
+  ROM strings and functions must lie in the first 4M words (16 MB) of the
+  cartridge's program ROM; textures and sounds don't count toward this.
+* **Numbers are float32**: 24 significant bits. Integers above 2^24 are
+  not exact, and there is no separate integer type.
+* **A raw 32-bit word can look like a tagged value.** Packed colors from
+  `rgba()`, `color()` or `hex()` are raw words, and one whose top bits
+  happen to be `0xFFC00000` *is* `nil` to the rest of the program (see
+  [API.md](API.md#colors-rgba)).
+* **Division by zero, `log(0)` and friends** give finite answers, because
+  an infinity or NaN would read back as a tagged value (the table is at
+  the end of [NaN_boxing.md](NaN_boxing.md#arithmetic-with-no-boxable-answer)).
 
- | `__tostring_function`<br> |
-| **Nil** | `0xFFC00000` | `0xFFC00000`<br> | `0x000000`<br> | Canonical absence of value
+## Calling convention
 
- |
-| **Boolean (False)** | `0xFFC00000` | `0xFFC00001`<br> | `0x000001`<br> | Immediate boolean false
+Arguments are pushed on the stack (the callee sees them at `[BP + 2]`,
+`[BP + 3]`, …; a variadic function also receives the argument count). The
+first three return values come back in `R0`, `R2` and `R3`; further ones
+go through a reserved RAM buffer (`MV_BUF`, 32 values), with the count in
+`RET_COUNT` when it isn't known at compile time. Captured variables
+(upvalues) are pushed as hidden trailing arguments by the closure call
+(`__builtin_exec`), so a closure's body reads them like parameters.
 
- |
-| **Boolean (True)** | `0xFFC00000` | `0xFFC00002`<br> | `0x000002`<br> | Immediate boolean true
+## The embedded runtime
 
- |
+The runtime library — tables, strings, number formatting, math, the
+sound, input and memory-card helpers, the PICO-8 and TIC-80 layers — is
+Vircon32 assembly in `src/runtime/*.s`. `src/runtime_embed.S` includes
+each file into the compiler binary with the assembler's `.incbin`
+directive, so `bin/v32lua` needs no files beside it: copy it anywhere and
+it works.
 
----
+When compiling a program, the compiler records which parts of the
+runtime the program uses (`runtime_req` in the source) and appends only
+those units to the generated `.asm`. The output is self-contained
+assembly for the Vircon32 assembler, and the runtime always matches the
+compiler that produced it.
 
-## Key Architectural Benefits
-
-* **50% Memory Bandwidth Reduction:** Transferring values between CPU registers, the hardware stack, and heap storage requires only a single memory read/write cycle (`MOV`) instead of two.
-* **Zero-Cost Numeric Arithmetic:** Because numbers are stored as standard IEEE 754 floats rather than wrapped inside a heap-allocated struct, math operations incur zero boxing or unboxing penalties. The CPU executes math instructions directly on the registers.
-* **O(1) Universal Equality (`==`):** In the runtime's equality evaluation (`__builtin_eq`), identical floats, booleans, nils, and identical object references can be validated in a single clock cycle using a bitwise comparison (`IEQ R3, R2`). If the 32-bit patterns match exactly, the values are equal.
-
-
-* **Ultra-Fast Type Dispatching:** Determining a variable's type requires only a bitwise `AND` mask of the top bits (`AND R2, 0xFFC00000`) followed by an immediate branch (`IEQ` / `JT`), enabling hyper-fast method dispatching in operations like `__builtin_len` (`#`) and `__builtin_tostring`.
-
-
-* **Unified Register Passing:** Function arguments and return values seamlessly map 1:1 to Vircon32's general-purpose registers (`R0`–`R15`), avoiding complex multi-register calling conventions or stack-overflow hazards.
-
----
-
-## Runtime Mechanics & Usage Examples
-
-### 1. Boxing a Heap Allocation (Table Creation)
-
-When allocating a new structure (such as a Table) on the heap, the memory allocator returns a raw 22-bit memory address in `R0`. The runtime boxes this address into a Lua Table by applying the Table tag via a bitwise `OR` instruction:
-
-```assembly
-;; R0 holds the raw heap pointer (e.g., address 0x00000410)
-OR   R0, 0x7F800000      ; Apply Table NaN-tag -> R0 is now 0x7F800410[cite: 11]
-
-```
-
-### 2. Unboxing a Reference (String Access)
-
-When a built-in function needs to read or manipulate the underlying characters of a string, it strips the upper 10-bit tag using a bitwise `AND` mask (`0x003FFFFF`) to isolate the safe physical memory address:
-
-```assembly
-MOV  R1, [BP+2]          ; Load tagged string pointer from stack[cite: 11]
-AND  R1, 0x003FFFFF      ; UNBOX: Clear upper 10 bits -> R1 is now a raw memory address[cite: 11]
-MOV  R2, [R1]            ; Safely read string header or character data from the heap[cite: 11]
-
-```
-
-### 3. Fast-Path Type Validation
-
-In routines like table indexing (`t[k]`), the runtime performs non-destructive type verification to separate numeric array indices from hash-map keys:
-
-```assembly
-MOV  R3, R2              ; Copy key to scratch register[cite: 11]
-AND  R3, 0xFFC00000      ; Isolate top 10 bits[cite: 11]
-INE  R3, 0               ; If top bits != 0, it is a tagged pointer/primitive, NOT a float![cite: 11]
-JT   R3, __table_get_fallback ; Route tagged keys to hash table lookup[cite: 11]
-
-```
-
----
-
-## Technical Bounds & Considerations
-
-* **Address Space Ceiling:** Because the lower 22 bits are dedicated to pointer storage (`0x003FFFFF`), the maximum addressable heap space for boxed objects is $2^{22}$ words (4,194,304 words / 16 MB). This aligns comfortably with the Vircon32 hardware architecture, which naturally operates within a 4 MW physical RAM space.
-
-
-* **Strict Masking Discipline:** Assembly developers modifying compiler intrinsics or writing bare-metal runtime subroutines must adhere strictly to the unboxing protocol. Attempting to dereference a boxed pointer without first masking off the upper tag via `AND Rx, 0x003FFFFF` will result in an immediate out-of-bounds memory fault.
-
-Here is a general-purpose, professional writeup formatted in GitHub-flavored Markdown. You can copy and paste this directly into your project's `FEATURES.md` file.
-
----
-
-## Standalone Compiler Executable & Resource Embedding
-
-This compiler is distributed as a **true standalone, zero-dependency executable**. Unlike traditional compiler toolchains that require external libraries, header files, or environment variable configurations (like `PATH` or `COMPILER_HOME`) to function, this compiler bundles all necessary runtime assets directly into its binary.
-
----
-
-### The `.incbin` Embedding Mechanism
-
-To achieve complete self-containment without bloating the codebase or requiring complex build steps, the compiler leverages the GNU Assembler (`gas`) **`.incbin` directive** (or equivalent linker-level resource embedding).
-
-During the compilation of the compiler itself, external assets—such as the standard runtime library, startup assembly wrappers (`crt0`), and default system headers—are embedded directly into the compiler's read-only data section (`.rodata`).
-
-```c
-// Example of how embedded runtime resources are exposed to the code generator
-extern const char _binary_runtime_asm_start[];
-extern const char _binary_runtime_asm_end[];
-
-size_t runtime_size = _binary_runtime_asm_end - _binary_runtime_asm_start;
-
-```
-
-When generating output, the code generator writes these embedded payloads directly into the target assembly or binary file from memory. This ensures the runtime architecture is always perfectly synchronized with the compiler version.
-
----
-
-### Key Capabilities Enabled
-
-* **Embedded Runtime Library:** Standard built-in functions, memory management routines, and system call wrappers are statically compiled into the compiler binary and injected into target builds on demand.
-* **Zero Environment Setup:** Users can download the single binary and immediately compile code without installing external SDKs, setting up library paths, or configuring directory hierarchies.
-* **Hermetic & Reproducible Builds:** Because all core dependencies are frozen inside the executable, builds are inherently deterministic. The compiler will not fail due to a missing or modified file on the host system's disk.
-* **Simplified Distribution & Sandboxing:** Ideal for CI/CD pipelines, containerized environments, and automated grading systems where installing a multi-gigabyte toolchain is impractical.
-
----
-
-### Traditional Toolchain vs. Standalone Architecture
-
-| Feature | Traditional Compilers (e.g., GCC/Clang) | Standalone Compiler (`incbin`-enabled) |
-| --- | --- | --- |
-| **Installation** | Requires package manager or multi-file installer | Single binary download |
-| **External Dependencies** | Relies on external `/usr/include`, `/lib`, or SDKs | **None** (all core assets are embedded) |
-| **Path Configuration** | Needs explicit environment variables (`PATH`, etc.) | Works out-of-the-box from any directory |
-| **Portability** | Low; tied to host OS library layouts | **High**; easily moved or executed anywhere |
-| **Maintenance** | Risk of version mismatch with external libraries | **Zero risk**; runtime is version-locked |
-
-> **Note for Contributors:** If you are modifying the internal runtime library or built-in assembly macros, you do not need to rewrite C strings manually. Simply edit the source files in the `runtime/` directory; the build system will automatically rebuild and re-embed the raw binary data using `.incbin` during the next compilation cycle.
+To change the runtime, edit the files in `src/runtime/` and rebuild; the
+Makefile tracks them as dependencies of the embed object.
