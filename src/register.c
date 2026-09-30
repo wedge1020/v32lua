@@ -128,6 +128,10 @@ void unlock_register(int reg)
     if (reg >= 0 && reg < NUM_GPRS) {
         register_inventory[reg] = 0;
         register_use_distance[reg] = 0; // Clear liveness
+        // A freed register's value is dead: forget any spill of it, or the
+        // next owner's ensure_in_register() would reload the old word over
+        // its own value.
+        spill_slot_for_reg[reg] = 0;
     }
 }
 

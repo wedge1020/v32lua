@@ -437,6 +437,21 @@ bool emit_math_randomseed_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.randomseed(x) ---\n");
 
+    // system.time()/system.date() return a string first ("HH:MM:SS"); the
+    // runtime seeds from the clock for a non-number, but say so.
+    if (arg->type == NODE_FUNCTION_CALL && arg->as.call.target != NULL) {
+        char path[256] = {0};
+        if (resolve_static_path (arg->as.call.target, path) &&
+            (strcmp (path, "system.time") == 0 || strcmp (path, "system.date") == 0)) {
+            compiler_warning (ERR_SEMANTIC, node->line_number,
+                "math.randomseed(%s()): its first value is a string, not a number; "
+                "the RNG is seeded from the clock instead (use ioports.tim.time for a numeric seed)", path);
+        }
+    } else if (arg->type == NODE_STRING || arg->type == NODE_NIL) {
+        compiler_warning (ERR_SEMANTIC, node->line_number,
+            "math.randomseed(): the seed is not a number; the RNG is seeded from the clock instead");
+    }
+
     int arg_reg = allocate_pinned_register();
     generate_asm(arg, arg_reg);
 

@@ -148,11 +148,37 @@ __builtin_randomseed:
     ;; --- Load seed from stack ---
     MOV  R0, [BP+2]           ; R0 = seed value (Lua float)
 
-    ;; --- Convert to integer (RNG expects integer seed) ---
-    CFI  R0                  ; R0 = integer seed
-
-    ;; --- Write seed to RNG hardware port ---
+    ;; CFI of a NaN or of a float outside the int32 range is undefined in
+    ;; the emulator's C++ ((int32_t)f): x86-64 gives 0x80000000, ARM64
+    ;; gives 0 (or saturates). The RNG drops the sign bit, so 0x80000000
+    ;; seeded it with 0 -- a generator stuck at 0, every math.random(m, n)
+    ;; returning m -- on x86 only; ARM's 0 is refused by the port and the
+    ;; RNG kept running. math.randomseed(system.time()) hit this: its
+    ;; first value is the "HH:MM:SS" string, a NaN-boxed word.
+    MOV  R1, R0
+    AND  R1, NAN_VALUE
+    IEQ  R1, NAN_VALUE
+    JT   R1, __randomseed_clock  ; not a number (string, nil, ...): the clock
+    MOV  R1, R0
+    AND  R1, 0x7FFFFFFF          ; |x| as float bits
+    IGE  R1, 0x4F000000          ; |x| >= 2^31: CFI undefined
+    JT   R1, __randomseed_bits   ; use the float's bits instead
+    CFI  R0                      ; R0 = integer seed
+    JMP  __randomseed_write
+__randomseed_clock:
+    IN   R0, TIM_CurrentDate     ; the same mix the PICO-8 layer seeds with
+    IMUL R0, 86413
+    IN   R1, TIM_CurrentTime
+    IADD R0, R1
+__randomseed_bits:
+__randomseed_write:
+    ;; The port ignores the sign bit and refuses 0 (a zero LCG state
+    ;; never leaves 0), keeping its current state. Drop the sign bit here
+    ;; and skip the write for 0, so no seed can reach state 0 on any host.
+    AND  R0, 0x7FFFFFFF
+    JF   R0, __randomseed_out    ; 0: leave the generator as it is
     OUT  RNG_CurrentValue, R0 ; Seed the RNG
+__randomseed_out:
 
     ;; --- Return nil ---
     MOV  R0, BOXED_NIL

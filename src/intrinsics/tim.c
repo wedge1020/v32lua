@@ -22,8 +22,13 @@ int emit_system_date_intrinsic(ASTNode *node, int dest_reg)
     emit_asm("    ;; --- Intrinsic: system.date() ---\n");
 
     // --- Step 1: read the hardware register and unpack it ---
+    // allocate_register() hands out a free register. This used to also
+    // force_spill_register() it, which stored the register to its spill
+    // slot and left that slot marked: the next ensure_in_register() of
+    // the same register, anywhere later in the function, then "reloaded"
+    // the stale word over a freshly computed value (`a == b` compared a
+    // with junk after a math.randomseed(system.time())).
     int raw_reg = allocate_register();
-    force_spill_register(raw_reg);
     emit_asm("    IN R%d, TIM_CurrentDate\n", raw_reg);
     emit_asm("    PUSH R%d\n", raw_reg);
     emit_asm("    CALL __builtin_unpack_date\n");
@@ -97,8 +102,13 @@ int emit_system_time_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: system.time() ---\n");
 
+    // allocate_register() hands out a free register. This used to also
+    // force_spill_register() it, which stored the register to its spill
+    // slot and left that slot marked: the next ensure_in_register() of
+    // the same register, anywhere later in the function, then "reloaded"
+    // the stale word over a freshly computed value (`a == b` compared a
+    // with junk after a math.randomseed(system.time())).
     int raw_reg = allocate_register();
-    force_spill_register(raw_reg);
     emit_asm("    IN R%d, TIM_CurrentTime\n", raw_reg);
     emit_asm("    PUSH R%d\n", raw_reg);
     emit_asm("    CALL __builtin_unpack_time\n");
