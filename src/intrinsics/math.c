@@ -271,11 +271,18 @@ bool emit_math_pow_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.pow(x, y) ---\n");
 
+    // The second argument may CALL (max(a, f())), and registers don't
+    // survive a CALL: hold the first on the stack meanwhile (as node_add()).
     int x_reg = allocate_register();
-    int y_reg = allocate_register();
-
     generate_asm(arg, x_reg);
+    ensure_in_register(x_reg);
+    emit_asm("PUSH R%d ; hold the first argument while the second is evaluated\n", x_reg);
+
+    int y_reg = allocate_register();
+    mark_register_live(y_reg, 1);
     generate_asm(arg->next, y_reg);
+    ensure_in_register(y_reg);
+    emit_asm("POP R%d\n", x_reg);
 
     emit_safe_pow(x_reg, y_reg, false);
 
@@ -599,11 +606,18 @@ bool emit_math_fmod_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.fmod(x, y) ---\n");
 
+    // The second argument may CALL (max(a, f())), and registers don't
+    // survive a CALL: hold the first on the stack meanwhile (as node_add()).
     int x_reg = allocate_register();
-    int y_reg = allocate_register();
-
     generate_asm(arg, x_reg);
+    ensure_in_register(x_reg);
+    emit_asm("PUSH R%d ; hold the first argument while the second is evaluated\n", x_reg);
+
+    int y_reg = allocate_register();
+    mark_register_live(y_reg, 1);
     generate_asm(arg->next, y_reg);
+    ensure_in_register(y_reg);
+    emit_asm("POP R%d\n", x_reg);
 
     // FMOD by zero is a hardware DivisionError; fmod(x, 0) = 0 (NaN in
     // Lua, which NaN-boxing can't carry).
@@ -649,11 +663,18 @@ bool emit_math_max_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.max(x, y) ---\n");
 
+    // The second argument may CALL (max(a, f())), and registers don't
+    // survive a CALL: hold the first on the stack meanwhile (as node_add()).
     int x_reg = allocate_register();
-    int y_reg = allocate_register();
-
     generate_asm(arg, x_reg);
+    ensure_in_register(x_reg);
+    emit_asm("PUSH R%d ; hold the first argument while the second is evaluated\n", x_reg);
+
+    int y_reg = allocate_register();
+    mark_register_live(y_reg, 1);
     generate_asm(arg->next, y_reg);
+    ensure_in_register(y_reg);
+    emit_asm("POP R%d\n", x_reg);
 
     emit_asm("FMAX R%d, R%d ; R%d = max(R%d, R%d)\n", x_reg, y_reg, x_reg, x_reg, y_reg);
 
@@ -684,11 +705,18 @@ bool emit_math_min_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.min(x, y) ---\n");
 
+    // The second argument may CALL (max(a, f())), and registers don't
+    // survive a CALL: hold the first on the stack meanwhile (as node_add()).
     int x_reg = allocate_register();
-    int y_reg = allocate_register();
-
     generate_asm(arg, x_reg);
+    ensure_in_register(x_reg);
+    emit_asm("PUSH R%d ; hold the first argument while the second is evaluated\n", x_reg);
+
+    int y_reg = allocate_register();
+    mark_register_live(y_reg, 1);
     generate_asm(arg->next, y_reg);
+    ensure_in_register(y_reg);
+    emit_asm("POP R%d\n", x_reg);
 
     emit_asm("FMIN R%d, R%d ; R%d = min(R%d, R%d)\n", x_reg, y_reg, x_reg, x_reg, y_reg);
 
@@ -1016,13 +1044,16 @@ int   emit_math_ldexp_intrinsic(ASTNode *node, int dest_reg)
     }
 
     emit_asm("    ;; --- Intrinsic: math.ldexp(m, e) ---\n");
+    // Push m first, then e (so m is at [BP+3], e at [BP+2]). m is pushed
+    // before e is evaluated: e may CALL, and registers don't survive one.
     int m_reg = allocate_register();
-    int e_reg = allocate_register();
     generate_asm(arg, m_reg);
-    generate_asm(arg->next, e_reg);
-
-    // ✅ FIX: Push m first, then e (so m is at [BP+3], e at [BP+2])
+    ensure_in_register(m_reg);
     emit_asm("    PUSH R%d\n", m_reg);
+    int e_reg = allocate_register();
+    mark_register_live(e_reg, 1);
+    generate_asm(arg->next, e_reg);
+    ensure_in_register(e_reg);
     emit_asm("    PUSH R%d\n", e_reg);
     emit_asm("    CALL __builtin_ldexp\n");
     emit_asm("    IADD SP, 2\n");

@@ -183,8 +183,16 @@ void  node_table_constructor (ASTNode *node, int dest_reg)
 
             // Handle array-style initializer (just a value expression)
             if (field->type != NODE_TABLE_SET) {
+                // dest_reg holds the table but isn't necessarily marked in
+                // use (a call argument's temporary): keep the allocator from
+                // handing it out as the value or key register, or the two
+                // POPs below load the table over the value -- `{h, "name"}`
+                // became `{h, <the table itself>}` (just one boss, hard mode).
+                int dest_pin = dest_reg > 0 ? register_pinned[dest_reg] : 0;
+                if (dest_reg > 0) register_pinned[dest_reg] = 1;
                 int val_reg = allocate_pinned_register();
                 int key_reg = allocate_pinned_register();
+                if (dest_reg > 0) register_pinned[dest_reg] = dest_pin;
 
                 mark_register_live(val_reg, 2);
                 mark_register_live(key_reg, 2);
@@ -220,8 +228,12 @@ void  node_table_constructor (ASTNode *node, int dest_reg)
             // Handle record-style initializer (key = value, or [key] = value)
             else {
                 int table_reg = dest_reg;
+                // (as above: never the table's own register)
+                int dest_pin = dest_reg > 0 ? register_pinned[dest_reg] : 0;
+                if (dest_reg > 0) register_pinned[dest_reg] = 1;
                 int val_reg = allocate_pinned_register();
                 int key_reg = allocate_pinned_register();
+                if (dest_reg > 0) register_pinned[dest_reg] = dest_pin;
 
                 mark_register_live(val_reg, 2);
                 mark_register_live(key_reg, 2);

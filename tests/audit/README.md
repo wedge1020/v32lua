@@ -39,3 +39,5 @@ target's table and key before storing anything: `self.vx, self = 0, 0`,
 test and (counting `for` variables) the zero-divisor guard; the cases that
 must keep them (a string assigned later or in a closure, a shadowing local, a
 loop that counts down or through 0).
+`argcalls.lua`: `math.max/min/pow/fmod(a, f())` (the first argument used to
+be lost across the call) and table constructors passed as call arguments.
