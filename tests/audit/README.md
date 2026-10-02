@@ -28,3 +28,8 @@ Results at the end of the audit:
 | fmt | 8/9 | `0.9999999 .. ""` is `"1"` (float32 + 6 digits) |
 
 Everything in `pico8/` and `tic80/` runs 60 frames without a trap.
+
+Added 2026-10-02: `assign_order.lua` (a multiple assignment evaluates every
+target's table and key before storing anything: `self.vx, self = 0, 0`,
+`t[i], i = v, i + 1`) and `pico8/line2.lua` (`line(x1, y1 [, c])` and
+`line()`; check the draws with `runlua pico8/line2.lua -f 3 -g`).

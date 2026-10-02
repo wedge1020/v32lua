@@ -262,6 +262,9 @@ _pico8_init_rng:
     MOV   [PICO8_RAM_PTR], R0              ; peek/poke RAM: created on first use
     MOV   [PICO8_CARTDATA], R0             ; no cartdata() yet
     MOV   [PICO8_MENU_HOOK], R0            ; no menuitem() yet: plain pause
+    MOV   [PICO8_LINE_X], R0               ; line(x, y) starts from (0, 0)
+    MOV   [PICO8_LINE_Y], R0               ; (0 is also the float 0.0)
+    MOV   [PICO8_LINE_BREAK], R0
 
     CALL  __builtin_pico8_reload
     CALL  __pico8_audio_init
@@ -2174,6 +2177,16 @@ _pico8_tint_channel:
 ;; One rotozoomed swatch: length |P1-P0| + 1 px (PICO-8 lines include both
 ;; endpoints, so a zero-length line is a single pixel -- the old version
 ;; drew nothing for it), angle atan2(dy, dx), anchored at (x0, y0).
+;;
+;; Short forms, told apart by the 4th argument being nil (the caller always
+;; pushes 5 slots, nil-padded):
+;;   line(x1, y1 [, col])  from the end of the last line to (x1, y1);
+;;                         here the color is the 3rd argument
+;;   line()                breaks the chain: the next line(x1, y1) only
+;;                         sets the end point (and the pen) and draws nothing
+;; PICO8_LINE_X/Y hold the last end point as the numbers the cart passed
+;; (before the camera), so a short form is turned into the full form by
+;; rewriting the argument slots in place.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 __builtin_pico8_line:
     PUSH  BP
@@ -2182,6 +2195,34 @@ __builtin_pico8_line:
     PUSH  R2
     PUSH  R3
     PUSH  R4
+
+    MOV   R0, [BP+5]
+    IEQ   R0, BOXED_NIL
+    JF    R0, _pico8_line_full
+    MOV   R0, [BP+3]
+    IEQ   R0, BOXED_NIL
+    JF    R0, _pico8_line_to
+    MOV   R0, 1                   ; line(): no end point given
+    MOV   [PICO8_LINE_BREAK], R0
+    JMP   _pico8_line_done
+_pico8_line_to:
+    MOV   R0, [BP+4]              ; line(x1, y1 [, col]) -> full-form slots
+    MOV   [BP+6], R0
+    MOV   R0, [BP+2]
+    MOV   [BP+4], R0
+    MOV   R0, [BP+3]
+    MOV   [BP+5], R0
+    MOV   R0, [PICO8_LINE_BREAK]
+    JF    R0, _pico8_line_from_last
+    MOV   R1, [BP+6]              ; after line(): set the pen and the point
+    CALL  __pico8_pen
+    JMP   _pico8_line_remember
+_pico8_line_from_last:
+    MOV   R0, [PICO8_LINE_X]
+    MOV   [BP+2], R0
+    MOV   R0, [PICO8_LINE_Y]
+    MOV   [BP+3], R0
+_pico8_line_full:
 
     OUT   GPU_SelectedTexture, 0
     MOV   R1, [BP+6]
@@ -2260,6 +2301,14 @@ _pico8_line_have_angle:
 
     OUT   GPU_Command, GPUCommand_DrawRegionRotozoomed
 
+_pico8_line_remember:
+    MOV   R0, [BP+4]
+    MOV   [PICO8_LINE_X], R0
+    MOV   R0, [BP+5]
+    MOV   [PICO8_LINE_Y], R0
+    MOV   R0, 0
+    MOV   [PICO8_LINE_BREAK], R0
+_pico8_line_done:
     MOV   R0, BOXED_NIL
     POP   R4
     POP   R3

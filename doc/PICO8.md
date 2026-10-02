@@ -116,7 +116,7 @@ before `_init()`; the map and flags are already loaded then.
 | `mget(x, y)`, `mset(x, y, v)` | 128×64 map; out-of-range reads 0, writes are ignored. |
 | `fget(n [, f])`, `fset(n, [f,] v)` | From `__gff__`; writable at runtime. |
 | `cls([c])`, `color([c])` | |
-| `rectfill`, `rect`, `circfill`, `circ`, `line`, `pset` | Corners in any order. A zero-length `line(x, y, x, y)` draws one pixel. An omitted color uses the pen; a given color becomes the pen (PICO-8 rule). Circles are PICO-8's own pixels (see [Circles](#circles)). |
+| `rectfill`, `rect`, `circfill`, `circ`, `line`, `pset` | Corners in any order. A zero-length `line(x, y, x, y)` draws one pixel. `line(x1, y1 [, c])` continues from the end of the last line (the start is (0,0) until a line has been drawn), and `line()` makes the next `line(x1, y1)` only set that point. An omitted color uses the pen; a given color becomes the pen (PICO-8 rule). Circles are PICO-8's own pixels (see [Circles](#circles)). |
 | `print(s [, x, y [, c]])` | BIOS font tinted with the palette color (the letters are the BIOS font's, not PICO-8's 3×5 font). PICO-8's glyph characters 128–153 (button glyphs, arrows, ♥, ★, ● …) are drawn as 7×5 icons, two characters wide; `\n` starts a new line. |
 | `camera([x, y])` | |
 | `btn([i [, p]])`, `btnp([i [, p]])` | 0 left, 1 right, 2 up, 3 down, 4 O (→ A), 5 X (→ B). No `i` → bitfield. `btnp`: first frame of a press, then from frame 15 every 4 frames. |

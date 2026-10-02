@@ -1152,17 +1152,21 @@ bool emit_pico8_circfill_intrinsic (ASTNode *node, int dest_reg)
 
 // ============================================================================
 // PICO-8 line(x0, y0, x1, y1 [, color]) -- 1px line between two points
+//        line(x1, y1 [, color])         -- from the end of the last line
+//        line()                         -- next line(x1, y1) only sets the point
 // ============================================================================
+// The runtime tells the forms apart (4th argument nil), so a call through
+// a function value or with a nil argument behaves the same as a direct one.
 bool emit_pico8_line_intrinsic (ASTNode *node, int dest_reg)
 {
     static const char *names[5] = { "x0", "y0", "x1", "y1", "color" };
     int arg_count = 0;
     pico8_push_args (node, 5, names, &arg_count);
 
-    if (arg_count < 4) {
+    if (arg_count == 1) {
         compiler_error (ERR_SEMANTIC, node->line_number,
-            "PICO-8 line() expects at least 4 arguments: "
-            "line(x0, y0, x1, y1 [, color])");
+            "PICO-8 line() takes line(x0, y0, x1, y1 [, color]), "
+            "line(x1, y1 [, color]) or line()");
         return false;
     }
 
