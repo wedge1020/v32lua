@@ -204,7 +204,9 @@ void  node_function_def (ASTNode *node)
     // actually populated with the count in the first place; it was dead,
     // uninitialized stack space.
 
+    numlocals_enter(node);      // locals that only ever hold numbers (node/math.c)
     generate_block(node->as.function_def.body);
+    numlocals_leave();
     pop_scope();
 
     // -------------------------------------------------------------------

@@ -70,6 +70,8 @@ void  node_table_constructor   (ASTNode *, int);
 
 // node/math.c: a numeric-string operand becomes its number
 void  emit_arith_coerce        (int, ASTNode *);
+void  numlocals_enter          (ASTNode *);
+void  numlocals_leave          (void);
 
 // node/multivalue.c
 bool  mv_is_tail               (ASTNode *);

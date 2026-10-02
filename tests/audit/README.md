@@ -35,3 +35,7 @@ target's table and key before storing anything: `self.vx, self = 0, 0`,
 `line()`; check the draws with `runlua pico8/line2.lua -f 3 -g`).
 `pico8/cursor.lua`: `cursor()`, `print` at the text cursor, `print(s, col)`,
 `print`'s return value, the cursor at 0x5F26/0x5F27.
+`numlocals.lua`: locals that only ever hold numbers skip the numeric-string
+test and (counting `for` variables) the zero-divisor guard; the cases that
+must keep them (a string assigned later or in a closure, a shadowing local, a
+loop that counts down or through 0).
