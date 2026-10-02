@@ -54,6 +54,14 @@ static const PreludeFunc prelude[] = {
       "  if conv ~= false then local x = tonumber(v) if x ~= nil then return x end end\n"
       "  return v\n"
       "end\n", NULL },
+    { "cursor", NULL,
+      // cursor([x, y [, col]]): a real function, so the three previous
+      // values can be returned; the state is the runtime's (pico8.s)
+      "function cursor(x, y, col)\n"
+      "  local px, py, pc = __p8_cursor_get(0), __p8_cursor_get(1), __p8_cursor_get(2)\n"
+      "  __p8_cursor_set(x, y, col)\n"
+      "  return px, py, pc\n"
+      "end\n", NULL },
     { "unpack", NULL,
       // every value from t[i] to t[j] (a multi-value list, node/multivalue.c;
       // calls and constructors ending in unpack(...) spread it inline)

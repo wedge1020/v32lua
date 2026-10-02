@@ -33,3 +33,5 @@ Added 2026-10-02: `assign_order.lua` (a multiple assignment evaluates every
 target's table and key before storing anything: `self.vx, self = 0, 0`,
 `t[i], i = v, i + 1`) and `pico8/line2.lua` (`line(x1, y1 [, c])` and
 `line()`; check the draws with `runlua pico8/line2.lua -f 3 -g`).
+`pico8/cursor.lua`: `cursor()`, `print` at the text cursor, `print(s, col)`,
+`print`'s return value, the cursor at 0x5F26/0x5F27.

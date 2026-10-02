@@ -76,6 +76,8 @@ bool  emit_pico8_sqrt_intrinsic     (ASTNode *, int);
 bool  emit_pico8_flip_intrinsic     (ASTNode *, int);
 bool  emit_pico8_sgn_intrinsic      (ASTNode *, int);
 bool  emit_pico8_split1_intrinsic    (ASTNode *, int);
+bool  emit_pico8_cursor_get_intrinsic (ASTNode *, int);
+bool  emit_pico8_cursor_set_intrinsic (ASTNode *, int);
 bool  emit_pico8_menu_hook_intrinsic (ASTNode *, int);
 bool  emit_pico8_start_pressed_intrinsic (ASTNode *, int);
 bool  emit_pico8_atan2_intrinsic    (ASTNode *, int);

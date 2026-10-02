@@ -1180,18 +1180,15 @@ bool emit_pico8_line_intrinsic (ASTNode *node, int dest_reg)
 }
 
 // ============================================================================
-// PICO-8 print(str [, x [, y [, color]]])
+// PICO-8 print(str, x, y [, color])  -- at (x, y)
+//        print(str [, color])        -- at the text cursor
 // ============================================================================
-// Wraps __builtin_print via __builtin_pico8_print, which converts PICO-8
-// screen coordinates (camera-adjusted, scaled, centered) to Vircon32 ones.
-// PICO-8's no-coordinate form prints at the cursor; this layer has no
-// cursor, so absent x/y NIL-pad and the runtime clamps to (0,0).
-// celeste always passes x and y.
-//
-// DISPATCH NOTE: the generic print() handler in try_emit_call_intrinsic()
-// runs BEFORE the console-API if/else chain -- add a needs_pico8 guard
-// there (or check print here first in the pico8 section), exactly like
-// the music() dispatch-order fix.
+// __builtin_pico8_print (pico8.s) converts PICO-8 screen coordinates
+// (camera-adjusted, scaled, centered) to Vircon32 ones and draws the text.
+// It tells the two forms apart at run time (y is nil -> cursor form, where
+// the 2nd argument is the color), moves the text cursor below what it
+// printed, and returns the x where the text ended, in PICO-8's 4-px
+// character cells.
 bool emit_pico8_print_intrinsic (ASTNode *node, int dest_reg)
 {
     static const char *names[4] = { "str", "x", "y", "color" };
@@ -1200,7 +1197,7 @@ bool emit_pico8_print_intrinsic (ASTNode *node, int dest_reg)
 
     if (arg_count < 1) {
         compiler_error (ERR_SEMANTIC, node->line_number,
-            "PICO-8 print() expects at least 1 argument: print(str [, x [, y [, color]]])");
+            "PICO-8 print() expects at least 1 argument: print(str, x, y [, color]) or print(str [, color])");
         return false;
     }
 
@@ -1208,7 +1205,7 @@ bool emit_pico8_print_intrinsic (ASTNode *node, int dest_reg)
     emit_asm ("    IADD SP, 4 ; Clean up print() arguments\n");
 
     if (dest_reg != 0) {
-        emit_asm ("    MOV R%d, R0 ; passthrough string\n", dest_reg);
+        emit_asm ("    MOV R%d, R0 ; x where the text ended\n", dest_reg);
     }
     return true;
 }
@@ -1263,6 +1260,22 @@ bool emit_pico8_start_pressed_intrinsic (ASTNode *node, int dest_reg)
 {
     return pico8_simple_call (node, dest_reg, 0, NULL, 0, "__builtin_pico8_start_pressed",
                               "__p8_start_pressed()");
+}
+
+// __p8_cursor_get(i): 0 = cursor x, 1 = cursor y, 2 = pen color
+bool emit_pico8_cursor_get_intrinsic (ASTNode *node, int dest_reg)
+{
+    static const char *names[1] = { "which" };
+    return pico8_simple_call (node, dest_reg, 1, names, 1, "__builtin_pico8_cursor_get",
+                              "__p8_cursor_get(i)");
+}
+
+// __p8_cursor_set(x, y, col): nil x / y -> 0, nil col keeps the pen
+bool emit_pico8_cursor_set_intrinsic (ASTNode *node, int dest_reg)
+{
+    static const char *names[3] = { "x", "y", "color" };
+    return pico8_simple_call (node, dest_reg, 3, names, 0, "__builtin_pico8_cursor_set",
+                              "__p8_cursor_set(x, y, col)");
 }
 
 bool emit_pico8_split1_intrinsic (ASTNode *node, int dest_reg)

@@ -265,6 +265,8 @@ _pico8_init_rng:
     MOV   [PICO8_LINE_X], R0               ; line(x, y) starts from (0, 0)
     MOV   [PICO8_LINE_Y], R0               ; (0 is also the float 0.0)
     MOV   [PICO8_LINE_BREAK], R0
+    MOV   [PICO8_CURSOR_X], R0             ; text cursor at the top left
+    MOV   [PICO8_CURSOR_Y], R0
 
     CALL  __builtin_pico8_reload
     CALL  __pico8_audio_init
@@ -2328,6 +2330,9 @@ __builtin_pico8_cls:
     MOV   BP, SP
     PUSH  R1
 
+    MOV   R1, 0                   ; the text cursor goes back to the top left
+    MOV   [PICO8_CURSOR_X], R1
+    MOV   [PICO8_CURSOR_Y], R1
     MOV   R1, [BP+2]
     CALL  __pico8_to_int
     AND   R1, 15
@@ -2477,12 +2482,23 @@ _pico8_fset_done:
     RET
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; print(str [, x, y [, col]]): [BP+2]=str [BP+3]=x [BP+4]=y [BP+5]=col
-;; Converts PICO-8 coordinates (camera, scale, centering) and delegates to
-;; __builtin_print. The BIOS font is white, so the color is applied as a
-;; GPU multiply color and restored afterwards (it used to be ignored).
+;; print(str, x, y [, col])   [BP+2]=str [BP+3]=x [BP+4]=y [BP+5]=col
+;; print(str [, col])         at the text cursor: [BP+4] (y) is nil, and
+;;                            [BP+3] is the color
+;; Converts PICO-8 coordinates (camera, scale, centering) and draws with
+;; __pico8_print_text. The BIOS font is white, so the color is applied as a
+;; GPU multiply color and restored afterwards.
 ;; Glyphs are the BIOS font's, not PICO-8's 3x5 font.
-;; Returns nil.
+;;
+;; Afterwards the text cursor is at the print's x, 6 px below the last line
+;; printed (both forms, as in PICO-8). PICO-8 scrolls the screen when a
+;; cursor print runs past the bottom; the GPU can't be read back, so the
+;; cursor form keeps the cursor on the last text row (y = 122) instead.
+;;
+;; Returns the x where the text ended, as PICO-8 measures it: 4 px per
+;; character, 8 per wide glyph (128 and up), on the last line.
+;; The argument slots are reused: [BP+3] = x, [BP+4] = y (ints),
+;; [BP+5] = 1 for the cursor form.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 __builtin_pico8_print:
     PUSH  BP
@@ -2494,15 +2510,37 @@ __builtin_pico8_print:
     PUSH  R5
     PUSH  R6
 
+    MOV   R0, [BP+4]
+    IEQ   R0, BOXED_NIL
+    JF    R0, _pico8_print_at
+    MOV   R1, [BP+3]              ; cursor form: 2nd argument is the color
+    CALL  __pico8_pen
+    MOV   R0, [PICO8_CURSOR_X]
+    MOV   [BP+3], R0
+    MOV   R0, [PICO8_CURSOR_Y]
+    MOV   [BP+4], R0
+    MOV   R0, 1
+    MOV   [BP+5], R0
+    JMP   _pico8_print_go
+_pico8_print_at:
     MOV   R1, [BP+5]
     CALL  __pico8_pen
+    MOV   R1, [BP+3]
+    CALL  __pico8_to_int
+    MOV   [BP+3], R1
+    MOV   R1, [BP+4]
+    CALL  __pico8_to_int
+    MOV   [BP+4], R1
+    MOV   R0, 0
+    MOV   [BP+5], R0
+_pico8_print_go:
+    MOV   R1, [PICO8_PEN]
     MOV   R0, __pico8_palette
     IADD  R1, R0
     MOV   R1, [R1]
     OUT   GPU_MultiplyColor, R1
 
     MOV   R1, [BP+3]
-    CALL  __pico8_to_int
     CIF   R1
     MOV   R2, [PICO8_CAMERA_X]
     FSUB  R1, R2
@@ -2514,7 +2552,6 @@ __builtin_pico8_print:
     MOV   R3, R1
 
     MOV   R1, [BP+4]
-    CALL  __pico8_to_int
     CIF   R1
     MOV   R2, [PICO8_CAMERA_Y]
     FSUB  R1, R2
@@ -2540,12 +2577,93 @@ __builtin_pico8_print:
 
     MOV   R1, 0xFFFFFFFF
     OUT   GPU_MultiplyColor, R1
-    MOV   R0, BOXED_NIL
+
+    ;; measure: R4 = lines, R5 = width of the last line (PICO-8 px)
+    MOV   R4, 1
+    MOV   R5, 0
+_pico8_print_measure:
+    MOV   R0, [R3]
+    JF    R0, _pico8_print_measured
+    MOV   R1, R0
+    IEQ   R1, 10
+    JF    R1, _pico8_print_char
+    IADD  R4, 1
+    MOV   R5, 0
+    JMP   _pico8_print_measure_next
+_pico8_print_char:
+    IADD  R5, 4
+    ILT   R0, 128
+    JT    R0, _pico8_print_measure_next
+    IADD  R5, 4                   ; wide glyph
+_pico8_print_measure_next:
+    IADD  R3, 1
+    JMP   _pico8_print_measure
+_pico8_print_measured:
+    MOV   R0, [BP+3]
+    MOV   [PICO8_CURSOR_X], R0
+    IMUL  R4, 6
+    MOV   R0, [BP+4]
+    IADD  R0, R4
+    MOV   R1, [BP+5]
+    JF    R1, _pico8_print_cursor_y
+    MOV   R1, R0
+    IGT   R1, 122
+    JF    R1, _pico8_print_cursor_y
+    MOV   R0, 122                 ; no scrolling: stay on the last text row
+_pico8_print_cursor_y:
+    MOV   [PICO8_CURSOR_Y], R0
+
+    MOV   R0, [BP+3]
+    IADD  R0, R5
+    CIF   R0                      ; x where the text ended
     POP   R6
     POP   R5
     POP   R4
     POP   R3
     POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; The prelude cursor()'s state access.
+;; __p8_cursor_get(i): [SP+1] = i -> 0: cursor x, 1: cursor y, 2: pen
+;; __p8_cursor_set(x, y, col): [SP+1] = x, [SP+2] = y (nil -> 0),
+;;   [SP+3] = col (nil keeps the pen). Returns nil.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+__builtin_pico8_cursor_get:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    MOV   R1, [BP+2]
+    CALL  __pico8_to_int
+    MOV   R0, [PICO8_CURSOR_X]
+    JF    R1, _pico8_cursor_get_done
+    MOV   R0, [PICO8_CURSOR_Y]
+    IEQ   R1, 1
+    JT    R1, _pico8_cursor_get_done
+    MOV   R0, [PICO8_PEN]
+_pico8_cursor_get_done:
+    CIF   R0
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+__builtin_pico8_cursor_set:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    MOV   R1, [BP+4]
+    CALL  __pico8_pen
+    MOV   R1, [BP+2]
+    CALL  __pico8_to_int
+    MOV   [PICO8_CURSOR_X], R1
+    MOV   R1, [BP+3]
+    CALL  __pico8_to_int
+    MOV   [PICO8_CURSOR_Y], R1
+    MOV   R0, BOXED_NIL
     POP   R1
     MOV   SP, BP
     POP   BP
@@ -3610,6 +3728,12 @@ __pico8_rd:
     IEQ   R0, 0x5F25
     JT    R0, _pico8_rd_pen
     MOV   R0, R1
+    IEQ   R0, 0x5F26
+    JT    R0, _pico8_rd_cursor_x
+    MOV   R0, R1
+    IEQ   R0, 0x5F27
+    JT    R0, _pico8_rd_cursor_y
+    MOV   R0, R1
     ILT   R0, 0x5F28
     JT    R0, _pico8_rd_ram
     MOV   R0, R1
@@ -3645,6 +3769,14 @@ _pico8_rd_pen:
     AND   R0, 0xF0                ; the high nibble is kept as written
     MOV   R2, [PICO8_PEN]
     OR    R0, R2
+    JMP   _pico8_rd_done
+_pico8_rd_cursor_x:
+    MOV   R0, [PICO8_CURSOR_X]
+    AND   R0, 255
+    JMP   _pico8_rd_done
+_pico8_rd_cursor_y:
+    MOV   R0, [PICO8_CURSOR_Y]
+    AND   R0, 255
     JMP   _pico8_rd_done
 _pico8_rd_camera:
     ;; 0x5F28/29 = camera x, 0x5F2A/2B = camera y (signed 16-bit, low first)
@@ -3726,6 +3858,12 @@ __pico8_wr:
     IEQ   R0, 0x5F25
     JT    R0, _pico8_wr_pen
     MOV   R0, R1
+    IEQ   R0, 0x5F26
+    JT    R0, _pico8_wr_cursor_x
+    MOV   R0, R1
+    IEQ   R0, 0x5F27
+    JT    R0, _pico8_wr_cursor_y
+    MOV   R0, R1
     ILT   R0, 0x5F28
     JT    R0, _pico8_wr_done
     MOV   R0, R1
@@ -3765,6 +3903,13 @@ _pico8_wr_flags:
 _pico8_wr_pen:
     AND   R2, 15
     MOV   [PICO8_PEN], R2
+    JMP   _pico8_wr_done
+
+_pico8_wr_cursor_x:
+    MOV   [PICO8_CURSOR_X], R2
+    JMP   _pico8_wr_done
+_pico8_wr_cursor_y:
+    MOV   [PICO8_CURSOR_Y], R2
     JMP   _pico8_wr_done
 
 _pico8_wr_camera:

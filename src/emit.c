@@ -618,6 +618,9 @@ int   emit_variable_map (void)
         fprintf (out(), "%%define  PICO8_LINE_X             0x%.8X\n", (next_ram_address + 15));
         fprintf (out(), "%%define  PICO8_LINE_Y             0x%.8X\n", (next_ram_address + 16));
         fprintf (out(), "%%define  PICO8_LINE_BREAK         0x%.8X\n", (next_ram_address + 17));
+        // text cursor (cursor(), print() without coordinates): PICO-8 pixels, ints
+        fprintf (out(), "%%define  PICO8_CURSOR_X           0x%.8X\n", (next_ram_address + 18));
+        fprintf (out(), "%%define  PICO8_CURSOR_Y           0x%.8X\n", (next_ram_address + 19));
         // SFX sound ids start here (-1: the cart plays no synthesized sound)
         fprintf (out(), "%%define  PICO8_SFX_BASE           %d\n", pico8_sfx_base_id);
         fprintf (out(), "%%define  PICO8_AUDIO_RATE         %d\n", synth_audio_rate);
@@ -628,8 +631,8 @@ int   emit_variable_map (void)
         // the last pause check, PICO-8 frames since start (time()), the
         // emulated 64 KB RAM (0 until first used), cartdata() state, the
         // pause menu (menuitem(): a boxed Lua function, 0 = none), line()'s
-        // end point x, y and break flag
-        next_ram_address    = next_ram_address + 18;
+        // end point x, y and break flag, the text cursor x, y
+        next_ram_address    = next_ram_address + 20;
         fprintf (out(), "%%define  PICO8_FLAGS_RAM          0x%.8X\n", next_ram_address);
         next_ram_address    = next_ram_address + 256;
         fprintf (out(), "%%define  PICO8_MAP_RAM            0x%.8X\n", next_ram_address);

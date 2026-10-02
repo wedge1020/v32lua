@@ -809,6 +809,16 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
             return (emit_cart_restart_intrinsic (node, dest_reg, "run"));
         }
 
+        // the prelude cursor()'s state access (pico8.s)
+        if (strcmp (func_name, "__p8_cursor_get") == 0)
+        {
+            return (emit_pico8_cursor_get_intrinsic (node, dest_reg));
+        }
+        if (strcmp (func_name, "__p8_cursor_set") == 0)
+        {
+            return (emit_pico8_cursor_set_intrinsic (node, dest_reg));
+        }
+
         // __p8_split1(s, sep, conv) -- the prelude split()'s native fast path
         if (strcmp (func_name, "__p8_split1") == 0)
         {

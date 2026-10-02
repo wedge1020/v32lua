@@ -117,7 +117,8 @@ before `_init()`; the map and flags are already loaded then.
 | `fget(n [, f])`, `fset(n, [f,] v)` | From `__gff__`; writable at runtime. |
 | `cls([c])`, `color([c])` | |
 | `rectfill`, `rect`, `circfill`, `circ`, `line`, `pset` | Corners in any order. A zero-length `line(x, y, x, y)` draws one pixel. `line(x1, y1 [, c])` continues from the end of the last line (the start is (0,0) until a line has been drawn), and `line()` makes the next `line(x1, y1)` only set that point. An omitted color uses the pen; a given color becomes the pen (PICO-8 rule). Circles are PICO-8's own pixels (see [Circles](#circles)). |
-| `print(s [, x, y [, c]])` | BIOS font tinted with the palette color (the letters are the BIOS font's, not PICO-8's 3×5 font). PICO-8's glyph characters 128–153 (button glyphs, arrows, ♥, ★, ● …) are drawn as 7×5 icons, two characters wide; `\n` starts a new line. |
+| `print(s, x, y [, c])`, `print(s [, c])` | BIOS font tinted with the palette color (the letters are the BIOS font's, not PICO-8's 3×5 font). PICO-8's glyph characters 128–153 (button glyphs, arrows, ♥, ★, ● …) are drawn as 7×5 icons, two characters wide; `\n` starts a new line. Without coordinates the text goes at the text cursor, and the second argument is the color. Either form leaves the cursor at the print's x, 6 px below its last line, and returns the x where the text ended, measured in PICO-8's cells (4 px per character, 8 per wide glyph). PICO-8 scrolls the screen when a cursor print passes the bottom; here the cursor stays on the last text row (y = 122) instead. |
+| `cursor([x, y [, c]])` | Sets the text cursor (omitted x, y: 0, 0) and, with `c`, the pen; returns the previous x, y and color. `cls()` puts the cursor back at 0,0. It is also at 0x5F26/0x5F27 for `peek`/`poke`. |
 | `camera([x, y])` | |
 | `btn([i [, p]])`, `btnp([i [, p]])` | 0 left, 1 right, 2 up, 3 down, 4 O (→ A), 5 X (→ B). No `i` → bitfield. `btnp`: first frame of a press, then from frame 15 every 4 frames. |
 | `add`, `del`, `count`, `foreach`, `for v in all(t)` | `del` uses full `==` (string contents compare). `foreach`/`all` follow PICO-8's rule that deleting the current element is safe. `count(t, v)` isn't supported. |
@@ -362,7 +363,7 @@ frames → 21); evercore 919k → 811k (13% more updates per second).
 ## Not supported (yet)
 
 `clip` and `fillp` (accepted, no effect), real `stat` values, custom
-`menuitem` entries in the pause screen, custom fonts (poked to 0x5600), the
-text cursor (`print` without coordinates prints at 0,0), palette remapping,
+`menuitem` entries in the pause screen, custom fonts (poked to 0x5600), screen
+scrolling when text passes the bottom, palette remapping,
 fractional `spr` widths (`spr(n, x, y, 0.5)`), `pget`, loading data from other
 cart files (`reload` with a file name, multi-cart games), and `cstore`.
