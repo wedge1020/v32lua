@@ -78,6 +78,8 @@ static void  print_usage (const char *prog_name)
     fprintf (stdout, "                   1.5%% of the edge pixels differ). Outlines stay exact\n");
     fprintf (stdout, "  --keyboard <n>   Gamepad port (0-3) of a v32kbd keyboard, for key()/keyp()/\n");
     fprintf (stdout, "                   kbd.*. Default 1, the second port (inc/config.h)\n");
+    fprintf (stdout, "  --mouse <n>      Gamepad port (0-3) of a v32mouse mouse, for mouse()/mouse.*\n");
+    fprintf (stdout, "                   (PICO-8: stat(32..34)). Default 3, the fourth port\n");
     fprintf (stdout, "\nInput files: .lua, .p8 (PICO-8 cart), .tic (TIC-80 cart, Lua only)\n");
 }
 
@@ -213,6 +215,13 @@ int  main (int  argc, char** argv)
             }
             v32kbd_default_port = val[0] - '0';
             g_cli_keyboard_set  = true;
+        } else if ((val = option_value(argc, argv, &i, "--mouse")) != NULL) {
+            if (val[0] < '0' || val[0] > '3' || val[1] != '\0') {
+                fprintf(stderr, "Compiler Error: --mouse must be a gamepad port 0-3 (got '%s')\n", val);
+                return 1;
+            }
+            v32mouse_default_port = val[0] - '0';
+            g_cli_mouse_set       = true;
         } else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
             strncpy(output_filename, argv[++i], sizeof(output_filename) - 1);
         } else if (strcmp(argv[i], "-g") == 0) {
@@ -516,6 +525,7 @@ int  main (int  argc, char** argv)
     // from the source before codegen, since the WAIT hooks it adds can be
     // emitted before the first key() call is compiled.
     v32kbd_prescan (program_text);
+    v32mouse_prescan (program_text);
 
     // --- Stage 4: Semantic Analyzer ---
     log_stage(4, "analyzer", verbose);

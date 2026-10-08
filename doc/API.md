@@ -29,6 +29,7 @@ The SPU port write order matters for sound; see
 - [Graphics: rect() / rectfill()](#graphics-rect--rectfill)
 - [Input: btn() / btnp()](#input-btn--btnp)
 - [Keyboard: key() / keyp() / kbd.\*](#keyboard-key--keyp--kbd)
+- [Mouse: mouse() / mouse.\*](#mouse-mouse--mouse)
 - [Tilemap: tilemap.\*](#tilemap-tilemap)
 - [Memory card: memcard.\*](#memory-card-memcard)
 - [Other raw IO ports](#other-raw-io-ports)
@@ -78,6 +79,19 @@ function behind it. A function of your own with the same name (`spr`,
 | `kbd.port([n])` | number | Gamepad port of the keyboard (default 1); setting it starts over. |
 | `kbd.capslock()`, `kbd.connected()` | boolean | Caps Lock state; device plugged in. |
 | `kbd.clear()` | nil | Drops unread events. |
+
+*Mouse* (v32mouse device) — [details](#mouse-mouse--mouse)
+
+| Call | Returns | What it does |
+|---|---|---|
+| `mouse()` | x, y, left, middle, right, scrollx, scrolly | Pointer (screen pixels) and buttons (booleans), as TIC-80's; scroll is always 0. |
+| `mouse.pressed([b])`, `mouse.released([b])` | boolean | A button in `b` (1 left, 2 right, 4 middle; sums; none: any) went down / up this frame. |
+| `mouse.buttons()` | number | Buttons held, 1 + 2 + 4. |
+| `mouse.delta()` | dx, dy | This frame's movement, in pixels. |
+| `mouse.position([x, y])` | x, y | Pointer; moves it when given. |
+| `mouse.bounds(x1, y1, x2, y2)` | nil | Area the pointer stays in (default the screen). |
+| `mouse.scale([n])`, `mouse.port([n])` | number | Pixels per step (default 2); gamepad port (default 3). |
+| `mouse.connected()` | boolean | Device plugged in. |
 
 *Sound* — [details](#sound-music--sfx)
 
@@ -1086,6 +1100,97 @@ The selected gamepad is remembered by the runtime (`V32IO_GAMEPAD`) rather
 than read back from `INP_SelectedGamepad`: the Vircon32 emulators return a
 wrong value when that port is read. `ioports.inp.gamepad` reads give the
 remembered value too. A `__rawasm__` write to the port bypasses it.
+
+---
+
+## Mouse: mouse() / mouse.\*
+
+```
+mouse()                       -> x, y, left, middle, right, scrollx, scrolly
+mouse.pressed([b])            -> boolean, a button in b went down this frame
+mouse.released([b])           -> boolean, a button in b went up this frame
+mouse.buttons()               -> buttons held: 1 left + 2 right + 4 middle
+mouse.delta()                 -> dx, dy: this frame's movement
+mouse.position([x, y])        -> x, y (and moves the pointer there)
+mouse.bounds(x1, y1, x2, y2)  -- the area the pointer stays in
+mouse.scale([n])              -> pixels the pointer moves per step (and sets it)
+mouse.port([n])               -> gamepad port of the mouse (and sets it)
+mouse.connected()             -> boolean, something is plugged into that port
+```
+
+These read a mouse through a **v32mouse** device: a USB mouse adapter the
+console sees as an ordinary gamepad (see the v32io project). It plugs into a
+gamepad port — **port 3 (the fourth) by default**, as in the v32io mouse
+demo, so a keyboard (port 1) and a player's gamepad (port 0) fit beside
+it. Change it with `--mouse N` on the command line, a `--#mouse N` hint in
+the source, or `mouse.port(n)` at run time.
+
+`mouse()` is TIC-80's: the pointer's `x, y`, then `left, middle, right` as
+booleans, then `scrollx, scrolly`, which are always 0 — the device has no
+room left for the wheel. The same call, with the same 7 values, works under
+`--#api tic80` and `--#api pico8` too, in that console's screen units (see
+[TIC80.md](TIC80.md#input) and [PICO8.md](PICO8.md#api)); `mouse.*` works
+under every API. A function or global of your own named `mouse` replaces
+all of them.
+
+```lua
+function game_loop()
+    local x, y, left = mouse()
+    if mouse.pressed(1) then          -- left button went down
+        click_at(x, y)
+    end
+    if left then
+        draw_at(x, y)                 -- held
+    end
+    rectfill(x - 1, y - 1, x + 1, y + 1)
+end
+```
+
+**The pointer**
+
+The device reports movement, not a position, so the runtime keeps a pointer:
+it starts at the screen's center (320, 180), moves by **steps × scale**
+(scale 2 by default: 2 pixels per step) and stays inside its bounds (the
+whole 640 × 360 screen by default, both edges inclusive). `mouse.bounds()`
+limits it to an area (a `nil` keeps that edge as it is) and moves it inside;
+`mouse.position(x, y)` places it (each coordinate given is floored and kept
+within the bounds; `nil` keeps it); `mouse.scale(n)` sets the speed (n ≥ 1).
+All three return their current values, so `mouse.position()` and
+`mouse.scale()` only read. `mouse.delta()` is this frame's movement in
+pixels (after the scale, before the bounds), 0, 0 when it didn't move.
+
+**Buttons**
+
+`left`, `middle` and `right` are held as long as the buttons are. For
+`mouse.pressed(b)`, `mouse.released(b)` and `mouse.buttons()`, buttons are
+numbers: **1 left, 2 right, 4 middle**, added together for "any of these"
+(`mouse.pressed(3)`: left or right). Without `b`, any button. `pressed` /
+`released` are true only on the frame the button changed. The adapter
+keeps every button change for at least 25 ms, so even a quick click lasts
+more than a frame.
+
+**How it is read**
+
+The device keeps two counters, one per axis, that go around 12 positions,
+one gamepad control changing per step; each read compares them with the
+previous read, giving −5 to +5 steps per axis (6 can't be told from −6, and
+counts as no movement). So, like the keyboard, the mouse has to be read on
+**every frame** — and the compiler arranges that when the program uses it:
+every `mouse`/`mouse.*` call reads it (once per frame), the `game_loop()`,
+TIC-80 and PICO-8 drivers read it each frame, and `system.wait()`,
+`ioports.gpu.sync()` and PICO-8's `flip()` read it before their `WAIT` (what
+arrives then counts for the next frame). A `main()` loop that waits with
+`system.wait()` loses no movement even if it only looks at the mouse now
+and then. Movement is only measured between two reads of a connected
+device at most 2 frames apart; anything else — a device just plugged in,
+frames spent in a pause screen, a bare `__rawasm__("WAIT")` loop — only
+takes the counters as the new starting point, so the pointer never jumps.
+
+`mouse.port(n)` moves the mouse to gamepad port `n` (0–3, clamped) and
+starts over from the device's current state (the pointer stays where it
+is). `mouse.connected()` is true when something is plugged into the
+mouse's port. As with the keyboard, reading the mouse's port doesn't
+disturb the gamepad the program has selected.
 
 ---
 

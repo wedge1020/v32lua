@@ -85,10 +85,12 @@ static const char *skip_long (const char *p, int level)
     return p;
 }
 
-// Does the source call any of the names (key, keyp: followed by "(", a
-// string or a table constructor), or use kbd.<field>? Comments and the
-// insides of strings are skipped -- "key" is a common word in both.
-static bool source_uses_keyboard (const char *src, bool key_calls)
+// Walks the source's tokens -- skipping comments and the insides of
+// strings, where words like "key" and "mouse" are common -- and asks
+// `match` about each identifier and number: its text, what follows it
+// (spaces skipped), and whether it is a field (after '.' or ':'). Stops at
+// the first token `match` accepts. Shared by the v32mouse prescan.
+bool v32io_source_find (const char *src, v32io_token_matcher match)
 {
     const char *p = src;
     while (*p) {
@@ -112,19 +114,14 @@ static bool source_uses_keyboard (const char *src, bool key_calls)
             if (*p == q) p++;
             continue;
         }
-        if (ident_char (*p) && !isdigit ((unsigned char) *p)) {
+        if (ident_char (*p)) {
+            bool number = isdigit ((unsigned char) *p);
             const char *b = p;
-            while (ident_char (*p)) p++;
-            size_t n = (size_t) (p - b);
-            bool member = b > src && (b[-1] == '.' || b[-1] == ':');
+            while (ident_char (*p) || (number && *p == '.')) p++;
+            bool member = !number && b > src && (b[-1] == '.' || b[-1] == ':');
             const char *q = p;
             while (*q == ' ' || *q == '\t') q++;
-            if (!member && n == 3 && strncmp (b, "kbd", 3) == 0 && *q == '.') return true;
-            if (!member && key_calls &&
-                ((n == 3 && strncmp (b, "key", 3) == 0) || (n == 4 && strncmp (b, "keyp", 4) == 0)) &&
-                (*q == '(' || *q == '"' || *q == '\'' || *q == '{' ||
-                 (*q == '[' && (q[1] == '[' || q[1] == '='))))
-                return true;
+            if (match (b, (size_t) (p - b), q, member, number)) return true;
             continue;
         }
         p++;
@@ -132,11 +129,25 @@ static bool source_uses_keyboard (const char *src, bool key_calls)
     return false;
 }
 
+// key / keyp called (followed by "(", a string or a table constructor), or
+// the kbd.* namespace
+static bool kbd_key_calls;
+static bool kbd_match (const char *b, size_t n, const char *q, bool member, bool number)
+{
+    if (member || number) return false;
+    if (n == 3 && strncmp (b, "kbd", 3) == 0 && *q == '.') return true;
+    return kbd_key_calls &&
+           ((n == 3 && strncmp (b, "key", 3) == 0) || (n == 4 && strncmp (b, "keyp", 4) == 0)) &&
+           (*q == '(' || *q == '"' || *q == '\'' || *q == '{' ||
+            (*q == '[' && (q[1] == '[' || q[1] == '=')));
+}
+
 void v32kbd_prescan (const char *src)
 {
     if (src == NULL) return;
     // key()/keyp() are intrinsics in native and TIC-80 mode; kbd.* in all
-    v32kbd_wanted = source_uses_keyboard (src, !runtime_req.needs_pico8);
+    kbd_key_calls = !runtime_req.needs_pico8;
+    v32kbd_wanted = v32io_source_find (src, kbd_match);
 }
 
 // ----------------------------------------------------------------------------

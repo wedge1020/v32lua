@@ -13,6 +13,7 @@ extern const char  runtime_iters_start[];
 extern const char  runtime_vircon32_start[];
 extern const char  runtime_v32io_start[];
 extern const char  runtime_v32kbd_start[];
+extern const char  runtime_v32mouse_start[];
 extern const char  runtime_pico8_start[];
 extern const char  runtime_tic80_start[];
 extern const char  runtime_constant_start[];

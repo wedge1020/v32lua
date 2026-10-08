@@ -660,6 +660,7 @@ int   emit_variable_map (void)
     // v32kbd keyboard state (v32kbd.c): fixed RAM, only when the program
     // uses the keyboard
     lines_printed += v32kbd_emit_defines (out());
+    lines_printed += v32mouse_emit_defines (out());
 
     // Unconditional -- see the allocation comment in main.c.
     {
@@ -929,6 +930,10 @@ void  emit_runtime_library (void)
     if (v32kbd_wanted)
     {
         emit_embedded_asm (runtime_v32kbd_start);
+    }
+    if (v32mouse_wanted)
+    {
+        emit_embedded_asm (runtime_v32mouse_start);
     }
 
     emit_tilemap_rom_data (out());

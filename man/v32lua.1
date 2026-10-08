@@ -18,6 +18,8 @@ v32lua \- compile a subset of Lua to Vircon32 assembly and cartridge XML
 .RB [ \-\-fast\-circles ]
 .RB [ \-\-keyboard
 .IR port ]
+.RB [ \-\-mouse
+.IR port ]
 .RB [ \-\-bezel
 .IR art.png " | "
 .BR \-\-no\-bezel ]
@@ -192,6 +194,18 @@ in native and TIC-80 mode. Default 1, the second port. Same as a
 .B \-\-#keyboard
 hint; a program can also change it with
 .BR kbd.port(n) .
+.TP
+.BI \-\-mouse " port"
+Gamepad port (0\(en3) where a v32mouse mouse is plugged in, for
+.B mouse()
+and
+.B mouse.*
+in every API mode (and PICO-8's
+.BR stat(32) \(en stat(34) ).
+Default 3, the fourth port. Same as a
+.B \-\-#mouse
+hint; a program can also change it with
+.BR mouse.port(n) .
 .TP
 .BI \-\-bezel " art.png"
 PICO-8: draw the side panels from your own art instead of the built-in
@@ -379,7 +393,13 @@ texture's white pixel (texture \-1, region 256).
 and
 .B kbd.*
 read a full keyboard through a v32kbd device on a gamepad port (see
-.BR \-\-keyboard ).
+.BR \-\-keyboard ),
+and
+.B mouse()
+(TIC-80's seven values, in every API mode) and
+.B mouse.*
+a mouse through a v32mouse device (see
+.BR \-\-mouse ).
 .PP
 Explicit, permanent deviations from standard Lua, made to suit
 Vircon32's freestanding environment: IEEE-754 float32 only, with no
@@ -465,7 +485,8 @@ line comments, parsed by the preprocessor stage and used to generate
 the companion XML file:
 .BR \-\-#version ", " \-\-#title ", " \-\-#api ", " \-\-#texture ,
 .BR \-\-#sound ", " \-\-#tilemap ", " \-\-#p8 ", " \-\-#rate ,
-.BR \-\-#bezel ", " \-\-#fast\-circles ", " \-\-#keyboard ", and " \-\-#include .
+.BR \-\-#bezel ", " \-\-#fast\-circles ", " \-\-#keyboard ,
+.BR \-\-#mouse ", and " \-\-#include .
 The XML names the
 .I .vtex
 and
@@ -555,7 +576,7 @@ before running
 .TP
 .I inc/config.h
 (in the source tree) Build-time defaults of the sample rates, side panels,
-fast circles, keyboard port and warnings.
+fast circles, keyboard and mouse ports, and warnings.
 .SH SEE ALSO
 .BR v32c++ (1),
 the Vircon32 C compiler and assembler documentation,

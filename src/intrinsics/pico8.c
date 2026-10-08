@@ -1416,6 +1416,7 @@ bool emit_pico8_flip_intrinsic(ASTNode *node, int dest_reg)
 {
     (void) node;
     emit_asm("    ;; --- PICO-8 flip() ---\n");
+    v32io_emit_frame_end_hooks ();     // keyboard/mouse read every frame (if used)
     emit_asm("CALL __builtin_pico8_flip\n");
     if (dest_reg != 0) emit_asm("MOV R%d, BOXED_NIL\n", dest_reg);
     return true;

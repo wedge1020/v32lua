@@ -2,11 +2,11 @@
 ;;
 ;; v32io: gamepad group read
 ;;
-;; Devices that tunnel their own data through a gamepad port (v32kbd now,
-;; v32mouse later) all start the same way: read the 11 controls of THEIR
+;; Devices that tunnel their own data through a gamepad port (v32kbd,
+;; v32mouse) all start the same way: read the 11 controls of THEIR
 ;; gamepad as one packed word, without disturbing the gamepad the program
 ;; has selected. This module is only that read; each device's decoder
-;; (v32kbd.s, ...) takes the word from here.
+;; (v32kbd.s, v32mouse.s) takes the word from here.
 ;;
 ;; It also owns gamepad SELECTION. The desktop and simplified emulators
 ;; return garbage when INP_SelectedGamepad is read (ReadPort sets the
@@ -18,7 +18,8 @@
 ;; bypasses this and leaves V32IO_GAMEPAD stale.)
 ;;
 ;; Always emitted (btn() of every API selects through it); the group read
-;; is only called by v32kbd.s, emitted when the program uses the keyboard.
+;; and connection check are called by v32kbd.s / v32mouse.s, emitted when
+;; the program uses the keyboard / the mouse.
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

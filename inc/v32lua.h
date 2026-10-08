@@ -27,6 +27,7 @@
 #include "closures.h"
 #include "shapes.h"
 #include "v32kbd.h"
+#include "v32mouse.h"
 
 #define  VERSION             "20261008-dev"
 #define  META_CALL_STACK_SIZE  32   // nested calls of callable tables (__call)

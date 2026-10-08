@@ -174,6 +174,16 @@ that, also on frames a cart skips its own `key()` calls. The `kbd.*`
 functions (typed text with Shift applied, events, the port) are available
 here too.
 
+`mouse()` reads a mouse through a **v32mouse** device (see
+[API.md](API.md#mouse-mouse--mouse)), in gamepad port 3 by default
+(`--mouse N`, `--#mouse N`, `mouse.port(n)`). It returns TIC-80's
+`x, y, left, middle, right, scrollx, scrolly`: the pointer in TIC-80 pixels
+(it starts at (120, 68), moves 1 pixel per step and stays on the 240 × 136
+screen), the buttons as booleans, and the scroll always 0 (the device has
+no wheel). TIC-80's relative mouse mode (poking 0x7FC3F) is not supported.
+The `mouse.*` functions (buttons pressed this frame, movement, bounds,
+speed, port) work here too.
+
 ## reset()
 
 `reset()` starts the cart over, as TIC-80 does. The hardware goes back to

@@ -87,8 +87,9 @@ static const PreludeFunc prelude[] = {
     { "tonum", NULL,
       "function tonum(v) return tonumber(v) end\n", NULL },
     { "stat", NULL,
-      // no system state to report; carts also use `stat` as a no-op function
-      "function stat(n) return 0 end\n", NULL },
+      // the devkit mouse (32-34, v32mouse.c) when the cart uses it; no other
+      // system state to report. Carts also use `stat` as a no-op function.
+      "function stat(n) return __p8_stat(n) end\n", NULL },
     { "printh", NULL,
       "function printh(s) end\n", NULL },
     { "ord", NULL,

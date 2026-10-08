@@ -99,4 +99,12 @@
 #define V32LUA_DEFAULT_KEYBOARD_PORT  1
 #endif
 
+// Gamepad port (0-3) a v32mouse mouse is expected in, for mouse()/mouse.*
+// (and PICO-8's stat(32..34)). 3 is the fourth port, as in the v32io
+// mouse demo. Overridden by --mouse / --#mouse, and at run time by
+// mouse.port(n).
+#ifndef V32LUA_DEFAULT_MOUSE_PORT
+#define V32LUA_DEFAULT_MOUSE_PORT     3
+#endif
+
 #endif

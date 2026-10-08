@@ -30,6 +30,7 @@ El orden de escritura de los puertos SPU es importante para el sonido; ver
 - [Gráficos: rect() / rectfill()](#gráficos-rect--rectfill)
 - [Entrada: btn() / btnp()](#entrada-btn--btnp)
 - [Teclado: key() / keyp() / kbd.\*](#teclado-key--keyp--kbd)
+- [Ratón: mouse() / mouse.\*](#ratón-mouse--mouse)
 - [Mapa de mosaicos: tilemap.\*](#mapa-de-mosaicos-tilemap)
 - [Tarjeta de memoria: memcard.\*](#tarjeta-de-memoria-memcard)
 - [Otros puertos de E/S en bruto](#otros-puertos-de-es-en-bruto)
@@ -81,6 +82,19 @@ nombre (`spr`, `rgba`, `color`, …) reemplaza al intrínseco.
 | `kbd.port([n])` | número | Puerto de mando del teclado (1 por defecto); cambiarlo empieza de nuevo. |
 | `kbd.capslock()`, `kbd.connected()` | booleano | Estado de Bloq Mayús; dispositivo conectado. |
 | `kbd.clear()` | nil | Descarta los eventos no leídos. |
+
+*Ratón* (dispositivo v32mouse) — [detalles](#ratón-mouse--mouse)
+
+| Llamada | Devuelve | Qué hace |
+|---|---|---|
+| `mouse()` | x, y, left, middle, right, scrollx, scrolly | Puntero (píxeles de pantalla) y botones (booleanos), como el de TIC-80; el desplazamiento es siempre 0. |
+| `mouse.pressed([b])`, `mouse.released([b])` | booleano | Un botón de `b` (1 izquierdo, 2 derecho, 4 central; sumas; ninguno: cualquiera) se pulsó / soltó en este cuadro. |
+| `mouse.buttons()` | número | Botones pulsados, 1 + 2 + 4. |
+| `mouse.delta()` | dx, dy | El movimiento de este cuadro, en píxeles. |
+| `mouse.position([x, y])` | x, y | El puntero; lo mueve si se dan valores. |
+| `mouse.bounds(x1, y1, x2, y2)` | nil | Zona en la que se queda el puntero (por defecto, la pantalla). |
+| `mouse.scale([n])`, `mouse.port([n])` | número | Píxeles por paso (2 por defecto); puerto de mando (3 por defecto). |
+| `mouse.connected()` | booleano | Dispositivo conectado. |
 
 *Sonido* — [detalles](#sonido-music--sfx)
 
@@ -1162,6 +1176,102 @@ en lugar de leerlo de `INP_SelectedGamepad`: los emuladores de Vircon32
 devuelven un valor erróneo al leer ese puerto. Las lecturas de
 `ioports.inp.gamepad` también dan el valor recordado. Una escritura en el
 puerto con `__rawasm__` se lo salta.
+
+---
+
+## Ratón: mouse() / mouse.\*
+
+```
+mouse()                       -> x, y, left, middle, right, scrollx, scrolly
+mouse.pressed([b])            -> booleano, un botón de b se pulsó en este cuadro
+mouse.released([b])           -> booleano, un botón de b se soltó en este cuadro
+mouse.buttons()               -> botones pulsados: 1 izquierdo + 2 derecho + 4 central
+mouse.delta()                 -> dx, dy: el movimiento de este cuadro
+mouse.position([x, y])        -> x, y (y mueve el puntero ahí)
+mouse.bounds(x1, y1, x2, y2)  -- la zona en la que se queda el puntero
+mouse.scale([n])              -> píxeles que se mueve el puntero por paso (y lo cambia)
+mouse.port([n])               -> puerto de mando del ratón (y lo cambia)
+mouse.connected()             -> booleano, hay algo conectado en ese puerto
+```
+
+Leen un ratón a través de un dispositivo **v32mouse**: un adaptador USB de
+ratón que la consola ve como un mando normal (ver el proyecto v32io). Se
+conecta en un puerto de mando — **el puerto 3 (el cuarto) por defecto**,
+como en la demo de ratón de v32io, así caben a su lado un teclado (puerto 1)
+y el mando de un jugador (puerto 0). Se cambia con `--mouse N` en la línea
+de órdenes, una pista `--#mouse N` en el código, o `mouse.port(n)` en tiempo
+de ejecución.
+
+`mouse()` es el de TIC-80: `x, y` del puntero, luego `left, middle, right`
+como booleanos, y luego `scrollx, scrolly`, que son siempre 0 — el
+dispositivo no tiene sitio para la rueda. La misma llamada, con los mismos 7
+valores, funciona también con `--#api tic80` y `--#api pico8`, en las
+unidades de pantalla de esa consola (ver [TIC80.md](TIC80.md#input) y
+[PICO8.md](PICO8.md#api)); `mouse.*` funciona con todas las API. Una función
+o global propia llamada `mouse` las reemplaza todas.
+
+```lua
+function game_loop()
+    local x, y, left = mouse()
+    if mouse.pressed(1) then          -- se pulsó el botón izquierdo
+        click_at(x, y)
+    end
+    if left then
+        draw_at(x, y)                 -- mantenido
+    end
+    rectfill(x - 1, y - 1, x + 1, y + 1)
+end
+```
+
+**El puntero**
+
+El dispositivo informa del movimiento, no de una posición, así que el
+entorno de ejecución lleva un puntero: empieza en el centro de la pantalla
+(320, 180), se mueve **pasos × escala** (escala 2 por defecto: 2 píxeles por
+paso) y se queda dentro de sus límites (toda la pantalla de 640 × 360 por
+defecto, ambos bordes incluidos). `mouse.bounds()` lo limita a una zona (un
+`nil` deja ese borde como está) y lo mueve dentro; `mouse.position(x, y)` lo
+coloca (cada coordenada dada se redondea hacia abajo y se mantiene dentro de
+los límites; `nil` la conserva); `mouse.scale(n)` fija la velocidad (n ≥ 1).
+Las tres devuelven sus valores actuales, así que `mouse.position()` y
+`mouse.scale()` solo leen. `mouse.delta()` es el movimiento de este cuadro
+en píxeles (después de la escala, antes de los límites); 0, 0 si no se
+movió.
+
+**Botones**
+
+`left`, `middle` y `right` siguen pulsados mientras lo estén los botones.
+Para `mouse.pressed(b)`, `mouse.released(b)` y `mouse.buttons()`, los
+botones son números: **1 izquierdo, 2 derecho, 4 central**, sumados para
+"cualquiera de estos" (`mouse.pressed(3)`: izquierdo o derecho). Sin `b`,
+cualquier botón. `pressed` / `released` solo son verdaderos en el cuadro en
+que cambió el botón. El adaptador mantiene cada cambio de botón al menos
+25 ms, así que hasta un clic rápido dura más de un cuadro.
+
+**Cómo se lee**
+
+El dispositivo lleva dos contadores, uno por eje, que recorren 12
+posiciones, cambiando un control del mando por paso; cada lectura los
+compara con la anterior, lo que da de −5 a +5 pasos por eje (6 no se
+distingue de −6 y cuenta como sin movimiento). Así que, como el teclado, el
+ratón hay que leerlo **en cada cuadro** — y el compilador se encarga cuando
+el programa lo usa: cada llamada a `mouse`/`mouse.*` lo lee (una vez por
+cuadro), los controladores de `game_loop()`, TIC-80 y PICO-8 lo leen en cada
+cuadro, y `system.wait()`, `ioports.gpu.sync()` y el `flip()` de PICO-8 lo
+leen antes de su `WAIT` (lo que llega entonces cuenta para el cuadro
+siguiente). Un bucle `main()` que espera con `system.wait()` no pierde
+movimiento aunque solo mire el ratón de vez en cuando. El movimiento solo se
+mide entre dos lecturas de un dispositivo conectado separadas como mucho 2
+cuadros; cualquier otro caso — un dispositivo recién conectado, cuadros
+pasados en una pantalla de pausa, un bucle con `__rawasm__("WAIT")` — solo
+toma los contadores como nuevo punto de partida, así que el puntero nunca
+salta.
+
+`mouse.port(n)` mueve el ratón al puerto de mando `n` (0–3, acotado) y
+empieza de nuevo desde el estado actual del dispositivo (el puntero se queda
+donde está). `mouse.connected()` es verdadero cuando hay algo conectado en
+el puerto del ratón. Como con el teclado, leer el puerto del ratón no altera
+el mando que el programa tiene seleccionado.
 
 ---
 

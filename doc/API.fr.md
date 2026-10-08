@@ -29,6 +29,7 @@ L'ordre d'écriture des ports SPU compte pour le son ; voir
 - [Graphismes : rect() / rectfill()](#graphismes--rect--rectfill)
 - [Entrées : btn() / btnp()](#entrées--btn--btnp)
 - [Clavier : key() / keyp() / kbd.\*](#clavier--key--keyp--kbd)
+- [Souris : mouse() / mouse.\*](#souris--mouse--mouse)
 - [Tilemap : tilemap.\*](#tilemap--tilemap)
 - [Carte mémoire : memcard.\*](#carte-mémoire--memcard)
 - [Autres ports d'E/S bruts](#autres-ports-des-bruts)
@@ -80,6 +81,19 @@ nom (`spr`, `rgba`, `color`, …) remplace l'intrinsèque.
 | `kbd.port([n])` | nombre | Port de manette du clavier (1 par défaut) ; le changer repart de zéro. |
 | `kbd.capslock()`, `kbd.connected()` | booléen | État de Verr Maj ; périphérique branché. |
 | `kbd.clear()` | nil | Oublie les événements non lus. |
+
+*Souris* (périphérique v32mouse) — [détails](#souris--mouse--mouse)
+
+| Appel | Renvoie | Ce qu'il fait |
+|---|---|---|
+| `mouse()` | x, y, left, middle, right, scrollx, scrolly | Pointeur (pixels d'écran) et boutons (booléens), comme celui de TIC-80 ; défilement toujours 0. |
+| `mouse.pressed([b])`, `mouse.released([b])` | booléen | Un bouton de `b` (1 gauche, 2 droit, 4 milieu ; sommes ; aucun : n'importe lequel) s'est enfoncé / a été relâché à cette image. |
+| `mouse.buttons()` | nombre | Boutons enfoncés, 1 + 2 + 4. |
+| `mouse.delta()` | dx, dy | Le mouvement de cette image, en pixels. |
+| `mouse.position([x, y])` | x, y | Le pointeur ; le déplace si des valeurs sont données. |
+| `mouse.bounds(x1, y1, x2, y2)` | nil | Zone où reste le pointeur (par défaut, l'écran). |
+| `mouse.scale([n])`, `mouse.port([n])` | nombre | Pixels par pas (2 par défaut) ; port de manette (3 par défaut). |
+| `mouse.connected()` | booléen | Périphérique branché. |
 
 *Son* — [détails](#son--music--sfx)
 
@@ -1175,6 +1189,104 @@ La manette sélectionnée est mémorisée par l'environnement d'exécution
 émulateurs Vircon32 renvoient une valeur erronée quand on lit ce port. Les
 lectures de `ioports.inp.gamepad` donnent elles aussi la valeur mémorisée.
 Une écriture du port par `__rawasm__` contourne ce mécanisme.
+
+---
+
+## Souris : mouse() / mouse.\*
+
+```
+mouse()                       -> x, y, left, middle, right, scrollx, scrolly
+mouse.pressed([b])            -> booléen, un bouton de b s'est enfoncé à cette image
+mouse.released([b])           -> booléen, un bouton de b a été relâché à cette image
+mouse.buttons()               -> boutons enfoncés : 1 gauche + 2 droit + 4 milieu
+mouse.delta()                 -> dx, dy : le mouvement de cette image
+mouse.position([x, y])        -> x, y (et y place le pointeur)
+mouse.bounds(x1, y1, x2, y2)  -- la zone où reste le pointeur
+mouse.scale([n])              -> pixels parcourus par pas (et le change)
+mouse.port([n])               -> port de manette de la souris (et le change)
+mouse.connected()             -> booléen, quelque chose est branché sur ce port
+```
+
+Ces fonctions lisent une souris à travers un périphérique **v32mouse** : un
+adaptateur USB de souris que la console voit comme une manette ordinaire
+(voir le projet v32io). Il se branche sur un port de manette — **le port 3
+(le quatrième) par défaut**, comme dans la démo souris de v32io, ce qui
+laisse la place à un clavier (port 1) et à la manette d'un joueur (port 0).
+On le change avec `--mouse N` sur la ligne de commande, une indication
+`--#mouse N` dans le source, ou `mouse.port(n)` à l'exécution.
+
+`mouse()` est celui de TIC-80 : `x, y` du pointeur, puis `left, middle,
+right` en booléens, puis `scrollx, scrolly`, toujours 0 — le périphérique
+n'a pas de place pour la molette. Le même appel, avec les mêmes 7 valeurs,
+fonctionne aussi avec `--#api tic80` et `--#api pico8`, dans les unités
+d'écran de cette console (voir [TIC80.md](TIC80.md#input) et
+[PICO8.md](PICO8.md#api)) ; `mouse.*` fonctionne avec toutes les API. Une
+fonction ou une globale à vous nommée `mouse` les remplace tous.
+
+```lua
+function game_loop()
+    local x, y, left = mouse()
+    if mouse.pressed(1) then          -- le bouton gauche s'est enfoncé
+        click_at(x, y)
+    end
+    if left then
+        draw_at(x, y)                 -- maintenu
+    end
+    rectfill(x - 1, y - 1, x + 1, y + 1)
+end
+```
+
+**Le pointeur**
+
+Le périphérique signale un mouvement, pas une position, donc
+l'environnement d'exécution tient un pointeur : il part du centre de l'écran
+(320, 180), se déplace de **pas × échelle** (échelle 2 par défaut : 2 pixels
+par pas) et reste dans ses limites (tout l'écran 640 × 360 par défaut, bords
+inclus). `mouse.bounds()` le limite à une zone (un `nil` garde ce bord tel
+quel) et l'y ramène ; `mouse.position(x, y)` le place (chaque coordonnée
+donnée est arrondie à l'entier inférieur et gardée dans les limites ; `nil`
+la conserve) ; `mouse.scale(n)` règle la vitesse (n ≥ 1). Les trois
+renvoient leurs valeurs actuelles, donc `mouse.position()` et
+`mouse.scale()` ne font que lire. `mouse.delta()` est le mouvement de cette
+image en pixels (après l'échelle, avant les limites) ; 0, 0 s'il n'a pas
+bougé.
+
+**Boutons**
+
+`left`, `middle` et `right` restent vrais tant que les boutons sont
+enfoncés. Pour `mouse.pressed(b)`, `mouse.released(b)` et
+`mouse.buttons()`, les boutons sont des nombres : **1 gauche, 2 droit, 4
+milieu**, additionnés pour « l'un de ceux-ci » (`mouse.pressed(3)` : gauche
+ou droit). Sans `b`, n'importe quel bouton. `pressed` / `released` ne sont
+vrais qu'à l'image où le bouton a changé. L'adaptateur garde chaque
+changement de bouton au moins 25 ms, donc même un clic rapide dure plus
+d'une image.
+
+**Comment elle est lue**
+
+Le périphérique tient deux compteurs, un par axe, qui font le tour de 12
+positions, une commande de la manette changeant à chaque pas ; chaque
+lecture les compare à la précédente, ce qui donne de −5 à +5 pas par axe (6
+ne se distingue pas de −6 et compte comme aucun mouvement). Comme le
+clavier, la souris doit donc être lue **à chaque image** — et le
+compilateur s'en charge quand le programme l'utilise : chaque appel à
+`mouse`/`mouse.*` la lit (une fois par image), les boucles de
+`game_loop()`, TIC-80 et PICO-8 la lisent à chaque image, et
+`system.wait()`, `ioports.gpu.sync()` et le `flip()` de PICO-8 la lisent
+avant leur `WAIT` (ce qui arrive alors compte pour l'image suivante). Une
+boucle `main()` qui attend avec `system.wait()` ne perd aucun mouvement même
+si elle ne regarde la souris que de temps en temps. Le mouvement n'est
+mesuré qu'entre deux lectures d'un périphérique branché espacées d'au plus
+2 images ; dans tous les autres cas — un périphérique tout juste branché,
+des images passées dans un écran de pause, une boucle
+`__rawasm__("WAIT")` — la lecture prend seulement les compteurs comme
+nouveau point de départ, si bien que le pointeur ne saute jamais.
+
+`mouse.port(n)` déplace la souris sur le port de manette `n` (0–3, borné)
+et repart de l'état actuel du périphérique (le pointeur reste où il est).
+`mouse.connected()` est vrai quand quelque chose est branché sur le port de
+la souris. Comme pour le clavier, lire le port de la souris ne perturbe pas
+la manette sélectionnée par le programme.
 
 ---
 

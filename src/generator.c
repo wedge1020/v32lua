@@ -778,6 +778,9 @@ void generate_global_setup (ASTNode *node)
     // v32kbd keyboard: state and strobe baseline (v32kbd.c)
     v32kbd_emit_setup ();
 
+    // v32mouse: pointer and counter baseline (v32mouse.c)
+    v32mouse_emit_setup ();
+
     // NEW: Explicitly nil-initialize every plain (non-function) global.
     // Previously a global's value before its first assignment was
     // whatever raw bits already happened to be sitting in that RAM
@@ -1001,6 +1004,7 @@ void generate_program (ASTNode *head)
         emit_asm ("MOV  R0, 0\n");
         emit_asm ("MOV  [PICO8_DRAW_COST], R0 ; RAM isn't clean after the BIOS\n");
         emit_asm ("__start:\n");
+        v32io_emit_frame_start_hooks ();
         emit_asm ("CALL __builtin_pico8_pause_check ; Start pauses, as on the TIC-80 layer\n");
         // time()/t(): PICO-8 counts frames (_update calls), not wall time,
         // so time stands still while paused
@@ -1038,6 +1042,7 @@ void generate_program (ASTNode *head)
                 emit_asm ("IADD R0, R1 ; + 1/8 margin\n");
                 emit_asm ("IGT  R0, 250000 ; would the draw run past the frame?\n");
                 emit_asm ("JF   R0, __pico8_draw_now\n");
+                v32io_emit_frame_end_hooks ();
                 emit_asm ("WAIT ; start _draw() on a fresh frame\n");
                 emit_asm ("CALL __builtin_pico8_music_tick\n");
                 emit_asm ("__pico8_draw_now:\n");
@@ -1065,6 +1070,7 @@ void generate_program (ASTNode *head)
         // keeps its 30 (or 60) calls per second as long as a tick fits in
         // its PICO8_FRAME_STEP frames.
         emit_asm ("__pico8_pace:\n");
+        v32io_emit_frame_end_hooks ();         // every frame, 30 fps ticks too
         emit_asm ("WAIT\n");
         emit_asm ("CALL __builtin_pico8_music_tick ; start the next music pattern on time\n");
         emit_asm ("IN   R0, TIM_FrameCounter\n");
@@ -1106,10 +1112,11 @@ void generate_program (ASTNode *head)
             emit_asm ("MOV R1, [R1]\n");
             emit_asm ("IEQ R1, 0\n");
             emit_asm ("JF R1, __just_wait ; If paused, skip TIC\n");
-            v32kbd_emit_frame_start_hook ();
+            v32io_emit_frame_start_hooks ();
             emit_asm ("CALL __function_TIC\n");
             emit_asm ("CALL __builtin_tic80_sound_tick ; sfx() durations\n");
             emit_asm ("__just_wait:");
+            v32io_emit_frame_end_hooks ();     // paused frames too
             emit_asm ("WAIT\n");
 
             // exit() defers termination to the end of the current frame --
@@ -1163,7 +1170,7 @@ void generate_program (ASTNode *head)
         }
         else
         {
-            v32kbd_emit_frame_start_hook ();
+            v32io_emit_frame_start_hooks ();
             emit_asm ("CALL __function_game_loop ; Execute game loop tick\n");
         }
         emit_asm ("WAIT\n");

@@ -600,6 +600,17 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         return try_emit_kbd_namespace_intrinsic (node, dest_reg, func_name);
     }
 
+    // mouse() / mouse.* -- v32mouse mouse, every API mode (v32mouse.c).
+    // (A function or global of the program's own named mouse replaces
+    // them; a bare mouse() of its own never gets here.)
+    if (strcmp(func_name, "mouse") == 0 && resolve_symbol ("mouse") == NULL) {
+        return emit_v32mouse_intrinsic (node, dest_reg);
+    }
+    if (strncmp(func_name, "mouse.", 6) == 0 && resolve_symbol ("mouse") == NULL &&
+        resolve_function_symbol ("mouse") == NULL) {
+        return try_emit_mouse_namespace_intrinsic (node, dest_reg, func_name);
+    }
+
     // hex("0x...")
     if (strcmp(func_name, "hex") == 0) {
         return emit_hex_intrinsic(node, dest_reg);
@@ -828,6 +839,12 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         if (strcmp (func_name, "run") == 0)
         {
             return (emit_cart_restart_intrinsic (node, dest_reg, "run"));
+        }
+
+        // the prelude stat(): the devkit mouse, stat(32..34) (v32mouse.c)
+        if (strcmp (func_name, "__p8_stat") == 0)
+        {
+            return (emit_pico8_stat_intrinsic (node, dest_reg));
         }
 
         // the prelude cursor()'s state access (pico8.s)

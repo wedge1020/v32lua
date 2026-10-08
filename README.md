@@ -267,8 +267,9 @@ present):
 * **Native Vircon32 API** (default) — direct, zero-cost access to the
   console's own IOPorts: `ioports.gpu.*`, `ioports.spu.*`, `ioports.inp.*`,
   `music.*`/`sfx.*`, `system.*`, `rect()`/`rectfill()`, the native
-  `tilemap.*` API, and a full keyboard through a v32kbd device
-  (`key()`/`keyp()`, typed text with `kbd.read()`). Fully documented in
+  `tilemap.*` API, a full keyboard through a v32kbd device
+  (`key()`/`keyp()`, typed text with `kbd.read()`) and a mouse through a
+  v32mouse device (`mouse()`, `mouse.*`). Fully documented in
   [doc/API.md](doc/API.md).
 * **TIC-80 compatibility layer** (`--#api "tic80"`) — TIC-80-shaped calls
   (`spr()`, `btn()`/`btnp()`, `map()`/`mset()`/`mget()`, sound/music
@@ -280,7 +281,8 @@ present):
   [doc/TIC80.md](doc/TIC80.md)); `spr()` rotates; Start pauses the game (as
   on the PICO-8 layer). `print()` honours its color and returns the text
   width. `key()`/`keyp()` read a real keyboard through a v32kbd device
-  (TIC-80 key codes, autorepeat included).
+  (TIC-80 key codes, autorepeat included), and `mouse()` a real mouse
+  through a v32mouse device.
   `map()` takes all of TIC-80's optional arguments including `scale`
   (not the remap callback); `fget()` returns a boolean and `fset()` takes
   one. `peek`/`peek1`/`peek2`/`peek4`, `poke`/`poke1`/`poke2`/`poke4`,
@@ -306,7 +308,8 @@ present):
   `peek`/`poke` (8/16/32-bit, and the `@ % $` operators), `memcpy`/
   `memset`/`reload`/`sget`/`sset` on an emulated 64 KB RAM in PICO-8's
   layout (map, flags, pen, camera, buttons live; screen writes drawn),
-  `cartdata`/`dget`/`dset` saved on the memory card, and
+  `cartdata`/`dget`/`dset` saved on the memory card, the devkit mouse
+  (`stat(32..34)`, plus TIC-80's `mouse()`) through a v32mouse device, and
   `_init`/`_update` (30 fps)/
   `_update60`/`_draw`. The 128×128 screen is scaled 2.75× and centered;
   drawing outside it is masked. A **`.p8` cart compiles directly**
@@ -339,6 +342,7 @@ Supported hints:
 | `--#bezel off` \| `on` \| `"art.png"` | PICO-8: the side panels beside the 128×128 screen — none, the built-in art, or your own (see [doc/PICO8.md](doc/PICO8.md#side-panels)). |
 | `--#fast-circles` | TIC-80/PICO-8: filled circles above radius 31 are drawn as one scaled disc (faster, edges differ slightly). |
 | `--#keyboard 0`–`3` | Gamepad port of a v32kbd keyboard, for `key()`/`keyp()`/`kbd.*` (default 1; see [doc/API.md](doc/API.md#keyboard-key--keyp--kbd)). |
+| `--#mouse 0`–`3` | Gamepad port of a v32mouse mouse, for `mouse()`/`mouse.*` and PICO-8's `stat(32..34)` (default 3; see [doc/API.md](doc/API.md#mouse-mouse--mouse)). |
 | `--#texture NAME "path/image.png"` | Registers a texture resource and binds it to a compile-time constant `NAME`. The XML names the `.vtex` file (`image.vtex`) that `png2vircon` makes from the PNG. |
 | `--#sound NAME "path/sound.wav"` | Registers a sound resource and binds it to a compile-time constant `NAME`. The XML names the `.vsnd` file that `wav2vircon` makes. |
 | `--#tilemap NAME "path/map.csv"` | Registers a tilemap from a CSV file, embedded directly into the ROM image (see [doc/API.md](doc/API.md#tilemap-tilemap)). |
@@ -811,6 +815,8 @@ short sample of the most commonly used entries:
 | **`ioports.inp.inputs`** | *Custom Action Subroutine* | Read Only | **Collation intrinsic:** polls all gamepad buttons/axes in one pass, collates them into a single 32-bit bitmask, and casts it to a Lua float. |
 | **`key([k])`**, **`keyp([k [, hold, period]])`** | v32kbd device on a gamepad port | Intrinsic | A full keyboard through a v32kbd device (gamepad port 1 by default, `--#keyboard N`): key held / went down this frame, TIC-80 style, with key codes or literal names (`"a"`, `"enter"`, `"shift"`) ([details](doc/API.md#keyboard-key--keyp--kbd)). |
 | **`kbd.read()`**, **`kbd.event()`**, **`kbd.port([n])`**, **`kbd.capslock()`**, **`kbd.connected()`**, **`kbd.clear()`** | v32kbd device | Intrinsic | Typed text (Shift and Caps Lock applied), raw press/release events, the keyboard's port, Caps Lock, device present, drop unread events. |
+| **`mouse()`** | v32mouse device on a gamepad port | Intrinsic | A mouse through a v32mouse device (gamepad port 3 by default, `--#mouse N`): `x, y, left, middle, right, scrollx, scrolly`, as TIC-80's (scroll always 0) ([details](doc/API.md#mouse-mouse--mouse)). |
+| **`mouse.pressed/released([b])`**, **`mouse.buttons()`**, **`mouse.delta()`**, **`mouse.position([x, y])`**, **`mouse.bounds(...)`**, **`mouse.scale([n])`**, **`mouse.port([n])`**, **`mouse.connected()`** | v32mouse device | Intrinsic | Button edges this frame, buttons held, movement this frame, the pointer, its limits and speed, the mouse's port, device present. |
 
 *System & Runtime Utilities*
 
@@ -973,12 +979,12 @@ decision:
   of whole SFX would roughly halve that again (about half of Celeste's
   notes repeat), at the cost of a note-level sequencer.
 * PICO-8: `pal`/`palt` (compile to no-ops with a warning), `clip`,
-  real `stat` values, fractional `spr` widths, `pget`, `oval`/`ovalfill`,
+  real `stat` values (beyond the mouse), fractional `spr` widths, `pget`, `oval`/`ovalfill`,
   `menuitem`, multi-cart loading (`reload` from another file, `cstore`);
   writing sprite/sound memory has no effect and reading screen memory
   returns only what was written there (no GPU read-back); the SFX
   editor's filter switches in synthesized sound
-* TIC-80: `tri`/`trib`, `elli`/`ellib`, `clip`, `mouse`, `font`,
+* TIC-80: `tri`/`trib`, `elli`/`ellib`, `clip`, `font`,
   `map()`'s remap callback; the `sfx()` speed argument and `music()`'s
   tempo/speed/sustain arguments (see [doc/TIC80.md](doc/TIC80.md#sound)).
   `peek`/`poke`

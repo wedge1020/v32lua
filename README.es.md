@@ -282,8 +282,9 @@ defecto cuando no hay ninguna pista `--#api` presente):
 * **API nativa de Vircon32** (por defecto) — acceso directo y de costo cero
   a los IOPorts propios de la consola: `ioports.gpu.*`, `ioports.spu.*`,
   `ioports.inp.*`, `music.*`/`sfx.*`, `system.*`, `rect()`/`rectfill()`,
-  la API nativa `tilemap.*`, y un teclado completo a través de un
-  dispositivo v32kbd (`key()`/`keyp()`, texto escrito con `kbd.read()`).
+  la API nativa `tilemap.*`, un teclado completo a través de un
+  dispositivo v32kbd (`key()`/`keyp()`, texto escrito con `kbd.read()`) y
+  un ratón a través de un dispositivo v32mouse (`mouse()`, `mouse.*`).
   Documentada por completo en [doc/API.es.md](doc/API.es.md).
 * **Capa de compatibilidad TIC-80** (`--#api "tic80"`) — llamadas con la
   forma de TIC-80 (`spr()`, `btn()`/`btnp()`, `map()`/`mset()`/`mget()`,
@@ -296,7 +297,8 @@ defecto cuando no hay ninguna pista `--#api` presente):
   de TIC-80 (ver [doc/TIC80.md](doc/TIC80.md)); `spr()` rota; Start pausa
   el juego (como en la capa PICO-8). `print()` respeta su color y devuelve
   el ancho del texto. `key()`/`keyp()` leen un teclado real a través de un
-  dispositivo v32kbd (códigos de tecla de TIC-80, con autorrepetición).
+  dispositivo v32kbd (códigos de tecla de TIC-80, con autorrepetición), y
+  `mouse()` un ratón real a través de un dispositivo v32mouse.
   `map()` acepta todos los argumentos opcionales de TIC-80, incluido `scale`
   (no la función de reasignación); `fget()` devuelve un booleano y `fset()`
   recibe uno. `peek`/`peek1`/`peek2`/`peek4`, `poke`/`poke1`/`poke2`/`poke4`,
@@ -325,7 +327,9 @@ defecto cuando no hay ninguna pista `--#api` presente):
   `@ % $`), `memcpy`/`memset`/`reload`/`sget`/`sset` sobre una RAM emulada
   de 64 KB con la disposición de PICO-8 (mapa, banderas, lápiz, cámara y
   botones en vivo; las escrituras en pantalla se dibujan),
-  `cartdata`/`dget`/`dset` guardados en la tarjeta de memoria, y
+  `cartdata`/`dget`/`dset` guardados en la tarjeta de memoria, el ratón
+  del devkit (`stat(32..34)`, más el `mouse()` de TIC-80) a través de un
+  dispositivo v32mouse, y
   `_init`/`_update` (30 fps)/`_update60`/`_draw`. La pantalla de 128×128 se
   escala 2,75× y se centra; lo que se dibuja fuera de ella queda
   enmascarado. **Un cartucho `.p8` compila directamente**
@@ -359,6 +363,7 @@ Pistas soportadas:
 | `--#bezel off` \| `on` \| `"arte.png"` | PICO-8: los paneles laterales junto a la pantalla de 128×128 — ninguno, el arte integrado o el tuyo propio (ver [doc/PICO8.md](doc/PICO8.md#side-panels)). |
 | `--#fast-circles` | TIC-80/PICO-8: los círculos rellenos de radio mayor que 31 se dibujan como un único disco escalado (más rápido, los bordes difieren ligeramente). |
 | `--#keyboard 0`–`3` | Puerto de mando de un teclado v32kbd, para `key()`/`keyp()`/`kbd.*` (1 por defecto; ver [doc/API.es.md](doc/API.es.md#teclado-key--keyp--kbd)). |
+| `--#mouse 0`–`3` | Puerto de mando de un ratón v32mouse, para `mouse()`/`mouse.*` y `stat(32..34)` de PICO-8 (3 por defecto; ver [doc/API.es.md](doc/API.es.md#ratón-mouse--mouse)). |
 | `--#texture NOMBRE "ruta/imagen.png"` | Registra un recurso de textura y lo vincula a una constante `NOMBRE` en tiempo de compilación. El XML nombra el archivo `.vtex` (`imagen.vtex`) que `png2vircon` genera a partir del PNG. |
 | `--#sound NOMBRE "ruta/sonido.wav"` | Registra un recurso de sonido y lo vincula a una constante `NOMBRE` en tiempo de compilación. El XML nombra el archivo `.vsnd` que genera `wav2vircon`. |
 | `--#tilemap NOMBRE "ruta/mapa.csv"` | Registra un mapa de mosaicos desde un archivo CSV, incrustado directamente en la imagen ROM (ver [doc/API.es.md](doc/API.es.md#mapa-de-mosaicos-tilemap)). |
@@ -876,6 +881,8 @@ uso más común:
 | **`ioports.inp.inputs`** | *Subrutina de Acción Personalizada* | Solo Lectura | **Intrínseco de recopilación:** sondea todos los botones/ejes del mando en una sola pasada, los combina en una única máscara de bits de 32 bits, y la convierte a un flotante de Lua. |
 | **`key([k])`**, **`keyp([k [, hold, period]])`** | dispositivo v32kbd en un puerto de mando | Intrínseco | Un teclado completo a través de un dispositivo v32kbd (puerto de mando 1 por defecto, `--#keyboard N`): tecla pulsada / pulsada en este cuadro, al estilo de TIC-80, con códigos de tecla o nombres literales (`"a"`, `"enter"`, `"shift"`) ([detalles](doc/API.es.md#teclado-key--keyp--kbd)). |
 | **`kbd.read()`**, **`kbd.event()`**, **`kbd.port([n])`**, **`kbd.capslock()`**, **`kbd.connected()`**, **`kbd.clear()`** | dispositivo v32kbd | Intrínseco | Texto escrito (con Mayús y Bloq Mayús), eventos de pulsar/soltar, el puerto del teclado, Bloq Mayús, dispositivo presente, descartar eventos no leídos. |
+| **`mouse()`** | dispositivo v32mouse en un puerto de mando | Intrínseco | Un ratón a través de un dispositivo v32mouse (puerto de mando 3 por defecto, `--#mouse N`): `x, y, left, middle, right, scrollx, scrolly`, como el de TIC-80 (desplazamiento siempre 0) ([detalles](doc/API.es.md#ratón-mouse--mouse)). |
+| **`mouse.pressed/released([b])`**, **`mouse.buttons()`**, **`mouse.delta()`**, **`mouse.position([x, y])`**, **`mouse.bounds(...)`**, **`mouse.scale([n])`**, **`mouse.port([n])`**, **`mouse.connected()`** | dispositivo v32mouse | Intrínseco | Cambios de botones en este cuadro, botones pulsados, movimiento en este cuadro, el puntero, sus límites y velocidad, el puerto del ratón, dispositivo presente. |
 
 *Utilidades del Sistema y de Ejecución*
 
@@ -1053,13 +1060,13 @@ una decisión de diseño:
   la mitad de las notas de Celeste se repiten), a costa de un secuenciador
   por notas.
 * PICO-8: `pal`/`palt` (compilan a no-ops con una advertencia), `clip`,
-  valores reales de `stat`, anchos fraccionarios en `spr`, `pget`,
+  valores reales de `stat` (aparte del ratón), anchos fraccionarios en `spr`, `pget`,
   `oval`/`ovalfill`, `menuitem`, la carga multicartucho (`reload` desde
   otro archivo, `cstore`); escribir en la memoria de sprites o de sonido
   no tiene efecto y leer la memoria de pantalla solo devuelve lo escrito
   allí (no hay lectura de la GPU); los filtros del editor de SFX en el
   sonido sintetizado
-* TIC-80: `tri`/`trib`, `elli`/`ellib`, `clip`, `mouse`, `font`, la
+* TIC-80: `tri`/`trib`, `elli`/`ellib`, `clip`, `font`, la
   función de reasignación de `map()`; el argumento de velocidad de `sfx()`
   y los argumentos tempo/velocidad/sustain de `music()` (ver
   [doc/TIC80.md](doc/TIC80.md#sound)). `peek`/`poke` trabajan sobre una

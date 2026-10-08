@@ -208,6 +208,24 @@
     runtime_v32kbd_end:
 #endif
 
+/* --- v32mouse: mouse decoder (mouse(), mouse.*, PICO-8 stat(32..34)) --- */
+#ifdef __APPLE__
+    .global _runtime_v32mouse_start
+    _runtime_v32mouse_start:
+#else
+    .global runtime_v32mouse_start
+    runtime_v32mouse_start:
+#endif
+    .incbin "runtime/v32mouse.s"
+    .byte 0
+#ifdef __APPLE__
+    .global _runtime_v32mouse_end
+    _runtime_v32mouse_end:
+#else
+    .global runtime_v32mouse_end
+    runtime_v32mouse_end:
+#endif
+
 /* --- PICO-8 API (all-or-nothing) --- */
 #ifdef __APPLE__
     .global _runtime_pico8_start

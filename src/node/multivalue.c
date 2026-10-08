@@ -31,7 +31,8 @@ static SymbolNode *mv_call_symbol (ASTNode *call, bool *is_unknown)
         SymbolNode *s = resolve_function_symbol (target->as.id.name);
         if (s == NULL) s = resolve_symbol (target->as.id.name);
         if (s == NULL) {
-            *is_unknown = false;      // no such variable: an intrinsic
+            // no such variable: an intrinsic -- one value, except mouse()
+            *is_unknown = v32mouse_call_values (target->as.id.name) > 1;
             return NULL;
         }
         if (s->is_function) *is_unknown = false;
@@ -50,6 +51,7 @@ static SymbolNode *mv_call_symbol (ASTNode *call, bool *is_unknown)
         s = resolve_symbol (m);
     }
     if (s != NULL && s->is_function) { *is_unknown = false; return s; }
+    if (v32mouse_call_values (path) > 1) { *is_unknown = true; return NULL; }
     // a library namespace (math.floor, string.sub, ...): intrinsics
     static const char *libs[] = { "math.", "string.", "table.", "os.", "io.",
         "gpu.", "spu.", "inp.", "mem.", "tim.", "tilemap.", "ioports.", "coroutine.",

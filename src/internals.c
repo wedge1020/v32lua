@@ -769,6 +769,9 @@ void compiler_warning (ErrorType type, int line_num, const char* format, ...)
 
 // Helper function to look up return count
 int get_builtin_return_count(const char *func_name) {
+    // mouse() 7, mouse.delta()/position() 2 -- unless the program has its own mouse
+    int mouse_values = v32mouse_call_values (func_name);
+    if (mouse_values > 0) return mouse_values;
     for (int i = 0; builtin_return_counts[i].name != NULL; i++) {
         if (strcmp(func_name, builtin_return_counts[i].name) == 0) {
             return builtin_return_counts[i].return_count;

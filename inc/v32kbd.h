@@ -8,6 +8,11 @@ extern bool v32kbd_wanted;         // the program uses key()/keyp()/kbd.*
 extern int  v32kbd_default_port;   // --keyboard / --#keyboard (config.h default)
 extern bool g_cli_keyboard_set;
 
+// token walk shared with v32mouse.c: (text, length, what follows, is a
+// field, is a number) -> stop here
+typedef bool (*v32io_token_matcher) (const char *, size_t, const char *, bool, bool);
+bool  v32io_source_find            (const char *, v32io_token_matcher);
+
 void  v32kbd_prescan               (const char *);
 int   v32kbd_emit_defines          (FILE *);
 void  v32kbd_emit_setup            (void);
