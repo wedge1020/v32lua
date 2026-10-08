@@ -491,9 +491,9 @@ bool emit_vircon32_tilemap_render_intrinsic (ASTNode *node, int dest_reg)
 // (rgba(), color(), hex(), a variable holding one of those) is passed
 // through as is; absent / nil -> 0xFFFFFFFF (opaque white).
 //
-// Runtime: __builtin_vircon32_rect (vircon32.s), one zoomed draw of the
-// fill texture's 1x1 white region (shapes.c) for rectfill(), up to 4 for
-// rect(). The GPU state it touches (texture, region, multiply color,
+// Runtime: __builtin_vircon32_rect (vircon32.s), one zoomed draw of BIOS
+// texture (-1) region 256 -- a single white pixel the BIOS defines -- for
+// rectfill(), up to 4 for rect(). Nothing is added to the cartridge. The GPU state it touches (texture, region, multiply color,
 // scale) is restored afterwards; the active blending mode is used as is.
 //
 // Stack: [BP+2]=x1 [BP+3]=y1 [BP+4]=x2 [BP+5]=y2 [BP+6]=color (raw word)
@@ -520,13 +520,6 @@ bool emit_vircon32_rect_intrinsic (ASTNode *node, int dest_reg, bool filled)
     if (curr != NULL) {
         compiler_warning (ERR_SEMANTIC, node->line_number,
             "%s() takes at most 5 arguments; extra arguments ignored", name);
-    }
-    if (fill_texture_id < 0) {
-        // register_fill_texture() looks for the names in the source text,
-        // so this only happens if the texture file could not be written
-        compiler_error (ERR_INTERNAL, node->line_number,
-            "%s(): the fill texture was not created", name);
-        return false;
     }
 
     // Arg 6: filled flag (raw int)

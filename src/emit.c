@@ -657,12 +657,6 @@ int   emit_variable_map (void)
         fprintf (out(), "%%define  SHAPES_FAST              %d\n", shapes_fast ? 1 : 0);
     }
 
-    // Native rect()/rectfill() fill texture (shapes.c), -1 when there is
-    // none. Unconditional: vircon32.s, which uses it, can be emitted in any
-    // API mode.
-    fprintf (out(), "%%define  V32_FILL_TEXTURE         %d\n", fill_texture_id);
-    lines_printed += 1;
-
     // v32kbd keyboard state (v32kbd.c): fixed RAM, only when the program
     // uses the keyboard
     lines_printed += v32kbd_emit_defines (out());

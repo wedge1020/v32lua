@@ -2312,9 +2312,10 @@ _tonebank_sfx_done:
 ;;
 ;; The corners are opposite and INCLUSIVE, in any order; each coordinate is
 ;; floored (nil / non-numbers count as 0). rectfill() is ONE zoomed draw of
-;; region 0 of the fill texture (V32_FILL_TEXTURE: 1 white pixel with white
-;; around it, see shapes.c) at scale (w, h) -- exact for integer sizes, since
-;; the region is 1x1. rect() is up to 4 non-overlapping edges -- top and
+;; the BIOS texture's (-1) region 256 -- one white pixel, (469, 29), hotspot
+;; on it, defined by the BIOS -- at scale (w, h): exact for integer sizes,
+;; since the region is 1x1, and the GPU's zoom correction keeps sampling
+;; inside that pixel. rect() is up to 4 non-overlapping edges -- top and
 ;; bottom full width, left and right between them -- so a translucent color
 ;; is not drawn twice at the corners.
 ;;
@@ -2369,8 +2370,8 @@ __builtin_vircon32_rect:
     ISUB  R4, R2
     IADD  R4, 1                   ; height (>= 1)
 
-    OUT   GPU_SelectedTexture, V32_FILL_TEXTURE
-    OUT   GPU_SelectedRegion, 0
+    OUT   GPU_SelectedTexture, -1    ; BIOS texture
+    OUT   GPU_SelectedRegion, 256    ; its white pixel
     MOV   R0, [BP+6]
     OUT   GPU_MultiplyColor, R0   ; raw word, no CFI (see spr())
 

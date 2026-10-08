@@ -4,10 +4,10 @@
 --@ rect(x1, y1, x2, y2 [, color]) draws a 1-pixel outline, rectfill() a
 --@ filled rectangle; (x1, y1) and (x2, y2) are opposite INCLUSIVE corners
 --@ in any order, floored. color is a packed 0xAABBGGRR word (default
---@ opaque white). Both draw from a 4x4 white texture the compiler adds
---@ after the program's own --#texture entries (texture 0 here, as this
---@ test declares none), one zoomed draw for rectfill(), up to 4
---@ non-overlapping ones for rect().
+--@ opaque white). Both draw the BIOS texture's (-1) region 256, a single
+--@ white pixel the BIOS defines -- nothing is added to the cartridge --
+--@ one zoomed draw for rectfill(), up to 4 non-overlapping ones for
+--@ rect().
 --@
 --@ What memory can show: the GPU state rect()/rectfill() touch is put
 --@ back (texture, region, multiply color, scale), they return nothing,
@@ -73,7 +73,7 @@ number_result05: 0.5000
 bool_result06: true
 
 Emulator quads (corner coordinates are pixel edges: 10,20 - 20,25 covers
-pixels 10..19 x 20..24), multiply color, texture 0:
+pixels 10..19 x 20..24), multiply color, texture -1 (BIOS):
   rectfill(10, 20, 19, 24)          FFFFFFFF  10,20 - 20,25
   rectfill(30, 20, 0, -3.5, ...)    FF0000FF   0,-4 - 31,21
   rect(100, 100, 109, 104, ...)     800000FF  100,100 - 110,101  top

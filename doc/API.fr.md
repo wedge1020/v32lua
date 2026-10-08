@@ -893,13 +893,13 @@ rectfill(px, py, px + 15, py + 15, rgba(255, 0, 0, 128))   -- rouge translucide
 
 **Comment il dessine**
 
-Un programme qui appelle `rect` ou `rectfill` reçoit une petite texture à
-lui : 4 × 4 pixels blancs opaques, ajoutée à la cartouche **après** toutes
-les `--#texture` (vos numéros de texture ne bougent pas ;
-`ioports.car.numvtex` la compte). Sa région 0 est un pixel blanc ;
-`rectfill()` est **un** seul dessin agrandi de cette région à l'échelle
-(largeur, hauteur), teinté par la couleur de multiplication — exact au
-pixel pour toute taille. `rect()` fait jusqu'à 4 dessins qui ne se
+Les deux dessinent avec la texture du BIOS (`-1`), région 256 : un pixel
+blanc défini par le BIOS, en (469, 29), avec son point d'ancrage dessus.
+Rien n'est ajouté à la cartouche. `rectfill()` est **un** seul dessin
+agrandi de cette région à l'échelle (largeur, hauteur), teinté par la
+couleur de multiplication — exact au pixel pour toute taille (la
+correction d'agrandissement du GPU garde l'échantillonnage dans ce seul
+pixel). `rect()` fait jusqu'à 4 dessins qui ne se
 chevauchent pas (bords haut et bas sur toute la largeur, les côtés entre
 eux), si bien qu'un contour translucide n'est pas plus sombre aux coins.
 

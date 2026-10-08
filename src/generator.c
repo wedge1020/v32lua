@@ -775,9 +775,6 @@ void generate_global_setup (ASTNode *node)
         emit_asm ("MOV [META_CALL_DEPTH], R1 ; no __call trampolines pending\n");
     }
 
-    // native rect()/rectfill(): the fill texture's region (shapes.c)
-    emit_fill_texture_setup ();
-
     // v32kbd keyboard: state and strobe baseline (v32kbd.c)
     v32kbd_emit_setup ();
 

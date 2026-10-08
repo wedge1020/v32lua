@@ -14,12 +14,4 @@ bool  shapes_build        (const char *, bool);
 void  emit_shapes_runtime (FILE *);
 void  register_shapes_texture (const char *, const char *, bool);
 
-// Native rect()/rectfill() fill texture (src/shapes.c): 4x4 opaque white,
-// region 0 = the pixel at (1, 1). -1 when the program draws no rectangles.
-#define FILL_TEXTURE_SIZE 4
-extern int   fill_texture_id;
-bool  fill_texture_wanted     (const char *);
-void  register_fill_texture   (const char *, const char *);
-void  emit_fill_texture_setup (void);
-
 #endif

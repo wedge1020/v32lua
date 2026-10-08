@@ -512,20 +512,6 @@ int  main (int  argc, char** argv)
         pico8_bezel_register_custom (base_path);   // --bezel FILE: after the atlas
     }
 
-    // Native API: rect()/rectfill() draw with a 4x4 white texture of their
-    // own (shapes.c), registered after the program's --#texture resources
-    // (whose ids were fixed at parse time) when the source mentions them.
-    if (!runtime_req.needs_pico8 && !runtime_req.needs_tic80)
-    {
-        char base_path[256];
-        strncpy (base_path, output_filename, sizeof (base_path) - 1);
-        base_path[sizeof (base_path) - 1] = '\0';
-        char *last_dot = strrchr (base_path, '.');
-        char *last_slash = strrchr (base_path, '/');
-        if (last_dot && (!last_slash || last_dot > last_slash)) *last_dot = '\0';
-        register_fill_texture (program_text, base_path);
-    }
-
     // v32kbd keyboard support (v32kbd.c): key()/keyp()/kbd.* -- decided
     // from the source before codegen, since the WAIT hooks it adds can be
     // emitted before the first key() call is compiled.

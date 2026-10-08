@@ -829,12 +829,12 @@ rectfill(px, py, px + 15, py + 15, rgba(255, 0, 0, 128))   -- translucent red
 
 **How it draws**
 
-A program that calls `rect` or `rectfill` gets a small texture of its own:
-4 × 4 opaque white pixels, added to the cartridge **after** every
-`--#texture` (so your texture numbers don't move; `ioports.car.numvtex`
-counts it). Region 0 of it is one white pixel; `rectfill()` is **one**
-zoomed draw of that region at scale (width, height), tinted with the
-multiply color — exact to the pixel for any size. `rect()` is up to 4 draws
+Both draw with the BIOS texture (`-1`), region 256: one white pixel the
+BIOS defines, at (469, 29), with its hotspot on it. Nothing is added to
+the cartridge. `rectfill()` is **one** zoomed draw of that region at scale
+(width, height), tinted with the multiply color — exact to the pixel for
+any size (the GPU's zoom correction keeps the sampling inside that one
+pixel). `rect()` is up to 4 draws
 that don't overlap (top and bottom edges full width, the sides between
 them), so a translucent outline isn't darker at the corners.
 
