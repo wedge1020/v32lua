@@ -60,6 +60,7 @@ código fuente.
 
 - [Primeros Pasos](#primeros-pasos)
 - [Capas de Compatibilidad de API](#capas-de-compatibilidad-de-api)
+  - [Teclado y ratón (v32io)](#teclado-y-ratón-v32io)
 - [Pistas de Recursos del Cartucho (`--#...`)](#pistas-de-recursos-del-cartucho)
 - [Proceso de Compilación](#proceso-de-compilación)
 - [Características Clave del Lenguaje y del Compilador](#características-clave-del-lenguaje-y-del-compilador)
@@ -341,6 +342,38 @@ defecto cuando no hay ninguna pista `--#api` presente):
 Solo una superficie de API está activa por cartucho; seleccionar `tic80` o
 `pico8` reemplaza la superficie de llamadas nativa en lugar de añadirse a
 ella.
+
+
+### Teclado y ratón (v32io)
+
+> **⚠ La entrada de teclado y ratón necesita hardware adicional o un
+> emulador modificado.** La consola Vircon32 no tiene teclado ni ratón:
+> solo cuatro mandos. Las funciones de teclado y ratón de v32lua
+> (`key()`/`keyp()`/`kbd.*` y `mouse()`/`mouse.*` nativas, `key()`/`keyp()`/
+> `mouse()` de TIC-80, `stat(32..34)` de PICO-8) leen un teclado o un ratón
+> **disfrazado de mando**, y funcionan **solo** con una de estas opciones:
+>
+> * el **adaptador de hardware v32io** — una placa Waveshare RP2350-USB-A
+>   (sin la resistencia R13) con el firmware v32io: un teclado o ratón USB
+>   conectado a ella aparece en el ordenador como un mando (`v32io:kbd` /
+>   `v32io:mouse`), así que funciona con **cualquier** emulador de Vircon32,
+>   incluido el original, una vez configurado su perfil de joystick;
+> * el **emulador modificado**,
+>   [wedge1020/ComputerSoftware](https://github.com/wedge1020/ComputerSoftware/tree/main),
+>   que lee el teclado del propio ordenador como un dispositivo v32io —
+>   por ahora en su [rama `v32kbd`](https://github.com/wedge1020/ComputerSoftware/tree/v32kbd);
+>   el ratón aún no está (se prevé una rama `v32io` con ambos).
+>
+> **Sin una de ellas, el acceso al teclado y al ratón no es posible:** los
+> programas compilan y se ejecutan, pero ninguna tecla está pulsada nunca
+> y el ratón no se mueve. Los programas que los necesiten deberían
+> indicarlo y, si es posible, ofrecer también controles con mando.
+
+El teclado se lee por defecto del puerto de mando 1 y el ratón del puerto
+3 (`--keyboard N`, `--mouse N`, `--#keyboard N`, `--#mouse N`, o
+`kbd.port(n)` / `mouse.port(n)` en tiempo de ejecución). Los protocolos,
+la lectura en cada cuadro que añade el compilador y la configuración se
+describen en [doc/API.es.md](doc/API.es.md#teclado-y-ratón-qué-se-necesita-v32io).
 
 ---
 
@@ -879,9 +912,9 @@ uso más común:
 | **`ioports.inp.left/right/up/down`** | `INP_Gamepad*` | Solo Lectura | Estado direccional del D-Pad (`> 0` presionado, `< 0` liberado). |
 | **`ioports.inp.A/B/X/Y/L/R/START`** | `INP_GamepadButton*` | Solo Lectura | Estado de botón de acción/gatillo (`> 0` presionado, `< 0` liberado). |
 | **`ioports.inp.inputs`** | *Subrutina de Acción Personalizada* | Solo Lectura | **Intrínseco de recopilación:** sondea todos los botones/ejes del mando en una sola pasada, los combina en una única máscara de bits de 32 bits, y la convierte a un flotante de Lua. |
-| **`key([k])`**, **`keyp([k [, hold, period]])`** | dispositivo v32kbd en un puerto de mando | Intrínseco | Un teclado completo a través de un dispositivo v32kbd (puerto de mando 1 por defecto, `--#keyboard N`): tecla pulsada / pulsada en este cuadro, al estilo de TIC-80, con códigos de tecla o nombres literales (`"a"`, `"enter"`, `"shift"`) ([detalles](doc/API.es.md#teclado-key--keyp--kbd)). |
+| **`key([k])`**, **`keyp([k [, hold, period]])`** | dispositivo v32kbd en un puerto de mando | Intrínseco | **Solo con un adaptador v32io o el emulador modificado** ([por qué](#teclado-y-ratón-v32io)). Un teclado completo a través de un dispositivo v32kbd (puerto de mando 1 por defecto, `--#keyboard N`): tecla pulsada / pulsada en este cuadro, al estilo de TIC-80, con códigos de tecla o nombres literales (`"a"`, `"enter"`, `"shift"`) ([detalles](doc/API.es.md#teclado-key--keyp--kbd)). |
 | **`kbd.read()`**, **`kbd.event()`**, **`kbd.port([n])`**, **`kbd.capslock()`**, **`kbd.connected()`**, **`kbd.clear()`** | dispositivo v32kbd | Intrínseco | Texto escrito (con Mayús y Bloq Mayús), eventos de pulsar/soltar, el puerto del teclado, Bloq Mayús, dispositivo presente, descartar eventos no leídos. |
-| **`mouse()`** | dispositivo v32mouse en un puerto de mando | Intrínseco | Un ratón a través de un dispositivo v32mouse (puerto de mando 3 por defecto, `--#mouse N`): `x, y, left, middle, right, scrollx, scrolly`, como el de TIC-80 (desplazamiento siempre 0) ([detalles](doc/API.es.md#ratón-mouse--mouse)). |
+| **`mouse()`** | dispositivo v32mouse en un puerto de mando | Intrínseco | **Solo con un adaptador v32io** ([por qué](#teclado-y-ratón-v32io)). Un ratón a través de un dispositivo v32mouse (puerto de mando 3 por defecto, `--#mouse N`): `x, y, left, middle, right, scrollx, scrolly`, como el de TIC-80 (desplazamiento siempre 0) ([detalles](doc/API.es.md#ratón-mouse--mouse)). |
 | **`mouse.pressed/released([b])`**, **`mouse.buttons()`**, **`mouse.delta()`**, **`mouse.position([x, y])`**, **`mouse.bounds(...)`**, **`mouse.scale([n])`**, **`mouse.port([n])`**, **`mouse.connected()`** | dispositivo v32mouse | Intrínseco | Cambios de botones en este cuadro, botones pulsados, movimiento en este cuadro, el puntero, sus límites y velocidad, el puerto del ratón, dispositivo presente. |
 
 *Utilidades del Sistema y de Ejecución*

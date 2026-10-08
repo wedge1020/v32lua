@@ -14,6 +14,11 @@ la siguen explican cada parte en detalle.
 El orden de escritura de los puertos SPU es importante para el sonido; ver
 [Sonido: music.\* / sfx.\*](#sonido-music--sfx).
 
+La entrada de teclado y ratón (`key()`, `kbd.*`, `mouse()`, `mouse.*`) solo
+funciona con un adaptador de hardware **v32io** o el emulador modificado —
+la consola no tiene ni lo uno ni lo otro; ver
+[Teclado y ratón: qué se necesita](#teclado-y-ratón-qué-se-necesita-v32io).
+
 ---
 
 ## Tabla de Contenidos
@@ -29,6 +34,7 @@ El orden de escritura de los puertos SPU es importante para el sonido; ver
 - [Gráficos: spr()](#gráficos-spr)
 - [Gráficos: rect() / rectfill()](#gráficos-rect--rectfill)
 - [Entrada: btn() / btnp()](#entrada-btn--btnp)
+- [Teclado y ratón: qué se necesita (v32io)](#teclado-y-ratón-qué-se-necesita-v32io)
 - [Teclado: key() / keyp() / kbd.\*](#teclado-key--keyp--kbd)
 - [Ratón: mouse() / mouse.\*](#ratón-mouse--mouse)
 - [Mapa de mosaicos: tilemap.\*](#mapa-de-mosaicos-tilemap)
@@ -71,7 +77,7 @@ nombre (`spr`, `rgba`, `color`, …) reemplaza al intrínseco.
 | `btn(id [, pad])` | booleano | El botón `id` (0–10, orden de hardware) está presionado. [Detalles](#entrada-btn--btnp) |
 | `btnp(id [, pad])` | booleano | El botón `id` se presionó en este cuadro. |
 
-*Teclado* (dispositivo v32kbd) — [detalles](#teclado-key--keyp--kbd)
+*Teclado* (dispositivo v32kbd) — [detalles](#teclado-key--keyp--kbd). **Necesita un adaptador de hardware v32io o el emulador modificado: sin ellos, ninguna tecla está pulsada nunca** ([qué se necesita](#teclado-y-ratón-qué-se-necesita-v32io)).
 
 | Llamada | Devuelve | Qué hace |
 |---|---|---|
@@ -83,7 +89,7 @@ nombre (`spr`, `rgba`, `color`, …) reemplaza al intrínseco.
 | `kbd.capslock()`, `kbd.connected()` | booleano | Estado de Bloq Mayús; dispositivo conectado. |
 | `kbd.clear()` | nil | Descarta los eventos no leídos. |
 
-*Ratón* (dispositivo v32mouse) — [detalles](#ratón-mouse--mouse)
+*Ratón* (dispositivo v32mouse) — [detalles](#ratón-mouse--mouse). **Necesita un adaptador de hardware v32io (el emulador modificado aún no tiene ratón): sin él, el puntero no se mueve** ([qué se necesita](#teclado-y-ratón-qué-se-necesita-v32io)).
 
 | Llamada | Devuelve | Qué hace |
 |---|---|---|
@@ -1021,6 +1027,118 @@ capas de compatibilidad `--#api pico8`/`--#api tic80`, no aquí.
 
 ---
 
+## Teclado y ratón: qué se necesita (v32io)
+
+> **⚠ Requiere hardware adicional o un emulador modificado.** La consola
+> Vircon32 **no tiene teclado ni ratón**: sus únicos dispositivos de
+> entrada son cuatro mandos. `key()`, `keyp()`, `kbd.*`, `mouse()`,
+> `mouse.*` y `stat(32..34)` de PICO-8 leen un teclado o un ratón que llega
+> a la consola **disfrazado de mando**, mediante una de las dos opciones
+> **v32io** de abajo. **Sin una de ellas, no es posible ninguna entrada de
+> teclado ni de ratón**: las funciones compilan y se ejecutan, pero ninguna
+> tecla está pulsada nunca, nunca se escribe ningún carácter y el puntero
+> del ratón no se mueve. Esto vale para los emuladores originales de
+> Vircon32 y para cualquier otro entorno.
+
+**1. El adaptador de hardware v32io (funciona con cualquier emulador de
+Vircon32).** Una placa Waveshare **RP2350-USB-A** (sin la resistencia
+**R13**, para que su puerto USB-A pueda alojar dispositivos de baja
+velocidad) con el firmware v32io. Un teclado o ratón USB se conecta al
+adaptador; el adaptador se conecta al ordenador y aparece en él como un
+mando USB normal llamado **`v32io:kbd`** o **`v32io:mouse`**, según lo que
+tenga conectado. Como es solo un mando, funciona tanto con el emulador
+original como con el modificado. Configuración, una vez por modo: crear un
+perfil de joystick con el editor de controles del emulador (EditControls),
+asignando sus botones 0 a 10 a Left, Right, Up, Down, Start, A, B, X, Y,
+L, R en ese orden — el adaptador tiene un **modo de configuración** para
+ello (teclado: Bloq Despl, y luego F1–F11 para los 11 controles; ratón:
+mantener los tres botones 2 segundos, y luego cada clic izquierdo pulsa el
+siguiente control) — y seleccionar ese perfil para el puerto de mando que
+espera el programa. El firmware, sus notas de compilación y los pasos de
+configuración completos están en el proyecto **v32io** (`firmware/`).
+
+**2. El emulador modificado (sin hardware).** Un fork del emulador de
+Vircon32, [wedge1020/ComputerSoftware](https://github.com/wedge1020/ComputerSoftware/tree/main),
+implementa los dispositivos v32io dentro del propio emulador, leyendo el
+teclado y el ratón del ordenador:
+
+- **teclado**: la [rama `v32kbd`](https://github.com/wedge1020/ComputerSoftware/tree/v32kbd).
+  En su menú Gamepads, elegir un puerto de mando y seleccionar `v32kbd`.
+- **ratón**: todavía no está en el fork; está previsto en una rama `v32io`
+  que tendrá ambos dispositivos. Hasta entonces, el ratón necesita el
+  adaptador de hardware.
+
+**Qué puerto de mando.** Por defecto, el programa lee el teclado del
+**puerto de mando 1** (el segundo) y el ratón del **puerto 3** (el cuarto),
+dejando el puerto 0 para el mando de un jugador. Conecta el dispositivo en
+ese puerto, o indica al programa dónde está: `--keyboard N` / `--mouse N`
+en la línea de órdenes, `--#keyboard N` / `--#mouse N` en el código, o
+`kbd.port(n)` / `mouse.port(n)` en tiempo de ejecución.
+
+**Comprobar el dispositivo.** `kbd.connected()` y `mouse.connected()`
+indican si hay *un mando* conectado en ese puerto — la consola no puede
+distinguir un dispositivo v32io de un mando real. Con el adaptador de
+hardware, su mando solo existe mientras tiene un teclado o un ratón
+conectado. Un **mando normal** que se quede en el puerto del teclado o del
+ratón se lee como tal: sus botones se convierten en teclas, clics y
+movimientos aleatorios. Un programa que también deba funcionar sin estos
+dispositivos debería ofrecer otra forma de jugar (controles con mando, un
+teclado en pantalla) e, idealmente, dejar elegir el puerto.
+
+### Cómo funciona
+
+El diseño sigue las bibliotecas C del proyecto v32io (`v32io.h`,
+`keyboard.h`, `mouse.h`), cuya referencia de protocolos es
+`PROTOCOLS.md`:
+
+- **Una palabra empaquetada.** Un dispositivo v32io usa los 11 controles
+  de su mando como 11 bits de datos, no como botones de juego. El entorno
+  de ejecución lee los 11 a la vez en una palabra, bit *n* = puerto INP
+  `0x402 + n` (Left, Right, Up, Down, Start, A, B, X, Y, L, R) —
+  `__v32io_read` en `v32io.s`, la capa común que decodifican ambos
+  dispositivos, como `v32io.h`. La consola nunca muestra pulsadas dos
+  direcciones opuestas a la vez, así que cada par de direcciones es un
+  "trit" de 3 estados; ambos protocolos se basan en ello.
+- **Teclado (v32kbd).** Como mucho un evento de tecla por cuadro:
+  Left/Right se alternan como *estrobo* (un evento nuevo es un lado del
+  estrobo distinto del último visto, así que la misma tecla puede llegar
+  dos veces seguidas), Up = pulsada, Down = soltada, Start…R = el código de
+  tecla de 7 bits. El adaptador envía primero el código y cambia el
+  estrobo 8 ms después, manteniendo cada evento 2 cuadros (unos 23 eventos
+  por segundo; si se escribe más rápido, el adaptador los encola); el fork
+  del emulador entrega exactamente un evento por cuadro. El entorno de
+  ejecución lleva las teclas pulsadas, Bloq Mayús, una cola de 64 eventos
+  para `kbd.read()`/`kbd.event()`, y aplica él mismo Mayús/Bloq Mayús
+  (distribución de EE. UU.). Ver [Teclado](#teclado-key--keyp--kbd).
+- **Ratón (v32mouse).** Start/A/B = central/izquierdo/derecho, tal cual
+  (cada cambio dura al menos 25 ms). El movimiento viaja como dos
+  contadores de 12 posiciones, uno por eje, cada uno un código Gray de 2
+  bits más un trit, que cambian un control por paso; el entorno de
+  ejecución convierte el cambio desde el último cuadro en −5…+5 pasos (6 es
+  ambiguo: sin movimiento) y mueve su propio puntero pasos × escala. El
+  adaptador envía como mucho un paso por eje cada 5 ms. No queda sitio
+  para la rueda. Ver [Ratón](#ratón-mouse--mouse).
+- **En cada cuadro.** Ambos dispositivos deben leerse en cada cuadro: un
+  evento de teclado o un paso del ratón que no se vean a tiempo se pierden
+  o se leen mal. Cuando un programa los usa, el compilador los lee en cada
+  llamada de teclado/ratón (una vez por cuadro), al principio de cada
+  `game_loop()`/`TIC()`/tick de PICO-8, y justo antes del `WAIT` de
+  `system.wait()`, `ioports.gpu.sync()` y el `flip()` de PICO-8. Un bucle
+  con `__rawasm__("WAIT")` desnudo se lo salta.
+- **Solo si se usan.** El compilador busca en el código (fuera de
+  comentarios y cadenas) llamadas de teclado/ratón; un programa sin
+  ninguna no recibe nada de este código, RAM ni lectura por cuadro.
+- **Se conserva la selección de mando.** Leer el puerto del dispositivo
+  implica seleccionarlo, y hay que restaurar la selección del programa —
+  pero los emuladores de Vircon32 devuelven un valor erróneo al leer
+  `INP_SelectedGamepad`. Así que el entorno de ejecución recuerda él mismo
+  el mando seleccionado (`V32IO_GAMEPAD`, actualizado por cada `btn()`,
+  `btnp()` y escritura en `ioports.inp.gamepad`), y las lecturas de
+  `ioports.inp.gamepad` dan ese valor recordado. `btn()` e `ioports.inp.*`
+  siguen leyendo el mando que leían antes.
+
+---
+
 ## Teclado: key() / keyp() / kbd.\*
 
 ```
@@ -1034,10 +1152,16 @@ kbd.connected()               -> booleano, hay algo conectado en ese puerto
 kbd.clear()                   -- descarta los eventos aún no leídos
 ```
 
+> **⚠ Solo con un dispositivo v32io.** Necesitan el adaptador de hardware
+> v32io con un teclado USB, o el dispositivo `v32kbd` del emulador
+> modificado — ver
+> [Teclado y ratón: qué se necesita](#teclado-y-ratón-qué-se-necesita-v32io).
+> Sin ellos, `key()` siempre es falso y `kbd.read()` siempre nil.
+
 Leen un teclado completo a través de un dispositivo **v32kbd**: un
-adaptador USB de teclado que la consola ve como un mando normal, cuyos 11
+teclado USB que la consola ve como un mando normal, cuyos 11
 controles transportan eventos de teclas en lugar de botones (ver el
-proyecto v32kbd). Se conecta en un puerto de mando — **el puerto 1 (el
+proyecto v32io). Se conecta en un puerto de mando — **el puerto 1 (el
 segundo) por defecto**, dejando el puerto 0 para un mando normal. Se cambia
 con `--keyboard N` en la línea de órdenes, una pista `--#keyboard N` en el
 código, o `kbd.port(n)` en tiempo de ejecución.
@@ -1194,8 +1318,14 @@ mouse.port([n])               -> puerto de mando del ratón (y lo cambia)
 mouse.connected()             -> booleano, hay algo conectado en ese puerto
 ```
 
-Leen un ratón a través de un dispositivo **v32mouse**: un adaptador USB de
-ratón que la consola ve como un mando normal (ver el proyecto v32io). Se
+> **⚠ Solo con un dispositivo v32io.** Necesitan el adaptador de hardware
+> v32io con un ratón USB (el emulador modificado solo tiene el teclado por
+> ahora; su ratón está previsto) — ver
+> [Teclado y ratón: qué se necesita](#teclado-y-ratón-qué-se-necesita-v32io).
+> Sin él, el puntero se queda donde empieza y ningún botón está pulsado.
+
+Leen un ratón a través de un dispositivo **v32mouse**: un ratón USB
+que la consola ve como un mando normal (ver el proyecto v32io). Se
 conecta en un puerto de mando — **el puerto 3 (el cuarto) por defecto**,
 como en la demo de ratón de v32io, así caben a su lado un teclado (puerto 1)
 y el mando de un jugador (puerto 0). Se cambia con `--mouse N` en la línea

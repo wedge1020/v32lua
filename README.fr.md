@@ -59,6 +59,7 @@ modification du code source.
 
 - [Pour Commencer](#pour-commencer)
 - [Couches de Compatibilité d'API](#couches-de-compatibilité-dapi)
+  - [Clavier et souris (v32io)](#clavier-et-souris-v32io)
 - [Indices de Ressources de Cartouche (`--#...`)](#indices-de-ressources-de-cartouche)
 - [Pipeline de Compilation](#pipeline-de-compilation)
 - [Fonctionnalités Clés du Langage et du Compilateur](#fonctionnalités-clés-du-langage-et-du-compilateur)
@@ -341,6 +342,42 @@ par défaut lorsqu'aucun indice `--#api` n'est présent) :
 
 Une seule surface d'API est active par cartouche ; sélectionner `tic80` ou
 `pico8` remplace la surface d'appel native au lieu de s'y ajouter.
+
+
+### Clavier et souris (v32io)
+
+> **⚠ Le clavier et la souris demandent du matériel en plus ou un
+> émulateur modifié.** La console Vircon32 n'a ni clavier ni souris :
+> seulement quatre manettes. Les fonctions clavier et souris de v32lua
+> (`key()`/`keyp()`/`kbd.*` et `mouse()`/`mouse.*` natives,
+> `key()`/`keyp()`/`mouse()` de TIC-80, `stat(32..34)` de PICO-8) lisent un
+> clavier ou une souris **déguisés en manette**, et ne fonctionnent
+> **qu'avec** l'une de ces solutions :
+>
+> * l'**adaptateur matériel v32io** — une carte Waveshare RP2350-USB-A
+>   (résistance R13 retirée) avec le firmware v32io : un clavier ou une
+>   souris USB branchés dessus apparaissent sur l'ordinateur comme une
+>   manette (`v32io:kbd` / `v32io:mouse`), donc il fonctionne avec
+>   **n'importe quel** émulateur Vircon32, y compris celui d'origine, une
+>   fois son profil de joystick configuré ;
+> * l'**émulateur modifié**,
+>   [wedge1020/ComputerSoftware](https://github.com/wedge1020/ComputerSoftware/tree/main),
+>   qui lit le clavier de l'ordinateur comme un périphérique v32io —
+>   pour l'instant dans sa [branche `v32kbd`](https://github.com/wedge1020/ComputerSoftware/tree/v32kbd) ;
+>   la souris n'y est pas encore (une branche `v32io` avec les deux est
+>   prévue).
+>
+> **Sans l'une d'elles, l'accès au clavier et à la souris est impossible :**
+> les programmes se compilent et s'exécutent, mais aucune touche n'est
+> jamais enfoncée et la souris ne bouge pas. Les programmes qui en ont
+> besoin devraient le dire et, si possible, proposer aussi des commandes à
+> la manette.
+
+Le clavier est lu par défaut sur le port de manette 1 et la souris sur le
+port 3 (`--keyboard N`, `--mouse N`, `--#keyboard N`, `--#mouse N`, ou
+`kbd.port(n)` / `mouse.port(n)` à l'exécution). Les protocoles, la lecture
+à chaque image ajoutée par le compilateur et la configuration sont décrits
+dans [doc/API.fr.md](doc/API.fr.md#clavier-et-souris--ce-quil-faut-v32io).
 
 ---
 
@@ -889,9 +926,9 @@ utilisées :
 | **`ioports.inp.left/right/up/down`** | `INP_Gamepad*` | Lecture Seule | État directionnel de la croix directionnelle (`> 0` pressé, `< 0` relâché). |
 | **`ioports.inp.A/B/X/Y/L/R/START`** | `INP_GamepadButton*` | Lecture Seule | État des boutons d'action/gâchettes (`> 0` pressé, `< 0` relâché). |
 | **`ioports.inp.inputs`** | *Sous-routine d'Action Personnalisée* | Lecture Seule | **Intrinsèque de regroupement :** sonde tous les boutons/axes de la manette en une seule passe, les regroupe en un unique masque de bits sur 32 bits, et le convertit en flottant Lua. |
-| **`key([k])`**, **`keyp([k [, hold, period]])`** | périphérique v32kbd sur un port de manette | Intrinsèque | Un clavier complet à travers un périphérique v32kbd (port de manette 1 par défaut, `--#keyboard N`) : touche enfoncée / enfoncée à cette image, façon TIC-80, avec des codes de touche ou des noms littéraux (`"a"`, `"enter"`, `"shift"`) ([détails](doc/API.fr.md#clavier--key--keyp--kbd)). |
+| **`key([k])`**, **`keyp([k [, hold, period]])`** | périphérique v32kbd sur un port de manette | Intrinsèque | **Uniquement avec un adaptateur v32io ou l'émulateur modifié** ([pourquoi](#clavier-et-souris-v32io)). Un clavier complet à travers un périphérique v32kbd (port de manette 1 par défaut, `--#keyboard N`) : touche enfoncée / enfoncée à cette image, façon TIC-80, avec des codes de touche ou des noms littéraux (`"a"`, `"enter"`, `"shift"`) ([détails](doc/API.fr.md#clavier--key--keyp--kbd)). |
 | **`kbd.read()`**, **`kbd.event()`**, **`kbd.port([n])`**, **`kbd.capslock()`**, **`kbd.connected()`**, **`kbd.clear()`** | périphérique v32kbd | Intrinsèque | Texte tapé (Maj et Verr Maj appliqués), événements d'appui/relâchement, le port du clavier, Verr Maj, périphérique présent, oubli des événements non lus. |
-| **`mouse()`** | périphérique v32mouse sur un port de manette | Intrinsèque | Une souris à travers un périphérique v32mouse (port de manette 3 par défaut, `--#mouse N`) : `x, y, left, middle, right, scrollx, scrolly`, comme celui de TIC-80 (défilement toujours 0) ([détails](doc/API.fr.md#souris--mouse--mouse)). |
+| **`mouse()`** | périphérique v32mouse sur un port de manette | Intrinsèque | **Uniquement avec un adaptateur v32io** ([pourquoi](#clavier-et-souris-v32io)). Une souris à travers un périphérique v32mouse (port de manette 3 par défaut, `--#mouse N`) : `x, y, left, middle, right, scrollx, scrolly`, comme celui de TIC-80 (défilement toujours 0) ([détails](doc/API.fr.md#souris--mouse--mouse)). |
 | **`mouse.pressed/released([b])`**, **`mouse.buttons()`**, **`mouse.delta()`**, **`mouse.position([x, y])`**, **`mouse.bounds(...)`**, **`mouse.scale([n])`**, **`mouse.port([n])`**, **`mouse.connected()`** | périphérique v32mouse | Intrinsèque | Changements de boutons à cette image, boutons enfoncés, mouvement à cette image, le pointeur, ses limites et sa vitesse, le port de la souris, périphérique présent. |
 
 *Utilitaires Système et d'Exécution*

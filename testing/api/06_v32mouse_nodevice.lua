@@ -5,8 +5,9 @@
 --@ mouse()/mouse.* read a v32mouse (a USB mouse the console sees as a
 --@ gamepad). This test runs with NOTHING plugged into the mouse's port, so
 --@ it checks the "no mouse" answers, the pointer's own state (position,
---@ bounds, scale) and the 7 values of mouse(). Movement needs a device (or
---@ a simulated one): see doc/API.md.
+--@ bounds, scale) and the 7 values of mouse(). Movement needs a v32io
+--@ device -- the hardware adapter (the modified emulator has no mouse
+--@ yet): see doc/API.md, "Keyboard and mouse: what you need".
 --@
 --@ --#mouse 2 above: the mouse's default port is 2 in this test.
 

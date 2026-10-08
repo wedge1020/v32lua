@@ -13,6 +13,11 @@ in detail.
 The SPU port write order matters for sound; see
 [Sound: music.\* / sfx.\*](#sound-music--sfx).
 
+Keyboard and mouse input (`key()`, `kbd.*`, `mouse()`, `mouse.*`) only works
+with a **v32io** hardware adapter or the modified emulator — the console
+itself has neither; see
+[Keyboard and mouse: what you need](#keyboard-and-mouse-what-you-need-v32io).
+
 ---
 
 ## Table of Contents
@@ -28,6 +33,7 @@ The SPU port write order matters for sound; see
 - [Graphics: spr()](#graphics-spr)
 - [Graphics: rect() / rectfill()](#graphics-rect--rectfill)
 - [Input: btn() / btnp()](#input-btn--btnp)
+- [Keyboard and mouse: what you need (v32io)](#keyboard-and-mouse-what-you-need-v32io)
 - [Keyboard: key() / keyp() / kbd.\*](#keyboard-key--keyp--kbd)
 - [Mouse: mouse() / mouse.\*](#mouse-mouse--mouse)
 - [Tilemap: tilemap.\*](#tilemap-tilemap)
@@ -68,7 +74,7 @@ function behind it. A function of your own with the same name (`spr`,
 | `btn(id [, pad])` | boolean | Button `id` (0–10, hardware order) is held. [Details](#input-btn--btnp) |
 | `btnp(id [, pad])` | boolean | Button `id` was pressed this frame. |
 
-*Keyboard* (v32kbd device) — [details](#keyboard-key--keyp--kbd)
+*Keyboard* (v32kbd device) — [details](#keyboard-key--keyp--kbd). **Needs a v32io hardware adapter or the modified emulator: without one, no key is ever down** ([what you need](#keyboard-and-mouse-what-you-need-v32io)).
 
 | Call | Returns | What it does |
 |---|---|---|
@@ -80,7 +86,7 @@ function behind it. A function of your own with the same name (`spr`,
 | `kbd.capslock()`, `kbd.connected()` | boolean | Caps Lock state; device plugged in. |
 | `kbd.clear()` | nil | Drops unread events. |
 
-*Mouse* (v32mouse device) — [details](#mouse-mouse--mouse)
+*Mouse* (v32mouse device) — [details](#mouse-mouse--mouse). **Needs a v32io hardware adapter (the modified emulator doesn't have the mouse yet): without one, the pointer never moves** ([what you need](#keyboard-and-mouse-what-you-need-v32io)).
 
 | Call | Returns | What it does |
 |---|---|---|
@@ -956,6 +962,110 @@ compatibility layers, not here.
 
 ---
 
+## Keyboard and mouse: what you need (v32io)
+
+> **⚠ Requires extra hardware or a modified emulator.** The Vircon32
+> console has **no keyboard and no mouse**: its only input devices are
+> four gamepads. `key()`, `keyp()`, `kbd.*`, `mouse()`, `mouse.*` and
+> PICO-8's `stat(32..34)` read a keyboard or a mouse that reaches the
+> console **disguised as a gamepad**, through one of the two **v32io**
+> setups below. **Without one of them, no keyboard or mouse input is
+> possible**: the functions compile and run, but no key is ever down, no
+> character is ever typed, and the mouse pointer never moves. This applies
+> to the stock Vircon32 emulators and to every other environment.
+
+**1. The v32io hardware adapter (works with any Vircon32 emulator).** A
+Waveshare **RP2350-USB-A** board (with its resistor **R13 removed**, so its
+USB-A port can host low-speed devices) running the v32io firmware. A USB
+keyboard or mouse plugs into the adapter; the adapter plugs into the
+computer and appears there as an ordinary USB gamepad named
+**`v32io:kbd`** or **`v32io:mouse`**, depending on what is plugged into it.
+Because it is just a gamepad, it works with the stock emulator as well as
+the modified one. Setup, once per mode: create a joystick profile for it
+with the emulator's controls editor (EditControls), mapping its buttons 0
+to 10 to Left, Right, Up, Down, Start, A, B, X, Y, L, R in that order — the
+adapter has a **setup mode** for this (keyboard: Scroll Lock, then F1–F11
+for the 11 controls; mouse: hold the three buttons for 2 seconds, then
+each left click presses the next control) — and select that profile for
+the gamepad port your program expects. The firmware, its build notes and
+the full setup steps are in the **v32io** project (`firmware/`).
+
+**2. The modified emulator (no hardware needed).** A fork of the Vircon32
+emulator, [wedge1020/ComputerSoftware](https://github.com/wedge1020/ComputerSoftware/tree/main),
+implements the v32io devices inside the emulator itself, reading the
+computer's own keyboard and mouse:
+
+- **keyboard**: the [`v32kbd` branch](https://github.com/wedge1020/ComputerSoftware/tree/v32kbd).
+  In its menu Gamepads, pick a gamepad port and select `v32kbd`.
+- **mouse**: not yet in the fork; planned for a `v32io` branch that will
+  carry both devices. Until then, the mouse needs the hardware adapter.
+
+**Which gamepad port.** The program reads the keyboard from **gamepad port
+1** (the second) and the mouse from **gamepad port 3** (the fourth) by
+default, leaving port 0 for a player's gamepad. Put the device in that
+port, or tell the program where it is: `--keyboard N` / `--mouse N` on the
+command line, `--#keyboard N` / `--#mouse N` in the source, or
+`kbd.port(n)` / `mouse.port(n)` at run time.
+
+**Checking for the device.** `kbd.connected()` and `mouse.connected()`
+say whether *a gamepad* is plugged into that port — the console can't
+tell a v32io device from a real gamepad. With the hardware adapter, its
+gamepad only exists while a keyboard or mouse is plugged into it. A
+**regular gamepad** left in the keyboard's or mouse's port is read as one:
+its buttons turn into random keys, clicks and movement. A program that
+must also work without these devices should offer another way to play
+(gamepad controls, an on-screen keyboard) and, ideally, let the player
+choose the port.
+
+### How it works
+
+The design follows the v32io project's C libraries (`v32io.h`,
+`keyboard.h`, `mouse.h`), whose protocol reference is `PROTOCOLS.md`:
+
+- **One packed word.** A v32io device uses its gamepad's 11 controls as
+  11 bits of data, not as game buttons. The runtime reads all 11 at once
+  into one word, bit *n* = INP port `0x402 + n` (Left, Right, Up, Down,
+  Start, A, B, X, Y, L, R) — `__v32io_read` in `v32io.s`, the shared layer
+  both devices decode, mirroring `v32io.h`. The console never shows two
+  opposite directions pressed at once, so each direction pair is a
+  3-state "trit"; both protocols are built around that.
+- **Keyboard (v32kbd).** One key event per frame at most: Left/Right
+  alternate as a *strobe* (a new event is a strobe side different from the
+  last one seen, so the same key can arrive twice in a row), Up = pressed,
+  Down = released, Start…R = the 7-bit key code. The adapter sends the code
+  first and switches the strobe 8 ms later, holding each event for 2
+  frames (about 23 events per second; faster typing is queued in the
+  adapter); the emulator fork delivers exactly one event per frame. The
+  runtime keeps the held keys, Caps Lock, a 64-event queue for
+  `kbd.read()`/`kbd.event()`, and applies Shift/Caps Lock itself (US
+  layout). See [Keyboard](#keyboard-key--keyp--kbd).
+- **Mouse (v32mouse).** Start/A/B = middle/left/right, held as they are
+  (each change lasts at least 25 ms). Movement travels as two 12-position
+  counters, one per axis, each a 2-bit Gray code plus a trit, changing one
+  control per step; the runtime turns the change since the last frame into
+  −5…+5 steps (6 is ambiguous: no movement) and moves its own pointer by
+  steps × scale. The adapter sends at most one step per axis every 5 ms.
+  There is no room left for the wheel. See [Mouse](#mouse-mouse--mouse).
+- **Every frame.** Both devices must be read on every frame — a keyboard
+  event or a mouse step not seen in time is lost or misread. When a
+  program uses them, the compiler reads them in every keyboard/mouse call
+  (once per frame), at the top of each `game_loop()`/`TIC()`/PICO-8 tick,
+  and just before the `WAIT` of `system.wait()`, `ioports.gpu.sync()` and
+  PICO-8's `flip()`. A bare `__rawasm__("WAIT")` loop skips that.
+- **Only when used.** The compiler looks through the source (outside
+  comments and strings) for keyboard/mouse calls; a program without any
+  gets none of this code, RAM or per-frame reading.
+- **The gamepad selection is kept.** Reading the device's port means
+  selecting it, and the program's own selection must be put back — but
+  the Vircon32 emulators return a wrong value when `INP_SelectedGamepad`
+  is read. So the runtime remembers the selected gamepad itself
+  (`V32IO_GAMEPAD`, updated by every `btn()`, `btnp()` and
+  `ioports.inp.gamepad` write), and `ioports.inp.gamepad` reads give that
+  remembered value. `btn()` and `ioports.inp.*` keep reading the gamepad
+  they read before.
+
+---
+
 ## Keyboard: key() / keyp() / kbd.\*
 
 ```
@@ -969,9 +1079,14 @@ kbd.connected()               -> boolean, something is plugged into that port
 kbd.clear()                   -- forget the events not read yet
 ```
 
+> **⚠ Only with a v32io device.** These need the v32io hardware adapter
+> with a USB keyboard, or the modified emulator's `v32kbd` device — see
+> [Keyboard and mouse: what you need](#keyboard-and-mouse-what-you-need-v32io).
+> Without one, `key()` is always false and `kbd.read()` always nil.
+
 These read a full keyboard through a **v32kbd** device: a USB keyboard
-gadget the console sees as an ordinary gamepad, whose 11 controls carry key
-events instead of buttons (see the v32kbd project). It plugs into a gamepad
+the console sees as an ordinary gamepad, whose 11 controls carry key
+events instead of buttons (see the v32io project). It plugs into a gamepad
 port — **port 1 (the second) by default**, leaving port 0 for a regular
 gamepad. Change it with `--keyboard N` on the command line, a `--#keyboard N`
 hint in the source, or `kbd.port(n)` at run time.
@@ -1118,7 +1233,13 @@ mouse.port([n])               -> gamepad port of the mouse (and sets it)
 mouse.connected()             -> boolean, something is plugged into that port
 ```
 
-These read a mouse through a **v32mouse** device: a USB mouse adapter the
+> **⚠ Only with a v32io device.** These need the v32io hardware adapter
+> with a USB mouse (the modified emulator has only the keyboard so far; its
+> mouse is planned) — see
+> [Keyboard and mouse: what you need](#keyboard-and-mouse-what-you-need-v32io).
+> Without one, the pointer stays where it starts and no button is ever down.
+
+These read a mouse through a **v32mouse** device: a USB mouse the
 console sees as an ordinary gamepad (see the v32io project). It plugs into a
 gamepad port — **port 3 (the fourth) by default**, as in the v32io mouse
 demo, so a keyboard (port 1) and a player's gamepad (port 0) fit beside

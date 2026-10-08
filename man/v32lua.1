@@ -190,7 +190,10 @@ Gamepad port (0\(en3) where a v32kbd keyboard is plugged in, for
 .BR key() ", " keyp()
 and
 .B kbd.*
-in native and TIC-80 mode. Default 1, the second port. Same as a
+in native and TIC-80 mode. Default 1, the second port. Keyboard input
+needs a v32io device (see
+.BR "KEYBOARD AND MOUSE" ).
+Same as a
 .B \-\-#keyboard
 hint; a program can also change it with
 .BR kbd.port(n) .
@@ -202,7 +205,9 @@ and
 .B mouse.*
 in every API mode (and PICO-8's
 .BR stat(32) \(en stat(34) ).
-Default 3, the fourth port. Same as a
+Default 3, the fourth port. Mouse input needs a v32io device (see
+.BR "KEYBOARD AND MOUSE" ).
+Same as a
 .B \-\-#mouse
 hint; a program can also change it with
 .BR mouse.port(n) .
@@ -478,6 +483,37 @@ declared in a block lexically outside any function at chunk level
 at chunk level) \(em such a read currently compiles silently to an
 uninitialized global rather than the value the block appeared to
 scope.
+.SH KEYBOARD AND MOUSE
+The Vircon32 console has no keyboard and no mouse, only four gamepads.
+.BR key() ", " keyp() ", " kbd.* ", " mouse() ", " mouse.*
+and PICO-8's
+.B stat(32..34)
+read a keyboard or mouse disguised as a gamepad, and get input
+.B only
+with one of:
+.IP \(bu 2
+the v32io hardware adapter (a Waveshare RP2350-USB-A board, R13 removed,
+running the v32io firmware), which makes a USB keyboard or mouse appear as
+a gamepad named
+.B v32io:kbd
+or
+.BR v32io:mouse ;
+it works with any Vircon32 emulator once a joystick profile is set up for
+it;
+.IP \(bu 2
+the modified emulator at
+.UR https://github.com/wedge1020/ComputerSoftware
+.UE
+(keyboard in its
+.B v32kbd
+branch; the mouse is not implemented there yet).
+.PP
+Without one of these, no keyboard or mouse input is possible: programs
+compile and run, but no key is ever down and the mouse never moves. A
+regular gamepad left in the keyboard's or mouse's port is read as one.
+See
+.I doc/API.md
+for the protocols and setup.
 .SH CARTRIDGE HINTS
 Cartridge metadata and resources are declared with
 .B \-\-#

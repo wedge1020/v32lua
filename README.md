@@ -56,6 +56,7 @@ no source modification.
 
 - [Getting Started](#getting-started)
 - [API Compatibility Layers](#api-compatibility-layers)
+  - [Keyboard and mouse (v32io)](#keyboard-and-mouse-v32io)
 - [Cartridge Resource Hints (`--#...`)](#cartridge-resource-hints)
 - [Compilation Pipeline](#compilation-pipeline)
 - [Key Language & Compiler Features](#key-language--compiler-features)
@@ -321,6 +322,38 @@ present):
 Only  one API  surface  is  active per  cartridge;  selecting `tic80`  or
 `pico8` replaces the native call surface rather than adding to it.
 
+
+### Keyboard and mouse (v32io)
+
+> **⚠ Keyboard and mouse input need extra hardware or a modified emulator.**
+> The Vircon32 console has no keyboard and no mouse — only four gamepads.
+> v32lua's keyboard and mouse functions (native `key()`/`keyp()`/`kbd.*`
+> and `mouse()`/`mouse.*`, TIC-80's `key()`/`keyp()`/`mouse()`, PICO-8's
+> `stat(32..34)`) read a keyboard or mouse **disguised as a gamepad**, and
+> work **only** with one of:
+>
+> * the **v32io hardware adapter** — a Waveshare RP2350-USB-A board (R13
+>   removed) running the v32io firmware: a USB keyboard or mouse plugged
+>   into it appears to the computer as a gamepad (`v32io:kbd` /
+>   `v32io:mouse`), so it works with **any** Vircon32 emulator, stock
+>   included, once a joystick profile is set up for it;
+> * the **modified emulator**,
+>   [wedge1020/ComputerSoftware](https://github.com/wedge1020/ComputerSoftware/tree/main),
+>   which reads the computer's own keyboard as a v32io device — currently
+>   in its [`v32kbd` branch](https://github.com/wedge1020/ComputerSoftware/tree/v32kbd);
+>   the mouse is not there yet (a `v32io` branch with both is planned).
+>
+> **Without one of these, keyboard and mouse access is not possible:**
+> programs compile and run, but no key is ever down and the mouse never
+> moves. Programs that need them should say so, and ideally offer gamepad
+> controls too.
+
+The keyboard is read from gamepad port 1 and the mouse from port 3 by
+default (`--keyboard N`, `--mouse N`, `--#keyboard N`, `--#mouse N`, or
+`kbd.port(n)` / `mouse.port(n)` at run time). The protocols, the
+every-frame reading the compiler adds, and the setup are described in
+[doc/API.md](doc/API.md#keyboard-and-mouse-what-you-need-v32io).
+
 ---
 
 ## Cartridge Resource Hints
@@ -341,8 +374,8 @@ Supported hints:
 | `--#rate 11025` \| `22050` \| `44100` | Sample rate of the sound synthesized from a PICO-8 or TIC-80 cart (default 22050; `--#p8rate` is the old name; see [doc/PICO8.md](doc/PICO8.md#sound)). |
 | `--#bezel off` \| `on` \| `"art.png"` | PICO-8: the side panels beside the 128×128 screen — none, the built-in art, or your own (see [doc/PICO8.md](doc/PICO8.md#side-panels)). |
 | `--#fast-circles` | TIC-80/PICO-8: filled circles above radius 31 are drawn as one scaled disc (faster, edges differ slightly). |
-| `--#keyboard 0`–`3` | Gamepad port of a v32kbd keyboard, for `key()`/`keyp()`/`kbd.*` (default 1; see [doc/API.md](doc/API.md#keyboard-key--keyp--kbd)). |
-| `--#mouse 0`–`3` | Gamepad port of a v32mouse mouse, for `mouse()`/`mouse.*` and PICO-8's `stat(32..34)` (default 3; see [doc/API.md](doc/API.md#mouse-mouse--mouse)). |
+| `--#keyboard 0`–`3` | Gamepad port of a v32kbd keyboard (v32io adapter or the modified emulator required, see [Keyboard and mouse](#keyboard-and-mouse-v32io)), for `key()`/`keyp()`/`kbd.*` (default 1; see [doc/API.md](doc/API.md#keyboard-key--keyp--kbd)). |
+| `--#mouse 0`–`3` | Gamepad port of a v32mouse mouse (v32io adapter required, see [Keyboard and mouse](#keyboard-and-mouse-v32io)), for `mouse()`/`mouse.*` and PICO-8's `stat(32..34)` (default 3; see [doc/API.md](doc/API.md#mouse-mouse--mouse)). |
 | `--#texture NAME "path/image.png"` | Registers a texture resource and binds it to a compile-time constant `NAME`. The XML names the `.vtex` file (`image.vtex`) that `png2vircon` makes from the PNG. |
 | `--#sound NAME "path/sound.wav"` | Registers a sound resource and binds it to a compile-time constant `NAME`. The XML names the `.vsnd` file that `wav2vircon` makes. |
 | `--#tilemap NAME "path/map.csv"` | Registers a tilemap from a CSV file, embedded directly into the ROM image (see [doc/API.md](doc/API.md#tilemap-tilemap)). |
@@ -813,9 +846,9 @@ short sample of the most commonly used entries:
 | **`ioports.inp.left/right/up/down`** | `INP_Gamepad*` | Read Only | D-Pad directional state (`> 0` pressed, `< 0` released). |
 | **`ioports.inp.A/B/X/Y/L/R/START`** | `INP_GamepadButton*` | Read Only | Action/shoulder button state (`> 0` pressed, `< 0` released). |
 | **`ioports.inp.inputs`** | *Custom Action Subroutine* | Read Only | **Collation intrinsic:** polls all gamepad buttons/axes in one pass, collates them into a single 32-bit bitmask, and casts it to a Lua float. |
-| **`key([k])`**, **`keyp([k [, hold, period]])`** | v32kbd device on a gamepad port | Intrinsic | A full keyboard through a v32kbd device (gamepad port 1 by default, `--#keyboard N`): key held / went down this frame, TIC-80 style, with key codes or literal names (`"a"`, `"enter"`, `"shift"`) ([details](doc/API.md#keyboard-key--keyp--kbd)). |
+| **`key([k])`**, **`keyp([k [, hold, period]])`** | v32kbd device on a gamepad port | Intrinsic | **Only with a v32io adapter or the modified emulator** ([why](#keyboard-and-mouse-v32io)). A full keyboard through a v32kbd device (gamepad port 1 by default, `--#keyboard N`): key held / went down this frame, TIC-80 style, with key codes or literal names (`"a"`, `"enter"`, `"shift"`) ([details](doc/API.md#keyboard-key--keyp--kbd)). |
 | **`kbd.read()`**, **`kbd.event()`**, **`kbd.port([n])`**, **`kbd.capslock()`**, **`kbd.connected()`**, **`kbd.clear()`** | v32kbd device | Intrinsic | Typed text (Shift and Caps Lock applied), raw press/release events, the keyboard's port, Caps Lock, device present, drop unread events. |
-| **`mouse()`** | v32mouse device on a gamepad port | Intrinsic | A mouse through a v32mouse device (gamepad port 3 by default, `--#mouse N`): `x, y, left, middle, right, scrollx, scrolly`, as TIC-80's (scroll always 0) ([details](doc/API.md#mouse-mouse--mouse)). |
+| **`mouse()`** | v32mouse device on a gamepad port | Intrinsic | **Only with a v32io adapter** ([why](#keyboard-and-mouse-v32io)). A mouse through a v32mouse device (gamepad port 3 by default, `--#mouse N`): `x, y, left, middle, right, scrollx, scrolly`, as TIC-80's (scroll always 0) ([details](doc/API.md#mouse-mouse--mouse)). |
 | **`mouse.pressed/released([b])`**, **`mouse.buttons()`**, **`mouse.delta()`**, **`mouse.position([x, y])`**, **`mouse.bounds(...)`**, **`mouse.scale([n])`**, **`mouse.port([n])`**, **`mouse.connected()`** | v32mouse device | Intrinsic | Button edges this frame, buttons held, movement this frame, the pointer, its limits and speed, the mouse's port, device present. |
 
 *System & Runtime Utilities*

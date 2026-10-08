@@ -150,13 +150,26 @@ floored and masked to 0–31, and `btnp` is true on the press frame and, when
 once it has been down `hold` frames, every `period` frames (`period` 0: every
 frame). There is no default autorepeat.
 
+> **⚠ Keyboard and mouse need a v32io device.** Vircon32 has only
+> gamepads. `key()`, `keyp()` and `mouse()` work only with the **v32io
+> hardware adapter** (a USB keyboard or mouse made to look like a gamepad;
+> works with any Vircon32 emulator) or the **modified emulator**
+> [wedge1020/ComputerSoftware](https://github.com/wedge1020/ComputerSoftware/tree/main)
+> (keyboard in its [`v32kbd` branch](https://github.com/wedge1020/ComputerSoftware/tree/v32kbd);
+> mouse not there yet). Without one, a cart compiles and runs but no key
+> is ever down and the mouse never moves — carts that need the keyboard or
+> mouse to be played can't be played. See
+> [API.md: what you need](API.md#keyboard-and-mouse-what-you-need-v32io)
+> for the setup and how it works.
+
 `key([code])` and `keyp([code [, hold, period]])` read a real keyboard
-through a **v32kbd** device: a USB keyboard gadget the console sees as a
-gamepad (see the native [API.md](API.md#keyboard-key--keyp--kbd) for how
+through a **v32kbd** device: a USB keyboard (on the v32io adapter) or the
+modified emulator's keyboard, which the console sees as a gamepad (see the native [API.md](API.md#keyboard-key--keyp--kbd) for how
 it works). It goes in gamepad port 1 by default — the second port, so
 player 1's gamepad stays in port 0 — or wherever `--keyboard N` /
 `--#keyboard N` puts it (`kbd.port(n)` at run time). Without the device
-plugged in, no key is ever down.
+plugged in, no key is ever down. A regular gamepad left in that port is
+read as a keyboard (random keys).
 
 The codes are TIC-80's (`tic.h`): 1–26 A–Z, 27–36 0–9, 37–47
 `` - = [ ] \ ; ' ` , . / ``, 48 space, 49 tab, 50 return, 51 backspace,

@@ -7,6 +7,12 @@
 --   right button:  clear the drawing
 --   middle button: change the drawing color
 --
+-- NEEDS A v32io MOUSE: the v32io hardware adapter with a USB mouse (any
+-- Vircon32 emulator, with a joystick profile for "v32io:mouse"). The
+-- modified emulator (github.com/wedge1020/ComputerSoftware) doesn't have
+-- the mouse yet. Without one, the pointer never moves. See doc/API.md,
+-- "Keyboard and mouse: what you need".
+--
 -- The mouse is expected in the FOURTH gamepad port (port 3, the default):
 -- select the "v32io:mouse" profile for Gamepad 4 in the emulator. Another
 -- port: --#mouse N at the top of this file, or mouse.port(N).

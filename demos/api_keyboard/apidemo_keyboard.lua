@@ -4,8 +4,15 @@
 -- library's v32kbd.c test program), with rect()/rectfill() for the frame,
 -- the cursor and the modifier lights.
 --
+-- NEEDS A v32io KEYBOARD: the v32io hardware adapter with a USB keyboard
+-- (any Vircon32 emulator, with a joystick profile for "v32io:kbd"), or the
+-- modified emulator (github.com/wedge1020/ComputerSoftware, branch v32kbd).
+-- Without one, nothing can be typed. See doc/API.md, "Keyboard and mouse:
+-- what you need".
+--
 -- The keyboard is expected in the SECOND gamepad port (port 1, the
--- default): in the emulator, pick "v32kbd" in menu Gamepads > Gamepad 2.
+-- default): in the modified emulator, pick "v32kbd" in menu Gamepads >
+-- Gamepad 2; with the adapter, select its profile for Gamepad 2.
 -- Another port: --#keyboard N at the top of this file, or kbd.port(N).
 
 TEXT_MAX = 600

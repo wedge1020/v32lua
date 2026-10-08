@@ -8,7 +8,9 @@
 --@ handling, and that the keyboard never disturbs the gamepad the
 --@ program has selected (the runtime remembers the selection in
 --@ V32IO_GAMEPAD: the emulators can't read INP_SelectedGamepad back).
---@ Key events need a device (or a simulated one): see doc/API.md.
+--@ Key events need a v32io device -- the hardware adapter or the modified
+--@ emulator (github.com/wedge1020/ComputerSoftware, branch v32kbd): see
+--@ doc/API.md, "Keyboard and mouse: what you need".
 --@
 --@ --#keyboard 2 above: the keyboard's default port is 2 in this test.
 

@@ -78,8 +78,10 @@ static void  print_usage (const char *prog_name)
     fprintf (stdout, "                   1.5%% of the edge pixels differ). Outlines stay exact\n");
     fprintf (stdout, "  --keyboard <n>   Gamepad port (0-3) of a v32kbd keyboard, for key()/keyp()/\n");
     fprintf (stdout, "                   kbd.*. Default 1, the second port (inc/config.h)\n");
+    fprintf (stdout, "                   (needs a v32io adapter or the modified emulator)\n");
     fprintf (stdout, "  --mouse <n>      Gamepad port (0-3) of a v32mouse mouse, for mouse()/mouse.*\n");
     fprintf (stdout, "                   (PICO-8: stat(32..34)). Default 3, the fourth port\n");
+    fprintf (stdout, "                   (needs a v32io adapter)\n");
     fprintf (stdout, "\nInput files: .lua, .p8 (PICO-8 cart), .tic (TIC-80 cart, Lua only)\n");
 }
 

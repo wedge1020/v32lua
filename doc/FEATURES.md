@@ -84,5 +84,15 @@ those units to the generated `.asm`. The output is self-contained
 assembly for the Vircon32 assembler, and the runtime always matches the
 compiler that produced it.
 
+The keyboard and mouse units are an example: `v32io.s` (always present:
+it also keeps track of the selected gamepad) reads a gamepad port as one
+packed word, and `v32kbd.s` / `v32mouse.s` decode it as a v32io keyboard
+or mouse. Those two are only appended — with their RAM and the
+every-frame reading they add to the main loops — when the source calls
+the keyboard or mouse functions, which the compiler checks before code
+generation (`v32kbd.c`, `v32mouse.c`). Keyboard and mouse input itself
+only exists with a v32io hardware adapter or the modified emulator (see
+[API.md](API.md#keyboard-and-mouse-what-you-need-v32io)).
+
 To change the runtime, edit the files in `src/runtime/` and rebuild; the
 Makefile tracks them as dependencies of the embed object.

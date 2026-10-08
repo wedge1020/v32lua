@@ -13,6 +13,11 @@ suivantes détaillent chaque partie.
 L'ordre d'écriture des ports SPU compte pour le son ; voir
 [Son : music.\* / sfx.\*](#son--music--sfx).
 
+Le clavier et la souris (`key()`, `kbd.*`, `mouse()`, `mouse.*`) ne
+fonctionnent qu'avec un adaptateur matériel **v32io** ou l'émulateur
+modifié — la console n'a ni l'un ni l'autre ; voir
+[Clavier et souris : ce qu'il faut](#clavier-et-souris--ce-quil-faut-v32io).
+
 ---
 
 ## Table des Matières
@@ -28,6 +33,7 @@ L'ordre d'écriture des ports SPU compte pour le son ; voir
 - [Graphismes : spr()](#graphismes--spr)
 - [Graphismes : rect() / rectfill()](#graphismes--rect--rectfill)
 - [Entrées : btn() / btnp()](#entrées--btn--btnp)
+- [Clavier et souris : ce qu'il faut (v32io)](#clavier-et-souris--ce-quil-faut-v32io)
 - [Clavier : key() / keyp() / kbd.\*](#clavier--key--keyp--kbd)
 - [Souris : mouse() / mouse.\*](#souris--mouse--mouse)
 - [Tilemap : tilemap.\*](#tilemap--tilemap)
@@ -70,7 +76,7 @@ nom (`spr`, `rgba`, `color`, …) remplace l'intrinsèque.
 | `btn(id [, pad])` | booléen | Le bouton `id` (0–10, ordre matériel) est enfoncé. [Détails](#entrées--btn--btnp) |
 | `btnp(id [, pad])` | booléen | Le bouton `id` a été pressé à cette image. |
 
-*Clavier* (périphérique v32kbd) — [détails](#clavier--key--keyp--kbd)
+*Clavier* (périphérique v32kbd) — [détails](#clavier--key--keyp--kbd). **Demande un adaptateur matériel v32io ou l'émulateur modifié : sans eux, aucune touche n'est jamais enfoncée** ([ce qu'il faut](#clavier-et-souris--ce-quil-faut-v32io)).
 
 | Appel | Renvoie | Ce qu'il fait |
 |---|---|---|
@@ -82,7 +88,7 @@ nom (`spr`, `rgba`, `color`, …) remplace l'intrinsèque.
 | `kbd.capslock()`, `kbd.connected()` | booléen | État de Verr Maj ; périphérique branché. |
 | `kbd.clear()` | nil | Oublie les événements non lus. |
 
-*Souris* (périphérique v32mouse) — [détails](#souris--mouse--mouse)
+*Souris* (périphérique v32mouse) — [détails](#souris--mouse--mouse). **Demande un adaptateur matériel v32io (l'émulateur modifié n'a pas encore la souris) : sans lui, le pointeur ne bouge pas** ([ce qu'il faut](#clavier-et-souris--ce-quil-faut-v32io)).
 
 | Appel | Renvoie | Ce qu'il fait |
 |---|---|---|
@@ -1030,6 +1036,125 @@ couches de compatibilité `--#api pico8`/`--#api tic80`, pas ici.
 
 ---
 
+## Clavier et souris : ce qu'il faut (v32io)
+
+> **⚠ Demande du matériel en plus ou un émulateur modifié.** La console
+> Vircon32 **n'a ni clavier ni souris** : ses seuls périphériques d'entrée
+> sont quatre manettes. `key()`, `keyp()`, `kbd.*`, `mouse()`, `mouse.*` et
+> `stat(32..34)` de PICO-8 lisent un clavier ou une souris qui arrivent à la
+> console **déguisés en manette**, par l'une des deux solutions **v32io**
+> ci-dessous. **Sans l'une d'elles, aucune entrée clavier ni souris n'est
+> possible** : les fonctions se compilent et s'exécutent, mais aucune
+> touche n'est jamais enfoncée, aucun caractère n'est jamais tapé et le
+> pointeur de la souris ne bouge pas. Cela vaut pour les émulateurs
+> Vircon32 d'origine et pour tout autre environnement.
+
+**1. L'adaptateur matériel v32io (fonctionne avec n'importe quel émulateur
+Vircon32).** Une carte Waveshare **RP2350-USB-A** (avec la résistance
+**R13 retirée**, pour que son port USB-A puisse accueillir des
+périphériques basse vitesse) qui exécute le firmware v32io. Un clavier ou
+une souris USB se branche sur l'adaptateur ; l'adaptateur se branche sur
+l'ordinateur et y apparaît comme une manette USB ordinaire nommée
+**`v32io:kbd`** ou **`v32io:mouse`**, selon ce qui y est branché. Comme ce
+n'est qu'une manette, il fonctionne avec l'émulateur d'origine comme avec
+le modifié. Configuration, une fois par mode : créer un profil de joystick
+avec l'éditeur de commandes de l'émulateur (EditControls), en associant ses
+boutons 0 à 10 à Left, Right, Up, Down, Start, A, B, X, Y, L, R dans cet
+ordre — l'adaptateur a un **mode configuration** pour cela (clavier : Arrêt
+défil, puis F1–F11 pour les 11 commandes ; souris : maintenir les trois
+boutons 2 secondes, puis chaque clic gauche appuie sur la commande
+suivante) — et choisir ce profil pour le port de manette attendu par le
+programme. Le firmware, ses notes de compilation et la procédure complète
+sont dans le projet **v32io** (`firmware/`).
+
+**2. L'émulateur modifié (sans matériel).** Un fork de l'émulateur
+Vircon32, [wedge1020/ComputerSoftware](https://github.com/wedge1020/ComputerSoftware/tree/main),
+implémente les périphériques v32io dans l'émulateur lui-même, en lisant le
+clavier et la souris de l'ordinateur :
+
+- **clavier** : la [branche `v32kbd`](https://github.com/wedge1020/ComputerSoftware/tree/v32kbd).
+  Dans son menu Gamepads, choisir un port de manette et sélectionner
+  `v32kbd`.
+- **souris** : pas encore dans le fork ; prévue dans une branche `v32io`
+  qui portera les deux périphériques. D'ici là, la souris demande
+  l'adaptateur matériel.
+
+**Quel port de manette.** Par défaut, le programme lit le clavier sur le
+**port de manette 1** (le deuxième) et la souris sur le **port 3** (le
+quatrième), ce qui laisse le port 0 à la manette d'un joueur. Branchez le
+périphérique sur ce port, ou indiquez au programme où il est :
+`--keyboard N` / `--mouse N` sur la ligne de commande, `--#keyboard N` /
+`--#mouse N` dans le source, ou `kbd.port(n)` / `mouse.port(n)` à
+l'exécution.
+
+**Vérifier le périphérique.** `kbd.connected()` et `mouse.connected()`
+indiquent si *une manette* est branchée sur ce port — la console ne peut
+pas distinguer un périphérique v32io d'une vraie manette. Avec
+l'adaptateur matériel, sa manette n'existe que tant qu'un clavier ou une
+souris y est branché. Une **manette ordinaire** laissée sur le port du
+clavier ou de la souris est lue comme tel : ses boutons deviennent des
+touches, des clics et des mouvements aléatoires. Un programme qui doit
+aussi fonctionner sans ces périphériques devrait proposer une autre façon
+de jouer (commandes à la manette, clavier à l'écran) et, idéalement,
+laisser choisir le port.
+
+### Comment ça marche
+
+La conception suit les bibliothèques C du projet v32io (`v32io.h`,
+`keyboard.h`, `mouse.h`), dont la référence des protocoles est
+`PROTOCOLS.md` :
+
+- **Un mot empaqueté.** Un périphérique v32io utilise les 11 commandes de
+  sa manette comme 11 bits de données, pas comme des boutons de jeu.
+  L'environnement d'exécution les lit toutes à la fois dans un mot, bit
+  *n* = port INP `0x402 + n` (Left, Right, Up, Down, Start, A, B, X, Y, L,
+  R) — `__v32io_read` dans `v32io.s`, la couche commune que décodent les
+  deux périphériques, comme `v32io.h`. La console ne montre jamais deux
+  directions opposées enfoncées à la fois, donc chaque paire de directions
+  est un « trit » à 3 états ; les deux protocoles reposent là-dessus.
+- **Clavier (v32kbd).** Au plus un événement de touche par image :
+  Left/Right alternent comme *stroboscope* (un nouvel événement est un côté
+  différent du dernier vu, donc la même touche peut arriver deux fois de
+  suite), Up = enfoncée, Down = relâchée, Start…R = le code de touche sur 7
+  bits. L'adaptateur envoie d'abord le code et bascule le stroboscope 8 ms
+  plus tard, en gardant chaque événement 2 images (environ 23 événements
+  par seconde ; une frappe plus rapide est mise en file par l'adaptateur) ;
+  le fork de l'émulateur livre exactement un événement par image.
+  L'environnement d'exécution tient les touches enfoncées, Verr Maj, une
+  file de 64 événements pour `kbd.read()`/`kbd.event()`, et applique
+  lui-même Maj/Verr Maj (disposition US). Voir
+  [Clavier](#clavier--key--keyp--kbd).
+- **Souris (v32mouse).** Start/A/B = milieu/gauche/droit, tels quels
+  (chaque changement dure au moins 25 ms). Le mouvement passe par deux
+  compteurs de 12 positions, un par axe, chacun un code de Gray sur 2 bits
+  plus un trit, qui changent une commande par pas ; l'environnement
+  d'exécution transforme le changement depuis l'image précédente en −5…+5
+  pas (6 est ambigu : pas de mouvement) et déplace son propre pointeur de
+  pas × échelle. L'adaptateur envoie au plus un pas par axe toutes les
+  5 ms. Il ne reste pas de place pour la molette. Voir
+  [Souris](#souris--mouse--mouse).
+- **À chaque image.** Les deux périphériques doivent être lus à chaque
+  image : un événement clavier ou un pas de souris non vu à temps est
+  perdu ou mal lu. Quand un programme les utilise, le compilateur les lit
+  dans chaque appel clavier/souris (une fois par image), au début de
+  chaque `game_loop()`/`TIC()`/tick PICO-8, et juste avant le `WAIT` de
+  `system.wait()`, `ioports.gpu.sync()` et du `flip()` de PICO-8. Une
+  boucle `__rawasm__("WAIT")` nue saute cette lecture.
+- **Seulement si utilisés.** Le compilateur cherche dans le source (hors
+  commentaires et chaînes) des appels clavier/souris ; un programme qui
+  n'en a pas ne reçoit rien de ce code, de cette RAM ni de cette lecture
+  par image.
+- **La sélection de manette est conservée.** Lire le port du périphérique
+  oblige à le sélectionner, et la sélection du programme doit être
+  rétablie — mais les émulateurs Vircon32 renvoient une valeur erronée
+  quand on lit `INP_SelectedGamepad`. L'environnement d'exécution mémorise
+  donc lui-même la manette sélectionnée (`V32IO_GAMEPAD`, mise à jour par
+  chaque `btn()`, `btnp()` et écriture de `ioports.inp.gamepad`), et les
+  lectures de `ioports.inp.gamepad` donnent cette valeur mémorisée.
+  `btn()` et `ioports.inp.*` continuent de lire la manette qu'ils lisaient.
+
+---
+
 ## Clavier : key() / keyp() / kbd.\*
 
 ```
@@ -1043,10 +1168,16 @@ kbd.connected()               -> booléen, quelque chose est branché sur ce por
 kbd.clear()                   -- oublie les événements non lus
 ```
 
+> **⚠ Uniquement avec un périphérique v32io.** Il faut l'adaptateur
+> matériel v32io avec un clavier USB, ou le périphérique `v32kbd` de
+> l'émulateur modifié — voir
+> [Clavier et souris : ce qu'il faut](#clavier-et-souris--ce-quil-faut-v32io).
+> Sans eux, `key()` est toujours faux et `kbd.read()` toujours nil.
+
 Ces fonctions lisent un clavier complet à travers un périphérique
-**v32kbd** : un adaptateur USB de clavier que la console voit comme une
+**v32kbd** : un clavier USB que la console voit comme une
 manette ordinaire, dont les 11 commandes transportent des événements de
-touches au lieu de boutons (voir le projet v32kbd). Il se branche sur un
+touches au lieu de boutons (voir le projet v32io). Il se branche sur un
 port de manette — **le port 1 (le deuxième) par défaut**, ce qui laisse le
 port 0 à une manette ordinaire. On le change avec `--keyboard N` sur la
 ligne de commande, une indication `--#keyboard N` dans le source, ou
@@ -1207,8 +1338,15 @@ mouse.port([n])               -> port de manette de la souris (et le change)
 mouse.connected()             -> booléen, quelque chose est branché sur ce port
 ```
 
-Ces fonctions lisent une souris à travers un périphérique **v32mouse** : un
-adaptateur USB de souris que la console voit comme une manette ordinaire
+> **⚠ Uniquement avec un périphérique v32io.** Il faut l'adaptateur
+> matériel v32io avec une souris USB (l'émulateur modifié n'a que le
+> clavier pour l'instant ; sa souris est prévue) — voir
+> [Clavier et souris : ce qu'il faut](#clavier-et-souris--ce-quil-faut-v32io).
+> Sans lui, le pointeur reste à son point de départ et aucun bouton n'est
+> enfoncé.
+
+Ces fonctions lisent une souris à travers un périphérique **v32mouse** :
+une souris USB que la console voit comme une manette ordinaire
 (voir le projet v32io). Il se branche sur un port de manette — **le port 3
 (le quatrième) par défaut**, comme dans la démo souris de v32io, ce qui
 laisse la place à un clavier (port 1) et à la manette d'un joueur (port 0).
