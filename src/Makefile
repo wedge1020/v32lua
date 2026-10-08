@@ -19,7 +19,7 @@ TARGET = ../bin/v32lua
 # --- Object Files ---
 
 # Core sources
-CORE_SRCS = parser.o lexer.o main.o context.o ffi.o closures.o generator.o ast.o emit.o internals.o register.o table.o tilemap.o pico8_assets.o pico8_shorthand.o pico8_audio.o pico8_prelude.o pico8_bezel.o png.o tic80_assets.o tic80_cart.o tic80_audio.o vtex_generator.o shapes.o runtime_embed.o
+CORE_SRCS = parser.o lexer.o main.o context.o ffi.o closures.o generator.o ast.o emit.o internals.o register.o table.o tilemap.o pico8_assets.o pico8_shorthand.o pico8_audio.o pico8_prelude.o pico8_bezel.o png.o tic80_assets.o tic80_cart.o tic80_audio.o vtex_generator.o shapes.o v32kbd.o runtime_embed.o
 
 # generate cases - automatically include all .c files in generate/
 NODE_DIR = node
@@ -73,6 +73,8 @@ context:
 	@cp -v runtime/pico8.s    runtime/pico8.s.txt
 	@cp -v runtime/tic80.s    runtime/tic80.s.txt
 	@cp -v runtime/vircon32.s runtime/vircon32.s.txt
+	@cp -v runtime/v32io.s    runtime/v32io.s.txt
+	@cp -v runtime/v32kbd.s   runtime/v32kbd.s.txt
 	@cp -v runtime/constant.s runtime/constant.s.txt
 	@cp -v Makefile           Makefile.txt
 	@cp -v lexer.l            lexer.l.txt

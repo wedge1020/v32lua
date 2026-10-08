@@ -356,9 +356,13 @@ __builtin_vircon32_btn:
     IEQ   R3, BOXED_NIL
     JT    R3, _vircon32_btn_use_current_gamepad
 
-    ;; Player specified - convert to int and set it
+    ;; Player specified - convert to int and set it (through v32io, which
+    ;; remembers it: the port can't be read back)
     CFI   R2
-    OUT   INP_SelectedGamepad, R2
+    PUSH  R1
+    MOV   R1, R2
+    CALL  __v32io_select
+    POP   R1
     JMP   _vircon32_btn_check_button
 
 _vircon32_btn_use_current_gamepad:
@@ -507,12 +511,18 @@ __builtin_vircon32_btnp:
     ;; Player specified - convert to int, save in R4, and set gamepad
     CFI   R2
     MOV   R4, R2            ; Save player index in R4
-    OUT   INP_SelectedGamepad, R2
+    PUSH  R1
+    MOV   R1, R2
+    CALL  __v32io_select
+    POP   R1
     JMP   _vircon32_btnp_clamp_player
 
 _vircon32_btnp_use_current_gamepad:
-    ;; Use current gamepad - read which one is selected
-    IN    R4, INP_SelectedGamepad  ; Get current gamepad index
+    ;; Use current gamepad - which one is selected. Not read from
+    ;; INP_SelectedGamepad: the emulator returns garbage for that port
+    ;; (V32GamepadController::ReadPort falls through to the per-gamepad
+    ;; ports), so v32io.s keeps the last selection in V32IO_GAMEPAD.
+    MOV   R4, [V32IO_GAMEPAD]
 
 _vircon32_btnp_clamp_player:
     ;; Clamp R4 to 0-3 so the prev-state index below can never run off
@@ -2289,4 +2299,173 @@ _tonebank_sfx_done:
     POP   BP
     RET
 
+
+;; ============================================================================
+;; __builtin_vircon32_rect: native rect() / rectfill()
+;; ============================================================================
+;; Stack layout relative to BP:
+;; [BP+2]: x1         [BP+3]: y1        (Lua numbers)
+;; [BP+4]: x2         [BP+5]: y2        (Lua numbers)
+;; [BP+6]: color      (RAW packed 0xAABBGGRR word, like spr()'s color_mult)
+;; [BP+7]: filled     (raw int: 1 rectfill(), 0 rect())
+;; Returns BOXED_NIL in R0. Preserves R1-R13.
+;;
+;; The corners are opposite and INCLUSIVE, in any order; each coordinate is
+;; floored (nil / non-numbers count as 0). rectfill() is ONE zoomed draw of
+;; region 0 of the fill texture (V32_FILL_TEXTURE: 1 white pixel with white
+;; around it, see shapes.c) at scale (w, h) -- exact for integer sizes, since
+;; the region is 1x1. rect() is up to 4 non-overlapping edges -- top and
+;; bottom full width, left and right between them -- so a translucent color
+;; is not drawn twice at the corners.
+;;
+;; The GPU state used is put back afterwards (selected texture and region,
+;; multiply color, drawing scale), so rect() can sit in the middle of
+;; ioports.gpu.* drawing code; the blending mode is left as the program set
+;; it.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_vircon32_rect:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
+
+    ;; --- GPU state to restore ---
+    IN    R0, GPU_SelectedTexture
+    PUSH  R0
+    IN    R0, GPU_SelectedRegion
+    PUSH  R0
+    IN    R0, GPU_MultiplyColor
+    PUSH  R0
+    IN    R0, GPU_DrawingScaleX
+    PUSH  R0
+    IN    R0, GPU_DrawingScaleY
+    PUSH  R0
+
+    ;; --- corners -> R1 = left, R2 = top, R3 = width, R4 = height ---
+    MOV   R1, [BP+4]
+    CALL  __vircon32_coord
+    MOV   R3, R1                  ; x2
+    MOV   R1, [BP+5]
+    CALL  __vircon32_coord
+    MOV   R4, R1                  ; y2
+    MOV   R1, [BP+3]
+    CALL  __vircon32_coord
+    MOV   R2, R1                  ; y1
+    MOV   R1, [BP+2]
+    CALL  __vircon32_coord        ; x1
+    MOV   R0, R1
+    IMIN  R1, R3                  ; left
+    IMAX  R3, R0                  ; right
+    ISUB  R3, R1
+    IADD  R3, 1                   ; width  (>= 1)
+    MOV   R0, R2
+    IMIN  R2, R4                  ; top
+    IMAX  R4, R0                  ; bottom
+    ISUB  R4, R2
+    IADD  R4, 1                   ; height (>= 1)
+
+    OUT   GPU_SelectedTexture, V32_FILL_TEXTURE
+    OUT   GPU_SelectedRegion, 0
+    MOV   R0, [BP+6]
+    OUT   GPU_MultiplyColor, R0   ; raw word, no CFI (see spr())
+
+    MOV   R0, [BP+7]
+    JF    R0, _vircon32_rect_outline
+    CALL  __vircon32_fill         ; (left, top, w, h)
+    JMP   _vircon32_rect_done
+
+_vircon32_rect_outline:
+    MOV   R5, R4                  ; h
+    MOV   R6, R3                  ; w
+    MOV   R4, 1
+    CALL  __vircon32_fill         ; top    (x, y, w, 1)
+    MOV   R0, R5
+    IGT   R0, 1
+    JF    R0, _vircon32_rect_done
+    PUSH  R2
+    IADD  R2, R5
+    ISUB  R2, 1
+    CALL  __vircon32_fill         ; bottom (x, y + h - 1, w, 1)
+    POP   R2
+    MOV   R0, R5
+    IGT   R0, 2
+    JF    R0, _vircon32_rect_done
+    IADD  R2, 1
+    MOV   R4, R5
+    ISUB  R4, 2
+    MOV   R3, 1
+    CALL  __vircon32_fill         ; left   (x, y + 1, 1, h - 2)
+    MOV   R0, R6
+    IGT   R0, 1
+    JF    R0, _vircon32_rect_done
+    IADD  R1, R6
+    ISUB  R1, 1
+    CALL  __vircon32_fill         ; right  (x + w - 1, y + 1, 1, h - 2)
+
+_vircon32_rect_done:
+    POP   R0
+    OUT   GPU_DrawingScaleY, R0
+    POP   R0
+    OUT   GPU_DrawingScaleX, R0
+    POP   R0
+    OUT   GPU_MultiplyColor, R0
+    POP   R0
+    OUT   GPU_SelectedRegion, R0
+    POP   R0
+    OUT   GPU_SelectedTexture, R0
+    MOV   R0, BOXED_NIL
+    POP   R6
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; __vircon32_fill (internal): draws the selected 1x1 region zoomed to
+;; R3 x R4 pixels at (R1, R2) -- all raw ints. Clobbers R0 only.
+__vircon32_fill:
+    MOV   R0, R3
+    CIF   R0
+    OUT   GPU_DrawingScaleX, R0
+    MOV   R0, R4
+    CIF   R0
+    OUT   GPU_DrawingScaleY, R0
+    OUT   GPU_DrawingPointX, R1
+    OUT   GPU_DrawingPointY, R2
+    OUT   GPU_Command, GPUCommand_DrawRegionZoomed
+    RET
+
+;; __vircon32_coord (internal): R1 = Lua number -> R1 = raw int, floored and
+;; clamped to +-65536 (far past the 640x360 screen, and CFI is undefined out
+;; of range -- see learnings on x86 vs ARM). nil / non-numbers -> 0.
+;; Clobbers R0 only.
+__vircon32_coord:
+    MOV   R0, R1
+    AND   R0, NAN_VALUE
+    IEQ   R0, NAN_VALUE
+    JT    R0, _vircon32_coord_zero
+    MOV   R0, R1
+    FLT   R0, -65536.0
+    JF    R0, _vircon32_coord_lo
+    MOV   R1, -65536.0
+_vircon32_coord_lo:
+    MOV   R0, R1
+    FGT   R0, 65536.0
+    JF    R0, _vircon32_coord_hi
+    MOV   R1, 65536.0
+_vircon32_coord_hi:
+    FLR   R1
+    CFI   R1
+    RET
+_vircon32_coord_zero:
+    MOV   R1, 0
+    RET
 

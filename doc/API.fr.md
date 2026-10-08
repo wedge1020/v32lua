@@ -26,7 +26,9 @@ L'ordre d'écriture des ports SPU compte pour le son ; voir
 - [Ports d'E/S booléens](#ports-des-booléens)
 - [Système : system.\*](#système--system)
 - [Graphismes : spr()](#graphismes--spr)
+- [Graphismes : rect() / rectfill()](#graphismes--rect--rectfill)
 - [Entrées : btn() / btnp()](#entrées--btn--btnp)
+- [Clavier : key() / keyp() / kbd.\*](#clavier--key--keyp--kbd)
 - [Tilemap : tilemap.\*](#tilemap--tilemap)
 - [Carte mémoire : memcard.\*](#carte-mémoire--memcard)
 - [Autres ports d'E/S bruts](#autres-ports-des-bruts)
@@ -49,6 +51,8 @@ nom (`spr`, `rgba`, `color`, …) remplace l'intrinsèque.
 | Appel | Renvoie | Ce qu'il fait |
 |---|---|---|
 | `spr(region, x, y [, sx [, sy [, angle [, color [, blend]]]]])` | nil | Dessine une région de texture ; choisit le dessin simple, zoomé, pivoté ou les deux selon les arguments. [Détails](#graphismes--spr) |
+| `rect(x1, y1, x2, y2 [, color])` | nil | Contour de rectangle de 1 pixel entre deux coins inclus. Couleur : mot empaqueté, blanc par défaut. [Détails](#graphismes--rect--rectfill) |
+| `rectfill(x1, y1, x2, y2 [, color])` | nil | Rectangle plein, un seul dessin GPU. |
 | `print(x, y, value)` | nil | Dessine `value` (convertie par `tostring`) au pixel `x, y` avec la police du BIOS. |
 | `ioports.gpu.clear([color])` / `clear(r, g, b [, a])` | nil | Fixe la couleur d'effacement (facultatif) et efface l'écran. [Détails](#gpu-clear) |
 | `ioports.gpu.draw([mode])` | nil | Dessine la région sélectionnée en `gpu.x, gpu.y`. `mode` : `"draw"` (par défaut), `"zoom"`, `"rotate"`, `"rotozoom"`, ou `0`–`3`. |
@@ -64,6 +68,18 @@ nom (`spr`, `rgba`, `color`, …) remplace l'intrinsèque.
 |---|---|---|
 | `btn(id [, pad])` | booléen | Le bouton `id` (0–10, ordre matériel) est enfoncé. [Détails](#entrées--btn--btnp) |
 | `btnp(id [, pad])` | booléen | Le bouton `id` a été pressé à cette image. |
+
+*Clavier* (périphérique v32kbd) — [détails](#clavier--key--keyp--kbd)
+
+| Appel | Renvoie | Ce qu'il fait |
+|---|---|---|
+| `key([k])` | booléen | La touche `k` (code ou nom littéral : `"a"`, `"enter"`, `"shift"`) est enfoncée ; sans `k` : n'importe quelle touche. |
+| `keyp([k [, hold, period]])` | booléen | La touche `k` s'est enfoncée à cette image (répétition avec `hold`/`period`, comme TIC-80). |
+| `kbd.read()` | nombre / nil | Appui suivant sous forme du caractère tapé (Maj et Verr Maj appliqués). |
+| `kbd.event()` | nombre / nil | Événement suivant : `+code` enfoncée, `-code` relâchée. |
+| `kbd.port([n])` | nombre | Port de manette du clavier (1 par défaut) ; le changer repart de zéro. |
+| `kbd.capslock()`, `kbd.connected()` | booléen | État de Verr Maj ; périphérique branché. |
+| `kbd.clear()` | nil | Oublie les événements non lus. |
 
 *Son* — [détails](#son--music--sfx)
 
@@ -155,7 +171,7 @@ ci-dessus).
 
 | Propriété | Port | Accès | Type | Signification |
 |---|---|---|---|---|
-| `ioports.inp.gamepad` | `INP_SelectedGamepad` | L/É | int | Manette (0–3) lue par les autres propriétés. |
+| `ioports.inp.gamepad` | `INP_SelectedGamepad` | L/É | int | Manette (0–3) lue par les autres propriétés. Sa lecture renvoie la dernière valeur affectée (les émulateurs ne savent pas relire ce port ; voir [Le port de manette](#clavier--key--keyp--kbd)). |
 | `ioports.inp.status` | `INP_GamepadConnected` | L | bool | La manette sélectionnée est-elle connectée. |
 | `ioports.inp.left`, `right`, `up`, `down` | `INP_GamepadLeft/…` | L | int | Croix : images depuis l'appui (> 0) ou depuis le relâchement (< 0). |
 | `ioports.inp.A`, `B`, `X`, `Y`, `L`, `R`, `START` | `INP_GamepadButton*` | L | int | Boutons, même codage. |
@@ -849,6 +865,61 @@ multiplication, mélange, et le compteur en lecture seule GPU-occupée
 
 ---
 
+## Graphismes : rect() / rectfill()
+
+```
+rect(x1, y1, x2, y2 [, color])       -- contour de 1 pixel
+rectfill(x1, y1, x2, y2 [, color])   -- plein
+```
+
+`(x1, y1)` et `(x2, y2)` sont deux coins opposés, tous deux **inclus**, dans
+n'importe quel ordre : `rectfill(10, 20, 19, 24)` couvre 10 × 5 pixels,
+colonnes 10–19 et lignes 20–24, et `rectfill(19, 24, 10, 20)` est le même
+rectangle. Les coordonnées sont arrondies à l'entier inférieur
+(`rectfill(9.8, ...)` commence à la colonne 9) ; `nil` ou une valeur qui
+n'est pas un nombre compte pour 0. Deux coins identiques dessinent un pixel.
+
+`color` est un mot empaqueté `0xAABBGGRR`, exactement comme le `color_mult`
+de `spr()` : un littéral (`0xFF0000FF`), `rgba()`, `color()`, `hex()`, ou
+une variable qui en contient un. Absent ou `nil` : blanc opaque. Une
+couleur d'alpha inférieur à 255 se mélange selon le mode de mélange courant
+(`ioports.gpu.blending`), que `rect()` laisse tel quel.
+
+```lua
+rectfill(0, 0, 639, 359, rgba(0, 0, 64))      -- tout l'écran, bleu foncé
+rect(100, 50, 199, 99, 0xFF00FFFF)           -- cadre jaune de 100 x 50
+rectfill(px, py, px + 15, py + 15, rgba(255, 0, 0, 128))   -- rouge translucide
+```
+
+**Comment il dessine**
+
+Un programme qui appelle `rect` ou `rectfill` reçoit une petite texture à
+lui : 4 × 4 pixels blancs opaques, ajoutée à la cartouche **après** toutes
+les `--#texture` (vos numéros de texture ne bougent pas ;
+`ioports.car.numvtex` la compte). Sa région 0 est un pixel blanc ;
+`rectfill()` est **un** seul dessin agrandi de cette région à l'échelle
+(largeur, hauteur), teinté par la couleur de multiplication — exact au
+pixel pour toute taille. `rect()` fait jusqu'à 4 dessins qui ne se
+chevauchent pas (bords haut et bas sur toute la largeur, les côtés entre
+eux), si bien qu'un contour translucide n'est pas plus sombre aux coins.
+
+L'état du GPU utilisé par l'appel est rétabli ensuite : texture et région
+sélectionnées, couleur de multiplication, échelle de dessin. Un `rect()`
+peut se glisser au milieu de code de dessin `ioports.gpu.*` sans le
+perturber.
+
+Chaque dessin coûte des pixels GPU comme n'importe quel autre
+(`ioports.gpu.pixels`), plus la pénalité d'agrandissement du GPU ; un
+`rectfill()` plein écran coûte un écran de pixels.
+
+Une fonction à vous nommée `rect` ou `rectfill` remplace l'intrinsèque,
+comme pour tous les intrinsèques. Avec `--#api pico8`, ces deux noms sont
+les versions PICO-8 à couleurs de palette (voir [PICO8.md](PICO8.md)) ;
+avec `--#api tic80`, `rect(x, y, w, h, color)` / `rectb(...)` sont celles
+de TIC-80 (voir [TIC80.md](TIC80.md)).
+
+---
+
 ## Entrées : btn() / btnp()
 
 ```
@@ -942,6 +1013,168 @@ bouton par bouton, où `btn()`/`btnp()` se lisent plus clairement.
 Cela correspond au matériel Vircon32 sous-jacent plutôt qu'aux
 conventions de PICO-8/TIC-80 ; cette émulation vit entièrement dans les
 couches de compatibilité `--#api pico8`/`--#api tic80`, pas ici.
+
+---
+
+## Clavier : key() / keyp() / kbd.\*
+
+```
+key([k])                      -> booléen, k enfoncée (sans k : n'importe quelle touche)
+keyp([k [, hold, period]])    -> booléen, k enfoncée à cette image (+ répétition)
+kbd.read()                    -> caractère tapé suivant (un nombre), ou nil
+kbd.event()                   -> événement suivant : +code enfoncée, -code relâchée, ou nil
+kbd.port([n])                 -> port de manette du clavier (et le change)
+kbd.capslock()                -> booléen, Verr Maj actif
+kbd.connected()               -> booléen, quelque chose est branché sur ce port
+kbd.clear()                   -- oublie les événements non lus
+```
+
+Ces fonctions lisent un clavier complet à travers un périphérique
+**v32kbd** : un adaptateur USB de clavier que la console voit comme une
+manette ordinaire, dont les 11 commandes transportent des événements de
+touches au lieu de boutons (voir le projet v32kbd). Il se branche sur un
+port de manette — **le port 1 (le deuxième) par défaut**, ce qui laisse le
+port 0 à une manette ordinaire. On le change avec `--keyboard N` sur la
+ligne de commande, une indication `--#keyboard N` dans le source, ou
+`kbd.port(n)` à l'exécution.
+
+`key()`/`keyp()` suivent ceux de TIC-80 : mêmes noms, mêmes règles, avec
+les codes de touche v32kbd. Avec `--#api tic80`, ces deux appels prennent
+les codes de TIC-80 (voir [TIC80.md](TIC80.md#input)) ; `kbd.*` fonctionne
+avec toutes les API. Une globale à vous nommée `kbd` (une table que vous
+affectez) remplace les fonctions `kbd.*` intégrées.
+
+**Codes de touche**
+
+Un code désigne une **touche**, pas un caractère : les touches qui tapent
+un caractère utilisent ce caractère sans majuscule, disposition US —
+`'a'`–`'z'` (97–122), `'0'`–`'9'` (48–57), espace (32) et
+`` ` - = [ ] \ ; ' , . / `` — et les autres :
+
+| Code | Touche | Code | Touche |
+|---|---|---|---|
+| 1 | Haut | 11 | Ctrl droit |
+| 2 | Bas | 12 | Alt gauche (Option) |
+| 3 | Gauche | 13 | Entrée |
+| 4 | Droite | 14–25 | F1–F12 |
+| 5 | Verr Maj | 26 | Alt droit (Option) |
+| 6 | Maj gauche | 27 | Échap |
+| 7 | Maj droite | 28 | GUI gauche (Commande, Windows) |
+| 8 | Retour arrière | 29 | GUI droite |
+| 9 | Tab | 127 | Suppr |
+| 10 | Ctrl gauche | | |
+
+Les touches du pavé numérique donnent les mêmes codes que leurs
+équivalents du clavier principal.
+
+`k` peut aussi être un **littéral de chaîne**, converti en code à la
+compilation : un caractère (`"a"`, `"/"`, `" "` ; un caractère majuscule
+ou shifté désigne sa touche, donc `"A"` est la touche a et `"!"` la
+touche 1), ou un nom — `up` `down` `left` `right` `enter` (`return`) `tab`
+`space` `backspace` `delete` (`del`) `escape` (`esc`) `capslock` `lshift`
+`rshift` `lctrl` `rctrl` `lalt` `ralt` `lgui` `rgui` `f1`–`f12`, sans
+distinction de casse. Quatre noms valent pour les deux côtés : `shift`,
+`ctrl`, `alt`, `gui` (`key("shift")` est vrai tant que l'une des deux
+touches Maj est enfoncée). Un nom inconnu est une erreur de compilation.
+Seuls les littéraux sont convertis : une chaîne rangée dans une variable
+n'est pas une touche (`false`).
+
+```lua
+function game_loop()
+    if key("left")  then x = x - 2 end
+    if key("right") then x = x + 2 end
+    if keyp("space") then fire() end
+    if key("ctrl") and keyp("s") then save() end
+    if keyp("down", 20, 4) then menu_next() end   -- se répète tant qu'elle reste enfoncée
+end
+```
+
+**key([k]), keyp([k [, hold, period]])**
+
+`key(k)` est vrai tant que la touche est enfoncée. `keyp(k)` est vrai à
+l'image où elle s'enfonce ; avec `hold` et `period` donnés et ≥ 0, aussi
+tant que la touche reste enfoncée, à partir de `hold` images, toutes les
+`period` images (`period` 0 : à chaque image) — en comptant les images
+après la première, comme `keyp` et `btnp` de TIC-80. Pas de répétition par
+défaut. Sans `k`, `key()` signifie « une touche est enfoncée » et `keyp()`
+« une touche s'est enfoncée à cette image ». Un code sans touche
+correspondante vaut `false`.
+
+**Texte tapé : kbd.read()**
+
+```lua
+local text = ""
+function game_loop()
+    local c = kbd.read()
+    while c do
+        if c == 8 then                          -- Retour arrière
+            text = string.sub(text, 1, -2)
+        elseif c >= 32 and c < 127 then
+            text = text .. string.char(c)
+        end
+        c = kbd.read()
+    end
+    print(0, 0, text .. "_")
+end
+```
+
+`kbd.read()` renvoie l'**appui** suivant sous la forme du caractère tapé,
+avec Maj et Verr Maj appliqués tels qu'ils étaient au moment de l'appui
+(`"A"`, `"!"`, `"{"` ... en nombres, selon la police du BIOS), et les
+touches sans caractère sous forme de leur code (Entrée 13, Retour arrière 8,
+flèches 1–4...). Les relâchements sont ignorés. `nil` quand il n'y a plus
+rien.
+
+`kbd.event()` renvoie au contraire tous les événements, appuis et
+relâchements, sous forme du code de touche sans Maj : positif pour un
+appui, négatif pour un relâchement (`-97` : la touche a a été relâchée).
+Les deux lisent la même file : utilisez l'une ou l'autre. La file contient
+64 événements ; au-delà, les nouveaux sont perdus jusqu'à ce qu'elle soit
+lue (`kbd.clear()` la vide ; les touches enfoncées que voit `key()` ne
+changent pas).
+
+**kbd.port([n]), kbd.capslock(), kbd.connected()**
+
+`kbd.port(n)` déplace le clavier sur le port de manette `n` (0–3, borné)
+et repart de zéro : touches enfoncées, événements en file et Verr Maj sont
+oubliés, et l'état actuel du périphérique sert de point de départ. Il
+renvoie le port ; `kbd.port()` ne fait que le renvoyer. `kbd.capslock()`
+est l'état de Verr Maj, tenu en comptant ses appuis (désactivé au départ).
+`kbd.connected()` est vrai quand quelque chose est branché sur le port du
+clavier.
+
+**Lire à chaque image**
+
+Le périphérique signale au plus un événement de touche par image et le
+garde jusqu'au suivant : il faut donc le lire **à chaque image**, sinon des
+événements se perdent. Le compilateur s'en charge quand le programme
+utilise le clavier :
+
+- chaque appel à `key`/`keyp`/`kbd.*` lit le périphérique (une fois par
+  image) ;
+- les boucles de `game_loop()` et de `TIC()` (TIC-80) le lisent avant
+  chaque image ;
+- `system.wait()` et `ioports.gpu.sync()` le lisent avant leur `WAIT` (ce
+  qui arrive alors compte pour l'image suivante, donc `keyp()` le voit
+  encore).
+
+Une boucle `main()` qui attend avec `system.wait()` ne perd donc rien, même
+si elle ne regarde le clavier que de temps en temps. Un
+`__rawasm__("WAIT")` nu saute cette lecture. Rien de tout cela n'est
+présent dans un programme qui n'utilise pas le clavier.
+
+**Le port de manette**
+
+Le port du clavier est lu sans perturber la manette sélectionnée par le
+programme : `btn()`, `btnp()` et `ioports.inp.*` continuent de lire la
+manette qu'ils lisaient. Ne lisez pas le port du clavier avec `btn()` : ses
+« boutons » sont des bits du code de touche.
+
+La manette sélectionnée est mémorisée par l'environnement d'exécution
+(`V32IO_GAMEPAD`) au lieu d'être relue dans `INP_SelectedGamepad` : les
+émulateurs Vircon32 renvoient une valeur erronée quand on lit ce port. Les
+lectures de `ioports.inp.gamepad` donnent elles aussi la valeur mémorisée.
+Une écriture du port par `__rawasm__` contourne ce mécanisme.
 
 ---
 

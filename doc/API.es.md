@@ -27,7 +27,9 @@ El orden de escritura de los puertos SPU es importante para el sonido; ver
 - [Puertos de E/S booleanos](#puertos-de-es-booleanos)
 - [Sistema: system.\*](#sistema-system)
 - [Gráficos: spr()](#gráficos-spr)
+- [Gráficos: rect() / rectfill()](#gráficos-rect--rectfill)
 - [Entrada: btn() / btnp()](#entrada-btn--btnp)
+- [Teclado: key() / keyp() / kbd.\*](#teclado-key--keyp--kbd)
 - [Mapa de mosaicos: tilemap.\*](#mapa-de-mosaicos-tilemap)
 - [Tarjeta de memoria: memcard.\*](#tarjeta-de-memoria-memcard)
 - [Otros puertos de E/S en bruto](#otros-puertos-de-es-en-bruto)
@@ -50,6 +52,8 @@ nombre (`spr`, `rgba`, `color`, …) reemplaza al intrínseco.
 | Llamada | Devuelve | Qué hace |
 |---|---|---|
 | `spr(region, x, y [, sx [, sy [, angle [, color [, blend]]]]])` | nil | Dibuja una región de textura; elige el dibujo simple, escalado, rotado o rotado y escalado según los argumentos. [Detalles](#gráficos-spr) |
+| `rect(x1, y1, x2, y2 [, color])` | nil | Contorno de rectángulo de 1 píxel entre dos esquinas incluidas. Color: palabra empaquetada, blanco por defecto. [Detalles](#gráficos-rect--rectfill) |
+| `rectfill(x1, y1, x2, y2 [, color])` | nil | Rectángulo relleno, un solo dibujo de la GPU. |
 | `print(x, y, value)` | nil | Dibuja `value` (convertido con `tostring`) en el píxel `x, y` con la fuente de la BIOS. |
 | `ioports.gpu.clear([color])` / `clear(r, g, b [, a])` | nil | Establece el color de limpieza (opcional) y limpia la pantalla. [Detalles](#gpu-clear) |
 | `ioports.gpu.draw([mode])` | nil | Dibuja la región seleccionada en `gpu.x, gpu.y`. `mode`: `"draw"` (por defecto), `"zoom"`, `"rotate"`, `"rotozoom"`, o `0`–`3`. |
@@ -65,6 +69,18 @@ nombre (`spr`, `rgba`, `color`, …) reemplaza al intrínseco.
 |---|---|---|
 | `btn(id [, pad])` | booleano | El botón `id` (0–10, orden de hardware) está presionado. [Detalles](#entrada-btn--btnp) |
 | `btnp(id [, pad])` | booleano | El botón `id` se presionó en este cuadro. |
+
+*Teclado* (dispositivo v32kbd) — [detalles](#teclado-key--keyp--kbd)
+
+| Llamada | Devuelve | Qué hace |
+|---|---|---|
+| `key([k])` | booleano | La tecla `k` (código o nombre literal: `"a"`, `"enter"`, `"shift"`) está pulsada; sin `k`: cualquier tecla. |
+| `keyp([k [, hold, period]])` | booleano | La tecla `k` se pulsó en este cuadro (autorrepetición con `hold`/`period`, como TIC-80). |
+| `kbd.read()` | número / nil | Siguiente pulsación como el carácter que escribe (Mayús y Bloq Mayús aplicados). |
+| `kbd.event()` | número / nil | Siguiente evento: `+código` pulsada, `-código` soltada. |
+| `kbd.port([n])` | número | Puerto de mando del teclado (1 por defecto); cambiarlo empieza de nuevo. |
+| `kbd.capslock()`, `kbd.connected()` | booleano | Estado de Bloq Mayús; dispositivo conectado. |
+| `kbd.clear()` | nil | Descarta los eventos no leídos. |
 
 *Sonido* — [detalles](#sonido-music--sfx)
 
@@ -156,7 +172,7 @@ Métodos: `ioports.gpu.clear()`, `ioports.gpu.draw()`,
 
 | Propiedad | Puerto | Acceso | Tipo | Significado |
 |---|---|---|---|---|
-| `ioports.inp.gamepad` | `INP_SelectedGamepad` | L/E | int | Mando (0–3) que leen las demás propiedades. |
+| `ioports.inp.gamepad` | `INP_SelectedGamepad` | L/E | int | Mando (0–3) que leen las demás propiedades. Al leerlo da el último valor asignado (los emuladores no pueden releer este puerto; ver [El puerto de mando](#teclado-key--keyp--kbd)). |
 | `ioports.inp.status` | `INP_GamepadConnected` | L | bool | Si el mando seleccionado está conectado. |
 | `ioports.inp.left`, `right`, `up`, `down` | `INP_GamepadLeft/…` | L | int | Cruceta: cuadros mantenido (> 0) o cuadros desde que se soltó (< 0). |
 | `ioports.inp.A`, `B`, `X`, `Y`, `L`, `R`, `START` | `INP_GamepadButton*` | L | int | Botones, misma codificación. |
@@ -843,6 +859,61 @@ GPU-ocupada `ioports.gpu.pixels`).
 
 ---
 
+## Gráficos: rect() / rectfill()
+
+```
+rect(x1, y1, x2, y2 [, color])       -- contorno de 1 píxel
+rectfill(x1, y1, x2, y2 [, color])   -- relleno
+```
+
+`(x1, y1)` y `(x2, y2)` son esquinas opuestas, ambas **incluidas**, en
+cualquier orden: `rectfill(10, 20, 19, 24)` cubre 10 × 5 píxeles, columnas
+10–19 y filas 20–24, y `rectfill(19, 24, 10, 20)` es el mismo rectángulo.
+Las coordenadas se redondean hacia abajo (`rectfill(9.8, ...)` empieza en
+la columna 9); `nil` o algo que no sea un número cuenta como 0. Si las dos
+esquinas coinciden se dibuja un píxel.
+
+`color` es una palabra empaquetada `0xAABBGGRR`, igual que el `color_mult`
+de `spr()`: un literal (`0xFF0000FF`), `rgba()`, `color()`, `hex()`, o una
+variable que contenga uno de ellos. Ausente o `nil`: blanco opaco. Un color
+con alfa menor que 255 se mezcla con el modo de mezcla actual
+(`ioports.gpu.blending`), que `rect()` no cambia.
+
+```lua
+rectfill(0, 0, 639, 359, rgba(0, 0, 64))      -- toda la pantalla, azul oscuro
+rect(100, 50, 199, 99, 0xFF00FFFF)           -- marco amarillo de 100 x 50
+rectfill(px, py, px + 15, py + 15, rgba(255, 0, 0, 128))   -- rojo translúcido
+```
+
+**Cómo dibuja**
+
+Un programa que llama a `rect` o `rectfill` recibe una pequeña textura
+propia: 4 × 4 píxeles blancos opacos, añadida al cartucho **después** de
+todas las `--#texture` (tus números de textura no cambian;
+`ioports.car.numvtex` la cuenta). Su región 0 es un píxel blanco;
+`rectfill()` es **un** dibujo escalado de esa región con escala (ancho,
+alto), teñido con el color de multiplicación — exacto al píxel en cualquier
+tamaño. `rect()` son hasta 4 dibujos que no se solapan (bordes superior e
+inferior de ancho completo, los laterales entre ellos), así que un contorno
+translúcido no queda más oscuro en las esquinas.
+
+El estado de la GPU que usa la llamada se restaura después: textura y
+región seleccionadas, color de multiplicación, escala de dibujo. Un
+`rect()` puede ir en medio de código de dibujo con `ioports.gpu.*` sin
+alterarlo.
+
+Cada dibujo cuesta píxeles de GPU como cualquier otro
+(`ioports.gpu.pixels`), más la penalización de escalado de la GPU; un
+`rectfill()` de pantalla completa cuesta una pantalla de píxeles.
+
+Una función propia llamada `rect` o `rectfill` reemplaza a la incorporada,
+como con todo intrínseco. Con `--#api pico8` los dos nombres son las
+versiones de PICO-8 con colores de paleta (ver [PICO8.md](PICO8.md)); con
+`--#api tic80`, `rect(x, y, w, h, color)` / `rectb(...)` son las de TIC-80
+(ver [TIC80.md](TIC80.md)).
+
+---
+
 ## Entrada: btn() / btnp()
 
 ```
@@ -934,6 +1005,164 @@ botón, donde `btn()`/`btnp()` se leen con más claridad.
 Estos coinciden con el hardware subyacente de Vircon32 en lugar de las
 convenciones de PICO-8/TIC-80; esa emulación vive por completo en las
 capas de compatibilidad `--#api pico8`/`--#api tic80`, no aquí.
+
+---
+
+## Teclado: key() / keyp() / kbd.\*
+
+```
+key([k])                      -> booleano, k pulsada (sin k: cualquier tecla)
+keyp([k [, hold, period]])    -> booleano, k se pulsó en este cuadro (+ autorrepetición)
+kbd.read()                    -> siguiente carácter escrito (un número), o nil
+kbd.event()                   -> siguiente evento: +código pulsada, -código soltada, o nil
+kbd.port([n])                 -> puerto de mando del teclado (y lo cambia)
+kbd.capslock()                -> booleano, Bloq Mayús activo
+kbd.connected()               -> booleano, hay algo conectado en ese puerto
+kbd.clear()                   -- descarta los eventos aún no leídos
+```
+
+Leen un teclado completo a través de un dispositivo **v32kbd**: un
+adaptador USB de teclado que la consola ve como un mando normal, cuyos 11
+controles transportan eventos de teclas en lugar de botones (ver el
+proyecto v32kbd). Se conecta en un puerto de mando — **el puerto 1 (el
+segundo) por defecto**, dejando el puerto 0 para un mando normal. Se cambia
+con `--keyboard N` en la línea de órdenes, una pista `--#keyboard N` en el
+código, o `kbd.port(n)` en tiempo de ejecución.
+
+`key()`/`keyp()` siguen a los de TIC-80: mismos nombres, mismas reglas, con
+códigos de tecla de v32kbd. Con `--#api tic80` las mismas dos llamadas usan
+los códigos de TIC-80 (ver [TIC80.md](TIC80.md#input)); `kbd.*` funciona con
+todas las API. Una global propia llamada `kbd` (una tabla que asignes)
+reemplaza a las funciones `kbd.*` incorporadas.
+
+**Códigos de tecla**
+
+Un código nombra una **tecla**, no un carácter: las teclas que escriben un
+carácter usan ese carácter sin mayúsculas, distribución de EE. UU. —
+`'a'`–`'z'` (97–122), `'0'`–`'9'` (48–57), espacio (32) y
+`` ` - = [ ] \ ; ' , . / `` — y las demás:
+
+| Código | Tecla | Código | Tecla |
+|---|---|---|---|
+| 1 | Arriba | 11 | Ctrl derecho |
+| 2 | Abajo | 12 | Alt izquierdo (Option) |
+| 3 | Izquierda | 13 | Intro |
+| 4 | Derecha | 14–25 | F1–F12 |
+| 5 | Bloq Mayús | 26 | Alt derecho (Option) |
+| 6 | Mayús izquierda | 27 | Escape |
+| 7 | Mayús derecha | 28 | GUI izquierda (Command, Windows) |
+| 8 | Retroceso | 29 | GUI derecha |
+| 9 | Tabulador | 127 | Suprimir |
+| 10 | Ctrl izquierdo | | |
+
+Las teclas del teclado numérico dan los mismos códigos que sus equivalentes
+del teclado principal.
+
+`k` también puede ser un **literal de cadena**, convertido al código al
+compilar: un carácter (`"a"`, `"/"`, `" "`; un carácter con mayúsculas
+nombra su tecla, así que `"A"` es la tecla a y `"!"` la tecla 1), o un
+nombre — `up` `down` `left` `right` `enter` (`return`) `tab` `space`
+`backspace` `delete` (`del`) `escape` (`esc`) `capslock` `lshift` `rshift`
+`lctrl` `rctrl` `lalt` `ralt` `lgui` `rgui` `f1`–`f12`, sin distinguir
+mayúsculas. Cuatro nombres valen por cualquiera de los dos lados: `shift`,
+`ctrl`, `alt`, `gui` (`key("shift")` es verdadero mientras cualquiera de
+las dos Mayús esté pulsada). Un nombre desconocido es un error de
+compilación. Solo se convierten literales: una cadena guardada en una
+variable no es una tecla (`false`).
+
+```lua
+function game_loop()
+    if key("left")  then x = x - 2 end
+    if key("right") then x = x + 2 end
+    if keyp("space") then fire() end
+    if key("ctrl") and keyp("s") then save() end
+    if keyp("down", 20, 4) then menu_next() end   -- se repite mientras se mantiene
+end
+```
+
+**key([k]), keyp([k [, hold, period]])**
+
+`key(k)` es verdadero mientras la tecla está pulsada. `keyp(k)` es
+verdadero en el cuadro en que se pulsa; con `hold` y `period` dados y
+≥ 0, también mientras la tecla siga pulsada, desde `hold` cuadros, cada
+`period` cuadros (`period` 0: cada cuadro) — contando los cuadros después
+del primero, como hacen `keyp` y `btnp` de TIC-80. No hay autorrepetición
+por defecto. Sin `k`, `key()` es "alguna tecla pulsada" y `keyp()` "alguna
+tecla se pulsó en este cuadro". Un código sin tecla detrás es `false`.
+
+**Texto escrito: kbd.read()**
+
+```lua
+local text = ""
+function game_loop()
+    local c = kbd.read()
+    while c do
+        if c == 8 then                          -- Retroceso
+            text = string.sub(text, 1, -2)
+        elseif c >= 32 and c < 127 then
+            text = text .. string.char(c)
+        end
+        c = kbd.read()
+    end
+    print(0, 0, text .. "_")
+end
+```
+
+`kbd.read()` devuelve la siguiente **pulsación** como el carácter que
+escribe, con Mayús y Bloq Mayús aplicados tal como estaban al pulsarla
+(`"A"`, `"!"`, `"{"` ... como números, según la fuente de la BIOS), y las
+teclas sin carácter como su código (Intro 13, Retroceso 8, flechas 1–4...).
+Las liberaciones se saltan. `nil` cuando no queda nada.
+
+`kbd.event()` devuelve en cambio todos los eventos, pulsaciones y
+liberaciones, como el código de tecla sin Mayús: positivo al pulsar,
+negativo al soltar (`-97`: se soltó la tecla a). Ambas leen la misma cola:
+usa una u otra. La cola guarda 64 eventos; a partir de ahí los nuevos se
+descartan hasta que se lea (`kbd.clear()` la vacía; las teclas pulsadas
+que ve `key()` no se ven afectadas).
+
+**kbd.port([n]), kbd.capslock(), kbd.connected()**
+
+`kbd.port(n)` mueve el teclado al puerto de mando `n` (0–3, acotado) y
+empieza de nuevo: se olvidan las teclas pulsadas, los eventos en cola y el
+Bloq Mayús, y el estado actual del dispositivo se toma como punto de
+partida. Devuelve el puerto; `kbd.port()` solo lo devuelve.
+`kbd.capslock()` es el estado de Bloq Mayús, llevado contando sus
+pulsaciones (empieza desactivado). `kbd.connected()` es verdadero cuando
+hay algo conectado en el puerto del teclado.
+
+**Leer en cada cuadro**
+
+El dispositivo informa como mucho de un evento de tecla por cuadro y lo
+mantiene hasta el siguiente, así que hay que leerlo **en cada cuadro** o se
+pierden eventos. El compilador se encarga de ello cuando el programa usa
+el teclado:
+
+- cada llamada a `key`/`keyp`/`kbd.*` lee el dispositivo (una vez por
+  cuadro);
+- los controladores de `game_loop()` y de `TIC()` de TIC-80 lo leen antes
+  de cada cuadro;
+- `system.wait()` e `ioports.gpu.sync()` lo leen antes de su `WAIT` (lo que
+  llega entonces cuenta para el cuadro siguiente, así que `keyp()` lo sigue
+  viendo).
+
+Así, un bucle `main()` que espera con `system.wait()` no pierde nada,
+aunque solo mire el teclado de vez en cuando. Un `__rawasm__("WAIT")`
+desnudo se salta esa lectura. Nada de esto está en un programa que no use
+el teclado.
+
+**El puerto de mando**
+
+El puerto del teclado se lee sin alterar el mando que el programa tiene
+seleccionado: `btn()`, `btnp()` e `ioports.inp.*` siguen leyendo el mando
+que leían antes. No leas el puerto del teclado con `btn()`: sus "botones"
+son bits del código de tecla.
+
+El mando seleccionado lo recuerda el entorno de ejecución (`V32IO_GAMEPAD`)
+en lugar de leerlo de `INP_SelectedGamepad`: los emuladores de Vircon32
+devuelven un valor erróneo al leer ese puerto. Las lecturas de
+`ioports.inp.gamepad` también dan el valor recordado. Una escritura en el
+puerto con `__rawasm__` se lo salta.
 
 ---
 

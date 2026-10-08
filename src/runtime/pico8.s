@@ -1094,7 +1094,7 @@ __pico8_btn_common:
 
     MOV   R1, [BP+3]
     CALL  __pico8_to_int         ; nil -> player 0
-    OUT   INP_SelectedGamepad, R1
+    CALL  __v32io_select         ; select (and remember) the gamepad
 
     MOV   R1, [BP+2]
     MOV   R0, R1
@@ -3394,12 +3394,12 @@ _pico8_flip_wait:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 __builtin_pico8_pause_check:
     PUSH  R1
-    IN    R1, INP_SelectedGamepad
+    MOV   R1, [V32IO_GAMEPAD]          ; the port can't be read back (v32io.s)
     PUSH  R1
     CALL  __pico8_start_edge
     JT    R0, _pico8_pause_enter
     POP   R1
-    OUT   INP_SelectedGamepad, R1
+    CALL  __v32io_select
     POP   R1
     RET
 
@@ -3407,6 +3407,8 @@ __builtin_pico8_pause_check:
 ;; and wasn't at the previous call. Updates PICO8_START_PREV. Clobbers R1.
 __pico8_start_edge:
     OUT   INP_SelectedGamepad, 0
+    MOV   R0, 0
+    MOV   [V32IO_GAMEPAD], R0
     IN    R0, INP_GamepadButtonStart
     IGT   R0, 0                          ; 1 while held
     MOV   R1, [PICO8_START_PREV]
@@ -3531,7 +3533,7 @@ _pico8_pause_done:
     MOV   [PICO8_MUSIC_END], R2
     POP   R2
     POP   R1                             ; caller's selected gamepad
-    OUT   INP_SelectedGamepad, R1
+    CALL  __v32io_select
     POP   R1
     RET
 
@@ -4932,11 +4934,11 @@ _pico8_menu_hook_set:
 ;; goes down (the pause's own edge detector), for the pause menu.
 __builtin_pico8_start_pressed:
     PUSH  R1
-    IN    R1, INP_SelectedGamepad
+    MOV   R1, [V32IO_GAMEPAD]          ; the port can't be read back (v32io.s)
     PUSH  R1
     CALL  __pico8_start_edge
     POP   R1
-    OUT   INP_SelectedGamepad, R1
+    CALL  __v32io_select
     POP   R1
     JT    R0, _pico8_start_pressed_yes
     MOV   R0, BOXED_FALSE

@@ -266,8 +266,10 @@ present):
 
 * **Native Vircon32 API** (default) — direct, zero-cost access to the
   console's own IOPorts: `ioports.gpu.*`, `ioports.spu.*`, `ioports.inp.*`,
-  `music.*`/`sfx.*`, `system.*`, and the native `tilemap.*` API. Fully
-  documented in [doc/API.md](doc/API.md).
+  `music.*`/`sfx.*`, `system.*`, `rect()`/`rectfill()`, the native
+  `tilemap.*` API, and a full keyboard through a v32kbd device
+  (`key()`/`keyp()`, typed text with `kbd.read()`). Fully documented in
+  [doc/API.md](doc/API.md).
 * **TIC-80 compatibility layer** (`--#api "tic80"`) — TIC-80-shaped calls
   (`spr()`, `btn()`/`btnp()`, `map()`/`mset()`/`mget()`, sound/music
   functions, and the fantasy-console-style asset sections) compiled down to
@@ -277,7 +279,8 @@ present):
   synthesized at compile time by a port of TIC-80's sound engine (see
   [doc/TIC80.md](doc/TIC80.md)); `spr()` rotates; Start pauses the game (as
   on the PICO-8 layer). `print()` honours its color and returns the text
-  width.
+  width. `key()`/`keyp()` read a real keyboard through a v32kbd device
+  (TIC-80 key codes, autorepeat included).
   `map()` takes all of TIC-80's optional arguments including `scale`
   (not the remap callback); `fget()` returns a boolean and `fset()` takes
   one. `peek`/`peek1`/`peek2`/`peek4`, `poke`/`poke1`/`poke2`/`poke4`,
@@ -335,6 +338,7 @@ Supported hints:
 | `--#rate 11025` \| `22050` \| `44100` | Sample rate of the sound synthesized from a PICO-8 or TIC-80 cart (default 22050; `--#p8rate` is the old name; see [doc/PICO8.md](doc/PICO8.md#sound)). |
 | `--#bezel off` \| `on` \| `"art.png"` | PICO-8: the side panels beside the 128×128 screen — none, the built-in art, or your own (see [doc/PICO8.md](doc/PICO8.md#side-panels)). |
 | `--#fast-circles` | TIC-80/PICO-8: filled circles above radius 31 are drawn as one scaled disc (faster, edges differ slightly). |
+| `--#keyboard 0`–`3` | Gamepad port of a v32kbd keyboard, for `key()`/`keyp()`/`kbd.*` (default 1; see [doc/API.md](doc/API.md#keyboard-key--keyp--kbd)). |
 | `--#texture NAME "path/image.png"` | Registers a texture resource and binds it to a compile-time constant `NAME`. The XML names the `.vtex` file (`image.vtex`) that `png2vircon` makes from the PNG. |
 | `--#sound NAME "path/sound.wav"` | Registers a sound resource and binds it to a compile-time constant `NAME`. The XML names the `.vsnd` file that `wav2vircon` makes. |
 | `--#tilemap NAME "path/map.csv"` | Registers a tilemap from a CSV file, embedded directly into the ROM image (see [doc/API.md](doc/API.md#tilemap-tilemap)). |
@@ -794,16 +798,19 @@ short sample of the most commonly used entries:
 | **`ioports.gpu.clear([color])`**<br>**`ioports.gpu.clear(r, g, b [, a])`** | `GPU_ClearColor` + `GPU_Command` | Function Call | Sets the clear color and wipes the screen. Supports preset color strings (`"black"`, `"white"`, `"blue"`, `"red"`, `"green"`), a packed `0xAABBGGRR` value (a literal, or `rgba()`/`hex()` for a runtime value), or separate components: `clear(r, g, b [, a])`, each `0`–`255`, alpha defaulting to opaque. |
 | **`rgba(r, g, b [, a])`** | — | Intrinsic | The packed `0xAABBGGRR` word (raw, not a Lua number) for `spr()`'s `color_mult`, `ioports.gpu.clear(color)`, `ioports.gpu.multiply` / `bgcolor`. Components clamped to `0`–`255` and truncated, alpha defaults to 255; folded at compile time when all are literals. Keep colors as components and call `rgba()` where they're drawn — see [doc/API.md](doc/API.md#colors-rgba) for why. |
 | **`color(n)`** | — | Intrinsic | A number holding a packed color (computed, or read from a table) as the raw word. Floored and wrapped to 32 bits; literals are exact, runtime values keep float32's 24 significant bits ([details](doc/API.md#colors-color)). |
+| **`rect(x1, y1, x2, y2 [, color])`**<br>**`rectfill(x1, y1, x2, y2 [, color])`** | `GPU_Command` (zoomed draw) | Intrinsic | Rectangle outline / filled, between two inclusive corners in any order; `color` a packed word as for `spr()` (default white). One GPU draw for `rectfill`, up to four for `rect`; the GPU state is restored afterwards ([details](doc/API.md#graphics-rect--rectfill)). |
 
 *Gamepad & Input (`ioports.inp.*`)*
 
 | Lua Path / Intrinsic | Vircon32 Port / Command | Access | Description & Behavior |
 | --- | --- | --- | --- |
-| **`ioports.inp.gamepad`** | `INP_SelectedGamepad` | Read / Write | Selects the active controller index (`0`-`3`) for input polling. |
+| **`ioports.inp.gamepad`** | `INP_SelectedGamepad` | Read / Write | Selects the active controller index (`0`-`3`) for input polling. Reads return the last index set (the emulators can't read the port back). |
 | **`ioports.inp.status`** | `INP_GamepadConnected` | Read Only | Returns a Lua boolean: is the selected gamepad connected. |
 | **`ioports.inp.left/right/up/down`** | `INP_Gamepad*` | Read Only | D-Pad directional state (`> 0` pressed, `< 0` released). |
 | **`ioports.inp.A/B/X/Y/L/R/START`** | `INP_GamepadButton*` | Read Only | Action/shoulder button state (`> 0` pressed, `< 0` released). |
 | **`ioports.inp.inputs`** | *Custom Action Subroutine* | Read Only | **Collation intrinsic:** polls all gamepad buttons/axes in one pass, collates them into a single 32-bit bitmask, and casts it to a Lua float. |
+| **`key([k])`**, **`keyp([k [, hold, period]])`** | v32kbd device on a gamepad port | Intrinsic | A full keyboard through a v32kbd device (gamepad port 1 by default, `--#keyboard N`): key held / went down this frame, TIC-80 style, with key codes or literal names (`"a"`, `"enter"`, `"shift"`) ([details](doc/API.md#keyboard-key--keyp--kbd)). |
+| **`kbd.read()`**, **`kbd.event()`**, **`kbd.port([n])`**, **`kbd.capslock()`**, **`kbd.connected()`**, **`kbd.clear()`** | v32kbd device | Intrinsic | Typed text (Shift and Caps Lock applied), raw press/release events, the keyboard's port, Caps Lock, device present, drop unread events. |
 
 *System & Runtime Utilities*
 
@@ -976,8 +983,7 @@ decision:
   tempo/speed/sustain arguments (see [doc/TIC80.md](doc/TIC80.md#sound)).
   `peek`/`poke`
   work on an emulated RAM, but writing the screen, palette, tiles or sound
-  registers has no visible or audible effect. `key`/`keyp` always report
-  no key (there is no keyboard); `trace` does nothing.
+  registers has no visible or audible effect. `trace` does nothing.
 * TIC-80 `circ`/`circb`/`rectb` draw one GPU quad per pixel: a cart that
   draws many large outlines each frame (witchem_up's title screen) runs
   below full speed

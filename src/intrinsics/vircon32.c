@@ -38,6 +38,9 @@ static const char *vircon32_button_ports[11] = {
 #define VIRCON32_BLEND_SUBTRACT 0x22
 
 int  vircon32_sfx_cursor_base          = -1;
+// One word: the gamepad selected by the last write of INP_SelectedGamepad
+// (v32io.s __v32io_select). Always allocated, like the above.
+int  v32io_gamepad_base                = -1;
 int  vircon32_btn_prev_state_base      = -1;
 int  vircon32_music_channel_mask_base  = -1;
 int  vircon32_sfx_channel_mask_base    = -1;
@@ -473,6 +476,104 @@ bool emit_vircon32_tilemap_render_intrinsic (ASTNode *node, int dest_reg)
 
     if (dest_reg != 0) {
         emit_asm ("MOV R%d, BOXED_NIL ; tilemap.render() returns nothing\n", dest_reg);
+    }
+    return true;
+}
+
+// ============================================================================
+// rect(x1, y1, x2, y2 [, color])     -- 1-pixel rectangle outline
+// rectfill(x1, y1, x2, y2 [, color]) -- filled rectangle
+//
+// (x1, y1) and (x2, y2) are opposite corners, both INCLUSIVE, in any order:
+// rectfill(10, 10, 19, 14) covers 10 x 5 pixels. Coordinates are floored.
+// color is a packed 0xAABBGGRR word, handled exactly like spr()'s
+// color_mult: a numeric literal is folded to its word here, anything else
+// (rgba(), color(), hex(), a variable holding one of those) is passed
+// through as is; absent / nil -> 0xFFFFFFFF (opaque white).
+//
+// Runtime: __builtin_vircon32_rect (vircon32.s), one zoomed draw of the
+// fill texture's 1x1 white region (shapes.c) for rectfill(), up to 4 for
+// rect(). The GPU state it touches (texture, region, multiply color,
+// scale) is restored afterwards; the active blending mode is used as is.
+//
+// Stack: [BP+2]=x1 [BP+3]=y1 [BP+4]=x2 [BP+5]=y2 [BP+6]=color (raw word)
+//        [BP+7]=filled (raw 0 / 1)
+// ============================================================================
+bool emit_vircon32_rect_intrinsic (ASTNode *node, int dest_reg, bool filled)
+{
+    const char *name = filled ? "rectfill" : "rect";
+    emit_asm ("    ;; --- Vircon32 %s() Intrinsic ---\n", name);
+
+    ASTNode *args[5] = { NULL };
+    int arg_count = 0;
+    ASTNode *curr = node->as.call.args_head;
+    while (curr != NULL && arg_count < 5) {
+        args[arg_count++] = curr;
+        curr = curr->next;
+    }
+
+    if (arg_count < 4) {
+        compiler_error (ERR_SEMANTIC, node->line_number,
+            "%s() requires at least 4 arguments: %s(x1, y1, x2, y2 [, color])", name, name);
+        return false;
+    }
+    if (curr != NULL) {
+        compiler_warning (ERR_SEMANTIC, node->line_number,
+            "%s() takes at most 5 arguments; extra arguments ignored", name);
+    }
+    if (fill_texture_id < 0) {
+        // register_fill_texture() looks for the names in the source text,
+        // so this only happens if the texture file could not be written
+        compiler_error (ERR_INTERNAL, node->line_number,
+            "%s(): the fill texture was not created", name);
+        return false;
+    }
+
+    // Arg 6: filled flag (raw int)
+    emit_asm ("MOV R0, %d\n", filled ? 1 : 0);
+    emit_asm ("PUSH R0 ; %s: filled = %d\n", name, filled ? 1 : 0);
+
+    // Arg 5: color -- same rules as spr()'s color_mult
+    bool has_color = (arg_count >= 5 && args[4] != NULL && args[4]->type != NODE_NIL);
+    double color_value;
+    if (!has_color) {
+        emit_asm ("MOV R0, 0xFFFFFFFF ; default color (opaque white)\n");
+        emit_asm ("PUSH R0\n");
+    } else if (spu_static_number (args[4], &color_value)) {
+        if (color_value < -2147483648.0 || color_value > 4294967295.0 ||
+            color_value != (double) (long long) color_value) {
+            compiler_error (ERR_SEMANTIC, node->line_number,
+                "%s(): color %g is not a packed 0xAABBGGRR value", name, color_value);
+            return false;
+        }
+        unsigned int word = (unsigned int) (long long) color_value;
+        emit_asm ("MOV R0, 0x%08X ; literal color (raw packed RGBA)\n", word);
+        emit_asm ("PUSH R0\n");
+    } else {
+        int reg = allocate_register ();
+        register_pinned[reg] = 1;
+        generate_asm (args[4], reg);
+        emit_asm ("PUSH R%d ; color (raw packed RGBA)\n", reg);
+        register_pinned[reg] = 0;
+        unlock_register (reg);
+    }
+
+    // Args 1-4: y2, x2, y1, x1 (pushed right to left)
+    static const char *coord[4] = { "x1", "y1", "x2", "y2" };
+    for (int i = 3; i >= 0; i--) {
+        int reg = allocate_register ();
+        register_pinned[reg] = 1;
+        generate_asm (args[i], reg);
+        emit_asm ("PUSH R%d ; %s\n", reg, coord[i]);
+        register_pinned[reg] = 0;
+        unlock_register (reg);
+    }
+
+    emit_asm ("CALL __builtin_vircon32_rect\n");
+    emit_asm ("IADD SP, 6 ; clean up %s() arguments\n", name);
+
+    if (dest_reg != 0) {
+        emit_asm ("MOV R%d, BOXED_NIL ; %s() returns nothing\n", dest_reg, name);
     }
     return true;
 }

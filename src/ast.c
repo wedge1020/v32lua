@@ -206,6 +206,17 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
         }
         node->as.cart_hint.value = strdup (param1);
     }
+    else if (strcmp(action, "keyboard") == 0 && tokens >= 2) {
+        // --#keyboard 0-3 -- gamepad port of a v32kbd keyboard (v32kbd.c)
+        const char *v = param1[0] == '"' ? param1 + 1 : param1;
+        if (v[0] < '0' || v[0] > '3' || (v[1] != '\0' && v[1] != '"')) {
+            compiler_error(ERR_SEMANTIC, yylineno, "--#keyboard: use a gamepad port 0-3 (got '%s')", param1);
+        }
+        if (!g_cli_keyboard_set) {  // --keyboard on the command line wins
+            v32kbd_default_port = v[0] - '0';
+        }
+        node->as.cart_hint.value = strdup(param1);
+    }
     else if (strcmp(action, "fast-circles") == 0) {
         // --#fast-circles: filled circles above the shape atlas's largest
         // radius are drawn as that disc, scaled (1 draw; ~1.5% of the edge

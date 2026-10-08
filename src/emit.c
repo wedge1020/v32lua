@@ -657,10 +657,21 @@ int   emit_variable_map (void)
         fprintf (out(), "%%define  SHAPES_FAST              %d\n", shapes_fast ? 1 : 0);
     }
 
+    // Native rect()/rectfill() fill texture (shapes.c), -1 when there is
+    // none. Unconditional: vircon32.s, which uses it, can be emitted in any
+    // API mode.
+    fprintf (out(), "%%define  V32_FILL_TEXTURE         %d\n", fill_texture_id);
+    lines_printed += 1;
+
+    // v32kbd keyboard state (v32kbd.c): fixed RAM, only when the program
+    // uses the keyboard
+    lines_printed += v32kbd_emit_defines (out());
+
     // Unconditional -- see the allocation comment in main.c.
     {
         fprintf (out(), "%%define  VIRCON32_BTN_PREV_STATE  0x%.8X\n", vircon32_btn_prev_state_base);
         fprintf (out(), "%%define  VIRCON32_SFX_CURSOR      0x%.8X\n", vircon32_sfx_cursor_base);
+        fprintf (out(), "%%define  V32IO_GAMEPAD            0x%.8X\n", v32io_gamepad_base);
         fprintf (out(), "%%define  VIRCON32_MUSIC_CHANNEL_MASK 0x%.8X\n", vircon32_music_channel_mask_base);
         fprintf (out(), "%%define  VIRCON32_SFX_CHANNEL_MASK   0x%.8X\n", vircon32_sfx_channel_mask_base);
         fprintf (out(), "%%define  RET_COUNT                0x%.8X\n", ret_count_base);
@@ -916,6 +927,14 @@ void  emit_runtime_library (void)
     if (runtime_req.needs_vircon32)
     {
         emit_embedded_asm (runtime_vircon32_start);
+    }
+
+    // v32io: gamepad selection (always -- every API's btn() selects
+    // through it) and the group read the v32kbd decoder uses
+    emit_embedded_asm (runtime_v32io_start);
+    if (v32kbd_wanted)
+    {
+        emit_embedded_asm (runtime_v32kbd_start);
     }
 
     emit_tilemap_rom_data (out());

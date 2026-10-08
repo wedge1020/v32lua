@@ -32,6 +32,7 @@ Run `v32lua --help` for every option; the common ones:
 | `--rate 11025\|22050\|44100` | Sample rate of the sound made from a PICO-8 or TIC-80 cart. |
 | `--bezel FILE`, `--no-bezel` | PICO-8 side panels: your own art, or none. |
 | `--fast-circles` | PICO-8/TIC-80: draw big filled circles faster (slightly different edges). |
+| `--keyboard 0-3` | Gamepad port of a v32kbd keyboard (`key()`, `keyp()`, `kbd.*`); default 1. |
 | `--version`, `--help` | Version, usage. |
 
 ## 2. Describe the cartridge with `--#` hints
@@ -49,7 +50,7 @@ reads as cartridge settings. Put them at the top of the file.
 | `--#include "file.lua"` | Inserts another source file here. |
 | `--#api "pico8"` / `"tic80"` | Chooses a compatibility API. |
 | `--#p8 "cart.p8"` | PICO-8: use the sprites, flags and map of a `.p8` file. |
-| `--#rate 22050`, `--#bezel off`, `--#fast-circles` | Same as the command-line options, which take precedence. |
+| `--#rate 22050`, `--#bezel off`, `--#fast-circles`, `--#keyboard 2` | Same as the command-line options, which take precedence. |
 
 ```lua
 --#title "Space Invaders Vircon32"

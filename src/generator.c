@@ -764,6 +764,9 @@ void generate_global_setup (ASTNode *node)
         emit_asm ("JMP __vircon32_btn_prev_state_zero_loop\n");
         emit_asm ("__vircon32_btn_prev_state_zero_done:\n");
 
+        emit_asm ("OUT INP_SelectedGamepad, 0 ; gamepad 0 selected, and known to be\n");
+        emit_asm ("MOV R1, 0\n");
+        emit_asm ("MOV [V32IO_GAMEPAD], R1 ; (the port can't be read back: v32io.s)\n");
         emit_asm ("MOV R1, 1 ; sfx.play() round-robin starts at channel 1\n");
         emit_asm ("MOV [VIRCON32_SFX_CURSOR], R1\n");
         emit_asm ("MOV R1, 0 ; no channels claimed by either namespace yet\n");
@@ -771,6 +774,12 @@ void generate_global_setup (ASTNode *node)
         emit_asm ("MOV [VIRCON32_SFX_CHANNEL_MASK], R1\n");
         emit_asm ("MOV [META_CALL_DEPTH], R1 ; no __call trampolines pending\n");
     }
+
+    // native rect()/rectfill(): the fill texture's region (shapes.c)
+    emit_fill_texture_setup ();
+
+    // v32kbd keyboard: state and strobe baseline (v32kbd.c)
+    v32kbd_emit_setup ();
 
     // NEW: Explicitly nil-initialize every plain (non-function) global.
     // Previously a global's value before its first assignment was
@@ -1100,6 +1109,7 @@ void generate_program (ASTNode *head)
             emit_asm ("MOV R1, [R1]\n");
             emit_asm ("IEQ R1, 0\n");
             emit_asm ("JF R1, __just_wait ; If paused, skip TIC\n");
+            v32kbd_emit_frame_start_hook ();
             emit_asm ("CALL __function_TIC\n");
             emit_asm ("CALL __builtin_tic80_sound_tick ; sfx() durations\n");
             emit_asm ("__just_wait:");
@@ -1156,6 +1166,7 @@ void generate_program (ASTNode *head)
         }
         else
         {
+            v32kbd_emit_frame_start_hook ();
             emit_asm ("CALL __function_game_loop ; Execute game loop tick\n");
         }
         emit_asm ("WAIT\n");

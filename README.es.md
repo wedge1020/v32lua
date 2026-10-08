@@ -281,8 +281,10 @@ defecto cuando no hay ninguna pista `--#api` presente):
 
 * **API nativa de Vircon32** (por defecto) — acceso directo y de costo cero
   a los IOPorts propios de la consola: `ioports.gpu.*`, `ioports.spu.*`,
-  `ioports.inp.*`, `music.*`/`sfx.*`, `system.*` y la API nativa
-  `tilemap.*`. Documentada por completo en [doc/API.es.md](doc/API.es.md).
+  `ioports.inp.*`, `music.*`/`sfx.*`, `system.*`, `rect()`/`rectfill()`,
+  la API nativa `tilemap.*`, y un teclado completo a través de un
+  dispositivo v32kbd (`key()`/`keyp()`, texto escrito con `kbd.read()`).
+  Documentada por completo en [doc/API.es.md](doc/API.es.md).
 * **Capa de compatibilidad TIC-80** (`--#api "tic80"`) — llamadas con la
   forma de TIC-80 (`spr()`, `btn()`/`btnp()`, `map()`/`mset()`/`mget()`,
   funciones de sonido/música, y las secciones de recursos al estilo de
@@ -293,7 +295,8 @@ defecto cuando no hay ninguna pista `--#api` presente):
   propio cartucho, sintetizados al compilar por un port del motor de sonido
   de TIC-80 (ver [doc/TIC80.md](doc/TIC80.md)); `spr()` rota; Start pausa
   el juego (como en la capa PICO-8). `print()` respeta su color y devuelve
-  el ancho del texto.
+  el ancho del texto. `key()`/`keyp()` leen un teclado real a través de un
+  dispositivo v32kbd (códigos de tecla de TIC-80, con autorrepetición).
   `map()` acepta todos los argumentos opcionales de TIC-80, incluido `scale`
   (no la función de reasignación); `fget()` devuelve un booleano y `fset()`
   recibe uno. `peek`/`peek1`/`peek2`/`peek4`, `poke`/`poke1`/`poke2`/`poke4`,
@@ -355,6 +358,7 @@ Pistas soportadas:
 | `--#rate 11025` \| `22050` \| `44100` | Frecuencia de muestreo del sonido sintetizado a partir de un cartucho de PICO-8 o TIC-80 (por defecto 22050; `--#p8rate` es el nombre antiguo; ver [doc/PICO8.md](doc/PICO8.md#sound)). |
 | `--#bezel off` \| `on` \| `"arte.png"` | PICO-8: los paneles laterales junto a la pantalla de 128×128 — ninguno, el arte integrado o el tuyo propio (ver [doc/PICO8.md](doc/PICO8.md#side-panels)). |
 | `--#fast-circles` | TIC-80/PICO-8: los círculos rellenos de radio mayor que 31 se dibujan como un único disco escalado (más rápido, los bordes difieren ligeramente). |
+| `--#keyboard 0`–`3` | Puerto de mando de un teclado v32kbd, para `key()`/`keyp()`/`kbd.*` (1 por defecto; ver [doc/API.es.md](doc/API.es.md#teclado-key--keyp--kbd)). |
 | `--#texture NOMBRE "ruta/imagen.png"` | Registra un recurso de textura y lo vincula a una constante `NOMBRE` en tiempo de compilación. El XML nombra el archivo `.vtex` (`imagen.vtex`) que `png2vircon` genera a partir del PNG. |
 | `--#sound NOMBRE "ruta/sonido.wav"` | Registra un recurso de sonido y lo vincula a una constante `NOMBRE` en tiempo de compilación. El XML nombra el archivo `.vsnd` que genera `wav2vircon`. |
 | `--#tilemap NOMBRE "ruta/mapa.csv"` | Registra un mapa de mosaicos desde un archivo CSV, incrustado directamente en la imagen ROM (ver [doc/API.es.md](doc/API.es.md#mapa-de-mosaicos-tilemap)). |
@@ -859,16 +863,19 @@ uso más común:
 | **`ioports.gpu.clear([color])`**<br>**`ioports.gpu.clear(r, g, b [, a])`** | `GPU_ClearColor` + `GPU_Command` | Llamada a Función | Establece el color de borrado y limpia la pantalla. Admite cadenas de color preestablecidas (`"black"`, `"white"`, `"blue"`, `"red"`, `"green"`), un valor empaquetado `0xAABBGGRR` (un literal, o `rgba()`/`hex()` para un valor en tiempo de ejecución), o componentes separados: `clear(r, g, b [, a])`, cada uno `0`–`255`, con alfa opaco por defecto. |
 | **`rgba(r, g, b [, a])`** | — | Intrínseco | La palabra empaquetada `0xAABBGGRR` (en bruto, no un número de Lua) para el `color_mult` de `spr()`, `ioports.gpu.clear(color)`, `ioports.gpu.multiply` / `bgcolor`. Componentes limitados a `0`–`255` y truncados, alfa 255 por defecto; se evalúa en tiempo de compilación cuando todos son literales. Guarda los colores como componentes y llama a `rgba()` donde se dibujan — ver [doc/API.es.md](doc/API.es.md#colors-rgba) para saber por qué. |
 | **`color(n)`** | — | Intrínseco | Un número que contiene un color empaquetado (calculado, o leído de una tabla), como palabra en bruto. Redondeado hacia abajo y ajustado a 32 bits; los literales son exactos, los valores en tiempo de ejecución conservan los 24 bits significativos de float32 ([detalles](doc/API.es.md#colors-color)). |
+| **`rect(x1, y1, x2, y2 [, color])`**<br>**`rectfill(x1, y1, x2, y2 [, color])`** | `GPU_Command` (dibujo escalado) | Intrínseco | Contorno / rectángulo relleno entre dos esquinas incluidas, en cualquier orden; `color` es una palabra empaquetada como en `spr()` (blanco por defecto). Un dibujo de GPU para `rectfill`, hasta cuatro para `rect`; el estado de la GPU se restaura después ([detalles](doc/API.es.md#gráficos-rect--rectfill)). |
 
 *Mando de Juego y Entrada (`ioports.inp.*`)*
 
 | Ruta Lua / Intrínseco | Puerto/Comando Vircon32 | Acceso | Descripción y Comportamiento |
 | --- | --- | --- | --- |
-| **`ioports.inp.gamepad`** | `INP_SelectedGamepad` | Lectura / Escritura | Selecciona el índice del controlador activo (`0`-`3`) para el sondeo de entrada. |
+| **`ioports.inp.gamepad`** | `INP_SelectedGamepad` | Lectura / Escritura | Selecciona el índice del controlador activo (`0`-`3`) para el sondeo de entrada. Al leerlo devuelve el último índice asignado (los emuladores no pueden releer el puerto). |
 | **`ioports.inp.status`** | `INP_GamepadConnected` | Solo Lectura | Retorna un booleano de Lua: si el mando seleccionado está conectado. |
 | **`ioports.inp.left/right/up/down`** | `INP_Gamepad*` | Solo Lectura | Estado direccional del D-Pad (`> 0` presionado, `< 0` liberado). |
 | **`ioports.inp.A/B/X/Y/L/R/START`** | `INP_GamepadButton*` | Solo Lectura | Estado de botón de acción/gatillo (`> 0` presionado, `< 0` liberado). |
 | **`ioports.inp.inputs`** | *Subrutina de Acción Personalizada* | Solo Lectura | **Intrínseco de recopilación:** sondea todos los botones/ejes del mando en una sola pasada, los combina en una única máscara de bits de 32 bits, y la convierte a un flotante de Lua. |
+| **`key([k])`**, **`keyp([k [, hold, period]])`** | dispositivo v32kbd en un puerto de mando | Intrínseco | Un teclado completo a través de un dispositivo v32kbd (puerto de mando 1 por defecto, `--#keyboard N`): tecla pulsada / pulsada en este cuadro, al estilo de TIC-80, con códigos de tecla o nombres literales (`"a"`, `"enter"`, `"shift"`) ([detalles](doc/API.es.md#teclado-key--keyp--kbd)). |
+| **`kbd.read()`**, **`kbd.event()`**, **`kbd.port([n])`**, **`kbd.capslock()`**, **`kbd.connected()`**, **`kbd.clear()`** | dispositivo v32kbd | Intrínseco | Texto escrito (con Mayús y Bloq Mayús), eventos de pulsar/soltar, el puerto del teclado, Bloq Mayús, dispositivo presente, descartar eventos no leídos. |
 
 *Utilidades del Sistema y de Ejecución*
 
@@ -1057,8 +1064,7 @@ una decisión de diseño:
   y los argumentos tempo/velocidad/sustain de `music()` (ver
   [doc/TIC80.md](doc/TIC80.md#sound)). `peek`/`poke` trabajan sobre una
   RAM emulada, pero escribir en los registros de pantalla, paleta, tiles o
-  sonido no tiene efecto visible ni audible. `key`/`keyp` siempre indican
-  que no hay tecla pulsada (no hay teclado); `trace` no hace nada.
+  sonido no tiene efecto visible ni audible. `trace` no hace nada.
 * `circ`/`circb`/`rectb` de TIC-80 dibujan un quad de GPU por píxel: un
   cartucho que dibuja muchos contornos grandes en cada cuadro (la pantalla
   de título de witchem_up) funciona por debajo de la velocidad máxima

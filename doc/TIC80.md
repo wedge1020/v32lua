@@ -150,6 +150,30 @@ floored and masked to 0–31, and `btnp` is true on the press frame and, when
 once it has been down `hold` frames, every `period` frames (`period` 0: every
 frame). There is no default autorepeat.
 
+`key([code])` and `keyp([code [, hold, period]])` read a real keyboard
+through a **v32kbd** device: a USB keyboard gadget the console sees as a
+gamepad (see the native [API.md](API.md#keyboard-key--keyp--kbd) for how
+it works). It goes in gamepad port 1 by default — the second port, so
+player 1's gamepad stays in port 0 — or wherever `--keyboard N` /
+`--#keyboard N` puts it (`kbd.port(n)` at run time). Without the device
+plugged in, no key is ever down.
+
+The codes are TIC-80's (`tic.h`): 1–26 A–Z, 27–36 0–9, 37–47
+`` - = [ ] \ ; ' ` , . / ``, 48 space, 49 tab, 50 return, 51 backspace,
+52 delete, 58–61 up/down/left/right, 62 caps lock, 63 ctrl, 64 shift,
+65 alt, 66 escape, 67–78 F1–F12, 79–94 the numeric keypad. `key()` and
+`key(0)` are "any key", `keyp()`/`keyp(0)` "any key went down this frame";
+`keyp` repeats with `hold`/`period` exactly as `btnp` does (TIC-80's
+`core/io.c`). Ctrl, shift and alt are either side, as in TIC-80. Codes with
+no key on a v32kbd device are never down: insert, page up/down, home, end
+(53–57), keypad + and * (89, 91). The other keypad keys can't be told
+apart from the main ones on the device, so keypad 1 (80) is also the main
+1 key, and so on. Codes outside 0–94 are `false` (TIC-80 stops with an
+error). The device must be read every frame; the `TIC()` driver does
+that, also on frames a cart skips its own `key()` calls. The `kbd.*`
+functions (typed text with Shift applied, events, the port) are available
+here too.
+
 ## reset()
 
 `reset()` starts the cart over, as TIC-80 does. The hardware goes back to

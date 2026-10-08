@@ -26,8 +26,9 @@
 #include "register.h"
 #include "closures.h"
 #include "shapes.h"
+#include "v32kbd.h"
 
-#define  VERSION             "20261002-dev"
+#define  VERSION             "20261008-dev"
 #define  META_CALL_STACK_SIZE  32   // nested calls of callable tables (__call)
 #define  AUTHOR              "Matthew Haas"
 #define  URL                 "https://github.com/wedge1020/v32lua"

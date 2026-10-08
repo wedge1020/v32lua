@@ -172,6 +172,42 @@
     runtime_vircon32_end:
 #endif
 
+/* --- v32io: gamepad group read (shared by v32kbd / future v32mouse) --- */
+#ifdef __APPLE__
+    .global _runtime_v32io_start
+    _runtime_v32io_start:
+#else
+    .global runtime_v32io_start
+    runtime_v32io_start:
+#endif
+    .incbin "runtime/v32io.s"
+    .byte 0
+#ifdef __APPLE__
+    .global _runtime_v32io_end
+    _runtime_v32io_end:
+#else
+    .global runtime_v32io_end
+    runtime_v32io_end:
+#endif
+
+/* --- v32kbd: keyboard decoder (key(), keyp(), kbd.*) --- */
+#ifdef __APPLE__
+    .global _runtime_v32kbd_start
+    _runtime_v32kbd_start:
+#else
+    .global runtime_v32kbd_start
+    runtime_v32kbd_start:
+#endif
+    .incbin "runtime/v32kbd.s"
+    .byte 0
+#ifdef __APPLE__
+    .global _runtime_v32kbd_end
+    _runtime_v32kbd_end:
+#else
+    .global runtime_v32kbd_end
+    runtime_v32kbd_end:
+#endif
+
 /* --- PICO-8 API (all-or-nothing) --- */
 #ifdef __APPLE__
     .global _runtime_pico8_start

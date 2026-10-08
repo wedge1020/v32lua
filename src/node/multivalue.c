@@ -52,7 +52,8 @@ static SymbolNode *mv_call_symbol (ASTNode *call, bool *is_unknown)
     if (s != NULL && s->is_function) { *is_unknown = false; return s; }
     // a library namespace (math.floor, string.sub, ...): intrinsics
     static const char *libs[] = { "math.", "string.", "table.", "os.", "io.",
-        "gpu.", "spu.", "inp.", "mem.", "tim.", "tilemap.", "ioports.", "coroutine.", NULL };
+        "gpu.", "spu.", "inp.", "mem.", "tim.", "tilemap.", "ioports.", "coroutine.",
+        "kbd.", NULL };
     for (int i = 0; libs[i]; i++)
         if (strncmp (path, libs[i], strlen (libs[i])) == 0) { *is_unknown = false; return NULL; }
     return NULL;

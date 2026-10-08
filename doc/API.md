@@ -26,7 +26,9 @@ The SPU port write order matters for sound; see
 - [Boolean IO ports](#boolean-io-ports)
 - [System: system.\*](#system-system)
 - [Graphics: spr()](#graphics-spr)
+- [Graphics: rect() / rectfill()](#graphics-rect--rectfill)
 - [Input: btn() / btnp()](#input-btn--btnp)
+- [Keyboard: key() / keyp() / kbd.\*](#keyboard-key--keyp--kbd)
 - [Tilemap: tilemap.\*](#tilemap-tilemap)
 - [Memory card: memcard.\*](#memory-card-memcard)
 - [Other raw IO ports](#other-raw-io-ports)
@@ -47,6 +49,8 @@ function behind it. A function of your own with the same name (`spr`,
 | Call | Returns | What it does |
 |---|---|---|
 | `spr(region, x, y [, sx [, sy [, angle [, color [, blend]]]]])` | nil | Draws a texture region; picks the plain, zoomed, rotated or rotozoomed draw from the arguments. [Details](#graphics-spr) |
+| `rect(x1, y1, x2, y2 [, color])` | nil | 1-pixel rectangle outline between two inclusive corners. Color: packed word, default white. [Details](#graphics-rect--rectfill) |
+| `rectfill(x1, y1, x2, y2 [, color])` | nil | Filled rectangle, one GPU draw. |
 | `print(x, y, value)` | nil | Draws `value` (converted with `tostring`) at pixel `x, y` with the BIOS font. |
 | `ioports.gpu.clear([color])` / `clear(r, g, b [, a])` | nil | Sets the clear color (optional) and clears the screen. [Details](#gpu-clear) |
 | `ioports.gpu.draw([mode])` | nil | Draws the selected region at `gpu.x, gpu.y`. `mode`: `"draw"` (default), `"zoom"`, `"rotate"`, `"rotozoom"`, or `0`–`3`. |
@@ -62,6 +66,18 @@ function behind it. A function of your own with the same name (`spr`,
 |---|---|---|
 | `btn(id [, pad])` | boolean | Button `id` (0–10, hardware order) is held. [Details](#input-btn--btnp) |
 | `btnp(id [, pad])` | boolean | Button `id` was pressed this frame. |
+
+*Keyboard* (v32kbd device) — [details](#keyboard-key--keyp--kbd)
+
+| Call | Returns | What it does |
+|---|---|---|
+| `key([k])` | boolean | Key `k` (code or literal name: `"a"`, `"enter"`, `"shift"`) is held; no `k`: any key. |
+| `keyp([k [, hold, period]])` | boolean | Key `k` went down this frame (autorepeat with `hold`/`period`, as TIC-80). |
+| `kbd.read()` | number / nil | Next key press as the character it types (Shift, Caps Lock applied). |
+| `kbd.event()` | number / nil | Next event: `+code` pressed, `-code` released. |
+| `kbd.port([n])` | number | Gamepad port of the keyboard (default 1); setting it starts over. |
+| `kbd.capslock()`, `kbd.connected()` | boolean | Caps Lock state; device plugged in. |
+| `kbd.clear()` | nil | Drops unread events. |
 
 *Sound* — [details](#sound-music--sfx)
 
@@ -149,7 +165,7 @@ Methods: `ioports.gpu.clear()`, `ioports.gpu.draw()`,
 
 | Property | Port | Access | Type | Meaning |
 |---|---|---|---|---|
-| `ioports.inp.gamepad` | `INP_SelectedGamepad` | R/W | int | Gamepad (0–3) the other properties read. |
+| `ioports.inp.gamepad` | `INP_SelectedGamepad` | R/W | int | Gamepad (0–3) the other properties read. Reads give the last value set (the emulators can't read this port back; see [The gamepad port](#keyboard-key--keyp--kbd)). |
 | `ioports.inp.status` | `INP_GamepadConnected` | R | bool | Is the selected gamepad connected. |
 | `ioports.inp.left`, `right`, `up`, `down` | `INP_GamepadLeft/…` | R | int | D-pad: frames held (> 0) or frames since release (< 0). |
 | `ioports.inp.A`, `B`, `X`, `Y`, `L`, `R`, `START` | `INP_GamepadButton*` | R | int | Buttons, same encoding. |
@@ -786,6 +802,58 @@ read-only `ioports.gpu.pixels` GPU-busy counter).
 
 ---
 
+## Graphics: rect() / rectfill()
+
+```
+rect(x1, y1, x2, y2 [, color])       -- 1-pixel outline
+rectfill(x1, y1, x2, y2 [, color])   -- filled
+```
+
+`(x1, y1)` and `(x2, y2)` are opposite corners, both **inclusive**, in any
+order: `rectfill(10, 20, 19, 24)` covers 10 × 5 pixels, columns 10–19 and
+rows 20–24, and `rectfill(19, 24, 10, 20)` is the same rectangle.
+Coordinates are floored (`rectfill(9.8, ...)` starts at column 9); `nil` or
+a non-number counts as 0. One corner equal to the other draws one pixel.
+
+`color` is a packed `0xAABBGGRR` word, exactly like `spr()`'s
+`color_mult`: a literal (`0xFF0000FF`), `rgba()`, `color()`, `hex()`, or a
+variable holding one of those. Absent or `nil`: opaque white. A color with
+alpha below 255 blends with the current blending mode
+(`ioports.gpu.blending`), which `rect()` leaves as it is.
+
+```lua
+rectfill(0, 0, 639, 359, rgba(0, 0, 64))      -- whole screen, dark blue
+rect(100, 50, 199, 99, 0xFF00FFFF)           -- yellow frame, 100 x 50
+rectfill(px, py, px + 15, py + 15, rgba(255, 0, 0, 128))   -- translucent red
+```
+
+**How it draws**
+
+A program that calls `rect` or `rectfill` gets a small texture of its own:
+4 × 4 opaque white pixels, added to the cartridge **after** every
+`--#texture` (so your texture numbers don't move; `ioports.car.numvtex`
+counts it). Region 0 of it is one white pixel; `rectfill()` is **one**
+zoomed draw of that region at scale (width, height), tinted with the
+multiply color — exact to the pixel for any size. `rect()` is up to 4 draws
+that don't overlap (top and bottom edges full width, the sides between
+them), so a translucent outline isn't darker at the corners.
+
+The GPU state the call uses is put back afterwards: selected texture and
+region, multiply color, drawing scale. A `rect()` can sit in the middle of
+`ioports.gpu.*` drawing code without disturbing it.
+
+Each draw costs GPU pixels like any other (`ioports.gpu.pixels`), plus the
+GPU's scaling penalty; a full-screen `rectfill()` is a full screen of
+pixels.
+
+A function of your own named `rect` or `rectfill` replaces the built-in,
+as with every intrinsic. Under `--#api pico8` the two names are PICO-8's
+palette-color versions (see [PICO8.md](PICO8.md)); under `--#api tic80`,
+`rect(x, y, w, h, color)` / `rectb(...)` are TIC-80's (see
+[TIC80.md](TIC80.md)).
+
+---
+
 ## Input: btn() / btnp()
 
 ```
@@ -871,6 +939,153 @@ more clearly.
 These match the underlying Vircon32 hardware rather than PICO-8/TIC-80
 conventions; that emulation lives entirely in the `--#api pico8`/`--#api tic80`
 compatibility layers, not here.
+
+---
+
+## Keyboard: key() / keyp() / kbd.\*
+
+```
+key([k])                      -> boolean, k held (no k: any key held)
+keyp([k [, hold, period]])    -> boolean, k went down this frame (+ autorepeat)
+kbd.read()                    -> next typed character (a number), or nil
+kbd.event()                   -> next event: +code pressed, -code released, or nil
+kbd.port([n])                 -> gamepad port of the keyboard (and sets it)
+kbd.capslock()                -> boolean, caps lock on
+kbd.connected()               -> boolean, something is plugged into that port
+kbd.clear()                   -- forget the events not read yet
+```
+
+These read a full keyboard through a **v32kbd** device: a USB keyboard
+gadget the console sees as an ordinary gamepad, whose 11 controls carry key
+events instead of buttons (see the v32kbd project). It plugs into a gamepad
+port — **port 1 (the second) by default**, leaving port 0 for a regular
+gamepad. Change it with `--keyboard N` on the command line, a `--#keyboard N`
+hint in the source, or `kbd.port(n)` at run time.
+
+`key()`/`keyp()` follow TIC-80's: same names, same rules, with v32kbd key
+codes. Under `--#api tic80` the same two calls take TIC-80's own key codes
+(see [TIC80.md](TIC80.md#input)); `kbd.*` works under every API. A global
+of your own named `kbd` (a table you assign) replaces the `kbd.*` built-ins.
+
+**Key codes**
+
+A code names a **key**, not a character: the keys that type a character
+use it unshifted, US layout — `'a'`–`'z'` (97–122), `'0'`–`'9'` (48–57),
+space (32) and `` ` - = [ ] \ ; ' , . / `` — and the others:
+
+| Code | Key | Code | Key |
+|---|---|---|---|
+| 1 | Up | 11 | Right Ctrl |
+| 2 | Down | 12 | Left Alt (Option) |
+| 3 | Left | 13 | Enter |
+| 4 | Right | 14–25 | F1–F12 |
+| 5 | Caps Lock | 26 | Right Alt (Option) |
+| 6 | Left Shift | 27 | Escape |
+| 7 | Right Shift | 28 | Left GUI (Command, Windows) |
+| 8 | Backspace | 29 | Right GUI |
+| 9 | Tab | 127 | Delete |
+| 10 | Left Ctrl | | |
+
+Numeric keypad keys report the same codes as their main-keyboard
+equivalents.
+
+`k` can also be a **string literal**, turned into the code at compile
+time: one character (`"a"`, `"/"`, `" "`; a shifted character names its
+key, so `"A"` is the a key and `"!"` the 1 key), or a name — `up` `down`
+`left` `right` `enter` (`return`) `tab` `space` `backspace` `delete`
+(`del`) `escape` (`esc`) `capslock` `lshift` `rshift` `lctrl` `rctrl`
+`lalt` `ralt` `lgui` `rgui` `f1`–`f12`, case-insensitive. Four names mean
+either side: `shift`, `ctrl`, `alt`, `gui` (`key("shift")` is true while
+either Shift is held). An unknown name is a compile error. Only literals
+are folded: a string held in a variable is not a key (`false`).
+
+```lua
+function game_loop()
+    if key("left")  then x = x - 2 end
+    if key("right") then x = x + 2 end
+    if keyp("space") then fire() end
+    if key("ctrl") and keyp("s") then save() end
+    if keyp("down", 20, 4) then menu_next() end   -- repeats while held
+end
+```
+
+**key([k]), keyp([k [, hold, period]])**
+
+`key(k)` is true while the key is held. `keyp(k)` is true on the frame it
+goes down; with `hold` and `period` both given and ≥ 0, it is also true
+while the key stays held, from `hold` frames on, every `period` frames
+(`period` 0: every frame) — counting the frames after the first, as
+TIC-80's `keyp` and `btnp` do. There is no default autorepeat. Without `k`,
+`key()` is "any key held" and `keyp()` "any key went down this frame". A
+code with no key behind it is `false`.
+
+**Typed text: kbd.read()**
+
+```lua
+local text = ""
+function game_loop()
+    local c = kbd.read()
+    while c do
+        if c == 8 then                          -- Backspace
+            text = string.sub(text, 1, -2)
+        elseif c >= 32 and c < 127 then
+            text = text .. string.char(c)
+        end
+        c = kbd.read()
+    end
+    print(0, 0, text .. "_")
+end
+```
+
+`kbd.read()` returns the next key **press** as the character it types,
+with Shift and Caps Lock applied as they were when the key went down
+(`"A"`, `"!"`, `"{"` ... as numbers, matching the BIOS font), and keys
+with no character as their code (Enter 13, Backspace 8, arrows 1–4...).
+Releases are skipped. `nil` when nothing is left.
+
+`kbd.event()` returns every event instead, presses and releases, as the
+key code with no Shift applied: positive for a press, negative for a
+release (`-97`: the a key went up). Both read the same queue — use one or
+the other. The queue holds 64 events; past that, new ones are dropped
+until it is read (`kbd.clear()` empties it — the held keys `key()` sees
+are not affected).
+
+**kbd.port([n]), kbd.capslock(), kbd.connected()**
+
+`kbd.port(n)` moves the keyboard to gamepad port `n` (0–3, clamped) and
+starts over: held keys, queued events and Caps Lock are forgotten, and the
+device's current state is taken as the starting point. It returns the port;
+`kbd.port()` only returns it. `kbd.capslock()` is the Caps Lock state, kept
+by counting its presses (it starts off). `kbd.connected()` is true when
+something is plugged into the keyboard's port.
+
+**Reading every frame**
+
+The device reports at most one key event per frame and holds it until the
+next one, so it has to be read **on every frame** or events are lost. The
+compiler arranges that when the program uses the keyboard:
+
+- every `key`/`keyp`/`kbd.*` call reads the device (once per frame);
+- the `game_loop()` and TIC-80 `TIC()` drivers read it before each frame;
+- `system.wait()` and `ioports.gpu.sync()` read it before their `WAIT`
+  (what arrives then counts for the next frame, so `keyp()` still sees it).
+
+So a `main()` loop that waits with `system.wait()` loses nothing, even if
+it only looks at the keyboard now and then. A bare `__rawasm__("WAIT")`
+skips that read. Nothing of this is in a program that doesn't use the
+keyboard.
+
+**The gamepad port**
+
+The keyboard's port is read without disturbing the gamepad the program has
+selected: `btn()`, `btnp()` and `ioports.inp.*` keep reading the gamepad
+they read before. Don't read the keyboard's port with `btn()` — its
+"buttons" are key-code bits.
+
+The selected gamepad is remembered by the runtime (`V32IO_GAMEPAD`) rather
+than read back from `INP_SelectedGamepad`: the Vircon32 emulators return a
+wrong value when that port is read. `ioports.inp.gamepad` reads give the
+remembered value too. A `__rawasm__` write to the port bypasses it.
 
 ---
 

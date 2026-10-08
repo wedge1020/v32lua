@@ -16,6 +16,8 @@ v32lua \- compile a subset of Lua to Vircon32 assembly and cartridge XML
 .RB [ \-\-rate
 .IR hz ]
 .RB [ \-\-fast\-circles ]
+.RB [ \-\-keyboard
+.IR port ]
 .RB [ \-\-bezel
 .IR art.png " | "
 .BR \-\-no\-bezel ]
@@ -180,6 +182,16 @@ per unit of radius; roughly 1.5% of the edge pixels differ from the
 console's). Outlines are always exact. Same as a
 .B \-\-#fast\-circles
 hint.
+.TP
+.BI \-\-keyboard " port"
+Gamepad port (0\(en3) where a v32kbd keyboard is plugged in, for
+.BR key() ", " keyp()
+and
+.B kbd.*
+in native and TIC-80 mode. Default 1, the second port. Same as a
+.B \-\-#keyboard
+hint; a program can also change it with
+.BR kbd.port(n) .
 .TP
 .BI \-\-bezel " art.png"
 PICO-8: draw the side panels from your own art instead of the built-in
@@ -357,6 +369,17 @@ and
 .BR ioports.gpu.multiply / bgcolor
 expect. A numeric literal written to an integer port is stored as its
 exact 32-bit word.
+.BI rect( x1 ", " y1 ", " x2 ", " y2 " [, " color ])
+and
+.B rectfill()
+draw a rectangle outline / filled rectangle between two inclusive
+corners, in that packed color (default white), with a small white
+texture added to the cartridge after the program's own.
+.BR key() ", " keyp()
+and
+.B kbd.*
+read a full keyboard through a v32kbd device on a gamepad port (see
+.BR \-\-keyboard ).
 .PP
 Explicit, permanent deviations from standard Lua, made to suit
 Vircon32's freestanding environment: IEEE-754 float32 only, with no
@@ -442,7 +465,7 @@ line comments, parsed by the preprocessor stage and used to generate
 the companion XML file:
 .BR \-\-#version ", " \-\-#title ", " \-\-#api ", " \-\-#texture ,
 .BR \-\-#sound ", " \-\-#tilemap ", " \-\-#p8 ", " \-\-#rate ,
-.BR \-\-#bezel ", " \-\-#fast\-circles ", and " \-\-#include .
+.BR \-\-#bezel ", " \-\-#fast\-circles ", " \-\-#keyboard ", and " \-\-#include .
 The XML names the
 .I .vtex
 and
@@ -532,7 +555,7 @@ before running
 .TP
 .I inc/config.h
 (in the source tree) Build-time defaults of the sample rates, side panels,
-fast circles and warnings.
+fast circles, keyboard port and warnings.
 .SH SEE ALSO
 .BR v32c++ (1),
 the Vircon32 C compiler and assembler documentation,

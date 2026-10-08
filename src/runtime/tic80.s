@@ -606,6 +606,7 @@ __builtin_tic80_btn:
     MOV   R3, R2
     IDIV  R3, 8  ; R3 will contain gamepad id
     OUT   INP_SelectedGamepad, R3
+    MOV   [V32IO_GAMEPAD], R3  ; remembered (v32io.s): 0-3 here
     IMOD  R2, 8  ; R2 now just contains button id on gamepad (0-7)
 
     ;; If invalid button ID (gamepad id > 3), return false
@@ -721,6 +722,7 @@ __builtin_tic80_btnp:
     MOV   R3, R2
     IDIV  R3, 8  ; R3 will contain gamepad id
     OUT   INP_SelectedGamepad, R3
+    MOV   [V32IO_GAMEPAD], R3  ; remembered (v32io.s): 0-3 here
     IMOD  R2, 8  ; R2 now just contains button id on gamepad (0-7)
 
     ;; If invalid button ID (gamepad id > 3), return false

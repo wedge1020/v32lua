@@ -595,6 +595,11 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         return 0;
     }
 
+    // kbd.* -- v32kbd keyboard, every API mode (v32kbd.c)
+    if (strncmp(func_name, "kbd.", 4) == 0 && resolve_symbol ("kbd") == NULL) {
+        return try_emit_kbd_namespace_intrinsic (node, dest_reg, func_name);
+    }
+
     // hex("0x...")
     if (strcmp(func_name, "hex") == 0) {
         return emit_hex_intrinsic(node, dest_reg);
@@ -640,6 +645,22 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         if (strcmp (func_name, "btnp") == 0)
         {
             return (emit_vircon32_btnp_intrinsic (node, dest_reg));
+        }
+
+        // rect() / rectfill() -- rectangle outline / filled, from 2 corners
+        if (strcmp (func_name, "rect") == 0)
+        {
+            return (emit_vircon32_rect_intrinsic (node, dest_reg, false));
+        }
+        if (strcmp (func_name, "rectfill") == 0)
+        {
+            return (emit_vircon32_rect_intrinsic (node, dest_reg, true));
+        }
+
+        // key() / keyp() -- v32kbd keyboard, native key codes (v32kbd.c)
+        if (strcmp (func_name, "key") == 0 || strcmp (func_name, "keyp") == 0)
+        {
+            return (emit_v32kbd_key_intrinsic (node, dest_reg, func_name, false));
         }
 
         // music.* / sfx.* -- native Vircon32 sound API
@@ -1041,10 +1062,15 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
             return (emit_tic80_music_intrinsic (node, dest_reg));
         }
 
-        if (strcmp (func_name, "trace") == 0 || strcmp (func_name, "key") == 0 ||
-            strcmp (func_name, "keyp") == 0)
+        if (strcmp (func_name, "trace") == 0)
         {
             return emit_tic80_stub_intrinsic (node, func_name, dest_reg);
+        }
+
+        // key() / keyp() -- v32kbd keyboard, TIC-80 key codes (v32kbd.c)
+        if (strcmp (func_name, "key") == 0 || strcmp (func_name, "keyp") == 0)
+        {
+            return (emit_v32kbd_key_intrinsic (node, dest_reg, func_name, true));
         }
 
         // peek/poke family, memcpy, memset -- emulated 96 KB RAM
@@ -1579,6 +1605,30 @@ int  try_emit_table_set_intrinsic (ASTNode *table_expr, ASTNode *key_expr, ASTNo
     else if (strcmp (full_path, "ioports.gpu.minY") == 0)
         paired_hotspot_port                          = "GPU_RegionHotSpotY";
 
+    // ioports.inp.gamepad = n: selected through v32io.s __v32io_select,
+    // which remembers it -- the emulator can't read INP_SelectedGamepad
+    // back (see v32io.s), and the keyboard/pause code must restore it.
+    if (strcmp (full_path, "ioports.inp.gamepad") == 0) {
+        int reg = allocate_register ();
+        register_pinned[reg] = 1;
+        double lit;
+        if (spu_static_number (val_node, &lit)) {
+            emit_asm ("MOV R%d, %d ; ioports.inp.gamepad = %g\n", reg, (int) trunc (lit), lit);
+        } else {
+            generate_asm (val_node, reg);
+            if (!is_raw_integer_expression (val_node)) {
+                emit_asm ("CFI R%d ; Cast Lua Float to Hardware Integer\n", reg);
+            }
+        }
+        emit_asm ("PUSH R1\n");
+        emit_asm ("MOV  R1, R%d\n", reg);
+        emit_asm ("CALL __v32io_select ; INP_SelectedGamepad (0-3), remembered\n");
+        emit_asm ("POP  R1\n");
+        register_pinned[reg] = 0;
+        unlock_register (reg);
+        return 1;
+    }
+
     for (int i = 0; ioports[i].lua_path != NULL; i++) {
         if (strcmp(full_path, ioports[i].lua_path)  == 0) {
             if ((ioports[i].mode & IOPORT_WRITE)    != IOPORT_WRITE) {
@@ -1831,7 +1881,13 @@ int  try_emit_table_get_intrinsic (ASTNode *table_expr, ASTNode *key_expr, int d
                 return 1;
             }
 
-            if (dest_reg != 0) {
+            if (dest_reg != 0 && strcmp (full_path, "ioports.inp.gamepad") == 0) {
+                // not the port: the emulator returns garbage for it (v32io.s)
+                emit_asm("    ;; --- Intrinsic: selected gamepad, as last set (V32IO_GAMEPAD) ---\n");
+                emit_asm("    MOV R%d, [V32IO_GAMEPAD]\n", dest_reg);
+                emit_asm("    CIF R%d\n", dest_reg);
+            }
+            else if (dest_reg != 0) {
                 if ((ioports[i].type & IOPORT_TYPE_INTEGER) == IOPORT_TYPE_INTEGER) {
                     emit_asm("    ;; --- Intrinsic: Read Hardware Integer (%s) ---\n", full_path);
                     emit_asm("    IN R%d, %s\n", dest_reg, ioports[i].asm_port);

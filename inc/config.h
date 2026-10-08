@@ -91,4 +91,12 @@
 #error "V32LUA_DEFAULT_TIC80_RATE must be 11025, 22050 or 44100"
 #endif
 
+// Gamepad port (0-3) a v32kbd keyboard is expected in, for key()/keyp()/
+// kbd.* (native and TIC-80 modes). 1 is the second port, leaving the first
+// for a regular gamepad. Overridden by --keyboard / --#keyboard, and at run
+// time by kbd.port(n).
+#ifndef V32LUA_DEFAULT_KEYBOARD_PORT
+#define V32LUA_DEFAULT_KEYBOARD_PORT  1
+#endif
+
 #endif

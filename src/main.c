@@ -76,6 +76,8 @@ static void  print_usage (const char *prog_name)
     fprintf (stdout, "  --fast-circles   TIC-80/PICO-8: draw filled circles above radius 31 as a\n");
     fprintf (stdout, "                   scaled disc (1 draw instead of ~1.2 per radius; about\n");
     fprintf (stdout, "                   1.5%% of the edge pixels differ). Outlines stay exact\n");
+    fprintf (stdout, "  --keyboard <n>   Gamepad port (0-3) of a v32kbd keyboard, for key()/keyp()/\n");
+    fprintf (stdout, "                   kbd.*. Default 1, the second port (inc/config.h)\n");
     fprintf (stdout, "\nInput files: .lua, .p8 (PICO-8 cart), .tic (TIC-80 cart, Lua only)\n");
 }
 
@@ -204,6 +206,13 @@ int  main (int  argc, char** argv)
             g_cli_bezel_set = true;
         } else if (strcmp(argv[i], "--fast-circles") == 0) {
             shapes_fast = true;
+        } else if ((val = option_value(argc, argv, &i, "--keyboard")) != NULL) {
+            if (val[0] < '0' || val[0] > '3' || val[1] != '\0') {
+                fprintf(stderr, "Compiler Error: --keyboard must be a gamepad port 0-3 (got '%s')\n", val);
+                return 1;
+            }
+            v32kbd_default_port = val[0] - '0';
+            g_cli_keyboard_set  = true;
         } else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
             strncpy(output_filename, argv[++i], sizeof(output_filename) - 1);
         } else if (strcmp(argv[i], "-g") == 0) {
@@ -503,6 +512,25 @@ int  main (int  argc, char** argv)
         pico8_bezel_register_custom (base_path);   // --bezel FILE: after the atlas
     }
 
+    // Native API: rect()/rectfill() draw with a 4x4 white texture of their
+    // own (shapes.c), registered after the program's --#texture resources
+    // (whose ids were fixed at parse time) when the source mentions them.
+    if (!runtime_req.needs_pico8 && !runtime_req.needs_tic80)
+    {
+        char base_path[256];
+        strncpy (base_path, output_filename, sizeof (base_path) - 1);
+        base_path[sizeof (base_path) - 1] = '\0';
+        char *last_dot = strrchr (base_path, '.');
+        char *last_slash = strrchr (base_path, '/');
+        if (last_dot && (!last_slash || last_dot > last_slash)) *last_dot = '\0';
+        register_fill_texture (program_text, base_path);
+    }
+
+    // v32kbd keyboard support (v32kbd.c): key()/keyp()/kbd.* -- decided
+    // from the source before codegen, since the WAIT hooks it adds can be
+    // emitted before the first key() call is compiled.
+    v32kbd_prescan (program_text);
+
     // --- Stage 4: Semantic Analyzer ---
     log_stage(4, "analyzer", verbose);
     init_global_scope();
@@ -534,6 +562,10 @@ int  main (int  argc, char** argv)
         vircon32_btn_prev_state_base      = next_ram_address;
         next_ram_address                  = next_ram_address + 44;
         vircon32_sfx_cursor_base          = next_ram_address;
+        next_ram_address                  = next_ram_address + 1;
+        // the selected gamepad, as last written (v32io.s): the emulator's
+        // INP_SelectedGamepad port can't be read back reliably
+        v32io_gamepad_base                = next_ram_address;
         next_ram_address                  = next_ram_address + 1;
 
         // One word each: a 16-bit-relevant bitmask (bit N set = channel N

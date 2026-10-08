@@ -249,7 +249,7 @@ __builtin_cart_restart:
     OUT   GPU_SelectedRegion, 0
     OUT   SPU_SelectedSound, -1
     OUT   SPU_SelectedChannel, 0
-    OUT   INP_SelectedGamepad, 0
+    OUT   INP_SelectedGamepad, 0      ; (V32IO_GAMEPAD: reset by the start-up code)
     OUT   SPU_Command, SPUCommand_StopAllChannels
     OUT   GPU_MultiplyColor, 0xFFFFFFFF
     OUT   GPU_ActiveBlending, GPUBlendingMode_Alpha

@@ -29,7 +29,7 @@ for src in `/bin/ls -1 src/*.c src/intrinsics/*.c src/node/*.c`; do
 done
 
 RUNTIME_UNITS="memory datetime exec table string print iters"
-RUNTIME_UNITS="${RUNTIME_UNITS} vircon32 pico8 tic80"
+RUNTIME_UNITS="${RUNTIME_UNITS} vircon32 v32io v32kbd pico8 tic80"
 RUNTIME_UNITS="${RUNTIME_UNITS} math constant"
 
 echo -n                                                      >  put/runtime.s.txt

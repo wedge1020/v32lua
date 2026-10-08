@@ -211,3 +211,70 @@ void emit_shapes_runtime (FILE *out)
         fprintf (out, "    integer %d, %d, %d, %d\n", shapes_regions[id][0], shapes_regions[id][1],
                  shapes_regions[id][2], shapes_regions[id][3]);
 }
+
+// ============================================================================
+// Native fill texture (native API rect() / rectfill())
+// ----------------------------------------------------------------------------
+// The native API has no sprite sheet of its own to borrow a swatch from (the
+// TIC-80 / PICO-8 layers keep one in texture 0), so a program that draws
+// rectangles gets a tiny texture of its own: 4x4 opaque white pixels, with
+// region 0 the single pixel at (1, 1), hotspot on it. A rectangle is then
+// ONE zoomed draw of that region (scale = width, height in pixels), tinted
+// with the GPU multiply color. The ring of white around the region keeps
+// the zoomed sampling white at the edges.
+//
+// Registered after every --#texture of the program, so its id never moves
+// the program's own (they are numbered at parse time).
+// ============================================================================
+
+int  fill_texture_id = -1;                 // texture index, -1: no fill texture
+
+bool fill_texture_wanted (const char *src)
+{
+    if (src == NULL) return false;
+    return mentions (src, "rect") || mentions (src, "rectfill");
+}
+
+void register_fill_texture (const char *src, const char *base_path)
+{
+    if (!fill_texture_wanted (src)) return;
+    char path[300], vtex[310];
+    snprintf (path, sizeof path, "%s_fill", base_path);
+    snprintf (vtex, sizeof vtex, "%s.vtex", path);
+
+    FILE *f = fopen (vtex, "wb");
+    if (f == NULL) {
+        compiler_warning (ERR_INTERNAL, -1,
+            "could not write '%s'; rect() and rectfill() will not draw", vtex);
+        return;
+    }
+    VTEXHeader hdr = { .width = FILL_TEXTURE_SIZE, .height = FILL_TEXTURE_SIZE };
+    memcpy (hdr.magic, "V32-VTEX", 8);
+    fwrite (&hdr, sizeof hdr, 1, f);
+    uint8_t white[4] = { 0xFF, 0xFF, 0xFF, 0xFF };
+    for (int i = 0; i < FILL_TEXTURE_SIZE * FILL_TEXTURE_SIZE; i++) fwrite (white, 4, 1, f);
+    fclose (f);
+
+    fill_texture_id = next_texture_id;
+    cart_resource_append (&textures_head, &textures_tail, next_texture_id++, "fill", path);
+}
+
+// Startup code (generate_global_setup): defines region 0 of the fill
+// texture, leaving the selected texture / region as they were.
+void emit_fill_texture_setup (void)
+{
+    if (fill_texture_id < 0) return;
+    emit_asm ("    ;; --- rect()/rectfill() fill texture: region 0 = pixel (1, 1) ---\n");
+    emit_asm ("IN  R1, GPU_SelectedTexture\n");
+    emit_asm ("IN  R2, GPU_SelectedRegion\n");
+    emit_asm ("OUT GPU_SelectedTexture, V32_FILL_TEXTURE\n");
+    emit_asm ("OUT GPU_SelectedRegion, 0\n");
+    emit_asm ("OUT GPU_RegionMinX, 1\n");
+    emit_asm ("OUT GPU_RegionMinY, 1\n");
+    emit_asm ("OUT GPU_RegionMaxX, 1\n");
+    emit_asm ("OUT GPU_RegionMaxY, 1\n");
+    emit_asm ("OUT GPU_RegionHotspotX, 1\n");
+    emit_asm ("OUT GPU_RegionHotspotY, 1\n");
+    emit_asm ("OUT GPU_SelectedTexture, R1\n");
+    emit_asm ("OUT GPU_SelectedRegion, R2\n");
+}
