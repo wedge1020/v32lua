@@ -1,0 +1,197 @@
+name: Generate Global Binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Purpose of this build run'
+        type: choice
+        required: true
+        default: 'test'
+        options:
+          - 'test'
+          - 'release'
+
+permissions:
+  contents: write
+
+# =========================================================================
+# CHANGE THIS SINGLE VARIABLE TO DEPLOY THIS WORKFLOW TO ANOTHER REPOSITORY
+# =========================================================================
+env:
+  PROJECT_NAME: v32lua
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }}-${{ matrix.arch }})
+    runs-on: ${{ matrix.os-runner }}
+    
+    defaults:
+      run:
+        shell: ${{ matrix.os == 'windows' && 'msys2 {0}' || 'bash' }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows Targets
+          - os: windows
+            arch: x86_64
+            os-runner: windows-latest
+          - os: windows
+            arch: arm64
+            os-runner: windows-latest
+          
+          # macOS Targets
+          - os: macos
+            arch: x86_64
+            os-runner: macos-latest
+          - os: macos
+            arch: arm64
+            os-runner: macos-latest
+
+          # Linux Core Targets
+          - os: linux
+            arch: x86_64
+            os-runner: ubuntu-latest
+          - os: linux
+            arch: arm64
+            os-runner: ubuntu-latest
+
+          # Linux Raspberry Pi Targets
+          - os: linux
+            arch: armv7-rpi
+            os-runner: ubuntu-latest
+          - os: linux
+            arch: armv8-rpi
+            os-runner: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # --- ENVIRONMENT TOOLCHAIN SETUP ---
+      - name: Setup MSYS2 Toolchain (Windows)
+        if: matrix.os == 'windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-clang
+            mingw-w64-ucrt-x86_64-lld
+            mingw-w64-ucrt-x86_64-make
+            zip
+      - name: Setup Linux ARM Cross-Compilers
+        if: matrix.os == 'linux'
+        shell: bash
+        run: |
+          if [ "${{ matrix.arch }}" = "arm64" ] || [ "${{ matrix.arch }}" = "armv8-rpi" ]; then
+            sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+          elif [ "${{ matrix.arch }}" = "armv7-rpi" ]; then
+            sudo apt-get update && sudo apt-get install -y gcc-arm-linux-gnueabihf
+          fi
+      # --- BUILD EXECUTABLES & STRIP SYMBOLS ---
+      - name: Compile and Strip (Windows)
+        if: matrix.os == 'windows'
+        run: |
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            mingw32-make CC="clang -target aarch64-w64-windows-gnu -fuse-ld=lld"
+            strip bin/*
+          else
+            mingw32-make CC="gcc"
+            strip bin/*
+          fi
+      - name: Compile and Strip (macOS)
+        if: matrix.os == 'macos'
+        shell: bash
+        run: |
+          make CC="clang -arch ${{ matrix.arch }}"
+          strip bin/*
+      - name: Compile and Strip (Linux)
+        if: matrix.os == 'linux'
+        shell: bash
+        run: |
+          if [ "${{ matrix.arch }}" = "arm64" ] || [ "${{ matrix.arch }}" = "armv8-rpi" ]; then
+            make CC="aarch64-linux-gnu-gcc"
+            aarch64-linux-gnu-strip bin/*
+          elif [ "${{ matrix.arch }}" = "armv7-rpi" ]; then
+            make CC="arm-linux-gnueabihf-gcc"
+            arm-linux-gnueabihf-strip bin/*
+          else
+            make CC="gcc"
+            strip bin/*
+          fi
+      # --- MODULAR PACKAGING BLOCK (ALL OS RUNNERS) ---
+      - name: Parse Version and Create Zip Archive
+        run: |
+          # Dynamically builds path: inc/${PROJECT_NAME}.h
+          HEADER_FILE="inc/${{ env.PROJECT_NAME }}.h"
+          
+          VERSION=$(grep -i "VERSION" "$HEADER_FILE" | head -n 1 | awk -F'"' '{print $2}')
+          if [ -z "$VERSION" ]; then
+             VERSION=$(grep -i "VERSION" "$HEADER_FILE" | head -n 1 | awk '{print $3}')
+          fi
+          
+          if [ "${{ github.event.inputs.build_type }}" = "test" ]; then
+            ZIP_NAME="${{ env.PROJECT_NAME }}-${VERSION}-test-${{ matrix.os }}-${{ matrix.arch }}.zip"
+            echo "RETENTION_DAYS=2" >> $GITHUB_ENV
+          else
+            ZIP_NAME="${{ env.PROJECT_NAME }}-${VERSION}-${{ matrix.os }}-${{ matrix.arch }}.zip"
+            echo "RETENTION_DAYS=0" >> $GITHUB_ENV
+          fi
+          
+          echo "VERSION_TAG=v$VERSION" >> $GITHUB_ENV
+          echo "Packaging: $ZIP_NAME"
+          
+          cp README.md bin/
+          cd bin
+          zip -r "../$ZIP_NAME" ./*
+          cd ..
+          
+          echo "FINAL_ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+      # --- STAGE ZIP INTERNALLY ---
+      - name: Upload Compressed Target Release Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          # Modified to avoid naming collisions across jobs
+          name: ${{ env.PROJECT_NAME }}-package-${{ matrix.os }}-${{ matrix.arch }}
+          path: ${{ env.FINAL_ZIP_NAME }}
+          retention-days: ${{ fromJson(env.RETENTION_DAYS) }}
+          
+      - name: Save Version Tag for Release Job
+        run: echo "${{ env.VERSION_TAG }}" > version_tag.txt
+
+      - name: Upload Version Tag
+        uses: actions/upload-artifact@v4
+        with:
+          name: version-tag-${{ matrix.os }}-${{ matrix.arch }}
+          path: version_tag.txt
+          retention-days: ${{ fromJson(env.RETENTION_DAYS) }}
+
+  release:
+    name: Create Draft Release
+    needs: build
+    if: github.event.inputs.build_type == 'release'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all zip packages from build jobs
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Determine Version Tag
+        run: |
+          VERSION_TAG=$(cat artifacts/version_tag.txt | head -n 1)
+          echo "VERSION_TAG=$VERSION_TAG" >> $GITHUB_ENV
+          rm artifacts/version_tag.txt
+      - name: Generate Draft Release on GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.VERSION_TAG }}
+          name: "${{ env.PROJECT_NAME }} Release ${{ env.VERSION_TAG }}"
+          draft: true
+          prerelease: false
+          files: artifacts/*.zip
