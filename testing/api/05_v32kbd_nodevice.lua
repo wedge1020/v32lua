@@ -1,5 +1,5 @@
 --#title "[v32lua] v32kbd keyboard, no device, unit test"
---#keyboard 2
+--#keyboard 1
 
 --@ Vircon32 Lua v32kbd keyboard Unit Test -- without a device
 --@ key()/keyp()/kbd.* read a v32kbd keyboard (a USB keyboard the console
@@ -9,14 +9,15 @@
 --@ program has selected (the runtime remembers the selection in
 --@ V32IO_GAMEPAD: the emulators can't read INP_SelectedGamepad back).
 --@ Key events need a v32io device -- the hardware adapter or the modified
---@ emulator (github.com/wedge1020/ComputerSoftware, branch v32kbd): see
+--@ emulator (github.com/wedge1020/ComputerSoftware, branch v32io): see
 --@ doc/API.md, "Keyboard and mouse: what you need".
 --@
---@ --#keyboard 2 above: the keyboard's default port is 2 in this test.
+--@ --#keyboard 1 above: the keyboard's default port is 1 in this test
+--@ (not the built-in default, 2, so the hint is what's being checked).
 
 function main()
     -- === Test 00: --#keyboard sets the default port ===
-    number_result00 = kbd.port()                    -- Expected: 2
+    number_result00 = kbd.port()                    -- Expected: 1
     __rawasm__("__debug00:")
 
     -- === Test 01-04: no key down, nothing typed ===
@@ -58,7 +59,7 @@ end
 
 --[[
 === EXPECTED OUTPUT ===
-number_result00: 2.0000
+number_result00: 1.0000
 bool_result01: false
 bool_result02: false
 bool_result03: false

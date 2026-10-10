@@ -1,0 +1,40 @@
+# ----------------------------------------------------------------------------
+#   `cmake  --build  build  --target  uninstall`: removes every file the
+#   last  `cmake  --install`  of  this  build  tree  wrote  (its
+#   install_manifest.txt),  then the v32lua directories that leaves empty
+#   --  and  v32tools/ (and, on Linux / macOS, Vircon32/) only if nothing
+#   else  is  left  in  them, since v32opt, v32c++ and the DevTools share
+#   them.
+# ----------------------------------------------------------------------------
+
+set(MANIFEST "@CMAKE_CURRENT_BINARY_DIR@/install_manifest.txt")
+if(NOT EXISTS "${MANIFEST}")
+    message(FATAL_ERROR "Nothing to uninstall: ${MANIFEST} not found (run cmake --install first)")
+endif()
+
+file(STRINGS "${MANIFEST}" FILES)
+foreach(FILE IN LISTS FILES)
+    if(EXISTS "${FILE}" OR IS_SYMLINK "${FILE}")
+        message(STATUS "Removing ${FILE}")
+        file(REMOVE "${FILE}")
+    endif()
+endforeach()
+
+# Deepest first; each only if empty.
+set(PREFIX "@CMAKE_INSTALL_PREFIX@")
+foreach(DIR
+        "@V32LUA_LIBRARY_PATH@"
+        "${PREFIX}/@V32LUA_INSTALL_DOCDIR@/doc"
+        "${PREFIX}/@V32LUA_INSTALL_DOCDIR@"
+        "${PREFIX}/@V32LUA_TOOLS_ROOT@/include"
+        "${PREFIX}/@V32LUA_TOOLS_ROOT@/docs"
+        "${PREFIX}/@V32LUA_TOOLS_ROOT@"
+        "@V32LUA_UNIX_VIRCON32_DIR@")
+    if(DIR AND IS_DIRECTORY "${DIR}")
+        file(GLOB LEFT "${DIR}/*")
+        if(NOT LEFT)
+            message(STATUS "Removing empty directory ${DIR}")
+            file(REMOVE_RECURSE "${DIR}")
+        endif()
+    endif()
+endforeach()

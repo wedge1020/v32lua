@@ -14,7 +14,7 @@ memoria y puertos de E/S en bruto). Empieza por su
 [Referencia rápida](doc/API.es.md#quick-reference): cada intrínseco y cada
 puerto `ioports.*` en un solo lugar.
 
-**Construir un cartucho:** [doc/USAGE.md](doc/USAGE.md) — la línea de
+**Construir un cartucho:** [doc/USAGE.es.md](doc/USAGE.es.md) — la línea de
 comandos, las pistas `--#`, el XML generado y las herramientas de Vircon32
 que completan el trabajo.
 
@@ -79,7 +79,8 @@ código fuente.
 
 **Requisitos**
 
-* Una cadena de herramientas de C (`gcc`/`clang` + `make`)
+* Una cadena de herramientas de C (`gcc`/`clang` + `make`), o CMake 3.13+
+  como compilación alternativa (ver [Compilar con CMake](#compilar-con-cmake))
 * Si se modifica el lexer/parser, se necesitan las herramientas `flex` y
   `bison` para regenerar las rutinas C del lexer/parser. Las rutinas C ya
   generadas por `flex` y `bison` están incluidas en el repositorio para
@@ -117,8 +118,9 @@ de Vircon32 (ensamblar → `packrom` → ejecutar bajo
 | **`all`** | **Objetivo por defecto.** Compila el compilador (`bin/v32lua`) dentro de `src/`. |
 | **`clean`** | Elimina los artefactos de compilación de `src/` y los archivos generados en `testing/` y `demos/`. |
 | **`install`** | Copia `bin/v32lua` a `~/bin/bin.$(ARCH)/` si existe, si no a `~/bin/`. |
-| **`sysinstall`** | Copia `bin/v32lua` a `/usr/local/bin/` (normalmente requiere `sudo`). |
-| **`tests`** | Ejecuta la suite de pruebas de compilación en `testing/` (compila primero el compilador). |
+| **`sysinstall`** | Instalación en el sistema: `bin/v32lua` en `/usr/local/bin/`, la página de manual en `/usr/local/share/man/man1/` y la biblioteca de `--#include` (`lib/*.lua`) en `/usr/local/Vircon32/v32tools/include/v32lua/` (normalmente requiere `sudo`; ver [Instalación](#instalacion)). |
+| **`sysuninstall`** | Elimina lo que instaló `sysinstall`. |
+| **`tests`** | Ejecuta las pruebas unitarias de `testing/`: cada programa se compila, se ensambla, se empaqueta y se ejecuta en [v32sim](https://github.com/g7n-org/v32sim), y sus resultados se comparan con el bloque `EXPECTED OUTPUT` del archivo (requiere las DevTools, v32sim y `v32lua` en tu `PATH`). |
 | **`asmcheck`** | Compila las pruebas y ensambla cada resultado (`.vbin`), comprobando el ensamblador generado. |
 | **`v32check`** | Como `asmcheck`, y además empaqueta cada prueba en un cartucho `.v32`. |
 | **`demos`** | Compila todas las demos bajo `demos/` (ver [Compilar las demos](#building-the-demos)). |
@@ -129,6 +131,80 @@ de Vircon32 (ensamblar → `packrom` → ejecutar bajo
 La cadena de versión está en un solo lugar, `#define VERSION` en
 `inc/v32lua.h`; `v32lua --version` la muestra y `make version` la copia en
 la página de manual y en la guía de depuración.
+
+<a id="compilar-con-cmake"></a>
+**Compilar con CMake**
+
+Para quien lo prefiera, `CMakeLists.txt` compila el mismo compilador a
+partir de las mismas fuentes (el Makefile sigue siendo la compilación
+principal, y `make tests` sigue siendo la ejecución completa de las
+pruebas en v32sim):
+
+```sh
+cmake -S . -B build              # Release por defecto
+cmake --build build              # build/v32lua
+ctest --test-dir build           # compila cada programa de prueba
+sudo cmake --install build       # ver "Instalación" más abajo
+```
+
+`ctest` comprueba que cada programa de las categorías de `testing/` que
+ejecuta `make tests` compila, y que los de `testing/fail/` se rechazan;
+ejecutarlos es tarea de `make tests`. Se usan flex y bison si se
+encuentran (`-DV32LUA_REGENERATE_PARSER=OFF` los omite); si no, se
+compilan tal cual `src/parser.c`, `inc/parser.h` y `src/lexer.c`, ya
+generados, así que una compilación normal solo necesita un compilador de
+C y CMake 3.13+. En **Windows**, compila con MinGW-w64 de 64 bits (por
+ejemplo desde una terminal MINGW64 de MSYS2, `cmake -S . -B build -G
+"MSYS Makefiles"`); MSVC no está soportado. `cpack --config
+build/CPackConfig.cmake` genera un `.tar.gz` (más `.deb` / `.rpm` donde
+haya `dpkg-deb` / `rpmbuild`), o un `.zip` en Windows.
+
+<a id="instalacion"></a>
+**Instalación**
+
+Una instalación en el sistema coloca todo donde una instalación de
+Vircon32 lo espera. El binario y la página de manual van donde van los
+comandos y las páginas de manual; la biblioteca de `--#include` y los
+documentos van en `v32tools/`, la carpeta que comparten las herramientas
+de la comunidad (con [v32opt](https://github.com/wedge1020/v32opt) y
+v32c++), junto a las `DevTools/` oficiales:
+
+| | Linux / macOS | Windows (CMake) |
+| --- | --- | --- |
+| compilador | `/usr/local/bin/v32lua` | `C:\Program Files\Vircon32\v32tools\v32lua.exe` |
+| página de manual | `/usr/local/share/man/man1/v32lua.1` | `...\v32tools\docs\v32lua\v32lua.1` |
+| biblioteca de `--#include` (`lib/*.lua`) | `/usr/local/Vircon32/v32tools/include/v32lua` | `...\v32tools\include\v32lua` |
+| documentación | `/usr/local/Vircon32/v32tools/docs/v32lua` (CMake) | `...\v32tools\docs\v32lua` |
+
+Cualquiera de las dos compilaciones lo hace:
+
+```sh
+sudo make sysinstall                          # Linux / macOS
+sudo make sysuninstall
+
+sudo cmake --install build                    # cualquier sistema (prefijo: /usr/local,
+sudo cmake --build build --target uninstall   #   o C:/Program Files/Vircon32)
+```
+
+El directorio de la biblioteca queda integrado en el compilador, así que
+tras instalar, `--#include "string.lua"` funciona desde cualquier
+directorio. Con CMake, elige otra ubicación al configurar (`cmake -S . -B
+build -DCMAKE_INSTALL_PREFIX=/opt/vircon32`) y el compilador buscará
+allí; `-DV32LUA_INSTALL_INCLUDEDIR=...` (y `BINDIR`, `MANDIR`, `DOCDIR`)
+mueven una sola parte. La desinstalación elimina solo los archivos de
+v32lua, y después `v32tools/` (y en Linux / macOS `Vircon32/`) solo si no
+queda nada más dentro. En Windows, añade `C:\Program
+Files\Vircon32\v32tools` a tu `PATH`, como para las DevTools.
+
+`make install`, en cambio, copia solo el binario a `~/bin`. Los valores
+por defecto de la compilación con el Makefile (el directorio de la
+biblioteca, las frecuencias de muestreo y los puertos de mando por
+defecto, ...) están en [`inc/config.h`](inc/config.h); cambia uno ahí y
+recompila, o sobrescríbelo al compilar:
+
+```sh
+make CFLAGS="-Wall -Wextra -g -I ../inc -DYYDEBUG=1 -DV32LUA_INCLUDE_PATH='\"/opt/v32tools/include/v32lua\"'"
+```
 
 <a id="building-the-demos"></a>
 **Compilar las demos**
@@ -358,20 +434,25 @@ ella.
 >   conectado a ella aparece en el ordenador como un mando (`v32io:kbd` /
 >   `v32io:mouse`), así que funciona con **cualquier** emulador de Vircon32,
 >   incluido el original, una vez configurado su perfil de joystick;
-> * el **emulador modificado**,
->   [wedge1020/ComputerSoftware](https://github.com/wedge1020/ComputerSoftware/tree/main),
->   que lee el teclado del propio ordenador como un dispositivo v32io —
->   por ahora en su [rama `v32kbd`](https://github.com/wedge1020/ComputerSoftware/tree/v32kbd);
->   el ratón aún no está (se prevé una rama `v32io` con ambos).
+> * un **emulador de Vircon32 modificado**, que lee el teclado y el ratón
+>   del propio ordenador como dispositivos v32io (sin hardware): el fork
+>   [wedge1020/ComputerSoftware](https://github.com/wedge1020/ComputerSoftware),
+>   [rama `v32io`](https://github.com/wedge1020/ComputerSoftware/tree/v32io)
+>   (con `v32kbd` y `v32mouse`), o las fuentes del DesktopEmulator original
+>   con los parches `emulator/v32kbd.patch` y `emulator/v32mouse.patch` del
+>   proyecto v32io aplicados.
 >
 > **Sin una de ellas, el acceso al teclado y al ratón no es posible:** los
 > programas compilan y se ejecutan, pero ninguna tecla está pulsada nunca
 > y el ratón no se mueve. Los programas que los necesiten deberían
 > indicarlo y, si es posible, ofrecer también controles con mando.
 
-El teclado se lee por defecto del puerto de mando 1 y el ratón del puerto
-3 (`--keyboard N`, `--mouse N`, `--#keyboard N`, `--#mouse N`, o
-`kbd.port(n)` / `mouse.port(n)` en tiempo de ejecución). Los protocolos,
+El teclado se lee por defecto del puerto de mando 2 (el tercero) y el
+ratón del puerto 3 (el cuarto), lo que deja los puertos 0 y 1 para mandos
+normales (`--keyboard N`, `--mouse N`, `--#keyboard N`, `--#mouse N`, o
+`kbd.port(n)` / `mouse.port(n)` en tiempo de ejecución). Los puertos se
+numeran desde 0; los menús del emulador llaman al puerto 2 "Gamepad 3" y
+al puerto 3 "Gamepad 4". Los protocolos,
 la lectura en cada cuadro que añade el compilador y la configuración se
 describen en [doc/API.es.md](doc/API.es.md#teclado-y-ratón-qué-se-necesita-v32io).
 
@@ -395,8 +476,8 @@ Pistas soportadas:
 | `--#rate 11025` \| `22050` \| `44100` | Frecuencia de muestreo del sonido sintetizado a partir de un cartucho de PICO-8 o TIC-80 (por defecto 22050; `--#p8rate` es el nombre antiguo; ver [doc/PICO8.md](doc/PICO8.md#sound)). |
 | `--#bezel off` \| `on` \| `"arte.png"` | PICO-8: los paneles laterales junto a la pantalla de 128×128 — ninguno, el arte integrado o el tuyo propio (ver [doc/PICO8.md](doc/PICO8.md#side-panels)). |
 | `--#fast-circles` | TIC-80/PICO-8: los círculos rellenos de radio mayor que 31 se dibujan como un único disco escalado (más rápido, los bordes difieren ligeramente). |
-| `--#keyboard 0`–`3` | Puerto de mando de un teclado v32kbd, para `key()`/`keyp()`/`kbd.*` (1 por defecto; ver [doc/API.es.md](doc/API.es.md#teclado-key--keyp--kbd)). |
-| `--#mouse 0`–`3` | Puerto de mando de un ratón v32mouse, para `mouse()`/`mouse.*` y `stat(32..34)` de PICO-8 (3 por defecto; ver [doc/API.es.md](doc/API.es.md#ratón-mouse--mouse)). |
+| `--#keyboard 0`–`3` | Puerto de mando de un teclado v32kbd (requiere un adaptador v32io o el emulador modificado, ver [Teclado y ratón](#teclado-y-ratón-v32io)), para `key()`/`keyp()`/`kbd.*` (2 por defecto; ver [doc/API.es.md](doc/API.es.md#teclado-key--keyp--kbd)). |
+| `--#mouse 0`–`3` | Puerto de mando de un ratón v32mouse (requiere un adaptador v32io o el emulador modificado, ver [Teclado y ratón](#teclado-y-ratón-v32io)), para `mouse()`/`mouse.*` y `stat(32..34)` de PICO-8 (3 por defecto; ver [doc/API.es.md](doc/API.es.md#ratón-mouse--mouse)). |
 | `--#texture NOMBRE "ruta/imagen.png"` | Registra un recurso de textura y lo vincula a una constante `NOMBRE` en tiempo de compilación. El XML nombra el archivo `.vtex` (`imagen.vtex`) que `png2vircon` genera a partir del PNG. |
 | `--#sound NOMBRE "ruta/sonido.wav"` | Registra un recurso de sonido y lo vincula a una constante `NOMBRE` en tiempo de compilación. El XML nombra el archivo `.vsnd` que genera `wav2vircon`. |
 | `--#tilemap NOMBRE "ruta/mapa.csv"` | Registra un mapa de mosaicos desde un archivo CSV, incrustado directamente en la imagen ROM (ver [doc/API.es.md](doc/API.es.md#mapa-de-mosaicos-tilemap)). |
@@ -445,12 +526,13 @@ de C:
 * Los destinos de inclusión se resuelven buscando, en este orden: el
   directorio del archivo que incluye; el directorio de trabajo actual del
   compilador; cada entrada de la variable de entorno `V32LUA_INCLUDE` si
-  está definida (una lista separada por dos puntos); y finalmente la ruta
-  de inclusión por defecto integrada `/usr/local/Vircon32/v32lua/include`
-  (se cambia al compilar con `-DV32LUA_INCLUDE_PATH=...`, ver
-  `inc/config.h`). Ahí es donde se espera que viva una copia instalada de
-  los ports de la biblioteca estándar de `lib/`, para que cualquier
-  proyecto pueda hacer `--#include "string.lua"` sin copiar la biblioteca.
+  está definida (una lista separada por dos puntos; por punto y coma en
+  Windows); y finalmente la ruta de inclusión por defecto integrada,
+  `/usr/local/Vircon32/v32tools/include/v32lua` (se fija al compilar: ver
+  `inc/config.h`, o [Instalación](#instalacion) para la compilación con
+  CMake). Ahí es donde `make sysinstall` y `cmake --install` colocan los
+  ports de la biblioteca estándar de `lib/`, para que cualquier proyecto
+  pueda hacer `--#include "string.lua"` sin copiar la biblioteca.
   Las rutas absolutas se usan tal cual.
 * Se detectan las inclusiones cíclicas, y cada archivo resuelto se incluye
   como máximo una vez a lo largo de toda la expansión.
@@ -912,9 +994,9 @@ uso más común:
 | **`ioports.inp.left/right/up/down`** | `INP_Gamepad*` | Solo Lectura | Estado direccional del D-Pad (`> 0` presionado, `< 0` liberado). |
 | **`ioports.inp.A/B/X/Y/L/R/START`** | `INP_GamepadButton*` | Solo Lectura | Estado de botón de acción/gatillo (`> 0` presionado, `< 0` liberado). |
 | **`ioports.inp.inputs`** | *Subrutina de Acción Personalizada* | Solo Lectura | **Intrínseco de recopilación:** sondea todos los botones/ejes del mando en una sola pasada, los combina en una única máscara de bits de 32 bits, y la convierte a un flotante de Lua. |
-| **`key([k])`**, **`keyp([k [, hold, period]])`** | dispositivo v32kbd en un puerto de mando | Intrínseco | **Solo con un adaptador v32io o el emulador modificado** ([por qué](#teclado-y-ratón-v32io)). Un teclado completo a través de un dispositivo v32kbd (puerto de mando 1 por defecto, `--#keyboard N`): tecla pulsada / pulsada en este cuadro, al estilo de TIC-80, con códigos de tecla o nombres literales (`"a"`, `"enter"`, `"shift"`) ([detalles](doc/API.es.md#teclado-key--keyp--kbd)). |
+| **`key([k])`**, **`keyp([k [, hold, period]])`** | dispositivo v32kbd en un puerto de mando | Intrínseco | **Solo con un adaptador v32io o el emulador modificado** ([por qué](#teclado-y-ratón-v32io)). Un teclado completo a través de un dispositivo v32kbd (puerto de mando 2 por defecto, `--#keyboard N`): tecla pulsada / pulsada en este cuadro, al estilo de TIC-80, con códigos de tecla o nombres literales (`"a"`, `"enter"`, `"shift"`) ([detalles](doc/API.es.md#teclado-key--keyp--kbd)). |
 | **`kbd.read()`**, **`kbd.event()`**, **`kbd.port([n])`**, **`kbd.capslock()`**, **`kbd.connected()`**, **`kbd.clear()`** | dispositivo v32kbd | Intrínseco | Texto escrito (con Mayús y Bloq Mayús), eventos de pulsar/soltar, el puerto del teclado, Bloq Mayús, dispositivo presente, descartar eventos no leídos. |
-| **`mouse()`** | dispositivo v32mouse en un puerto de mando | Intrínseco | **Solo con un adaptador v32io** ([por qué](#teclado-y-ratón-v32io)). Un ratón a través de un dispositivo v32mouse (puerto de mando 3 por defecto, `--#mouse N`): `x, y, left, middle, right, scrollx, scrolly`, como el de TIC-80 (desplazamiento siempre 0) ([detalles](doc/API.es.md#ratón-mouse--mouse)). |
+| **`mouse()`** | dispositivo v32mouse en un puerto de mando | Intrínseco | **Solo con un adaptador v32io o el emulador modificado** ([por qué](#teclado-y-ratón-v32io)). Un ratón a través de un dispositivo v32mouse (puerto de mando 3 por defecto, `--#mouse N`): `x, y, left, middle, right, scrollx, scrolly`, como el de TIC-80 (desplazamiento siempre 0) ([detalles](doc/API.es.md#ratón-mouse--mouse)). |
 | **`mouse.pressed/released([b])`**, **`mouse.buttons()`**, **`mouse.delta()`**, **`mouse.position([x, y])`**, **`mouse.bounds(...)`**, **`mouse.scale([n])`**, **`mouse.port([n])`**, **`mouse.connected()`** | dispositivo v32mouse | Intrínseco | Cambios de botones en este cuadro, botones pulsados, movimiento en este cuadro, el puntero, sus límites y velocidad, el puerto del ratón, dispositivo presente. |
 
 *Utilidades del Sistema y de Ejecución*
@@ -1057,7 +1139,7 @@ incluso `-O3`. Está pensada para insertarse en la cadena de compilación
 después de compilar y antes de ensamblar. Los Makefiles de las demos la
 usan cuando está instalada, generando un `bin/<demo>Opt.v32` optimizado
 junto al cartucho normal (ver [Compilar las demos](#building-the-demos) y
-[doc/USAGE.md](doc/USAGE.md#5-optional-the-optimizer)).
+[doc/USAGE.es.md](doc/USAGE.es.md#5-opcional-el-optimizador)).
 
 ## Hoja de Ruta / Aún No Implementado
 
@@ -1094,7 +1176,7 @@ una decisión de diseño:
   por notas.
 * PICO-8: `pal`/`palt` (compilan a no-ops con una advertencia), `clip`,
   valores reales de `stat` (aparte del ratón), anchos fraccionarios en `spr`, `pget`,
-  `oval`/`ovalfill`, `menuitem`, la carga multicartucho (`reload` desde
+  la carga multicartucho (`reload` desde
   otro archivo, `cstore`); escribir en la memoria de sprites o de sonido
   no tiene efecto y leer la memoria de pantalla solo devuelve lo escrito
   allí (no hay lectura de la GPU); los filtros del editor de SFX en el

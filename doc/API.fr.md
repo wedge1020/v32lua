@@ -84,11 +84,11 @@ nom (`spr`, `rgba`, `color`, …) remplace l'intrinsèque.
 | `keyp([k [, hold, period]])` | booléen | La touche `k` s'est enfoncée à cette image (répétition avec `hold`/`period`, comme TIC-80). |
 | `kbd.read()` | nombre / nil | Appui suivant sous forme du caractère tapé (Maj et Verr Maj appliqués). |
 | `kbd.event()` | nombre / nil | Événement suivant : `+code` enfoncée, `-code` relâchée. |
-| `kbd.port([n])` | nombre | Port de manette du clavier (1 par défaut) ; le changer repart de zéro. |
+| `kbd.port([n])` | nombre | Port de manette du clavier (2 par défaut) ; le changer repart de zéro. |
 | `kbd.capslock()`, `kbd.connected()` | booléen | État de Verr Maj ; périphérique branché. |
 | `kbd.clear()` | nil | Oublie les événements non lus. |
 
-*Souris* (périphérique v32mouse) — [détails](#souris--mouse--mouse). **Demande un adaptateur matériel v32io (l'émulateur modifié n'a pas encore la souris) : sans lui, le pointeur ne bouge pas** ([ce qu'il faut](#clavier-et-souris--ce-quil-faut-v32io)).
+*Souris* (périphérique v32mouse) — [détails](#souris--mouse--mouse). **Demande un adaptateur matériel v32io ou l'émulateur modifié : sans l'un d'eux, le pointeur ne bouge pas** ([ce qu'il faut](#clavier-et-souris--ce-quil-faut-v32io)).
 
 | Appel | Renvoie | Ce qu'il fait |
 |---|---|---|
@@ -1067,21 +1067,32 @@ suivante) — et choisir ce profil pour le port de manette attendu par le
 programme. Le firmware, ses notes de compilation et la procédure complète
 sont dans le projet **v32io** (`firmware/`).
 
-**2. L'émulateur modifié (sans matériel).** Un fork de l'émulateur
-Vircon32, [wedge1020/ComputerSoftware](https://github.com/wedge1020/ComputerSoftware/tree/main),
-implémente les périphériques v32io dans l'émulateur lui-même, en lisant le
-clavier et la souris de l'ordinateur :
+**2. Un émulateur Vircon32 modifié (sans matériel).** Les périphériques
+v32io intégrés au DesktopEmulator lui-même, qui lisent le clavier et la
+souris de l'ordinateur. Au choix :
 
-- **clavier** : la [branche `v32kbd`](https://github.com/wedge1020/ComputerSoftware/tree/v32kbd).
-  Dans son menu Gamepads, choisir un port de manette et sélectionner
-  `v32kbd`.
-- **souris** : pas encore dans le fork ; prévue dans une branche `v32io`
-  qui portera les deux périphériques. D'ici là, la souris demande
-  l'adaptateur matériel.
+- le fork [wedge1020/ComputerSoftware](https://github.com/wedge1020/ComputerSoftware),
+  [branche `v32io`](https://github.com/wedge1020/ComputerSoftware/tree/v32io),
+  qui a les périphériques `v32kbd` et `v32mouse` ; ou
+- les sources du DesktopEmulator d'origine avec les deux correctifs du
+  projet v32io appliqués (`emulator/v32kbd.patch`,
+  `emulator/v32mouse.patch`).
+
+Dans son menu *Gamepads*, choisir la manette attendue par le programme et
+sélectionner **`v32kbd`** ou **`v32mouse`**. `v32kbd` ne peut pas être
+sélectionné tant qu'une manette utilise le périphérique *Keyboard*
+d'origine (les deux ont besoin du clavier de l'ordinateur). Avec
+`v32mouse`, donner le focus à la fenêtre de l'émulateur capture le
+pointeur ; **Ctrl gauche + Alt gauche** le libère. Le périphérique de
+manette *Keyboard* propre à l'émulateur d'origine **n'est pas** un
+clavier v32io : il ne fait qu'associer quelques touches à des boutons de
+manette, qu'un programme qui le lit voit comme des touches aléatoires.
 
 **Quel port de manette.** Par défaut, le programme lit le clavier sur le
-**port de manette 1** (le deuxième) et la souris sur le **port 3** (le
-quatrième), ce qui laisse le port 0 à la manette d'un joueur. Branchez le
+**port de manette 2** (le troisième) et la souris sur le **port 3** (le
+quatrième), ce qui laisse les ports 0 et 1 aux manettes des joueurs. Les
+ports sont numérotés à partir de 0 et les menus de l'émulateur à partir
+de 1 : le port 2 est *Gamepad 3* et le port 3 est *Gamepad 4*. Branchez le
 périphérique sur ce port, ou indiquez au programme où il est :
 `--keyboard N` / `--mouse N` sur la ligne de commande, `--#keyboard N` /
 `--#mouse N` dans le source, ou `kbd.port(n)` / `mouse.port(n)` à
@@ -1178,8 +1189,8 @@ Ces fonctions lisent un clavier complet à travers un périphérique
 **v32kbd** : un clavier USB que la console voit comme une
 manette ordinaire, dont les 11 commandes transportent des événements de
 touches au lieu de boutons (voir le projet v32io). Il se branche sur un
-port de manette — **le port 1 (le deuxième) par défaut**, ce qui laisse le
-port 0 à une manette ordinaire. On le change avec `--keyboard N` sur la
+port de manette — **le port 2 (le troisième) par défaut**, ce qui laisse
+les ports 0 et 1 aux manettes ordinaires. On le change avec `--keyboard N` sur la
 ligne de commande, une indication `--#keyboard N` dans le source, ou
 `kbd.port(n)` à l'exécution.
 
@@ -1339,8 +1350,8 @@ mouse.connected()             -> booléen, quelque chose est branché sur ce por
 ```
 
 > **⚠ Uniquement avec un périphérique v32io.** Il faut l'adaptateur
-> matériel v32io avec une souris USB (l'émulateur modifié n'a que le
-> clavier pour l'instant ; sa souris est prévue) — voir
+> matériel v32io avec une souris USB, ou le périphérique `v32mouse` de
+> l'émulateur modifié — voir
 > [Clavier et souris : ce qu'il faut](#clavier-et-souris--ce-quil-faut-v32io).
 > Sans lui, le pointeur reste à son point de départ et aucun bouton n'est
 > enfoncé.
@@ -1349,7 +1360,8 @@ Ces fonctions lisent une souris à travers un périphérique **v32mouse** :
 une souris USB que la console voit comme une manette ordinaire
 (voir le projet v32io). Il se branche sur un port de manette — **le port 3
 (le quatrième) par défaut**, comme dans la démo souris de v32io, ce qui
-laisse la place à un clavier (port 1) et à la manette d'un joueur (port 0).
+laisse la place à un clavier (port 2) et aux manettes de deux joueurs
+(ports 0 et 1).
 On le change avec `--mouse N` sur la ligne de commande, une indication
 `--#mouse N` dans le source, ou `mouse.port(n)` à l'exécution.
 

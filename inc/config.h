@@ -25,7 +25,7 @@
 // individual projects point at their own library copies without installing
 // anything system-wide.
 #ifndef V32LUA_INCLUDE_PATH
-#define V32LUA_INCLUDE_PATH "/usr/local/Vircon32/v32lua/include"
+#define V32LUA_INCLUDE_PATH "/usr/local/Vircon32/v32tools/include/v32lua"
 #endif
 
 #ifndef V32LUA_INCLUDE_ENV_VAR
@@ -92,17 +92,19 @@
 #endif
 
 // Gamepad port (0-3) a v32kbd keyboard is expected in, for key()/keyp()/
-// kbd.* (native and TIC-80 modes). 1 is the second port, leaving the first
-// for a regular gamepad. Overridden by --keyboard / --#keyboard, and at run
-// time by kbd.port(n).
+// kbd.*  (native  and  TIC-80  modes).  2 is  the  third  port,  leaving
+// the  first  two  for  regular gamepads.  Overridden  by  --keyboard  /
+// --#keyboard, and at run time by kbd.port(n).
+//
 #ifndef V32LUA_DEFAULT_KEYBOARD_PORT
-#define V32LUA_DEFAULT_KEYBOARD_PORT  1
+#define V32LUA_DEFAULT_KEYBOARD_PORT  2
 #endif
 
-// Gamepad port (0-3) a v32mouse mouse is expected in, for mouse()/mouse.*
-// (and PICO-8's stat(32..34)). 3 is the fourth port, as in the v32io
-// mouse demo. Overridden by --mouse / --#mouse, and at run time by
-// mouse.port(n).
+// Gamepad   port  (0-3)   a   v32mouse  mouse   is   expected  in,   for
+// mouse()/mouse.* (and PICO-8's stat(32..34)). 3  is the fourth port, as
+// in the v32io mouse demo. Overridden  by --mouse / --#mouse, and at run
+// time by mouse.port(n).
+//
 #ifndef V32LUA_DEFAULT_MOUSE_PORT
 #define V32LUA_DEFAULT_MOUSE_PORT     3
 #endif

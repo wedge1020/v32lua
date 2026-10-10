@@ -153,10 +153,11 @@ frame). There is no default autorepeat.
 > **⚠ Keyboard and mouse need a v32io device.** Vircon32 has only
 > gamepads. `key()`, `keyp()` and `mouse()` work only with the **v32io
 > hardware adapter** (a USB keyboard or mouse made to look like a gamepad;
-> works with any Vircon32 emulator) or the **modified emulator**
-> [wedge1020/ComputerSoftware](https://github.com/wedge1020/ComputerSoftware/tree/main)
-> (keyboard in its [`v32kbd` branch](https://github.com/wedge1020/ComputerSoftware/tree/v32kbd);
-> mouse not there yet). Without one, a cart compiles and runs but no key
+> works with any Vircon32 emulator) or a **modified emulator** that reads
+> the computer's own keyboard and mouse (the
+> [`v32io` branch](https://github.com/wedge1020/ComputerSoftware/tree/v32io) of
+> wedge1020/ComputerSoftware, or the stock emulator with the v32io
+> patches). Without one, a cart compiles and runs but no key
 > is ever down and the mouse never moves — carts that need the keyboard or
 > mouse to be played can't be played. See
 > [API.md: what you need](API.md#keyboard-and-mouse-what-you-need-v32io)
@@ -165,8 +166,8 @@ frame). There is no default autorepeat.
 `key([code])` and `keyp([code [, hold, period]])` read a real keyboard
 through a **v32kbd** device: a USB keyboard (on the v32io adapter) or the
 modified emulator's keyboard, which the console sees as a gamepad (see the native [API.md](API.md#keyboard-key--keyp--kbd) for how
-it works). It goes in gamepad port 1 by default — the second port, so
-player 1's gamepad stays in port 0 — or wherever `--keyboard N` /
+it works). It goes in gamepad port 2 by default — the third port, so the
+players' gamepads stay in ports 0 and 1 — or wherever `--keyboard N` /
 `--#keyboard N` puts it (`kbd.port(n)` at run time). Without the device
 plugged in, no key is ever down. A regular gamepad left in that port is
 read as a keyboard (random keys).
@@ -210,6 +211,12 @@ After the next frame, the cart restarts from its first instruction with a
 fresh stack. Globals, the heap and the layer's state are re-created by the
 cart's own start-up code; `pmem` values saved on the memory card survive it (without a card they
 live in RAM and start over).
+
+## exit()
+
+`exit()` stops the cart once the current frame has been shown: Vircon32
+has no console to return to, so the program halts (`HLT`) with that frame
+on the screen. Any arguments are evaluated and ignored.
 
 ## Pause
 

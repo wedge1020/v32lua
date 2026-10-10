@@ -95,4 +95,5 @@ only exists with a v32io hardware adapter or the modified emulator (see
 [API.md](API.md#keyboard-and-mouse-what-you-need-v32io)).
 
 To change the runtime, edit the files in `src/runtime/` and rebuild; the
-Makefile tracks them as dependencies of the embed object.
+Makefile and the CMake build both track them as dependencies of the
+embed object.

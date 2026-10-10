@@ -5,6 +5,8 @@ This page walks through building a cartridge: the command line, the
 and the Vircon32 tools that finish the job. The language and API are in
 the [README](../README.md) and [API.md](API.md).
 
+*Also in: [Español](USAGE.es.md) | [Français](USAGE.fr.md)*
+
 ---
 
 ## 1. Compile
@@ -32,18 +34,18 @@ Run `v32lua --help` for every option; the common ones:
 | `--rate 11025\|22050\|44100` | Sample rate of the sound made from a PICO-8 or TIC-80 cart. |
 | `--bezel FILE`, `--no-bezel` | PICO-8 side panels: your own art, or none. |
 | `--fast-circles` | PICO-8/TIC-80: draw big filled circles faster (slightly different edges). |
-| `--keyboard 0-3` | Gamepad port of a v32kbd keyboard (`key()`, `keyp()`, `kbd.*`); default 1. Needs a v32io device (below). |
+| `--keyboard 0-3` | Gamepad port of a v32kbd keyboard (`key()`, `keyp()`, `kbd.*`); default 2. Needs a v32io device (below). |
 | `--mouse 0-3` | Gamepad port of a v32mouse mouse (`mouse()`, `mouse.*`, PICO-8 `stat(32..34)`); default 3. Needs a v32io device (below). |
 | `--version`, `--help` | Version, usage. |
 
 > **Keyboard and mouse need a v32io device.** Vircon32 has only gamepads.
 > A program using the keyboard or mouse functions only gets input when run
 > with the **v32io hardware adapter** (a USB keyboard or mouse that the
-> computer sees as a gamepad; any Vircon32 emulator) or the **modified
-> emulator**
-> [wedge1020/ComputerSoftware](https://github.com/wedge1020/ComputerSoftware/tree/main)
-> (keyboard in its `v32kbd` branch; mouse not yet). Otherwise it runs with
-> no keyboard or mouse input at all. See
+> computer sees as a gamepad; any Vircon32 emulator) or a **modified
+> emulator** that reads the computer's own keyboard and mouse (the
+> [`v32io` branch](https://github.com/wedge1020/ComputerSoftware/tree/v32io)
+> of wedge1020/ComputerSoftware, or the stock emulator with the v32io
+> patches). Otherwise it runs with no keyboard or mouse input at all. See
 > [API.md](API.md#keyboard-and-mouse-what-you-need-v32io).
 
 ## 2. Describe the cartridge with `--#` hints

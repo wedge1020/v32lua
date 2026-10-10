@@ -85,11 +85,11 @@ nombre (`spr`, `rgba`, `color`, …) reemplaza al intrínseco.
 | `keyp([k [, hold, period]])` | booleano | La tecla `k` se pulsó en este cuadro (autorrepetición con `hold`/`period`, como TIC-80). |
 | `kbd.read()` | número / nil | Siguiente pulsación como el carácter que escribe (Mayús y Bloq Mayús aplicados). |
 | `kbd.event()` | número / nil | Siguiente evento: `+código` pulsada, `-código` soltada. |
-| `kbd.port([n])` | número | Puerto de mando del teclado (1 por defecto); cambiarlo empieza de nuevo. |
+| `kbd.port([n])` | número | Puerto de mando del teclado (2 por defecto); cambiarlo empieza de nuevo. |
 | `kbd.capslock()`, `kbd.connected()` | booleano | Estado de Bloq Mayús; dispositivo conectado. |
 | `kbd.clear()` | nil | Descarta los eventos no leídos. |
 
-*Ratón* (dispositivo v32mouse) — [detalles](#ratón-mouse--mouse). **Necesita un adaptador de hardware v32io (el emulador modificado aún no tiene ratón): sin él, el puntero no se mueve** ([qué se necesita](#teclado-y-ratón-qué-se-necesita-v32io)).
+*Ratón* (dispositivo v32mouse) — [detalles](#ratón-mouse--mouse). **Necesita un adaptador de hardware v32io o el emulador modificado: sin uno de ellos, el puntero no se mueve** ([qué se necesita](#teclado-y-ratón-qué-se-necesita-v32io)).
 
 | Llamada | Devuelve | Qué hace |
 |---|---|---|
@@ -1057,20 +1057,32 @@ siguiente control) — y seleccionar ese perfil para el puerto de mando que
 espera el programa. El firmware, sus notas de compilación y los pasos de
 configuración completos están en el proyecto **v32io** (`firmware/`).
 
-**2. El emulador modificado (sin hardware).** Un fork del emulador de
-Vircon32, [wedge1020/ComputerSoftware](https://github.com/wedge1020/ComputerSoftware/tree/main),
-implementa los dispositivos v32io dentro del propio emulador, leyendo el
-teclado y el ratón del ordenador:
+**2. Un emulador de Vircon32 modificado (sin hardware).** Los
+dispositivos v32io integrados en el propio DesktopEmulator, que leen el
+teclado y el ratón del ordenador. Puede ser:
 
-- **teclado**: la [rama `v32kbd`](https://github.com/wedge1020/ComputerSoftware/tree/v32kbd).
-  En su menú Gamepads, elegir un puerto de mando y seleccionar `v32kbd`.
-- **ratón**: todavía no está en el fork; está previsto en una rama `v32io`
-  que tendrá ambos dispositivos. Hasta entonces, el ratón necesita el
-  adaptador de hardware.
+- el fork [wedge1020/ComputerSoftware](https://github.com/wedge1020/ComputerSoftware),
+  [rama `v32io`](https://github.com/wedge1020/ComputerSoftware/tree/v32io),
+  que tiene los dispositivos `v32kbd` y `v32mouse`; o
+- las fuentes del DesktopEmulator original con los dos parches del
+  proyecto v32io aplicados (`emulator/v32kbd.patch`,
+  `emulator/v32mouse.patch`).
+
+En su menú *Gamepads*, elegir el mando que espera el programa y
+seleccionar **`v32kbd`** o **`v32mouse`**. `v32kbd` no se puede
+seleccionar mientras algún mando use el dispositivo *Keyboard* original
+(ambos necesitan el teclado del ordenador). Con `v32mouse`, al dar el
+foco a la ventana del emulador este captura el puntero; **Ctrl izquierdo
++ Alt izquierdo** lo libera. El dispositivo de mando *Keyboard* propio
+del emulador original **no** es un teclado v32io: solo asigna unas
+cuantas teclas a botones del mando, que un programa que lo lea ve como
+teclas aleatorias.
 
 **Qué puerto de mando.** Por defecto, el programa lee el teclado del
-**puerto de mando 1** (el segundo) y el ratón del **puerto 3** (el cuarto),
-dejando el puerto 0 para el mando de un jugador. Conecta el dispositivo en
+**puerto de mando 2** (el tercero) y el ratón del **puerto 3** (el
+cuarto), dejando los puertos 0 y 1 para los mandos de los jugadores. Los
+puertos se numeran desde 0 y los menús del emulador desde 1: el puerto 2
+es *Gamepad 3* y el puerto 3 es *Gamepad 4*. Conecta el dispositivo en
 ese puerto, o indica al programa dónde está: `--keyboard N` / `--mouse N`
 en la línea de órdenes, `--#keyboard N` / `--#mouse N` en el código, o
 `kbd.port(n)` / `mouse.port(n)` en tiempo de ejecución.
@@ -1161,8 +1173,8 @@ kbd.clear()                   -- descarta los eventos aún no leídos
 Leen un teclado completo a través de un dispositivo **v32kbd**: un
 teclado USB que la consola ve como un mando normal, cuyos 11
 controles transportan eventos de teclas en lugar de botones (ver el
-proyecto v32io). Se conecta en un puerto de mando — **el puerto 1 (el
-segundo) por defecto**, dejando el puerto 0 para un mando normal. Se cambia
+proyecto v32io). Se conecta en un puerto de mando — **el puerto 2 (el
+tercero) por defecto**, dejando los puertos 0 y 1 para mandos normales. Se cambia
 con `--keyboard N` en la línea de órdenes, una pista `--#keyboard N` en el
 código, o `kbd.port(n)` en tiempo de ejecución.
 
@@ -1319,16 +1331,16 @@ mouse.connected()             -> booleano, hay algo conectado en ese puerto
 ```
 
 > **⚠ Solo con un dispositivo v32io.** Necesitan el adaptador de hardware
-> v32io con un ratón USB (el emulador modificado solo tiene el teclado por
-> ahora; su ratón está previsto) — ver
+> v32io con un ratón USB, o el dispositivo `v32mouse` del emulador
+> modificado — ver
 > [Teclado y ratón: qué se necesita](#teclado-y-ratón-qué-se-necesita-v32io).
 > Sin él, el puntero se queda donde empieza y ningún botón está pulsado.
 
 Leen un ratón a través de un dispositivo **v32mouse**: un ratón USB
 que la consola ve como un mando normal (ver el proyecto v32io). Se
 conecta en un puerto de mando — **el puerto 3 (el cuarto) por defecto**,
-como en la demo de ratón de v32io, así caben a su lado un teclado (puerto 1)
-y el mando de un jugador (puerto 0). Se cambia con `--mouse N` en la línea
+como en la demo de ratón de v32io, así caben a su lado un teclado (puerto 2)
+y los mandos de dos jugadores (puertos 0 y 1). Se cambia con `--mouse N` en la línea
 de órdenes, una pista `--#mouse N` en el código, o `mouse.port(n)` en tiempo
 de ejecución.
 

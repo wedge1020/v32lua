@@ -111,11 +111,35 @@ typedef struct DoneListNode {
 // Path helpers
 // ----------------------------------------------------------------------------
 
-// Returns a malloc'd copy of the directory portion of path ("." if path has
-// no '/'). Never returns NULL.
-static char *dir_of (const char *path)
+// Is path absolute? '/'-rooted everywhere; on Windows also "\\..." and a
+// drive letter ("C:/...", "C:\\...").
+static int is_absolute_path (const char *path)
+{
+    if (path[0] == '/') return 1;
+#ifdef _WIN32
+    if (path[0] == '\\') return 1;
+    if (isalpha ((unsigned char) path[0]) && path[1] == ':') return 1;
+#endif
+    return 0;
+}
+
+// The last directory separator in path ('/', and on Windows also '\\'), or
+// NULL if it has none.
+static const char *last_separator (const char *path)
 {
     const char *slash = strrchr (path, '/');
+#ifdef _WIN32
+    const char *bslash = strrchr (path, '\\');
+    if (bslash != NULL && (slash == NULL || bslash > slash)) slash = bslash;
+#endif
+    return slash;
+}
+
+// Returns a malloc'd copy of the directory portion of path ("." if path has
+// no directory separator). Never returns NULL.
+static char *dir_of (const char *path)
+{
+    const char *slash = last_separator (path);
     if (slash == NULL) {
         return strdup (".");
     }
@@ -134,7 +158,7 @@ static char *dir_of (const char *path)
 static char *join_path (const char *base_dir, const char *rel_path)
 {
     char *joined;
-    if (rel_path[0] == '/') {
+    if (is_absolute_path (rel_path)) {
         joined = strdup (rel_path);
     } else {
         size_t need = strlen (base_dir) + 1 + strlen (rel_path) + 1;
@@ -333,8 +357,8 @@ static bool include_file_exists (const char *path)
 //      search path.
 //   2. The compiler's current working directory ("the present directory").
 //   3. Each entry of the V32LUA_INCLUDE environment variable, when set --
-//      a colon-separated list, letting a project point at its own library
-//      copy without installing anything.
+//      a colon-separated list (semicolon-separated on Windows), letting a
+//      project point at its own library copy without installing anything.
 //   4. The compile-time default V32LUA_INCLUDE_PATH (see inc/config.h),
 //      where an installed v32lua standard-library port is expected to live.
 //
@@ -352,7 +376,7 @@ static char *resolve_include_path (const char *base_dir, const char *inc_path,
     // Candidate 1: next to the including file (or verbatim when absolute --
     // join_path() already returns absolute paths untouched).
     char *candidate = join_path (base_dir, inc_path);
-    if (inc_path[0] == '/' || include_file_exists (candidate)) {
+    if (is_absolute_path (inc_path) || include_file_exists (candidate)) {
         return candidate;
     }
     free (candidate);
@@ -364,14 +388,15 @@ static char *resolve_include_path (const char *base_dir, const char *inc_path,
         return strdup (inc_path);
     }
 
-    // Candidate 3: each entry of V32LUA_INCLUDE (colon-separated). strtok_r
-    // skips empty entries, so a stray "::" or a trailing ':' is harmless.
+    // Candidate 3: each entry of V32LUA_INCLUDE (colon-separated; ';' on
+    // Windows, see V32LUA_PATH_LIST_SEP). strtok_r skips empty entries, so
+    // a stray "::" or a trailing ':' is harmless.
     const char *env_paths = getenv (V32LUA_INCLUDE_ENV_VAR);
     if (env_paths != NULL && env_paths[0] != '\0') {
         char *env_copy = strdup (env_paths);
         char *save     = NULL;
 
-        char *entry = strtok_r (env_copy, ":", &save);
+        char *entry = strtok_r (env_copy, V32LUA_PATH_LIST_SEP, &save);
         while (entry != NULL) {
             candidate = join_path (entry, inc_path);
             if (include_file_exists (candidate)) {
@@ -379,7 +404,7 @@ static char *resolve_include_path (const char *base_dir, const char *inc_path,
                 return candidate;
             }
             free (candidate);
-            entry = strtok_r (NULL, ":", &save);
+            entry = strtok_r (NULL, V32LUA_PATH_LIST_SEP, &save);
         }
 
         free (env_copy);

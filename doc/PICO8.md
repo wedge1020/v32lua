@@ -138,19 +138,20 @@ before `_init()`; the map and flags are already loaded then.
 | `cartdata(id)`, `dget(n)`, `dset(n, v)` | 64 persistent numbers at 0x5E00, saved on the memory card (see [Memory](#memory)). |
 | `run()` | Starts the cart over: hardware defaults (texture -1, region 0, sound -1, channel 0, gamepad 0), all sound stopped, white multiply color, alpha blending, a black screen, then the cart's first instruction on the next frame with a fresh stack. `cartdata` values on the memory card survive it; `run`'s parameter string isn't passed on. |
 | `time()`, `t()` | Seconds since the cart started, counted in PICO-8 frames (1/30 s each, 1/60 s with `_update60`) as PICO-8 does, so it stands still while paused. |
-| `stat(n)` | The devkit mouse, read through a **v32mouse** device — **only with the v32io hardware adapter** (see the note below the table): `stat(32)`, `stat(33)` the pointer (0–127), `stat(34)` the buttons (1 left + 2 right + 4 middle). Everything else is 0. A real function, so `stat` works as a value too. The mouse goes in gamepad port 3 by default (`--mouse N`, `--#mouse N`); `poke(0x5f2d, 1)` isn't needed (it's accepted). The pointer starts at (64, 64), moves 1 pixel per step and stays on the 128 × 128 screen. |
-| `mouse()` | **Not PICO-8's** (needs the v32io adapter too) — a v32lua addition, the same call as TIC-80's: `x, y, left, middle, right, scrollx, scrolly`, in PICO-8 pixels, buttons as booleans, scroll always 0. `mouse.*` (buttons pressed this frame, movement, bounds, speed, port) works too. A cart's own `mouse` (function or table) replaces them. |
+| `stat(n)` | The devkit mouse, read through a **v32mouse** device — **only with the v32io hardware adapter or the modified emulator** (see the note below the table): `stat(32)`, `stat(33)` the pointer (0–127), `stat(34)` the buttons (1 left + 2 right + 4 middle). Everything else is 0. A real function, so `stat` works as a value too. The mouse goes in gamepad port 3 by default (`--mouse N`, `--#mouse N`); `poke(0x5f2d, 1)` isn't needed (it's accepted). The pointer starts at (64, 64), moves 1 pixel per step and stays on the 128 × 128 screen. |
+| `mouse()` | **Not PICO-8's** (needs a v32io device too) — a v32lua addition, the same call as TIC-80's: `x, y, left, middle, right, scrollx, scrolly`, in PICO-8 pixels, buttons as booleans, scroll always 0. `mouse.*` (buttons pressed this frame, movement, bounds, speed, port) works too. A cart's own `mouse` (function or table) replaces them. |
 | `printh(s)` | A stub — a real function that does nothing. |
 | `_ENV[name]` | Reads or writes the global called `name` (only globals the program uses by name exist). The drawing builtins (`rect`, `rectfill`, `line`, `pset`, `circ`, `circfill`, `spr`, `sspr`, `map`, `print`, `pal`, `palt`, `clip`, `fillp`, `camera`, `color`, `cls`) are there too, for carts that call them by name. |
 | `pal`, `palt` | Accepted as no-ops (one warning): sprite colors are baked into the texture. |
 | `clip`, `fillp` | Accepted as no-ops (one warning) for now: drawing isn't clipped, and fill patterns draw solid. |
 
 > **⚠ The mouse needs a v32io device.** Vircon32 has only gamepads.
-> `stat(32..34)` and `mouse()` read a USB mouse through the **v32io
-> hardware adapter**, which makes it look like a gamepad and works with any
-> Vircon32 emulator (the modified emulator,
-> [wedge1020/ComputerSoftware](https://github.com/wedge1020/ComputerSoftware/tree/main),
-> has only the keyboard so far; its mouse is planned). Without one, a cart
+> `stat(32..34)` and `mouse()` read a mouse disguised as a gamepad: a USB
+> mouse on the **v32io hardware adapter** (works with any Vircon32
+> emulator), or the computer's own mouse through a **modified emulator**
+> (the [`v32io` branch](https://github.com/wedge1020/ComputerSoftware/tree/v32io) of
+> wedge1020/ComputerSoftware, or the stock emulator with the v32io
+> patches), as its `v32mouse` device. Without one, a cart
 > compiles and runs, but `stat(32)`/`stat(33)` stay at the pointer's start
 > (64, 64) and `stat(34)` at 0 — carts that need the mouse to be played
 > can't be played. The devkit keyboard (`stat(30)`/`stat(31)`) isn't
@@ -379,7 +380,7 @@ frames → 21); evercore 919k → 811k (13% more updates per second).
 
 `clip` and `fillp` (accepted, no effect), real `stat` values (other than
 the mouse, 32–34), the devkit keyboard (`stat(30)`/`stat(31)`), custom
-`menuitem` entries in the pause screen, custom fonts (poked to 0x5600), screen
+fonts (poked to 0x5600), screen
 scrolling when text passes the bottom, palette remapping,
 fractional `spr` widths (`spr(n, x, y, 0.5)`), `pget`, loading data from other
 cart files (`reload` with a file name, multi-cart games), and `cstore`.

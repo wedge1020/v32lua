@@ -6,8 +6,8 @@
 --@ gamepad). This test runs with NOTHING plugged into the mouse's port, so
 --@ it checks the "no mouse" answers, the pointer's own state (position,
 --@ bounds, scale) and the 7 values of mouse(). Movement needs a v32io
---@ device -- the hardware adapter (the modified emulator has no mouse
---@ yet): see doc/API.md, "Keyboard and mouse: what you need".
+--@ device -- the hardware adapter or the modified emulator (branch
+--@ v32io): see doc/API.md, "Keyboard and mouse: what you need".
 --@
 --@ --#mouse 2 above: the mouse's default port is 2 in this test.
 

@@ -75,7 +75,8 @@ no source modification.
 
 **Requirements**
 
-* A C toolchain (`gcc`/`clang` + `make`)
+* A C toolchain (`gcc`/`clang` + `make`), or CMake 3.13+ as an
+  alternative build (see [Building with CMake](#building-with-cmake))
 * If changes are made to the lexer/parser, the `flex` and `bison` tools are
   needed to regenerate the lexer/parser C routines. The existing `flex` and
   `bison` C routines are included in the repository to simplify the building
@@ -111,8 +112,9 @@ any  other  Vircon32  project  (assemble  →  `packrom`  →  run  under
 | **`all`** | **Default target.** Builds the compiler (`bin/v32lua`) inside `src/`. |
 | **`clean`** | Removes build artifacts from `src/` and generated files from `testing/` and `demos/`. |
 | **`install`** | Copies `bin/v32lua` to `~/bin/bin.$(ARCH)/` if that exists, else to `~/bin/`. |
-| **`sysinstall`** | Copies `bin/v32lua` to `/usr/local/bin/` (usually needs `sudo`). |
-| **`tests`** | Runs the compilation test suite in `testing/` (builds the compiler first). |
+| **`sysinstall`** | System-wide install: `bin/v32lua` to `/usr/local/bin/`, the man page to `/usr/local/share/man/man1/` and the `--#include` library (`lib/*.lua`) to `/usr/local/Vircon32/v32tools/include/v32lua/` (usually needs `sudo`; see [Installing](#installing)). |
+| **`sysuninstall`** | Removes what `sysinstall` put down. |
+| **`tests`** | Runs the unit tests in `testing/`: each program is compiled, assembled, packed and run on [v32sim](https://github.com/g7n-org/v32sim), and its results are checked against the `EXPECTED OUTPUT` block in the file (needs the DevTools, v32sim and `v32lua` in your `PATH`). |
 | **`asmcheck`** | Compiles the tests and assembles every result (`.vbin`), checking the generated assembly. |
 | **`v32check`** | Like `asmcheck`, and also packs every test into a `.v32` cartridge. |
 | **`demos`** | Builds every demo under `demos/` (see [Building the demos](#building-the-demos)). |
@@ -123,6 +125,77 @@ any  other  Vircon32  project  (assemble  →  `packrom`  →  run  under
 The version string lives in one place, `#define VERSION` in
 `inc/v32lua.h`; `v32lua --version` prints it and `make version` copies it
 into the man page and the debugging guide.
+
+<a id="building-with-cmake"></a>
+**Building with CMake**
+
+For those who prefer it, `CMakeLists.txt` builds the same compiler from
+the same sources (the Makefile stays the primary build, and `make tests`
+is still the full test run on v32sim):
+
+```sh
+cmake -S . -B build              # Release by default
+cmake --build build              # build/v32lua
+ctest --test-dir build           # compile every test program
+sudo cmake --install build       # see "Installing" below
+```
+
+`ctest` checks that every program in the `testing/` categories `make
+tests` runs compiles, and that the ones in `testing/fail/` are refused;
+running them is `make tests`' job. flex and bison are used when found
+(`-DV32LUA_REGENERATE_PARSER=OFF` skips them); otherwise the
+already-generated `src/parser.c`, `inc/parser.h` and `src/lexer.c` are
+compiled as they are, so a plain build needs only a C compiler and CMake
+3.13+. On **Windows**, build with 64-bit MinGW-w64 (for example from an
+MSYS2 MINGW64 shell, `cmake -S . -B build -G "MSYS Makefiles"`); MSVC
+isn't supported. `cpack --config build/CPackConfig.cmake` makes a
+`.tar.gz` (plus `.deb` / `.rpm` where `dpkg-deb` / `rpmbuild` are
+available), or a `.zip` on Windows.
+
+<a id="installing"></a>
+**Installing**
+
+A system-wide install puts everything where a Vircon32 setup expects it.
+The binary and the man page go where commands and manual pages go; the
+`--#include` library and the documents go under `v32tools/`, the folder
+the community tools share (with [v32opt](https://github.com/wedge1020/v32opt)
+and v32c++), next to the official `DevTools/`:
+
+| | Linux / macOS | Windows (CMake) |
+| --- | --- | --- |
+| compiler | `/usr/local/bin/v32lua` | `C:\Program Files\Vircon32\v32tools\v32lua.exe` |
+| man page | `/usr/local/share/man/man1/v32lua.1` | `...\v32tools\docs\v32lua\v32lua.1` |
+| `--#include` library (`lib/*.lua`) | `/usr/local/Vircon32/v32tools/include/v32lua` | `...\v32tools\include\v32lua` |
+| documentation | `/usr/local/Vircon32/v32tools/docs/v32lua` (CMake) | `...\v32tools\docs\v32lua` |
+
+Either build does it:
+
+```sh
+sudo make sysinstall                          # Linux / macOS
+sudo make sysuninstall
+
+sudo cmake --install build                    # any system (prefix: /usr/local,
+sudo cmake --build build --target uninstall   #   or C:/Program Files/Vircon32)
+```
+
+The library directory is compiled into the compiler, so after installing,
+`--#include "string.lua"` works from any directory. With CMake, pick a
+different location at configure time (`cmake -S . -B build
+-DCMAKE_INSTALL_PREFIX=/opt/vircon32`) and the compiler will look there;
+`-DV32LUA_INSTALL_INCLUDEDIR=...` (and `BINDIR`, `MANDIR`, `DOCDIR`) move
+one part alone. Uninstalling removes only v32lua's own files, and then
+`v32tools/` (and on Linux / macOS `Vircon32/`) only if nothing else is
+left in it. On Windows, add `C:\Program Files\Vircon32\v32tools` to your
+`PATH`, as for the DevTools.
+
+`make install` instead copies just the binary to `~/bin`. The Makefile
+build's defaults (the library directory, the default sample rates and
+gamepad ports, ...) live in [`inc/config.h`](inc/config.h); change one
+there and rebuild, or override it when building:
+
+```sh
+make CFLAGS="-Wall -Wextra -g -I ../inc -DYYDEBUG=1 -DV32LUA_INCLUDE_PATH='\"/opt/v32tools/include/v32lua\"'"
+```
 
 <a id="building-the-demos"></a>
 **Building the demos**
@@ -337,20 +410,24 @@ Only  one API  surface  is  active per  cartridge;  selecting `tic80`  or
 >   into it appears to the computer as a gamepad (`v32io:kbd` /
 >   `v32io:mouse`), so it works with **any** Vircon32 emulator, stock
 >   included, once a joystick profile is set up for it;
-> * the **modified emulator**,
->   [wedge1020/ComputerSoftware](https://github.com/wedge1020/ComputerSoftware/tree/main),
->   which reads the computer's own keyboard as a v32io device — currently
->   in its [`v32kbd` branch](https://github.com/wedge1020/ComputerSoftware/tree/v32kbd);
->   the mouse is not there yet (a `v32io` branch with both is planned).
+> * a **modified Vircon32 emulator**, which reads the computer's own
+>   keyboard and mouse as v32io devices (no hardware needed): the fork
+>   [wedge1020/ComputerSoftware](https://github.com/wedge1020/ComputerSoftware),
+>   [`v32io` branch](https://github.com/wedge1020/ComputerSoftware/tree/v32io)
+>   (both `v32kbd` and `v32mouse`), or the stock DesktopEmulator sources
+>   with the v32io project's `emulator/v32kbd.patch` and
+>   `emulator/v32mouse.patch` applied.
 >
 > **Without one of these, keyboard and mouse access is not possible:**
 > programs compile and run, but no key is ever down and the mouse never
 > moves. Programs that need them should say so, and ideally offer gamepad
 > controls too.
 
-The keyboard is read from gamepad port 1 and the mouse from port 3 by
-default (`--keyboard N`, `--mouse N`, `--#keyboard N`, `--#mouse N`, or
-`kbd.port(n)` / `mouse.port(n)` at run time). The protocols, the
+The keyboard is read from gamepad port 2 (the third) and the mouse from
+port 3 (the fourth) by default, leaving ports 0 and 1 for regular
+gamepads (`--keyboard N`, `--mouse N`, `--#keyboard N`, `--#mouse N`, or
+`kbd.port(n)` / `mouse.port(n)` at run time). Port numbers count from 0;
+the emulator's menus call port 2 "Gamepad 3" and port 3 "Gamepad 4". The protocols, the
 every-frame reading the compiler adds, and the setup are described in
 [doc/API.md](doc/API.md#keyboard-and-mouse-what-you-need-v32io).
 
@@ -374,8 +451,8 @@ Supported hints:
 | `--#rate 11025` \| `22050` \| `44100` | Sample rate of the sound synthesized from a PICO-8 or TIC-80 cart (default 22050; `--#p8rate` is the old name; see [doc/PICO8.md](doc/PICO8.md#sound)). |
 | `--#bezel off` \| `on` \| `"art.png"` | PICO-8: the side panels beside the 128×128 screen — none, the built-in art, or your own (see [doc/PICO8.md](doc/PICO8.md#side-panels)). |
 | `--#fast-circles` | TIC-80/PICO-8: filled circles above radius 31 are drawn as one scaled disc (faster, edges differ slightly). |
-| `--#keyboard 0`–`3` | Gamepad port of a v32kbd keyboard (v32io adapter or the modified emulator required, see [Keyboard and mouse](#keyboard-and-mouse-v32io)), for `key()`/`keyp()`/`kbd.*` (default 1; see [doc/API.md](doc/API.md#keyboard-key--keyp--kbd)). |
-| `--#mouse 0`–`3` | Gamepad port of a v32mouse mouse (v32io adapter required, see [Keyboard and mouse](#keyboard-and-mouse-v32io)), for `mouse()`/`mouse.*` and PICO-8's `stat(32..34)` (default 3; see [doc/API.md](doc/API.md#mouse-mouse--mouse)). |
+| `--#keyboard 0`–`3` | Gamepad port of a v32kbd keyboard (v32io adapter or the modified emulator required, see [Keyboard and mouse](#keyboard-and-mouse-v32io)), for `key()`/`keyp()`/`kbd.*` (default 2; see [doc/API.md](doc/API.md#keyboard-key--keyp--kbd)). |
+| `--#mouse 0`–`3` | Gamepad port of a v32mouse mouse (v32io adapter or the modified emulator required, see [Keyboard and mouse](#keyboard-and-mouse-v32io)), for `mouse()`/`mouse.*` and PICO-8's `stat(32..34)` (default 3; see [doc/API.md](doc/API.md#mouse-mouse--mouse)). |
 | `--#texture NAME "path/image.png"` | Registers a texture resource and binds it to a compile-time constant `NAME`. The XML names the `.vtex` file (`image.vtex`) that `png2vircon` makes from the PNG. |
 | `--#sound NAME "path/sound.wav"` | Registers a sound resource and binds it to a compile-time constant `NAME`. The XML names the `.vsnd` file that `wav2vircon` makes. |
 | `--#tilemap NAME "path/map.csv"` | Registers a tilemap from a CSV file, embedded directly into the ROM image (see [doc/API.md](doc/API.md#tilemap-tilemap)). |
@@ -421,12 +498,13 @@ lexer ever sees the file, exactly like C's `#include`:
 * Include targets are resolved by searching, in order: the directory of the
   including file; the compiler's current working directory; each entry of
   the `V32LUA_INCLUDE` environment variable when set (a colon-separated
-  list); and finally the built-in default include path
-  `/usr/local/Vircon32/v32lua/include` (override at build time with
-  `-DV32LUA_INCLUDE_PATH=...`, see `inc/config.h`). This is where an
-  installed copy of the standard-library ports in `lib/` is expected to
-  live, so any project can `--#include "string.lua"` without copying the
-  library around. Absolute paths are used verbatim.
+  list; semicolon-separated on Windows); and finally the built-in default
+  include path, `/usr/local/Vircon32/v32tools/include/v32lua` (set at
+  build time: see `inc/config.h`, or [Installing](#installing) for the
+  CMake build). That is where `make sysinstall` and `cmake --install` put
+  the standard-library ports from `lib/`, so any project can
+  `--#include "string.lua"` without copying the library around. Absolute
+  paths are used verbatim.
 * Cyclic includes are detected, and each resolved file is included at most
   once across the whole expansion.
 * Cart resource hints (`--#texture`, `--#sound`, `--#tilemap`) declared
@@ -846,9 +924,9 @@ short sample of the most commonly used entries:
 | **`ioports.inp.left/right/up/down`** | `INP_Gamepad*` | Read Only | D-Pad directional state (`> 0` pressed, `< 0` released). |
 | **`ioports.inp.A/B/X/Y/L/R/START`** | `INP_GamepadButton*` | Read Only | Action/shoulder button state (`> 0` pressed, `< 0` released). |
 | **`ioports.inp.inputs`** | *Custom Action Subroutine* | Read Only | **Collation intrinsic:** polls all gamepad buttons/axes in one pass, collates them into a single 32-bit bitmask, and casts it to a Lua float. |
-| **`key([k])`**, **`keyp([k [, hold, period]])`** | v32kbd device on a gamepad port | Intrinsic | **Only with a v32io adapter or the modified emulator** ([why](#keyboard-and-mouse-v32io)). A full keyboard through a v32kbd device (gamepad port 1 by default, `--#keyboard N`): key held / went down this frame, TIC-80 style, with key codes or literal names (`"a"`, `"enter"`, `"shift"`) ([details](doc/API.md#keyboard-key--keyp--kbd)). |
+| **`key([k])`**, **`keyp([k [, hold, period]])`** | v32kbd device on a gamepad port | Intrinsic | **Only with a v32io adapter or the modified emulator** ([why](#keyboard-and-mouse-v32io)). A full keyboard through a v32kbd device (gamepad port 2 by default, `--#keyboard N`): key held / went down this frame, TIC-80 style, with key codes or literal names (`"a"`, `"enter"`, `"shift"`) ([details](doc/API.md#keyboard-key--keyp--kbd)). |
 | **`kbd.read()`**, **`kbd.event()`**, **`kbd.port([n])`**, **`kbd.capslock()`**, **`kbd.connected()`**, **`kbd.clear()`** | v32kbd device | Intrinsic | Typed text (Shift and Caps Lock applied), raw press/release events, the keyboard's port, Caps Lock, device present, drop unread events. |
-| **`mouse()`** | v32mouse device on a gamepad port | Intrinsic | **Only with a v32io adapter** ([why](#keyboard-and-mouse-v32io)). A mouse through a v32mouse device (gamepad port 3 by default, `--#mouse N`): `x, y, left, middle, right, scrollx, scrolly`, as TIC-80's (scroll always 0) ([details](doc/API.md#mouse-mouse--mouse)). |
+| **`mouse()`** | v32mouse device on a gamepad port | Intrinsic | **Only with a v32io adapter or the modified emulator** ([why](#keyboard-and-mouse-v32io)). A mouse through a v32mouse device (gamepad port 3 by default, `--#mouse N`): `x, y, left, middle, right, scrollx, scrolly`, as TIC-80's (scroll always 0) ([details](doc/API.md#mouse-mouse--mouse)). |
 | **`mouse.pressed/released([b])`**, **`mouse.buttons()`**, **`mouse.delta()`**, **`mouse.position([x, y])`**, **`mouse.bounds(...)`**, **`mouse.scale([n])`**, **`mouse.port([n])`**, **`mouse.connected()`** | v32mouse device | Intrinsic | Button edges this frame, buttons held, movement this frame, the pointer, its limits and speed, the mouse's port, device present. |
 
 *System & Runtime Utilities*
@@ -1012,8 +1090,8 @@ decision:
   of whole SFX would roughly halve that again (about half of Celeste's
   notes repeat), at the cost of a note-level sequencer.
 * PICO-8: `pal`/`palt` (compile to no-ops with a warning), `clip`,
-  real `stat` values (beyond the mouse), fractional `spr` widths, `pget`, `oval`/`ovalfill`,
-  `menuitem`, multi-cart loading (`reload` from another file, `cstore`);
+  real `stat` values (beyond the mouse), fractional `spr` widths, `pget`,
+  multi-cart loading (`reload` from another file, `cstore`);
   writing sprite/sound memory has no effect and reading screen memory
   returns only what was written there (no GPU read-back); the SFX
   editor's filter switches in synthesized sound

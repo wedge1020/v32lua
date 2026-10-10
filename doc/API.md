@@ -82,11 +82,11 @@ function behind it. A function of your own with the same name (`spr`,
 | `keyp([k [, hold, period]])` | boolean | Key `k` went down this frame (autorepeat with `hold`/`period`, as TIC-80). |
 | `kbd.read()` | number / nil | Next key press as the character it types (Shift, Caps Lock applied). |
 | `kbd.event()` | number / nil | Next event: `+code` pressed, `-code` released. |
-| `kbd.port([n])` | number | Gamepad port of the keyboard (default 1); setting it starts over. |
+| `kbd.port([n])` | number | Gamepad port of the keyboard (default 2); setting it starts over. |
 | `kbd.capslock()`, `kbd.connected()` | boolean | Caps Lock state; device plugged in. |
 | `kbd.clear()` | nil | Drops unread events. |
 
-*Mouse* (v32mouse device) — [details](#mouse-mouse--mouse). **Needs a v32io hardware adapter (the modified emulator doesn't have the mouse yet): without one, the pointer never moves** ([what you need](#keyboard-and-mouse-what-you-need-v32io)).
+*Mouse* (v32mouse device) — [details](#mouse-mouse--mouse). **Needs a v32io hardware adapter or the modified emulator: without one, the pointer never moves** ([what you need](#keyboard-and-mouse-what-you-need-v32io)).
 
 | Call | Returns | What it does |
 |---|---|---|
@@ -990,22 +990,32 @@ each left click presses the next control) — and select that profile for
 the gamepad port your program expects. The firmware, its build notes and
 the full setup steps are in the **v32io** project (`firmware/`).
 
-**2. The modified emulator (no hardware needed).** A fork of the Vircon32
-emulator, [wedge1020/ComputerSoftware](https://github.com/wedge1020/ComputerSoftware/tree/main),
-implements the v32io devices inside the emulator itself, reading the
-computer's own keyboard and mouse:
+**2. A modified Vircon32 emulator (no hardware needed).** The v32io
+devices built into the DesktopEmulator itself, reading the computer's own
+keyboard and mouse. Either:
 
-- **keyboard**: the [`v32kbd` branch](https://github.com/wedge1020/ComputerSoftware/tree/v32kbd).
-  In its menu Gamepads, pick a gamepad port and select `v32kbd`.
-- **mouse**: not yet in the fork; planned for a `v32io` branch that will
-  carry both devices. Until then, the mouse needs the hardware adapter.
+- the fork [wedge1020/ComputerSoftware](https://github.com/wedge1020/ComputerSoftware),
+  [`v32io` branch](https://github.com/wedge1020/ComputerSoftware/tree/v32io),
+  which has both the `v32kbd` and the `v32mouse` device; or
+- the stock DesktopEmulator sources with the two patches from the v32io
+  project applied (`emulator/v32kbd.patch`, `emulator/v32mouse.patch`).
+
+In its *Gamepads* menu, pick the gamepad your program expects and select
+**`v32kbd`** or **`v32mouse`**. `v32kbd` can't be selected while any
+gamepad uses the stock *Keyboard* device (both need the computer's
+keyboard). With `v32mouse`, focusing the emulator window captures the
+pointer; **left Ctrl + left Alt** releases it. The stock emulator's own
+*Keyboard* gamepad device is **not** a v32io keyboard: it only maps a few
+keys onto gamepad buttons, which a program reading it sees as random keys.
 
 **Which gamepad port.** The program reads the keyboard from **gamepad port
-1** (the second) and the mouse from **gamepad port 3** (the fourth) by
-default, leaving port 0 for a player's gamepad. Put the device in that
-port, or tell the program where it is: `--keyboard N` / `--mouse N` on the
-command line, `--#keyboard N` / `--#mouse N` in the source, or
-`kbd.port(n)` / `mouse.port(n)` at run time.
+2** (the third) and the mouse from **gamepad port 3** (the fourth) by
+default, leaving ports 0 and 1 for the players' gamepads. Port numbers
+count from 0, the emulator's menus from 1: port 2 is *Gamepad 3*, port 3
+is *Gamepad 4*. Put the device in that port, or tell the program where it
+is: `--keyboard N` / `--mouse N` on the command line, `--#keyboard N` /
+`--#mouse N` in the source, or `kbd.port(n)` / `mouse.port(n)` at run
+time.
 
 **Checking for the device.** `kbd.connected()` and `mouse.connected()`
 say whether *a gamepad* is plugged into that port — the console can't
@@ -1087,8 +1097,8 @@ kbd.clear()                   -- forget the events not read yet
 These read a full keyboard through a **v32kbd** device: a USB keyboard
 the console sees as an ordinary gamepad, whose 11 controls carry key
 events instead of buttons (see the v32io project). It plugs into a gamepad
-port — **port 1 (the second) by default**, leaving port 0 for a regular
-gamepad. Change it with `--keyboard N` on the command line, a `--#keyboard N`
+port — **port 2 (the third) by default**, leaving ports 0 and 1 for
+regular gamepads. Change it with `--keyboard N` on the command line, a `--#keyboard N`
 hint in the source, or `kbd.port(n)` at run time.
 
 `key()`/`keyp()` follow TIC-80's: same names, same rules, with v32kbd key
@@ -1234,16 +1244,15 @@ mouse.connected()             -> boolean, something is plugged into that port
 ```
 
 > **⚠ Only with a v32io device.** These need the v32io hardware adapter
-> with a USB mouse (the modified emulator has only the keyboard so far; its
-> mouse is planned) — see
+> with a USB mouse, or the modified emulator's `v32mouse` device — see
 > [Keyboard and mouse: what you need](#keyboard-and-mouse-what-you-need-v32io).
 > Without one, the pointer stays where it starts and no button is ever down.
 
 These read a mouse through a **v32mouse** device: a USB mouse the
 console sees as an ordinary gamepad (see the v32io project). It plugs into a
 gamepad port — **port 3 (the fourth) by default**, as in the v32io mouse
-demo, so a keyboard (port 1) and a player's gamepad (port 0) fit beside
-it. Change it with `--mouse N` on the command line, a `--#mouse N` hint in
+demo, so a keyboard (port 2) and two players' gamepads (ports 0 and 1)
+fit beside it. Change it with `--mouse N` on the command line, a `--#mouse N` hint in
 the source, or `mouse.port(n)` at run time.
 
 `mouse()` is TIC-80's: the pointer's `x, y`, then `left, middle, right` as

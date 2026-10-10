@@ -29,7 +29,33 @@
 #include "v32kbd.h"
 #include "v32mouse.h"
 
-#define  VERSION             "20261008-dev"
+// ----------------------------------------------------------------------------
+// Windows (MinGW) portability
+// ----------------------------------------------------------------------------
+// V32LUA_PATH_LIST_SEP separates the directories of a list held in an
+// environment variable (V32LUA_INCLUDE): ':' on POSIX, ';' on Windows,
+// where ':' follows the drive letter. MinGW's C library has no dependable
+// strndup(), so on Windows the calls (here and in the lexer) use this one;
+// realpath() is mapped to _fullpath() in internals.c.
+#ifdef _WIN32
+#define  V32LUA_PATH_LIST_SEP  ";"
+static inline char *v32lua_strndup (const char *s, size_t n)
+{
+    size_t  len = 0;
+    while (len < n && s[len] != '\0') len++;
+    char   *out = (char *) malloc (len + 1);
+    if (out != NULL) {
+        memcpy (out, s, len);
+        out[len] = '\0';
+    }
+    return out;
+}
+#define  strndup  v32lua_strndup
+#else
+#define  V32LUA_PATH_LIST_SEP  ":"
+#endif
+
+#define  VERSION            "20261010-dev"
 #define  META_CALL_STACK_SIZE  32   // nested calls of callable tables (__call)
 #define  AUTHOR              "Matthew Haas"
 #define  URL                 "https://github.com/wedge1020/v32lua"

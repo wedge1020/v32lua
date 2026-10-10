@@ -1,4 +1,4 @@
-.TH V32LUA 1 "October 2026" "v32lua 20261002-dev" "User Commands"
+.TH V32LUA 1 "October 2026" "v32lua 20261010-dev" "User Commands"
 .SH NAME
 v32lua \- compile a subset of Lua to Vircon32 assembly and cartridge XML
 .SH SYNOPSIS
@@ -190,7 +190,8 @@ Gamepad port (0\(en3) where a v32kbd keyboard is plugged in, for
 .BR key() ", " keyp()
 and
 .B kbd.*
-in native and TIC-80 mode. Default 1, the second port. Keyboard input
+in native and TIC-80 mode. Default 2, the third port (the emulator's
+"Gamepad 3"), leaving ports 0 and 1 for regular gamepads. Keyboard input
 needs a v32io device (see
 .BR "KEYBOARD AND MOUSE" ).
 Same as a
@@ -205,7 +206,8 @@ and
 .B mouse.*
 in every API mode (and PICO-8's
 .BR stat(32) \(en stat(34) ).
-Default 3, the fourth port. Mouse input needs a v32io device (see
+Default 3, the fourth port (the emulator's "Gamepad 4"). Mouse input
+needs a v32io device (see
 .BR "KEYBOARD AND MOUSE" ).
 Same as a
 .B \-\-#mouse
@@ -501,12 +503,27 @@ or
 it works with any Vircon32 emulator once a joystick profile is set up for
 it;
 .IP \(bu 2
-the modified emulator at
+a modified Vircon32 emulator that reads the computer's own keyboard and
+mouse as v32io devices: the
+.B v32io
+branch of the fork at
 .UR https://github.com/wedge1020/ComputerSoftware
 .UE
-(keyboard in its
+(both the
 .B v32kbd
-branch; the mouse is not implemented there yet).
+and the
+.B v32mouse
+device), or the stock DesktopEmulator with the v32io project's
+.I emulator/v32kbd.patch
+and
+.I emulator/v32mouse.patch
+applied.
+.PP
+By default the keyboard is read from gamepad port 2 and the mouse from
+port 3; see
+.B \-\-keyboard
+and
+.BR \-\-mouse .
 .PP
 Without one of these, no keyboard or mouse input is possible: programs
 compile and run, but no key is ever down and the mouse never moves. A
@@ -541,9 +558,14 @@ compile-time constant usable directly from Lua; resource IDs are
 assigned in source order and are guaranteed to match their position
 in the generated XML.
 .B \-\-#include \(dqfile.lua\(dq
-textually splices another file in before parsing, resolved relative
-to the including file, with include-once deduplication and cycle
-detection; it performs no scoping transformation of any kind; a
+textually splices another file in before parsing, with include-once
+deduplication and cycle detection. The file is looked for next to the
+including file, then in the current directory, then in each directory of
+.B V32LUA_INCLUDE
+(see
+.BR ENVIRONMENT ),
+then in the installed library directory (see
+.BR FILES ); it performs no scoping transformation of any kind; a
 .B local
 at the included file's own top level is promoted to a global exactly
 as in a monolithic file.
@@ -610,9 +632,35 @@ and
 before running
 .BR packrom (1).
 .TP
+.I /usr/local/Vircon32/v32tools/include/v32lua/
+The
+.B \-\-#include
+library: the standard-library ports from the source tree's
+.I lib/
+.RI ( string.lua ", " math.lua ", ...),"
+installed there by
+.B make sysinstall
+or
+.BR "cmake \-\-install" .
+The directory is compiled into
+.BR v32lua ;
+a CMake build installed under another prefix uses
+.IR <prefix>/Vircon32/v32tools/include/v32lua ,
+or
+.I <prefix>\ev32tools\einclude\ev32lua
+on Windows.
+.TP
 .I inc/config.h
 (in the source tree) Build-time defaults of the sample rates, side panels,
 fast circles, keyboard and mouse ports, and warnings.
+.SH ENVIRONMENT
+.TP
+.B V32LUA_INCLUDE
+Directories searched for
+.B \-\-#include
+files after the including file's own directory and the current
+directory, and before the installed library directory: a colon-separated
+list (semicolon-separated on Windows).
 .SH SEE ALSO
 .BR v32c++ (1),
 the Vircon32 C compiler and assembler documentation,
