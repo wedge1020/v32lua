@@ -48,7 +48,10 @@ TilemapAsset *parse_tilemap_csv                   (const char *, const char *);
 //     of the V32LUA_INCLUDE environment variable when set (colon-
 //     separated), (4) the compile-time default V32LUA_INCLUDE_PATH
 //     (inc/config.h), where an installed standard-library port is expected
-//     to live. An absolute path is used verbatim, skipping the search.
+//     to live, (5) include/v32lua and ../Vircon32/v32tools/include/v32lua
+//     next to the compiler executable (a release zip unpacked anywhere, an
+//     install under another prefix). An absolute path is used verbatim,
+//     skipping the search.
 //     Resolution failure is a hard compiler error listing the locations
 //     searched.
 //   - Recursive: an included file may itself contain --#include lines.
@@ -86,6 +89,11 @@ typedef struct {
 // reporting. Returns NULL and calls compiler_error() (which exits) on any
 // failure -- callers can treat a non-NULL return as always-succeeded.
 char *expand_includes (const char *entry_path, LineMapEntry **out_map, int *out_map_count);
+
+// Records argv[0], so a --#include found nowhere else can still be looked
+// up in the library directories next to the compiler executable (see
+// resolve_include_path() in internals.c). Call once, early in main().
+void  include_set_program_name (const char *argv0);
 
 // Frees a line map returned by expand_includes().
 void  free_line_map (LineMapEntry *map, int count);

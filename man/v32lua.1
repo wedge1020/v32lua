@@ -1,4 +1,4 @@
-.TH V32LUA 1 "October 2026" "v32lua 20261010-dev" "User Commands"
+.TH V32LUA 1 "October 2026" "v32lua 20261011-dev" "User Commands"
 .SH NAME
 v32lua \- compile a subset of Lua to Vircon32 assembly and cartridge XML
 .SH SYNOPSIS
@@ -564,7 +564,8 @@ including file, then in the current directory, then in each directory of
 .B V32LUA_INCLUDE
 (see
 .BR ENVIRONMENT ),
-then in the installed library directory (see
+then in the installed library directory, and finally in the library
+directories next to the compiler itself (see
 .BR FILES ); it performs no scoping transformation of any kind; a
 .B local
 at the included file's own top level is promoted to a global exactly
@@ -649,6 +650,22 @@ a CMake build installed under another prefix uses
 or
 .I <prefix>\ev32tools\einclude\ev32lua
 on Windows.
+.TP
+.IR <dir>/include/v32lua/ ", " <dir>/../Vircon32/v32tools/include/v32lua/
+Where
+.B \-\-#include
+files not found anywhere else are finally looked for,
+.I <dir>
+being the directory the
+.B v32lua
+executable is in: the layout of a release zip and of a Windows install
+.RI ( v32lua.exe
+beside
+.IR include\ev32lua ),
+and of an install under any
+.I <prefix>
+.RI ( <prefix>/bin/v32lua ).
+So an unpacked release zip finds its own library wherever it is put.
 .TP
 .I inc/config.h
 (in the source tree) Build-time defaults of the sample rates, side panels,

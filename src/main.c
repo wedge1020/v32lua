@@ -165,6 +165,8 @@ static void log_stage (int  stage_num, const char *stage_name, int  verbose)
 
 int  main (int  argc, char** argv)
 {
+    include_set_program_name (argv[0]);
+
     if (argc                   <  2)
     {
         print_usage (argv[0]);

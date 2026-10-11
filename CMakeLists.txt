@@ -28,6 +28,10 @@
 #                       (the READMEs, doc/ and the manual page)
 #
 #   Change the root with -DCMAKE_INSTALL_PREFIX=<dir> when configuring.
+#   -DDEST_LANG=es|fr installs the documents in Spanish or French (the
+#   translated README, API and USAGE guides under their plain names, and
+#   the manual page in that language when there is one), -DDEST_LANG=en
+#   the English ones only; the default (all) installs every language.
 #   The  include  directory  (lib/*.lua,  the  standard-library ports) is
 #   compiled  into the compiler (config.h's V32LUA_INCLUDE_PATH), so `--
 #   #include  "string.lua"`  works  from any directory. The path compiled
@@ -194,6 +198,40 @@ set(V32LUA_INSTALL_INCLUDEDIR "${V32LUA_DEFAULT_INCLUDEDIR}" CACHE STRING
     "Where lib/*.lua (the --#include library) goes, relative to CMAKE_INSTALL_PREFIX or absolute; compiled into v32lua")
 set(V32LUA_INSTALL_DOCDIR "${V32LUA_DEFAULT_DOCDIR}" CACHE STRING
     "Where the READMEs and doc/ are installed (relative to CMAKE_INSTALL_PREFIX; empty = not installed)")
+
+# Language of the installed documentation: all (default), en, es or fr.
+# Same setting as the base Makefile's DEST_LANG=; a DEST_LANG environment
+# variable at first configure is honored too.
+#   all    every language, each file under its own name (README.es.md,
+#          doc/API.fr.md, ...), the English manual page
+#   en     the English documents only
+#   es/fr  that language's translations of README, doc/API and doc/USAGE
+#          installed under the plain names (README.md, doc/API.md, ...),
+#          with the links between them adjusted to match, beside the
+#          documents that exist only in English; the manual page
+#          man/v32lua.<lang>.1 as v32lua.1 when it exists, otherwise the
+#          English one
+#
+if(DEFINED ENV{DEST_LANG} AND NOT "$ENV{DEST_LANG}" STREQUAL "")
+    set(V32LUA_DEFAULT_LANG "$ENV{DEST_LANG}")
+else()
+    set(V32LUA_DEFAULT_LANG "all")
+endif()
+set(DEST_LANG "${V32LUA_DEFAULT_LANG}" CACHE STRING
+    "Language of the installed manual page and documents: all, en, es or fr")
+set_property(CACHE DEST_LANG PROPERTY STRINGS all en es fr)
+if(DEST_LANG STREQUAL "")
+    set(DEST_LANG "all" CACHE STRING
+        "Language of the installed manual page and documents: all, en, es or fr" FORCE)
+endif()
+if(NOT DEST_LANG MATCHES "^(all|en|es|fr)$")
+    message(FATAL_ERROR "v32lua: DEST_LANG must be all, en, es or fr (got '${DEST_LANG}')")
+endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/man/v32lua.${DEST_LANG}.1")
+    set(V32LUA_MAN_SOURCE "man/v32lua.${DEST_LANG}.1")
+else()
+    set(V32LUA_MAN_SOURCE "man/v32lua.1")
+endif()
 
 # The absolute --#include directory the compiler is built to search.
 #
@@ -381,10 +419,10 @@ else()
 endif()
 message(STATUS "Install prefix: ${CMAKE_INSTALL_PREFIX}")
 message(STATUS " * executable  -> ${V32LUA_INSTALL_BINDIR}")
-message(STATUS " * manual page -> ${V32LUA_INSTALL_MANDIR}")
+message(STATUS " * manual page -> ${V32LUA_INSTALL_MANDIR} (${V32LUA_MAN_SOURCE})")
 message(STATUS " * Lua library -> ${V32LUA_INSTALL_INCLUDEDIR} (compiled in: ${V32LUA_LIBRARY_PATH})")
 if(V32LUA_INSTALL_DOCDIR)
-    message(STATUS " * documents   -> ${V32LUA_INSTALL_DOCDIR}")
+    message(STATUS " * documents   -> ${V32LUA_INSTALL_DOCDIR} (language: ${DEST_LANG})")
 endif()
 
 # ----------------------------------------------------------------------------
@@ -395,8 +433,9 @@ install(TARGETS v32lua
         RUNTIME DESTINATION "${V32LUA_INSTALL_BINDIR}"
         COMPONENT binaries)
 
-install(FILES man/v32lua.1
+install(FILES "${V32LUA_MAN_SOURCE}"
         DESTINATION "${V32LUA_INSTALL_MANDIR}"
+        RENAME v32lua.1
         COMPONENT documentation)
 
 # The standard-library ports --#include finds through V32LUA_INCLUDE_PATH.
@@ -406,17 +445,55 @@ install(FILES ${V32LUA_LIBRARY_FILES}
         DESTINATION "${V32LUA_INSTALL_INCLUDEDIR}"
         COMPONENT library)
 
-# The READMEs at the top, the rest in doc/ beside them, so the links
-# between them keep working.
+# The README at the top, the rest in doc/ beside it, so the links between
+# them keep working. In one language (DEST_LANG=en/es/fr) each English
+# document is installed under its own name -- replaced, for es/fr, by its
+# translation where there is one, with the links to the other translated
+# documents (README.es.md, API.es.md, ...) turned into links to the plain
+# names they are installed under. Those copies are made here, in the build
+# tree; editing a document re-runs the configuration.
 #
+file(GLOB V32LUA_DOC_FILES RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/README*.md"
+     "${CMAKE_CURRENT_SOURCE_DIR}/doc/*.md")
+list(SORT V32LUA_DOC_FILES)
+set(V32LUA_EN_DOCS "")
+foreach(doc IN LISTS V32LUA_DOC_FILES)
+    if(NOT doc MATCHES "\\.(es|fr)\\.md$")
+        list(APPEND V32LUA_EN_DOCS "${doc}")
+    endif()
+endforeach()
+
+set(V32LUA_README_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 if(V32LUA_INSTALL_DOCDIR)
-    install(FILES README.md README.es.md README.fr.md
-            DESTINATION "${V32LUA_INSTALL_DOCDIR}"
-            COMPONENT documentation)
-    install(DIRECTORY doc/
-            DESTINATION "${V32LUA_INSTALL_DOCDIR}/doc"
-            COMPONENT documentation
-            FILES_MATCHING PATTERN "*.md")
+    if(DEST_LANG STREQUAL "all")
+        set(V32LUA_INSTALL_DOCS ${V32LUA_DOC_FILES})
+    else()
+        set(V32LUA_INSTALL_DOCS ${V32LUA_EN_DOCS})
+    endif()
+    foreach(doc IN LISTS V32LUA_INSTALL_DOCS)
+        get_filename_component(subdir "${doc}" DIRECTORY)
+        set(source "${CMAKE_CURRENT_SOURCE_DIR}/${doc}")
+        if(DEST_LANG MATCHES "^(es|fr)$")
+            string(REGEX REPLACE "\\.md$" ".${DEST_LANG}.md" translated "${doc}")
+            if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${translated}")
+                set(source "${CMAKE_CURRENT_SOURCE_DIR}/${translated}")
+            endif()
+            file(READ "${source}" text)
+            string(REPLACE ".${DEST_LANG}.md" ".md" text "${text}")
+            set(staged "${V32LUA_GENERATED_DIR}/docs-${DEST_LANG}/${doc}")
+            file(WRITE "${staged}.new" "${text}")
+            configure_file("${staged}.new" "${staged}" COPYONLY)
+            set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${source}")
+            if(doc STREQUAL "README.md")
+                set(V32LUA_README_SOURCE "${staged}")
+            endif()
+            set(source "${staged}")
+        endif()
+        install(FILES "${source}"
+                DESTINATION "${V32LUA_INSTALL_DOCDIR}/${subdir}"
+                COMPONENT documentation)
+    endforeach()
 endif()
 
 if(TARGET_OS STREQUAL "windows")
@@ -502,8 +579,12 @@ set(CPACK_PACKAGE_CONTACT "Matthew Haas")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Lua compiler for the Vircon32 fantasy console")
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/wedge1020/v32lua")
-set(CPACK_PACKAGE_FILE_NAME "v32lua-${V32LUA_VERSION}-${TARGET_OS}${TARGET_BITS}")
-set(CPACK_RESOURCE_FILE_README "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
+if(DEST_LANG MATCHES "^(es|fr)$")
+    set(CPACK_PACKAGE_FILE_NAME "v32lua-${V32LUA_VERSION}-${TARGET_OS}${TARGET_BITS}-${DEST_LANG}")
+else()
+    set(CPACK_PACKAGE_FILE_NAME "v32lua-${V32LUA_VERSION}-${TARGET_OS}${TARGET_BITS}")
+endif()
+set(CPACK_RESOURCE_FILE_README "${V32LUA_README_SOURCE}")
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
     set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 endif()

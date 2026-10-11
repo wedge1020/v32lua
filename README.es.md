@@ -118,19 +118,22 @@ de Vircon32 (ensamblar → `packrom` → ejecutar bajo
 | **`all`** | **Objetivo por defecto.** Compila el compilador (`bin/v32lua`) dentro de `src/`. |
 | **`clean`** | Elimina los artefactos de compilación de `src/` y los archivos generados en `testing/` y `demos/`. |
 | **`install`** | Copia `bin/v32lua` a `~/bin/bin.$(ARCH)/` si existe, si no a `~/bin/`. |
-| **`sysinstall`** | Instalación en el sistema: `bin/v32lua` en `/usr/local/bin/`, la página de manual en `/usr/local/share/man/man1/` y la biblioteca de `--#include` (`lib/*.lua`) en `/usr/local/Vircon32/v32tools/include/v32lua/` (normalmente requiere `sudo`; ver [Instalación](#instalacion)). |
+| **`sysinstall`** | Instalación en el sistema: `bin/v32lua` en `/usr/local/bin/`, la página de manual en `/usr/local/share/man/man1/`, la biblioteca de `--#include` (`lib/*.lua`) en `/usr/local/Vircon32/v32tools/include/v32lua/` y los documentos en `/usr/local/Vircon32/v32tools/docs/v32lua/` (normalmente requiere `sudo`; `DEST_LANG=` elige el idioma de los documentos y `PREFIX=` la ubicación: ver [Instalación](#instalacion)). |
 | **`sysuninstall`** | Elimina lo que instaló `sysinstall`. |
 | **`tests`** | Ejecuta las pruebas unitarias de `testing/`: cada programa se compila, se ensambla, se empaqueta y se ejecuta en [v32sim](https://github.com/g7n-org/v32sim), y sus resultados se comparan con el bloque `EXPECTED OUTPUT` del archivo (requiere las DevTools, v32sim y `v32lua` en tu `PATH`). |
 | **`asmcheck`** | Compila las pruebas y ensambla cada resultado (`.vbin`), comprobando el ensamblador generado. |
 | **`v32check`** | Como `asmcheck`, y además empaqueta cada prueba en un cartucho `.v32`. |
 | **`demos`** | Compila todas las demos bajo `demos/` (ver [Compilar las demos](#building-the-demos)). |
-| **`version`** | Muestra la versión de `inc/v32lua.h` y la estampa en `man/v32lua.1` y `doc/DEBUGGING.md` (ejecútalo antes de una publicación). |
+| **`version`** | Muestra la versión de `inc/v32lua.h` y la estampa en las páginas de manual y en `doc/DEBUGGING.md` (ejecútalo antes de una publicación y luego recompila). `make version VERSION=AAAAMMDD-estado` escribe antes una versión nueva en `inc/v32lua.h`. |
 | **`monofiles`**, **`context`**, **`put`** | Reúnen las fuentes en `put/` como archivos de texto únicos, para pegarlos en una conversación. |
 | **`archive`** | Limpia y luego comprime el proyecto en `v32lua-project.zip`. |
 
 La cadena de versión está en un solo lugar, `#define VERSION` en
 `inc/v32lua.h`; `v32lua --version` la muestra y `make version` la copia en
-la página de manual y en la guía de depuración.
+la página de manual y en la guía de depuración. La compilación con CMake y
+el flujo de publicación la leen de esa misma línea, y una compilación de
+publicación se detiene si la página de manual o la guía de depuración
+todavía llevan otra versión.
 
 <a id="compilar-con-cmake"></a>
 **Compilar con CMake**
@@ -174,7 +177,7 @@ v32c++), junto a las `DevTools/` oficiales:
 | compilador | `/usr/local/bin/v32lua` | `C:\Program Files\Vircon32\v32tools\v32lua.exe` |
 | página de manual | `/usr/local/share/man/man1/v32lua.1` | `...\v32tools\docs\v32lua\v32lua.1` |
 | biblioteca de `--#include` (`lib/*.lua`) | `/usr/local/Vircon32/v32tools/include/v32lua` | `...\v32tools\include\v32lua` |
-| documentación | `/usr/local/Vircon32/v32tools/docs/v32lua` (CMake) | `...\v32tools\docs\v32lua` |
+| documentación | `/usr/local/Vircon32/v32tools/docs/v32lua` | `...\v32tools\docs\v32lua` |
 
 Cualquiera de las dos compilaciones lo hace:
 
@@ -194,7 +197,35 @@ allí; `-DV32LUA_INSTALL_INCLUDEDIR=...` (y `BINDIR`, `MANDIR`, `DOCDIR`)
 mueven una sola parte. La desinstalación elimina solo los archivos de
 v32lua, y después `v32tools/` (y en Linux / macOS `Vircon32/`) solo si no
 queda nada más dentro. En Windows, añade `C:\Program
-Files\Vircon32\v32tools` a tu `PATH`, como para las DevTools.
+Files\Vircon32\v32tools` a tu `PATH`, como para las DevTools. El Makefile
+acepta `PREFIX=` (`sudo make sysinstall PREFIX=/opt/vircon32`, y
+`DESTDIR=` para preparar un paquete); el compilador encuentra la
+biblioteca instalada así junto a sí mismo (ver más abajo), sin
+recompilar.
+
+**Idioma de la documentación.** Por defecto, ambas compilaciones
+instalan los documentos en todos los idiomas (`README.md`,
+`README.es.md`, `README.fr.md`, `doc/API.es.md`, ...) y la página de
+manual en inglés. `DEST_LANG=es` o `DEST_LANG=fr` (`sudo make sysinstall
+DEST_LANG=es`, o `cmake -S . -B build -DDEST_LANG=es`) instala en cambio
+ese idioma: el README, `doc/API.md` y `doc/USAGE.md` traducidos, con esos
+nombres simples (y los enlaces entre ellos ajustados), junto a las guías
+que solo existen en inglés (`doc/PICO8.md`, `doc/TIC80.md`, ...), y la
+página de manual en ese idioma cuando la haya (por ahora solo existe la
+inglesa). `DEST_LANG=en` instala solo los documentos en inglés.
+
+**Zips de publicación.** Los zips precompilados de la página de
+[Releases](https://github.com/wedge1020/v32lua/releases) (Windows x86_64 y
+arm64, macOS, Linux, Raspberry Pi, y OpenBSD y Haiku cuando esas
+compilaciones salen bien) siguen la disposición de la instalación en
+Windows: `v32lua` (`v32lua.exe`) junto a `include/v32lua/` (la biblioteca
+de `--#include`) y `docs/v32lua/` (los README, `doc/` y la página de
+manual, en todos los idiomas). En Windows, descomprime uno en
+`C:\Program Files\Vircon32\v32tools`; en cualquier otro sitio, mantén
+juntos el binario y su carpeta `include/`. El compilador busca los
+archivos de `--#include` en `include/v32lua` junto a sí mismo cuando no
+los encuentra en ningún otro sitio, así que un zip descomprimido encuentra
+su biblioteca esté donde esté.
 
 `make install`, en cambio, copia solo el binario a `~/bin`. Los valores
 por defecto de la compilación con el Makefile (el directorio de la
@@ -527,13 +558,16 @@ de C:
   directorio del archivo que incluye; el directorio de trabajo actual del
   compilador; cada entrada de la variable de entorno `V32LUA_INCLUDE` si
   está definida (una lista separada por dos puntos; por punto y coma en
-  Windows); y finalmente la ruta de inclusión por defecto integrada,
+  Windows); después la ruta de inclusión por defecto integrada,
   `/usr/local/Vircon32/v32tools/include/v32lua` (se fija al compilar: ver
   `inc/config.h`, o [Instalación](#instalacion) para la compilación con
   CMake). Ahí es donde `make sysinstall` y `cmake --install` colocan los
   ports de la biblioteca estándar de `lib/`, para que cualquier proyecto
-  pueda hacer `--#include "string.lua"` sin copiar la biblioteca.
-  Las rutas absolutas se usan tal cual.
+  pueda hacer `--#include "string.lua"` sin copiar la biblioteca. Por
+  último se buscan `include/v32lua` y `../Vircon32/v32tools/include/v32lua`
+  junto al propio ejecutable `v32lua`: así encuentra su biblioteca un zip
+  de publicación, o una instalación bajo otro prefijo. Las rutas absolutas
+  se usan tal cual.
 * Se detectan las inclusiones cíclicas, y cada archivo resuelto se incluye
   como máximo una vez a lo largo de toda la expansión.
 * Las pistas de recursos de cartucho (`--#texture`, `--#sound`,

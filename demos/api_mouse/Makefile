@@ -33,3 +33,6 @@ obj/$(DEMO).asm: $(DEMO).lua
 	$(LUA_COMPILER) $(DEBUG_FLAGS) -o obj/$(DEMO).asm $(DEMO).lua
 	mv obj/$(DEMO).xml .
 
+# --- Clean Up ---
+clean:
+	rm -f bin/*.v32 obj/* assets/*.vtex *.xml

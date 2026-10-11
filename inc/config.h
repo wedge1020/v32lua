@@ -24,8 +24,27 @@
 // separated list of directories) is searched BEFORE this default, letting
 // individual projects point at their own library copies without installing
 // anything system-wide.
+//
+// A library that is found nowhere else is finally looked for next to the
+// compiler itself: in include/v32lua beside the executable (the Windows
+// install layout, and the release zips), then in ../Vircon32/v32tools/
+// include/v32lua (a Unix install under some other prefix).
+//
+// The base Makefile's `make sysinstall` reads the quoted Unix path below
+// (keep that #define on one line, in this shape); the CMake build passes
+// its own -DV32LUA_INCLUDE_PATH computed from the install prefix.
 #ifndef V32LUA_INCLUDE_PATH
+#ifdef _WIN32
+#define V32LUA_INCLUDE_PATH  V32LUA_WIN32_INCLUDE_PATH
+#else
 #define V32LUA_INCLUDE_PATH "/usr/local/Vircon32/v32tools/include/v32lua"
+#endif
+#endif
+
+// The Windows default: where `cmake --install` puts the library with its
+// default prefix (<Program Files>/Vircon32).
+#ifndef V32LUA_WIN32_INCLUDE_PATH
+#define V32LUA_WIN32_INCLUDE_PATH "C:/Program Files/Vircon32/v32tools/include/v32lua"
 #endif
 
 #ifndef V32LUA_INCLUDE_ENV_VAR

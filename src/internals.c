@@ -2,6 +2,15 @@
 #ifdef _WIN32
   #include <stdlib.h>
   #define realpath(N, R) _fullpath((R), (N), _MAX_PATH)
+  // Declared by hand rather than through <windows.h>, whose macros (ERROR,
+  // ...) collide with names used across the compiler. kernel32 is always
+  // linked in.
+  __declspec(dllimport) unsigned long __stdcall
+      GetModuleFileNameA (void *module, char *filename, unsigned long size);
+#elif defined(__APPLE__)
+  #include <mach-o/dyld.h>
+#elif defined(__linux__)
+  #include <unistd.h>
 #endif
 
 int  w_mainwait  = -1;
@@ -348,6 +357,103 @@ static bool include_file_exists (const char *path)
     return true;
 }
 
+// ----------------------------------------------------------------------------
+// The compiler's own location (for the last-resort include candidates)
+// ----------------------------------------------------------------------------
+
+// argv[0], recorded by main() through include_set_program_name(). Only
+// looked at when an include is found nowhere else, so the (cheap, but
+// platform-specific) executable lookup below runs at most once and only on
+// that path.
+static const char *g_program_argv0 = NULL;
+
+void include_set_program_name (const char *argv0)
+{
+    g_program_argv0 = argv0;
+}
+
+// Returns a malloc'd path to the running executable, or NULL when it can't
+// be determined. The OS is asked first where it can say (Windows, macOS,
+// Linux); elsewhere (the BSDs, Haiku, ...) argv[0] is used: as a path when
+// it has a directory separator, otherwise looked up on PATH, as the shell
+// did to start us.
+static char *find_executable_path (const char *argv0)
+{
+    char buf[PATH_MAX];
+
+#if defined(_WIN32)
+    unsigned long n = GetModuleFileNameA (NULL, buf, (unsigned long) sizeof (buf));
+    if (n > 0 && n < sizeof (buf)) {
+        return strdup (buf);
+    }
+#elif defined(__APPLE__)
+    uint32_t size = (uint32_t) sizeof (buf);
+    if (_NSGetExecutablePath (buf, &size) == 0) {
+        return canonicalize_path (buf);
+    }
+#elif defined(__linux__)
+    ssize_t n = readlink ("/proc/self/exe", buf, sizeof (buf) - 1);
+    if (n > 0) {
+        buf[n] = '\0';
+        return strdup (buf);
+    }
+#endif
+
+    if (argv0 == NULL || argv0[0] == '\0') {
+        return NULL;
+    }
+    if (last_separator (argv0) != NULL) {
+        return canonicalize_path (argv0);
+    }
+
+    const char *path_env = getenv ("PATH");
+    if (path_env == NULL || path_env[0] == '\0') {
+        return NULL;
+    }
+    char *path_copy = strdup (path_env);
+    char *save      = NULL;
+    char *found     = NULL;
+    for (char *entry = strtok_r (path_copy, V32LUA_PATH_LIST_SEP, &save);
+         entry != NULL && found == NULL;
+         entry = strtok_r (NULL, V32LUA_PATH_LIST_SEP, &save)) {
+        char *candidate = join_path (entry, argv0);
+        if (include_file_exists (candidate)) {
+            found = canonicalize_path (candidate);
+        }
+        free (candidate);
+    }
+    free (path_copy);
+    return found;
+}
+
+// The directories next to the compiler that can hold the --#include
+// library, relative to the executable's directory:
+//   include/v32lua                    -- Windows installs (v32tools/
+//                                        v32lua.exe beside v32tools/include/
+//                                        v32lua) and the release zips
+//   ../Vircon32/v32tools/include/v32lua -- Unix installs under any prefix
+//                                        (<prefix>/bin/v32lua)
+static const char *const program_relative_include_dirs[] = {
+    "include/v32lua",
+    "../Vircon32/v32tools/include/v32lua",
+};
+
+// The executable's directory (malloc'd), computed once; NULL if unknown.
+static const char *program_dir (void)
+{
+    static bool  looked = false;
+    static char *dir    = NULL;
+    if (!looked) {
+        looked = true;
+        char *exe = find_executable_path (g_program_argv0);
+        if (exe != NULL) {
+            dir = dir_of (exe);
+            free (exe);
+        }
+    }
+    return dir;
+}
+
 // Resolves one --#include target to an existing file.
 //
 // Search order (first hit wins):
@@ -361,6 +467,10 @@ static bool include_file_exists (const char *path)
 //      project point at its own library copy without installing anything.
 //   4. The compile-time default V32LUA_INCLUDE_PATH (see inc/config.h),
 //      where an installed v32lua standard-library port is expected to live.
+//   5. The library directories next to the compiler executable (see
+//      program_relative_include_dirs): what lets a release zip, unpacked
+//      anywhere, or an install under a prefix other than the compiled-in
+//      one, find its own library.
 //
 // An ABSOLUTE include path skips the search and is returned verbatim, so
 // the preexisting behavior (and read_whole_file()'s own error message)
@@ -417,13 +527,31 @@ static char *resolve_include_path (const char *base_dir, const char *inc_path,
     }
     free (candidate);
 
+    // Candidate 5: the library directories next to the compiler.
+    const char *exe_dir = program_dir ();
+    if (exe_dir != NULL) {
+        size_t count = sizeof (program_relative_include_dirs)
+                     / sizeof (program_relative_include_dirs[0]);
+        for (size_t i = 0; i < count; i++) {
+            char *lib_dir = join_path (exe_dir, program_relative_include_dirs[i]);
+            candidate = join_path (lib_dir, inc_path);
+            free (lib_dir);
+            if (include_file_exists (candidate)) {
+                return candidate;
+            }
+            free (candidate);
+        }
+    }
+
     compiler_error (ERR_INTERNAL, -1,
         "--#include: could not find '%s' (referenced from '%s'). Searched: "
         "the including file's directory, the current directory, the "
-        V32LUA_INCLUDE_ENV_VAR " environment variable, and \""
-        V32LUA_INCLUDE_PATH "\"",
+        V32LUA_INCLUDE_ENV_VAR " environment variable, \""
+        V32LUA_INCLUDE_PATH "\" and the library directories next to the "
+        "compiler (in '%s')",
         inc_path,
-        (referenced_from != NULL) ? referenced_from : "the main program");
+        (referenced_from != NULL) ? referenced_from : "the main program",
+        (exe_dir != NULL) ? exe_dir : "an unknown directory");
 
     return NULL;    // unreachable -- compiler_error() exits
 }

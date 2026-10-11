@@ -14,7 +14,13 @@ DEPFLAGS = -MMD -MP
 CLIBS = -lm
 
 # --- Output Executable ---
-TARGET = ../bin/v32lua
+# Written to bin/ at the project root. On Windows (MSYS2/MinGW, where make
+# sees OS=Windows_NT) the compiler names the file v32lua.exe; naming the
+# target the same way keeps make from relinking it on every run.
+ifeq ($(OS),Windows_NT)
+EXE = .exe
+endif
+TARGET = ../bin/v32lua$(EXE)
 
 # --- Object Files ---
 

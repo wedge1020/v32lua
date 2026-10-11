@@ -179,3 +179,39 @@ Everything was checked on the real CPU core only. Not checked on real
 hardware or a full emulator: what the GPU actually draws, how the
 synthesized PICO-8 audio sounds, and packing the generated `.vtex`/`.vsnd`
 files with `packrom`.
+
+# Release prep: DEST_LANG docs install, VERSION sync, release workflow (2026-10-11)
+
+Patch: `v32lua-dest-lang-release.patch` (against the 20261011-dev project zip). Compiler output is unchanged: all 209 testing/ + tests/ programs produce byte-identical asm vs. the previous build. ctest 127/127.
+
+## DEST_LANG (Makefile and CMake, same semantics)
+- Values: `all` (default; every language under its own name, English man page), `en`, `es`, `fr`. An invalid value is a hard error in both builds.
+- es/fr: README, doc/API, doc/USAGE translations installed under plain names (README.md, doc/API.md, doc/USAGE.md); `.<lang>.md` links rewritten to `.md`; English-only docs (PICO8, TIC80, FEATURES, ...) installed beside them. The language-switcher links dangle, same as in v32opt.
+- Man page: `man/v32lua.<lang>.1` if present, else English plus a notice. No translated man pages exist yet. `make version` already stamps es/fr pages (localized month) if they're added.
+- `make sysinstall` now also installs the docs to `.../v32tools/docs/v32lua` (previously CMake only). Also new: PREFIX/BINDIR/MANDIR/LIBDIR/DOCDIR/DESTDIR. LIBDIR defaults to config.h's path; with a non-default PREFIX it is `$(PREFIX)/Vircon32/v32tools/include/v32lua`.
+- Verified: make-es install == cmake-es install (diff -r); cpack names es/fr packages `-es`/`-fr`.
+
+## VERSION sync
+- The v32opt bug (workflow `grep -i VERSION | head -1` picking a comment line) was latent in v32lua: only one line of v32lua.h mentions "version" today. The workflow now uses the anchored `#define` sed in a single `version` job; build and release jobs read its output.
+- The workflow checks that the man page .TH and the DEBUGGING.md footer match the header: warning on test builds, error on release builds. At patch time both were still stamped 20261010-dev, so run `make version` before a release.
+- `make version VERSION=...` now writes the header, as in v32opt. It validates first: an empty value or characters outside `[A-Za-z0-9._+-]` refuse to run, and a missing YYYYMMDD prefix warns. v32opt's `make version` has no such guard (`VERSION=` writes `""`; `/` or `&` break the sed).
+- Base Makefile: `bin/$(TARGET)` is now a phony target that recurses into src/, as in v32opt (stale or missing binary for install/sysinstall/tests). src/Makefile names the target `v32lua.exe` on Windows_NT.
+
+## --#include for release zips
+- New last-resort search step 5 in resolve_include_path(): `<exe_dir>/include/v32lua`, then `<exe_dir>/../Vircon32/v32tools/include/v32lua`.
+- How the exe location is found:
+  - Windows: GetModuleFileNameA, declared by hand (no windows.h).
+  - macOS: _NSGetExecutablePath.
+  - Linux: /proc/self/exe.
+  - Elsewhere: argv[0], or a PATH search.
+- main() calls include_set_program_name(argv[0]).
+- config.h: `_WIN32` default is `V32LUA_WIN32_INCLUDE_PATH` ("C:/Program Files/Vircon32/v32tools/include/v32lua"). It is named so the Makefile's INCPATH sed still matches only the Unix line.
+- Tested in five layouts: zip layout, via PATH, symlink, prefix layout, and the argv0/PATH fallback built with -U__linux__.
+
+## Workflow (ported from v32opt's overhaul)
+- Windows x86_64 UCRT64 gcc; Windows arm64 CLANGARM64 clang on windows-11-arm.
+- OpenBSD 7.9 x86_64/arm64 and Haiku r1beta5 via cross-platform-actions; optional (continue-on-error). Direct compile from inside src/ (for the runtime_embed.S .incbin paths), excluding the dead vsnd_generator.c; no -lm on Haiku.
+- Touches parser.c/parser.h then lexer.c after checkout, so make never runs bison/flex.
+- `scripts/smoke_test.sh BIN LIBDIR [VERSION]` runs on native jobs (Windows x2, macOS arm64, Linux x86_64) and inside the VMs: checks `--version` and compiles a program that --#includes every lib/*.lua, with V32LUA_INCLUDE unset.
+- Zip layout mirrors the Windows install: `v32lua[.exe]`, `include/v32lua/*.lua`, `docs/v32lua/{README*.md, doc/, v32lua*.1}`.
+- Not run on GitHub from the session (no actionlint or MinGW reachable). The run blocks were syntax-checked; the version and packaging steps were simulated locally. runtime_embed.S assembles for aarch64/x86_64 Windows, OpenBSD and Haiku targets with clang.
