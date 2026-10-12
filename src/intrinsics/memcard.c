@@ -12,7 +12,7 @@
 //   memcard.load(position)          -> value   (raw read, exactly 1 word)
 //   memcard.load()                  -> value   (position 0, unchanged)
 //   memcard.load_table(position)    -> table or nil  (see below)
-//   memcard.title(str)              -> nil     (writes the 20-word title)
+//   memcard.title(str|table)        -> nil     (writes 20 raw title words)
 //   memcard.title()                 -> table   (reads all 20 title words)
 //   memcard[position]                  == memcard.load(position)
 //   memcard[position] = value          == memcard.save(value, position)
@@ -402,7 +402,7 @@ bool emit_vircon32_memcard_load_table_intrinsic (ASTNode *node, int dest_reg)
 }
 
 // ============================================================================
-// memcard.title([STR]) -> table | nil
+// memcard.title([STR|TABLE]) -> table | nil
 //
 // WRITE form, memcard.title(str): writes STR's characters into the
 // memcard's title region, one raw word per character -- exactly this
@@ -415,12 +415,34 @@ bool emit_vircon32_memcard_load_table_intrinsic (ASTNode *node, int dest_reg)
 // region right after the title, not carved out of it. Truncated to 20
 // characters if longer; padded with 0-words if shorter. Still NUL-stop
 // against STR itself (a Lua string in this VM cannot carry a zero word
-// past its terminator), so an ID with a zero word mid-stream has to be
-// written raw via memcard.save(value, position) at positions -5..-24 --
-// and memcard.title() below reads it back verbatim. Always a CALL: STR's
-// length isn't known at compile time unless it's a literal, and even
-// then sharing the runtime copy loop is simpler than unrolling it per
-// call site.
+// past its terminator). Always a CALL: STR's length isn't known at
+// compile time unless it's a literal, and even then sharing the runtime
+// copy loop is simpler than unrolling it per call site.
+//
+// WRITE form, memcard.title(t) -- TABLE ARGUMENT: the write-side mirror
+// of the read form, closing the write-side blind spot the string form
+// can't fix. The runtime routine (see vircon32.s) DISPATCHES ON THE
+// ARGUMENT'S TAG AT RUNTIME -- string vs table is not decidable at
+// compile time for a non-literal argument, and the two forms share one
+// entry point, so the emitter emits the same CALL either way. Table
+// semantics: elements 1..20 are the 20 title words, element i's number
+// CFI'd to its integer bits (77.0 -> 0x0000004D, -1.0 -> 0xFFFFFFFF --
+// bit-exact inverse of the read form's per-element CIF, so
+// memcard.title(memcard.title()) is a no-op round trip); absent/nil
+// elements are the zero-pad; elements past 20 ignored; a non-number
+// element (or a non-string/non-table argument of any kind) is a RUNTIME
+// PANIC, not a silent fallback -- memcard.title previously fed any
+// argument to __unbox_string unvalidated, so this is the write form's
+// first ever type validation.
+//
+// Because the DISPATCH is in the runtime, EVERY write call now links the
+// table runtime (the routine unconditionally references
+// __builtin_table_get) -- needs_tables is set on the write path below,
+// the same dependency memcard.load_table() documents. The panic path's
+// __builtin_print has the same linkage profile as table.s's own
+// __runtime_error_not_table error path (reached from intrinsics that set
+// needs_tables alone), and its message string lives in constant.s,
+// which emit.c links unconditionally.
 //
 // READ form, memcard.title() with NO argument: returns the card's title
 // block as a TABLE -- ALL VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS (20)
@@ -431,15 +453,15 @@ bool emit_vircon32_memcard_load_table_intrinsic (ASTNode *node, int dest_reg)
 // block is an ID field, so the transaction is FIXED-WIDTH: all 20 words
 // every call, zeros included, no early exit.
 //
-// WHY A TABLE AND NOT A STRING: this VM's strings are NUL-terminated and
-// its string operations (string.len, ==, .., print, string.sub) all scan
-// to the first zero word -- a string return made every word after the
-// first zero invisible, so two IDs differing only after a zero word were
-// indistinguishable through the string API. A table has no such blind
-// spot: zero words are visible element 0s and words past them are
-// ordinary comparable elements. (A display string can still be
-// reassembled in Lua from the elements when wanted -- a string.char loop
-// over the elements up to the first zero, for instance.)
+// WHY A TABLE AND NOT A STRING (read form): this VM's strings are
+// NUL-terminated and its string operations (string.len, ==, .., print,
+// string.sub) all scan to the first zero word -- a string return made
+// every word after the first zero invisible, so two IDs differing only
+// after a zero word were indistinguishable through the string API. A
+// table has no such blind spot: zero words are visible element 0s and
+// words past them are ordinary comparable elements. (A display string
+// can still be reassembled in Lua from the elements when wanted -- a
+// string.char loop over the elements up to the first zero, for instance.)
 //
 // == ON TABLES IS IDENTITY: this VM only deep-compares strings, so two
 // reads of the same title are different table objects and never ==
@@ -453,7 +475,7 @@ bool emit_vircon32_memcard_load_table_intrinsic (ASTNode *node, int dest_reg)
 // valid table or never returns.
 //
 // The two forms mirror memcard.save()'s split: no-argument READ is to
-// memcard.title(str) WRITE what memcard.load() is to
+// memcard.title(str|t) WRITE what memcard.load() is to
 // memcard.save(value, position). Unlike save()/load(), though, they share
 // one entry point rather than one being bracket sugar for the other --
 // Lua call syntax can't distinguish them any other way.
@@ -502,6 +524,16 @@ bool emit_vircon32_memcard_title_intrinsic (ASTNode *node, int dest_reg)
                          "memcard.title(): \"%s\" is longer than %d characters and will be truncated",
                          arg_str->as.string_val.value, VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS);
     }
+
+    // The write path's argument type (string vs table) is a RUNTIME
+    // property -- the runtime routine dispatches on the tag -- so the
+    // emitter emits the same CALL either way, and every write call links
+    // the table runtime: __builtin_vircon32_memcard_title unconditionally
+    // references __builtin_table_get for its table path (and its panic
+    // path references __builtin_print, with the same linkage profile as
+    // table.s's own error paths). Same needs_tables dependency
+    // memcard.load_table() documents.
+    runtime_req.needs_tables = true;
 
     emit_asm("    ;; --- Vircon32 memcard.title() Intrinsic ---");
 

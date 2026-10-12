@@ -1524,14 +1524,15 @@ local hi = memcard[0]        -- 1234
 local cursor = memcard[-1]    -- reads the auto-append cursor
 ```
 
-**memcard.title(str) -> nil**
+**memcard.title(str|table) -> nil**
 
-Sets  the memory  card's  title/id  — up  to  20  characters, one  word
-per  character,  matching  this   VM's  internal  string  representation.
-Longer strings  are truncated; shorter  strings are zero-padded.  This is
-independent of any `--#title` cart hint, which names the *cartridge*, not
-the  *save  data*  — a  single  cart  can  have  many memory  cards  in
-circulation, each with its own title.
+Sets the memory  card's title/id — 20  words, which if used  to store a
+game title would  be one character per word, matching  this VM's internal
+string representation. Longer strings  are truncated; shorter strings are
+zero-padded. This is independent of any `--#title` cart hint, which names
+the *cartridge*,  not the  *save data*  — a single  cart can  have many
+memory cards in circulation,  each with its own title. To  use as more of
+an ID, one can also pass an indexed table to be processed.
 
 ```lua
 memcard.title("My Save File")

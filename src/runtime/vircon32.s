@@ -1396,23 +1396,68 @@ _memcard_get_title_done:
 
 
 ; ============================================================================
-; __builtin_vircon32_memcard_title: set the memcard's title, one word per
-; character, into the full VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS (20) title
-; block. Metadata (VIRCON32_MEMCARD_METADATA_WORDS, including the cursor at
-; VIRCON32_MEMCARD_CURSOR_ADDR) now lives in its own separate region right
-; after the title -- see the header comment block near the top of this
-; file -- so it's never touched here regardless of title length.
+; __builtin_vircon32_memcard_title: set the memcard's title into the full
+; VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS (20) title block -- from a STRING
+; or, new, from a TABLE. Metadata (VIRCON32_MEMCARD_METADATA_WORDS,
+; including the cursor at VIRCON32_MEMCARD_CURSOR_ADDR) lives in its own
+; separate region right after the title -- see the header comment block
+; near the top of this file -- so it's never touched here regardless of
+; title length or form.
 ; ============================================================================
 ;
-; CIF DROPPED -- CHARACTERS ARE STORED RAW NOW: the copy loop used to CIF
-; each character into a float before its store, so the card words held
-; float encodings of char codes. The title block is an ID field, so both
-; directions are bit-exact word copies now: characters go in as the same
-; raw words this VM's own internal string representation uses (one word
-; per character -- see __builtin_string_len; NOT a packed byte string, and
-; no longer a float encoding either), and
-; __builtin_vircon32_memcard_get_title above reads them back verbatim
-; (each word CIF'd into its integer value as a table element).
+; NOW ACCEPTS A STRING OR A TABLE: the write form is memcard.title(str|t),
+; and the runtime DISPATCHES ON THE ARGUMENT'S NaN-BOX TAG at entry --
+; the two forms deliberately share one entry point (Lua call syntax can't
+; distinguish them any other way), and a non-literal argument's type is a
+; runtime property the compiler can't know at compile time, so the
+; dispatch lives here, not in the emitter.
+;
+;   STRING (ROM or RAM): behavior unchanged -- one raw word per
+;   character, NUL-stop against STR itself, truncate at 20 characters,
+;   zero-pad the remainder (details in the CIF-DROPPED note below).
+;
+;   TABLE: the write-side mirror of the read form -- a FIXED-WIDTH
+;   20-word transaction built from elements 1..20. For each i the
+;   routine evaluates t[i] via __builtin_table_get (so a metatable's
+;   __index answers misses exactly as a Lua t[i] would):
+;     - a NUMBER element is CFI'd and its integer bits become the word
+;       (77.0 -> 0x0000004D, -1.0 -> 0xFFFFFFFF) -- the exact inverse
+;       of the read form's per-element CIF, so a value read back from
+;       memcard.title() ROUND-TRIPS BIT-EXACTLY, signed words included
+;       (the read form reports words >= 0x80000000 as negative 32-bit
+;       values, and writing that negative number reproduces the same
+;       bits);
+;     - an ABSENT element (nil) writes a zero word -- the table form's
+;       zero-pad;
+;     - elements past 20 are ignored;
+;     - any other element value (string/boolean/table/function) is a
+;       RUNTIME ERROR -- no silent fallback: the routine traps through
+;       __runtime_error_bad_memcard_title (below), the same family as
+;       table.s's __runtime_error_not_table. The offending value is
+;       printed before the halt.
+;   This closes the write-side blind spot: a Lua string in this VM
+;   cannot carry a zero word past its terminator, so an ID with an
+;   interior zero word could previously only be written raw via
+;   memcard.save(value, position) at positions -5..-24. The table form
+;   writes all 20 words verbatim -- and memcard.title(memcard.title())
+;   is a bit-exact no-op round trip, the ID update pattern.
+;
+;   ANYTHING ELSE (number, boolean, nil, function): the same runtime
+;   error. This is new coverage, not a regression: the old body fed the
+;   argument to __unbox_string unvalidated, so a wrong-type write was
+;   undefined behavior; the dispatch turns that into a loud trap.
+;
+; CIF DROPPED -- CHARACTERS ARE STORED RAW NOW: the string path's copy
+; loop used to CIF each character into a float before its store, so the
+; card words held float encodings of char codes. The title block is an
+; ID field, so both directions are bit-exact word copies now: characters
+; go in as the same raw words this VM's own internal string
+; representation uses (one word per character -- see
+; __builtin_string_len; NOT a packed byte string, and no longer a float
+; encoding either), and __builtin_vircon32_memcard_get_title above
+; reads them back verbatim (each word CIF'd into its integer value as a
+; table element). The table path's per-element CFI is the same word
+; convention arriving from numbers instead of characters.
 ;
 ; COMPATIBILITY NOTE: cards written by the pre-drop writer carry float
 ; bit patterns in their title words. memcard.title() now reports those
@@ -1421,37 +1466,74 @@ _memcard_get_title_done:
 ; them as the floats they are. A card still carrying an old-format title
 ; should be re-titled once before its title is used as an ID.
 ;
-; WRITE SHAPE UNCHANGED: the copy still stops at STR's OWN NUL terminator
-; -- a short Lua string's buffer must not be read past its end -- and
-; zero-pads the remainder of the 20. Consequence: an ID containing a
-; zero word mid-stream cannot be written through this form at all (a Lua
-; string in this VM cannot carry one past its terminator); those words
-; must be written raw via memcard.save(value, position) at positions
-; -5..-24, which memcard.title() then reads back verbatim.
+; STRING-PATH WRITE SHAPE UNCHANGED: the copy still stops at STR's OWN
+; NUL terminator -- a short Lua string's buffer must not be read past
+; its end -- and zero-pads the remainder of the 20. An ID containing a
+; zero word mid-stream cannot be written through the STRING form (a Lua
+; string in this VM cannot carry one past its terminator); use the table
+; form -- or raw memcard.save(value, position) at positions -5..-24,
+; which memcard.title() then reads back verbatim.
 ;
 ; NOTE: 20 is a LITERAL here, not the symbolic VIRCON32_MEMCARD_TITLE_
 ; DISPLAY_WORDS constant -- emit_variable_map() in emit.c only exports
 ; BASE/DATA_BASE/CURSOR_ADDR/END as %defines for the assembler, not word-
 ; count constants. If a future change adds an export for this one, this
-; is a good spot to switch it over.
+; is a good spot to switch it over (and the table path's two 20s and the
+; getter's two should follow).
 ;
 ; Stack layout relative to BP:
-; [BP+2]: title string (boxed, ROM or RAM)
+; [BP+2]: title -- a boxed string (ROM or RAM) or a boxed table
 ;
 ; Returns: R0 = BOXED_NIL
 ;
-; Truncates to 20 characters if the string is longer; zero-pads the
-; remainder of the 20 if shorter.
+; STRING path: truncates to 20 characters if the string is longer;
+; zero-pads the remainder of the 20 if shorter. TABLE path: elements
+; 1..20 only, nil/absent = zero pad.
 ;
-; Register use: R1 = source pointer (from __unbox_string). R2 = dest
-; pointer, starts at VIRCON32_MEMCARD_BASE. R3 = characters written so
-; far (0-20). R4/R5 are per-iteration scratch.
+; Register use: STRING path -- R1 = source pointer (from __unbox_string),
+; R2 = dest pointer (starts at VIRCON32_MEMCARD_BASE), R3 = characters
+; written so far (0-20), R4/R5 per-iteration scratch; no CALLs on that
+; path, so plain registers are safe. TABLE path -- __builtin_table_get
+; callee-saves only R1-R5 and clobbers R6-R8, so per this file's standing
+; rule nothing the loop needs is trusted to survive a CALL in a plain
+; register: the 1..20 element index lives in stack slot [BP-1], the table
+; itself is the caller's [BP+2] (stable across CALLs), and the
+; destination address is recomputed from the index each iteration.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 __builtin_vircon32_memcard_title:
     PUSH  BP
     MOV   BP, SP
 
+    ;; --- 0. Tag dispatch: string or table? A non-literal argument's ---
+    ;; --- type is a runtime property, so this is decided here, not in ---
+    ;; --- the emitter. The dispatch doubles as the write form's first  ---
+    ;; --- ever argument validation -- a wrong type used to reach       ---
+    ;; --- __unbox_string unvalidated.                                   ---
+    MOV   R1, [BP+2]
+    AND   R1, BOXED_DATA
+    IEQ   R1, BOXED_TABLE
+    JT    R1, _memcard_title_table_init
+
+    MOV   R1, [BP+2]
+    AND   R1, BOXED_DATA
+    IEQ   R1, BOXED_ROMSTRING
+    JT    R1, _memcard_title_string_path
+
+    MOV   R1, [BP+2]
+    AND   R1, BOXED_DATA
+    IEQ   R1, BOXED_RAMSTRING
+    JF    R1, _memcard_title_arg_error   ; number/function/... -> error
+
+    ;; nil/false/true share the RAM-string tag with payload < 4 -- only
+    ;; payload >= 4 is a real RAM string (same check as __builtin_eq in
+    ;; string.s and __table_get_non_table in table.s).
+    MOV   R1, [BP+2]
+    AND   R1, BOXED_PAYLOAD
+    ILT   R1, 4
+    JT    R1, _memcard_title_arg_error
+
+_memcard_title_string_path:
     MOV   R0, [BP+2]
     CALL  __unbox_string           ; R0 = raw char-array address
     MOV   R1, R0                   ; R1 = source pointer
@@ -1490,6 +1572,129 @@ _memcard_title_done:
     MOV   SP, BP
     POP   BP
     RET
+
+;; ---------------------------------------------------------------------------
+;; TABLE path: elements 1..20 of the caller's table become the 20 title
+;; words, one __builtin_table_get per word -- the mirror of the read
+;; form's one __builtin_table_set per word. The table is the caller's
+;; [BP+2] (stable across CALLs); the 1-based element index lives in
+;; stack slot [BP-1] because table_get callee-saves only R1-R5 and
+;; clobbers R6-R8 -- nothing the loop needs is trusted to survive a
+;; CALL in a plain register, this file's standing rule.
+;; ---------------------------------------------------------------------------
+_memcard_title_table_init:
+    MOV   R1, 1
+    PUSH  R1                            ; [BP-1] = element index (1-based)
+
+_memcard_title_table_loop:
+    MOV   R1, [BP-1]
+    IGT   R1, 20
+    JT    R1, _memcard_title_done       ; SP reset below BP happens via
+                                       ; MOV SP,BP at _memcard_title_done
+                                       ; -- the [BP-1] slot is reclaimed
+    ;; t[i] via __builtin_table_get: [BP+3] = table, [BP+2] = key. The
+    ;; key is pushed as a real Lua number (CIF of the index) -- a raw
+    ;; integer pushed bare would CFI (float-read) to 0, same reason as
+    ;; the getter's keys.
+    MOV   R1, [BP+2]
+    PUSH  R1                            ; table (boxed)
+    MOV   R1, [BP-1]
+    CIF   R1                            ; key as a real Lua number
+    PUSH  R1
+    CALL  __builtin_table_get
+    IADD  SP, 2                         ; R0 = t[i] (BOXED_NIL if absent)
+
+    ;; absent element -> zero word, the table form's zero-pad
+    MOV   R1, R0
+    IEQ   R1, BOXED_NIL
+    JT    R1, _memcard_title_store_zero
+
+    ;; numbers are raw float bits; every other type is NaN-boxed. The
+    ;; same "is it a number" test table.s's array path uses.
+    MOV   R1, R0
+    AND   R1, NAN_VALUE
+    IEQ   R1, NAN_VALUE
+    JT    R1, _memcard_title_elem_error
+
+    ;; number -> its integer bits: the inverse of the read form's
+    ;; per-element CIF, so a value read from memcard.title() round-trips
+    ;; bit-exactly, signed words included.
+    CFI   R0
+    JMP   _memcard_title_store_word
+
+_memcard_title_store_zero:
+    MOV   R0, 0
+
+_memcard_title_store_word:
+    MOV   R1, VIRCON32_MEMCARD_BASE     ; dest = BASE + (i-1), recomputed
+    MOV   R2, [BP-1]                    ; from the index each iteration
+    IADD  R1, R2
+    ISUB  R1, 1
+    MOV   [R1], R0
+
+    MOV   R1, [BP-1]
+    IADD  R1, 1
+    MOV   [BP-1], R1
+    JMP   _memcard_title_table_loop
+
+;; --- runtime error: the argument is neither a string nor a table ---
+;; --- (R0 = the offending argument for the panic below)             ---
+_memcard_title_arg_error:
+    MOV   R0, [BP+2]
+    JMP   __runtime_error_bad_memcard_title
+
+;; --- runtime error: t[i] holds a non-number, non-nil value ---
+;; --- (R0 = the offending element, still untouched above)  ---
+_memcard_title_elem_error:
+    JMP   __runtime_error_bad_memcard_title
+
+
+; ============================================================================
+; __runtime_error_bad_memcard_title: panic for a memcard.title(...) write
+; whose argument is neither a string nor a table, or whose table argument
+; holds a non-number element. Same family as table.s's
+; __runtime_error_not_table and exec.s's __runtime_error_not_callable: red
+; screen, PANIC banner, message, the offending value, then __panic_halt.
+; Never returns -- no frame unwinding needed.
+; Incoming: R0 = the offending value.
+; ============================================================================
+__runtime_error_bad_memcard_title:
+    PUSH  BP
+    MOV   BP, SP
+    ISUB  SP, 1
+    MOV   [BP-1], R0                ; the value that couldn't be a title
+
+    MOV   R0, 0xFF000080            ; A=FF, B=00, G=00, R=80 (see hex_to_v32_color)
+    OUT   GPU_ClearColor, R0
+    OUT   GPU_Command, GPUCommand_ClearScreen
+
+    MOV   R0, 20
+    PUSH  R0
+    MOV   R0, 0
+    PUSH  R0
+    MOV   R0, __const_str_panic_banner
+    OR    R0, BOXED_ROMSTRING
+    PUSH  R0
+    CALL  __builtin_print
+
+    MOV   R0, 20
+    PUSH  R0
+    MOV   R0, 20
+    PUSH  R0
+    MOV   R0, __const_str_err_bad_memcard_title
+    OR    R0, BOXED_ROMSTRING
+    PUSH  R0
+    CALL  __builtin_print
+
+    MOV   R0, 20
+    PUSH  R0
+    MOV   R0, 40
+    PUSH  R0
+    MOV   R0, [BP-1]
+    PUSH  R0
+    CALL  __builtin_print
+
+    JMP   __panic_halt
 
 ;; ============================================================================
 ;; __builtin_vircon32_memcard_append: memcard.save(value) with NO position

@@ -40,6 +40,9 @@ __const_str_err_not_table:
 __const_str_err_oom:
     string "RUNTIME ERROR: OUT OF MEMORY -- HEAP WORDS USED:"
 
+__const_str_err_bad_memcard_title:
+    string "RUNTIME ERROR: memcard.title() MUST BE STRING OR INDEXED TABLE"
+
 __const_str_pause:
     string "- PAUSED -"
 

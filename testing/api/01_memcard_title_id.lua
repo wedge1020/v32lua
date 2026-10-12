@@ -19,6 +19,18 @@
 --@ back as its signed-32-bit value (negative). Comparing two IDs is an
 --@ element-wise loop, which Test 04/Test 05 lock in.
 --@
+--@ WRITE FORM TAKES A STRING OR A TABLE: memcard.title(t) is the
+--@ write-side mirror of the read -- elements 1..20 are the 20 title
+--@ words (each number CFI'd to its integer bits: 77 writes 'M', -1
+--@ writes 0xFFFFFFFF), absent elements are the zero-pad, elements past
+--@ 20 are ignored. The last three tests exercise it: the bit-exact
+--@ round trip memcard.title(memcard.title()), an ID with an interior
+--@ zero word written WITHOUT raw memcard.save (impossible through the
+--@ string form), and the signed-word round trip. A non-number element
+--@ or a non-string/non-table argument is a runtime panic, not a silent
+--@ fallback -- untestable in a self-checking cart since the panic
+--@ halts, so it's spec, not a test here.
+--@
 --@ Split from the addressing/layout half (00_memcard_basic.lua) purely
 --@ because of screen height (640x360): the two together are more
 --@ checks than one screen can show. Owns the title positions -24..-5
@@ -113,6 +125,46 @@ function test_memcard_title_id()
     end
     number_result06 = empty_ok and 1 or 0  -- Expected: 1
     __rawasm__("__debug06:")
+
+    -- === Test 07: ID ROUND TRIP through the table write form -- write ===
+    -- === the read form's own result back and the 20 words reproduce. ===
+    -- === This check could not even RUN under the string-only writer ===
+    -- === (its argument would have had to be a string). The title here ===
+    -- === deliberately carries an interior zero ('ABCDE' with word 2 ===
+    -- === punched to 0), so the round trip also proves a zero word and ===
+    -- === the words PAST it survive the full read->write->read cycle ===
+    memcard.title("ABCDE")
+    memcard.save(0, -23)
+    local a07 = memcard.title()
+    memcard.title(a07)               -- table write: all 20 words verbatim
+    local b07 = memcard.title()
+    local rt_ok = true
+    for i = 1, 20 do
+        if a07[i] ~= b07[i] then
+            rt_ok = false
+        end
+    end
+    number_result07 = rt_ok and 1 or 0  -- Expected: 1
+    __rawasm__("__debug07:")
+
+    -- === Test 08: direct table construction -- an ID with an interior ===
+    -- === zero written WITHOUT touching raw memcard.save (the string ===
+    -- === form cannot express this at all): elements ARE the word values, ===
+    -- === and absent elements 6..20 are the zero-pad ===
+    memcard.title({65, 0, 67, 68, 69})
+    local t08 = memcard.title()
+    number_result08 = (t08[1] == 65 and t08[2] == 0 and t08[3] == 67 and
+                       t08[4] == 68 and t08[5] == 69 and t08[20] == 0) and 1 or 0  -- Expected: 1
+    __rawasm__("__debug08:")
+
+    -- === Test 09: signed word round trip -- element -1 writes the raw ===
+    -- === word 0xFFFFFFFF (CFI of -1.0), and the read form's signed ===
+    -- === convention reports it back as -1: every 32-bit word pattern ===
+    -- === is reachable through the table form, in both directions ===
+    memcard.title({-1})
+    local t09 = memcard.title()
+    number_result09 = (t09[1] == -1 and t09[2] == 0 and t09[20] == 0) and 1 or 0  -- Expected: 1
+    __rawasm__("__debug09:")
 end
 
 function main()
@@ -127,6 +179,9 @@ function main()
     print(  0, 100, "T04 == identity= "       .. number_result04)
     print(  0, 120, "T05 elem compare= "      .. number_result05)
     print(  0, 140, "T06 empty title= "       .. number_result06)
+    print(  0, 160, "T07 table roundtrip= "   .. number_result07)
+    print(  0, 180, "T08 table w/ zero= "      .. number_result08)
+    print(  0, 200, "T09 signed word= "        .. number_result09)
 
     ioports.gpu.sync()
 end
@@ -140,4 +195,7 @@ number_result03: 1.0000
 number_result04: 0.0000
 number_result05: 1.0000
 number_result06: 1.0000
+number_result07: 1.0000
+number_result08: 1.0000
+number_result09: 1.0000
 ]]
