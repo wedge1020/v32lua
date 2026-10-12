@@ -121,7 +121,7 @@ function behind it. A function of your own with the same name (`spr`,
 | `memcard.save(v [, pos])`, `memcard.load([pos])` | v | Reads/writes one word on the memory card. [Details](#memory-card-memcard) |
 | `memcard.load_table(pos)` | table / nil | Loads a table saved with `memcard.save(t)`. |
 | `memcard.title(str)` | nil | Sets the card's title/id |
-| `memcard.title()` | string | Gets the card's title/id |
+| `memcard.title()` | table | Gets the card's title/id |
 | `memcard[pos]`, `memcard[pos] = v` | | Same as `load` / `save`. |
 | `system.wait()` / `system.halt()` | nil | `WAIT` for the next frame / `HLT`. [Details](#system-system) |
 | `system.date()` / `system.time()` | string, 3 numbers | `"YYYY-MM-DD", y, m, d` / `"HH:MM:SS", h, m, s`. |
@@ -1455,7 +1455,7 @@ memcard.load(position)          -> value   (raw read, exactly 1 word)
 memcard.load()                  -> value   (position 0)
 memcard.load_table(position)    -> table or nil   (see Tables, below)
 memcard.title(str)              -> nil     (sets the 20-word title/id)
-memcard.title()                 -> string  (gets the 20-word title/id)
+memcard.title()                 -> table   (gets the 20-word title/id)
 
 memcard[position]                  == memcard.load(position)
 memcard[position] = value          == memcard.save(value, position)
@@ -1537,10 +1537,10 @@ circulation, each with its own title.
 memcard.title("My Save File")
 ```
 
-**memcard.title() -> string**
+**memcard.title() -> table**
 
 Gets  the  memory  card's  title/id  —  20  characters,  one  word  per
-character,  matching this  VM's internal  string representation.  This is
+character,  matching  this VM's  indexed  table  representation. This  is
 independent of any `--#title` cart hint, which names the *cartridge*, not
 the  *save  data*  — a  single  cart  can  have  many memory  cards  in
 circulation, each with its own title.
@@ -1599,7 +1599,7 @@ words as a pair count and garbage keys/values.
 
 ```
 0x30000000  +-------------------------------------+  position -24
-            |  title: 20 characters               |
+            |  title/id: 20 words                 |
             |  (memcard.title() writes here)      |  position -5
             +-------------------------------------+
             |  reserved (3 words, unused)          |  position -4 .. -2
@@ -1616,9 +1616,7 @@ words as a pair count and garbage keys/values.
 (`0x30000018`). Negative positions reach backward into the title/metadata
 block — reachable, but only by consciously going negative. Note the
 metadata region (4 words, positions -4..-1) is separate from the title
-block (20 words, positions -24..-5) — previously the metadata was carved
-out of the *last 4 words of the title itself*, capping the usable title
-at 16 characters; the full 20 is available now.
+block (20 words, positions -24..-5).
 
 | Constant | Value | Meaning |
 |---|---|---|

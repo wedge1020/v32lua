@@ -28,10 +28,11 @@
 --@ written against: reading a title word through memcard.load()/bracket
 --@ at a negative position returns the RAW BIT PATTERN interpreted as a
 --@ float -- 'M' (77) is the denormal bits 0x0000004D, NOT the number
---@ 77. Characters are legible through the string API (memcard.title()
---@ and string.* on its result), so that is where Section 3 checks them.
---@ Zero pad words are all-zero bits either way, so checks against 0
---@ survive unchanged.
+--@ 77. Characters are legible through the read form instead:
+--@ memcard.title() with no argument returns the block as a TABLE whose
+--@ element i is title word i-1's integer value as a Lua number ('M' ->
+--@ 77), so that is where Section 3 checks them. Zero pad words are
+--@ all-zero bits either way, so checks against 0 survive unchanged.
 
 function test_memcard_layout()
     -- ------------------------------------------------------------------
@@ -98,14 +99,15 @@ function test_memcard_layout()
     __rawasm__("__debug_title_write:")
 
     -- === Test 08: every character landed correctly ===
-    -- (Checked through the read form: title words are RAW character
-    -- words now, so comparing memcard[-24 + i] against string.byte()
-    -- would compare a denormal bit pattern against the char-code number
-    -- and fail. The string API is where characters are legible.)
+    -- (Checked through the read form's TABLE: title words are RAW
+    -- character words now, so comparing memcard[-24 + i] against
+    -- string.byte() would compare a denormal bit pattern against the
+    -- char-code number and fail. The read form's element i IS that
+    -- word's integer value as a number, so 'M' is 77 again.)
     local reread08 = memcard.title()
     local title_ok = true
     for i = 1, string.len(title) do
-        if string.byte(reread08, i) ~= string.byte(title, i) then
+        if reread08[i] ~= string.byte(title, i) then
             title_ok = false
         end
     end
@@ -124,12 +126,13 @@ function test_memcard_layout()
     number_result09 = pad_ok and 1 or 0  -- Expected: 1
     __rawasm__("__debug09:")
 
-    -- === Test 10: title's first character, via the read form ===
+    -- === Test 10: title's first character, via the read form's table ===
     -- (memcard.load(-24) used to return 77 under the old float encoding;
     -- with raw words it returns the denormal bits 0x0000004D instead.
-    -- Both spellings still hit the same address -- the read form is now
-    -- where the character itself is checkable.)
-    number_result10 = string.byte(memcard.title(), 1)  -- Expected: 77 (ASCII 'M')
+    -- Both spellings still hit the same address -- the read form's
+    -- element 1 carries the same information the old load did.)
+    local t10 = memcard.title()
+    number_result10 = t10[1]  -- Expected: 77 (ASCII 'M')
     __rawasm__("__debug10:")
 
     -- ------------------------------------------------------------------

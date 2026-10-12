@@ -1285,54 +1285,56 @@ _vircon32_volmask_done:
 
 ; ============================================================================
 ; __builtin_vircon32_memcard_get_title: read the memcard's title block back
-; as a Lua string -- the no-argument memcard.title() form
+; as a Lua TABLE -- the no-argument memcard.title() form
 ; ============================================================================
 ; Takes NO arguments.
 ;
-; Returns: R0 = a fresh heap-allocated string (boxed RAMSTRING) holding
-; ALL VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS (20) title words, or BOXED_NIL
-; on heap exhaustion.
+; Returns: R0 = a fresh table whose elements 1..20 are ALL
+; VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS (20) title words, in order --
+; element i is the word at VIRCON32_MEMCARD_BASE + (i-1), i.e. memcard
+; position -24 + (i-1).
 ;
 ; THE TITLE BLOCK IS AN ID FIELD, NOT DISPLAY TEXT: this is a FIXED-WIDTH
-; transaction. Exactly 20 words are copied, verbatim, every call -- no
-; early exit at a zero word, no conversion. Zero words come back as
-; embedded NUL characters, physically present in the returned buffer.
+; transaction. All 20 words are read, verbatim, every call -- no early
+; exit at a zero word, no conversion loss. Each element is its word CIF'd:
+; CIF reads the register's content as an INTEGER and yields that value as
+; a Lua number, so 'M' (raw bits 0x0000004D) becomes the number 77, and a
+; zero pad word becomes 0. A plain number every time, whatever the bits
+; resemble -- CIF never consults the NaN-box tags, so a word whose bits
+; happen to look like a string/boolean/nil encoding still comes back as a
+; number. (Words >= 0x80000000 come back negative: 32-bit signed.)
 ;
-; BIT-EXACT, NO CFI: words are copied raw, pairing with
-; __builtin_vircon32_memcard_title now that its per-character CIF is
-; dropped -- title(str) then title() round-trips a string ID word-for-word.
-; It also means words written by ANY other means (memcard.save(value,
-; position) at positions -5..-24, or an external card formatter) come
-; back byte-identical, which is the whole point of treating the block as
-; an ID. The old float encoding is gone from both directions; a card
-; still carrying float-pattern words from the pre-CIF-drop writer should
-; be re-titled before its title is used as an ID (those words read back
-; as garbage characters now).
+; WHY A TABLE AND NOT A STRING: this VM's strings are NUL-terminated and
+; every string operation (string.len, ==, .., print, string.sub) scans to
+; the first zero word -- a string return made all words after the first
+; zero invisible, so two IDs differing only there were indistinguishable.
+; A table has no such blind spot: zero words are visible element 0s, and
+; words past them are ordinary comparable elements. It also restores the
+; readable-char-code property the raw-words writer change took away from
+; memcard.load(-24): element 1 for a title starting 'M' is 77.
 ;
-; NUL-TERMINATION CAVEAT: the buffer physically holds all 20 words plus a
-; terminator, but this VM's string operations are NUL-scanning --
-; string.len, ==, .., print, string.sub all see only the prefix before
-; the first zero word. Two IDs differing only after a zero word are
-; indistinguishable through those operations; the full-width content is
-; observable by writing it back to a card (memcard.title of it preserves
-; it up to the first embedded zero -- see the writer's note) or by
-; reading the card raw. A fresh/never-written card reads back as a
-; string whose 20 buffer words are all zero -- string.len reports 0.
+; == ON TABLES IS IDENTITY in this VM (only strings compare by content):
+; two reads of the same title are different table objects and never ==
+; each other. ID checks are an element-wise loop in Lua -- see the
+; title/ID unit test for the pattern.
 ;
-; FIXED ALLOCATION: exactly 21 words per call -- 20 title words + the NUL
-; terminator. No count pass; the width is a compile-time constant. This
-; VM's __malloc has no free(), so the allocation is permanent, but 21
-; words is the true cost of the transaction -- there is no smaller exact
-; answer. OOM returns BOXED_NIL, the string runtime's convention
-; (string.char/string.sub/strcat), never a half-built string.
+; NO NIL-OOM PATH: __builtin_table_new and __builtin_table_set both halt
+; through __oom_handler on heap exhaustion and never return 0 -- the same
+; contract __builtin_vircon32_memcard_load_table already has. This
+; routine returns a valid table or never returns at all.
 ;
-; Register use: R1 = card read pointer, starts at VIRCON32_MEMCARD_BASE.
-; R3 = heap pointer after the allocation, kept for the return. R4 =
-; words-remaining counter (assigned after the CALL, so it needn't survive
-; it). R5 = heap write pointer. R2 = per-iteration scratch. R6 unused.
-; No stack locals are needed.
+; Register/stack discipline: __builtin_table_set is called 20 times, so
+; per this file's standing rule nothing the loop needs is trusted to
+; survive a CALL in a plain register -- the table ([BP-1]), the card read
+; pointer ([BP-2]), and the 1-based element index ([BP-3]) all live in
+; stack slots, reloaded/rewritten around every iteration, the same shape
+; as load_table's restore loop. (table_set's own header says it preserves
+; R1-R8; that is deliberately NOT relied on here.) The KEY is pushed as a
+; real Lua number -- CIF of the index -- because table_set treats its key
+; as a boxed value; a raw integer pushed bare would CFI (float-read) to
+; 0. Same reason node_table.c's constructor CIFs its array keys.
 ;
-; NOTE: 20 (and 21) are LITERALS here for the same reason as in
+; NOTE: 20 is a LITERAL here for the same reason as in
 ; __builtin_vircon32_memcard_title below -- emit_variable_map() in
 ; emit.c only exports BASE/DATA_BASE/CURSOR_ADDR/END as %defines for the
 ; assembler, not word-count constants. If a future change adds an export
@@ -1347,49 +1349,51 @@ __builtin_vircon32_memcard_get_title:
     PUSH  BP
     MOV   BP, SP
 
-    ;; --- 1. Allocate the fixed 21 words: 20 title words + NUL ---
-    MOV   R2, 21
-    PUSH  R2                          ; __malloc arg: size in WORDS
-    CALL  __malloc
-    IADD  SP, 1
-    MOV   R3, R0                      ; R3 = heap pointer (kept for return)
+    ;; --- 1. Fresh table (fatal on OOM via __oom_handler -- no branch here)
+    CALL  __builtin_table_new
+    PUSH  R0                            ; [BP-1] = the new table
 
-    ;; --- 2. OOM check via scratch -- R3 must stay intact ---
-    MOV   R2, R3
-    IEQ   R2, 0
-    JT    R2, _memcard_get_title_oom
+    ;; --- 2. Loop state in stack slots, not registers ---
+    MOV   R1, VIRCON32_MEMCARD_BASE
+    PUSH  R1                            ; [BP-2] = card read pointer
+    MOV   R1, 1
+    PUSH  R1                            ; [BP-3] = element index (1-based)
 
-    ;; --- 3. Copy ALL 20 title words verbatim -- no CFI, no early exit ---
-    MOV   R1, VIRCON32_MEMCARD_BASE   ; R1 = card read pointer
-    MOV   R5, R3                      ; R5 = heap write pointer
-    MOV   R4, 20                      ; R4 = words remaining
+_memcard_get_title_loop:
+    MOV   R1, [BP-3]
+    IGT   R1, 20
+    JT    R1, _memcard_get_title_done
 
-_memcard_get_title_copy_loop:
-    MOV   R2, R4                      ; scratch copy -- IEQ is destructive
-    IEQ   R2, 0
-    JT    R2, _memcard_get_title_copy_done
-    MOV   R2, [R1]
-    MOV   [R5], R2                    ; raw word, bit-exact
+    ;; --- 3. One __builtin_table_set per word: [BP+4]=table,
+    ;; [BP+3]=key, [BP+2]=value -- same stack shape as load_table's
+    ;; restore loop.
+    MOV   R1, [BP-1]
+    PUSH  R1                            ; table
+    MOV   R1, [BP-3]
+    CIF   R1                            ; key as a real Lua number
+    PUSH  R1
+    MOV   R1, [BP-2]
+    MOV   R1, [R1]                      ; the raw title word
+    CIF   R1                            ; ... its integer value, as a number
+    PUSH  R1
+    CALL  __builtin_table_set
+    IADD  SP, 3
+
+    MOV   R1, [BP-2]
     IADD  R1, 1
-    IADD  R5, 1
-    ISUB  R4, 1
-    JMP   _memcard_get_title_copy_loop
-
-_memcard_get_title_copy_done:
-    MOV   R2, 0
-    MOV   [R5], R2                    ; NUL terminator (word 21)
-
-    MOV   R0, R3                      ; return heap pointer
-    OR    R0, BOXED_RAMSTRING         ; boxed as a RAM string
-    JMP   _memcard_get_title_done
-
-_memcard_get_title_oom:
-    MOV   R0, BOXED_NIL               ; OOM, matching string.s convention
+    MOV   [BP-2], R1
+    MOV   R1, [BP-3]
+    IADD  R1, 1
+    MOV   [BP-3], R1
+    JMP   _memcard_get_title_loop
 
 _memcard_get_title_done:
+    MOV   R0, [BP-1]                    ; return the table
+
     MOV   SP, BP
     POP   BP
     RET
+
 
 ; ============================================================================
 ; __builtin_vircon32_memcard_title: set the memcard's title, one word per
@@ -1407,13 +1411,15 @@ _memcard_get_title_done:
 ; raw words this VM's own internal string representation uses (one word
 ; per character -- see __builtin_string_len; NOT a packed byte string, and
 ; no longer a float encoding either), and
-; __builtin_vircon32_memcard_get_title above copies them back verbatim.
+; __builtin_vircon32_memcard_get_title above reads them back verbatim
+; (each word CIF'd into its integer value as a table element).
 ;
 ; COMPATIBILITY NOTE: cards written by the pre-drop writer carry float
-; bit patterns in their title words. memcard.title() now reads those back
-; as raw garbage characters, and memcard.load(-5..-24) reads them as
-; denormal floats. A card still carrying an old-format title should be
-; re-titled once before its title is used as an ID.
+; bit patterns in their title words. memcard.title() now reports those
+; words' integer values (e.g. 0x42820000 for a CIF'd 'A' reads back as
+; the large number 1111636864, not 65), and memcard.load(-5..-24) reads
+; them as the floats they are. A card still carrying an old-format title
+; should be re-titled once before its title is used as an ID.
 ;
 ; WRITE SHAPE UNCHANGED: the copy still stops at STR's OWN NUL terminator
 ; -- a short Lua string's buffer must not be read past its end -- and

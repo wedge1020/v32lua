@@ -1,10 +1,10 @@
 #include "v32lua.h"
 
 // ============================================================================
-// intrinsics_vircon32_memcard.c
+// intrinsics/memcard.c
 //
 // Native Vircon32 persistent memory card: memcard.load()/save()/title()/
-// load_table(), plus memcard[position] as bracket-index sugar for
+// load_table(),  plus  memcard[position]   as  bracket-index  sugar  for
 // load/save.
 //
 //   memcard.save(value, position)   -> value   (raw write, exactly 1 word)
@@ -13,97 +13,102 @@
 //   memcard.load()                  -> value   (position 0, unchanged)
 //   memcard.load_table(position)    -> table or nil  (see below)
 //   memcard.title(str)              -> nil     (writes the 20-word title)
-//   memcard.title()                 -> string  (reads all 20 title words)
+//   memcard.title()                 -> table   (reads all 20 title words)
 //   memcard[position]                  == memcard.load(position)
 //   memcard[position] = value          == memcard.save(value, position)
 //
-// ADDRESSING: this VM is word-addressed throughout -- "[Rd+N]" always
-// steps by whole words per unit of N, the same convention __builtin_
-// vircon32_btnp's prev-state table uses (see vircon32.s). POSITION follows
-// that convention too: position 0 is VIRCON32_MEMCARD_DATA_BASE (the first
-// word past the 20-word title block), each +1 is the next word, and
-// -1..-20 reach back into the title/metadata region -- reachable, but only
-// by consciously going negative.
+// ADDRESSING: this  VM is  word-addressed throughout --  "[Rd+N]" always
+// steps by  whole words per  unit of  N, the same  convention __builtin_
+// vircon32_btnp's  prev-state  table  uses  (see  vircon32.s).  POSITION
+// follows that convention too:  position 0 is VIRCON32_MEMCARD_DATA_BASE
+// (the first  word past the  20-word title block),  each +1 is  the next
+// word,  and  -1..-20  reach  back into  the  title/metadata  region  --
+// reachable, but only by consciously going negative.
 //
 // TWO DIFFERENT SAVE FORMS, on purpose:
 //
-// - memcard.save(value, position) / memcard[position] = value -- the
-//   low-level primitive. Writes exactly the raw boxed VALUE to exactly one
-//   word, no tag, no bookkeeping. Same address either time you write the
-//   same position; you are fully responsible for knowing what you put
-//   where. This is what memcard[pos] always compiles to.
+
+// - memcard.save(value,  position) /  memcard[position] =  value --  the
+//   low-level primitive. Writes  exactly the raw boxed  VALUE to exactly
+//   one word, no tag, no bookkeeping. Same address either time you write
+//   the same  position; you are  fully responsible for knowing  what you
+//   put where. This is what memcard[pos] always compiles to.
 //
-// - memcard.save(value) -- no position -- auto-appends through a
-//   PERSISTENT ON-CARD cursor stored at VIRCON32_MEMCARD_CURSOR_ADDR (the
-//   memcard's own last title word, NOT Vircon32 RAM, so it survives a
-//   reboot: repeated no-position saves keep extending a log instead of
+// - memcard.save(value)  --  no  position   --  auto-appends  through  a
+//   PERSISTENT  ON-CARD  cursor stored  at  VIRCON32_MEMCARD_CURSOR_ADDR
+//   (the memcard's own last title word, NOT Vircon32 RAM, so it survives
+//   a reboot: repeated no-position saves keep extending a log instead of
 //   overwriting position 0 every run). This form is type-aware:
 //     - a real Lua string is written as [TAG_STRING][length][char words...]
 //     - a TABLE is written as [TAG_TABLE][pair_count][k1][v1]...[kN][vN]
 //       -- see "TABLES" below
 //     - everything else (number/boolean/nil/function) is written as
 //       [TAG_SCALAR][raw value]
-//   Entirely handled by __builtin_vircon32_memcard_append in vircon32.s;
-//   see that routine for the exact tag layout. The cursor itself is
-//   readable at any time as memcard.load(-1) / memcard[-1] -- no separate
-//   "how much have I saved" accessor was added, since that position
-//   already does the job.
 //
-// memcard.load()/memcard.load(position) do NOT understand the
-// [tag][...] layout the auto-append form writes -- both always do a raw
-// single-word read, same as before. Reading back a scalar or string entry
-// means reading its tag word yourself (memcard.load(N)) and branching on
-// it, or simply knowing what you wrote there. Tying memcard.load()'s
-// no-position case to "read the next tagged entry" was considered and
-// deliberately left out of this pass -- flagged for confirmation before
+//   Entirely handled by __builtin_vircon32_memcard_append in vircon32.s;
+//   see that  routine for  the exact  tag layout.  The cursor  itself is
+//   readable  at  any  time  as memcard.load(-1)  /  memcard[-1]  --  no
+//   separate  "how much  have I  saved" accessor  was added,  since that
+//   position already does the job.
+//
+// memcard.load()/memcard.load(position) do NOT understand the [tag][...]
+// layout the auto-append form writes -- both always do a raw single-word
+// read, same  as before.  Reading back  a scalar  or string  entry means
+// reading its tag  word yourself (memcard.load(N)) and  branching on it,
+// or  simply  knowing  what  you  wrote  there.  Tying  memcard.load()'s
+// no-position case  to "read the  next tagged entry" was  considered and
+// deliberately left out of this  pass -- flagged for confirmation before
 // building it, since it's a real design fork (sequential-read cursor vs.
 // today's fixed "position 0" default) rather than a small addition.
 //
-// TABLES: memcard.save(a_table) (the no-position auto-append form ONLY --
-// memcard.save(a_table, position) still writes a single raw pointer word,
-// same as any other scalar) writes a RAW DUMP of the table's hash-bucket
-// storage: [TAG_TABLE][pair_count][key][value]... one pair per stored
-// entry, walking every bucket in the chain. This is the "dump a struct to
-// a file" approach, not a general recursive serializer -- a key or value
-// that is itself a table/string/function is written as its raw pointer,
-// one level only, with the same within-this-run-only caveat as everything
-// else here (see the safety note below). Nothing about the array part is
-// involved: this compiler's array-part fast path is currently unreachable
-// in practice (see __builtin_table_set_reallocate's TODO in vircon32.s --
-// capacity is always 0), so EVERY table, array-shaped or not, already
-// lives entirely in the hash-bucket chain this walks. There is no
-// "simpler" array case to special-case today.
+// TABLES: memcard.save(a_table)  (the no-position auto-append  form ONLY
+// -- memcard.save(a_table,  position) still writes a  single raw pointer
+// word,  same as  any other  scalar) writes  a RAW  DUMP of  the table's
+// hash-bucket  storage: [TAG_TABLE][pair_count][key][value]...  one pair
+// per  stored  entry,  walking  every  bucket  in  the  chain.  This  is
+// the  "dump a  struct  to a  file" approach,  not  a general  recursive
+// serializer --  a key or  value that is itself  a table/string/function
+// is  written  as  its  raw  pointer, one  level  only,  with  the  same
+// within-this-run-only caveat  as everything  else here (see  the safety
+// note below). Nothing about the array part is involved: this compiler's
+// array-part  fast  path  is  currently  unreachable  in  practice  (see
+// __builtin_table_set_reallocate's  TODO in  vircon32.s  -- capacity  is
+// always 0), so EVERY table, array-shaped or not, already lives entirely
+// in the hash-bucket chain this walks.  There is no "simpler" array case
+// to special-case today.
 //
 // memcard.load_table(position) is the matching reconstruction: validates
-// the tag, then rebuilds a fresh table via __builtin_table_new plus one
-// __builtin_table_set per stored pair. POSITION is required -- there's no
-// sensible "position 0" default for something whose size in words isn't
-// known until the entry itself is read. Returns nil if the tag at
-// POSITION isn't TAG_TABLE, rather than misinterpreting unrelated data as
-// a pair count and garbage keys/values.
+// the tag, then rebuilds a  fresh table via __builtin_table_new plus one
+// __builtin_table_set per  stored pair. POSITION is  required -- there's
+// no sensible  "position 0"  default for something  whose size  in words
+// isn't known until the entry itself is  read. Returns nil if the tag at
+// POSITION isn't  TAG_TABLE, rather than misinterpreting  unrelated data
+// as a pair count and garbage keys/values.
 //
-// SAFETY NOTE this compiler does NOT enforce: a number, boolean, or nil
+// SAFETY NOTE this compiler does NOT  enforce: a number, boolean, or nil
 // round-trips correctly forever -- that bit pattern means the same thing
-// on any run. A real Lua string or table saved through the auto-append
-// form (memcard.save(value) with no position) round-trips correctly too --
-// a string's actual characters are copied, and a table's actual key/value
-// PAIRS are copied, restorable with memcard.load_table(). A table, string
-// (when raw-saved via the explicit-position form, bypassing the auto-
-// append form's real handling), or function value -- including any such
-// value found as a KEY or VALUE inside a saved table, since those are not
-// recursively unpacked -- round-trips fine WITHIN the same run (its
-// pointer is still valid) but is meaningless after a fresh boot reads it
-// back from a real memcard, since heap/ROM layout is not guaranteed to
-// match between runs. Stick to numbers/booleans/nil (or real strings/
-// tables of such, via the auto-append form) for anything meant to survive
-// a save/reload.
+// on any run.  A real Lua string or table  saved through the auto-append
+// form (memcard.save(value) with no  position) round-trips correctly too
+// --  a string's  actual characters  are  copied, and  a table's  actual
+// key/value  PAIRS  are  copied, restorable  with  memcard.load_table().
+// A  table,  string  (when  raw-saved via  the  explicit-position  form,
+// bypassing the auto- append form's real handling), or function value --
+// including any such value found as a KEY or VALUE inside a saved table,
+// since those  are not recursively  unpacked -- round-trips  fine WITHIN
+// the same run  (its pointer is still valid) but  is meaningless after a
+// fresh boot reads it back from a real memcard, since heap/ROM layout is
+// not guaranteed  to match  between runs. Stick  to numbers/booleans/nil
+// (or  real strings/  tables  of  such, via  the  auto-append form)  for
+// anything meant to survive a save/reload.
+//
 // ============================================================================
 
-// Clamps the hardware address already sitting in `addr_reg` to
+// Clamps  the   hardware  address  already  sitting   in  `addr_reg`  to
 // [VIRCON32_MEMCARD_BASE, VIRCON32_MEMCARD_END], in place. Shared by the
-// dynamic-position paths of save/load below -- a position computed at
-// runtime (not a compile-time literal) needs this since it can't be range-
-// checked ahead of time the way a literal position can.
+// dynamic-position paths  of save/load below  -- a position  computed at
+// runtime  (not a  compile-time literal)  needs this  since it  can't be
+// range- checked ahead of time the way a literal position can.
+//
 void emit_vircon32_memcard_clamp_addr (int addr_reg)
 {
     int         lbl = get_next_label();
@@ -149,12 +154,12 @@ bool emit_vircon32_memcard_write (ASTNode *val_node, ASTNode *pos_node, int dest
     runtime_req.needs_vircon32 = true;
 
     // ------------------------------------------------------------------
-    // NO POSITION AT ALL: auto-append via the persistent on-card cursor
+    // NO POSITION AT ALL: auto-append  via the persistent on-card cursor
     // (VIRCON32_MEMCARD_CURSOR_ADDR, the last title word). Always a CALL
     // -- the cursor is a runtime, cross-session quantity, never known at
-    // compile time, and __builtin_vircon32_memcard_append also handles
-    // string values (tagged, length-prefixed) so this is the one save
-    // path that isn't limited to a single raw word. Only reachable via
+    // compile time,  and __builtin_vircon32_memcard_append  also handles
+    // string values  (tagged, length-prefixed) so  this is the  one save
+    // path that isn't  limited to a single raw word.  Only reachable via
     // memcard.save(value) -- memcard[pos] = value always has an explicit
     // pos_node, since Lua's bracket syntax has no "no index" form.
     // ------------------------------------------------------------------
@@ -250,10 +255,10 @@ bool emit_vircon32_memcard_write (ASTNode *val_node, ASTNode *pos_node, int dest
 }
 
 // ============================================================================
-// Shared read: memcard.load([POSITION]) and memcard[POS] both funnel
-// through here. pos_node == NULL means "position 0" -- UNLIKE save(),
-// load()'s no-position default was deliberately left unchanged rather
-// than tied to the auto-append cursor; see the header comment block
+// Shared  read: memcard.load([POSITION])  and  memcard[POS] both  funnel
+// through here.  pos_node == NULL  means "position 0" --  UNLIKE save(),
+// load()'s no-position  default was  deliberately left  unchanged rather
+// than  tied to  the auto-append  cursor; see  the header  comment block
 // above. dest_reg == 0 means the result is discarded (a memcard read has
 // no side effect worth keeping on its own, so nothing is emitted then).
 // ============================================================================
@@ -397,7 +402,7 @@ bool emit_vircon32_memcard_load_table_intrinsic (ASTNode *node, int dest_reg)
 }
 
 // ============================================================================
-// memcard.title([STR]) -> string | nil
+// memcard.title([STR]) -> table | nil
 //
 // WRITE form, memcard.title(str): writes STR's characters into the
 // memcard's title region, one raw word per character -- exactly this
@@ -418,22 +423,34 @@ bool emit_vircon32_memcard_load_table_intrinsic (ASTNode *node, int dest_reg)
 // call site.
 //
 // READ form, memcard.title() with NO argument: returns the card's title
-// block as a string -- ALL VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS (20)
-// words, verbatim, via __builtin_vircon32_memcard_get_title (see
-// vircon32.s). The block is an ID field, so the transaction is
-// FIXED-WIDTH: it never stops at a zero word, and zero words come back
-// as embedded NUL characters. Caveat the compiler does NOT enforce: this
-// VM's string operations are NUL-scanning -- string.len, ==, .., print,
-// string.sub all see only the prefix before the first zero word, so two
-// IDs differing only after a zero are indistinguishable through those
-// operations; the full 20-word content lives in the buffer (and on the
-// card), observable by writing it back or reading the card raw. A
-// fresh/never-written card reads back as a 20-zero-word buffer, i.e. "".
-// Returns nil ONLY on heap exhaustion (the runtime routine's OOM path),
-// the same convention string.char()/string.sub()/strcat already follow.
-// Also always a CALL: the title lives on the card -- a cross-session
-// quantity never known at compile time -- and the result has to come
-// off the heap anyway.
+// block as a TABLE -- ALL VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS (20)
+// words, one per element, via __builtin_vircon32_memcard_get_title (see
+// vircon32.s). Elements are Lua 1-based: element i is the title word at
+// position -24 + (i-1), delivered as that word's integer value converted
+// to a Lua number -- 'M' reads back as 77, a zero pad word as 0. The
+// block is an ID field, so the transaction is FIXED-WIDTH: all 20 words
+// every call, zeros included, no early exit.
+//
+// WHY A TABLE AND NOT A STRING: this VM's strings are NUL-terminated and
+// its string operations (string.len, ==, .., print, string.sub) all scan
+// to the first zero word -- a string return made every word after the
+// first zero invisible, so two IDs differing only after a zero word were
+// indistinguishable through the string API. A table has no such blind
+// spot: zero words are visible element 0s and words past them are
+// ordinary comparable elements. (A display string can still be
+// reassembled in Lua from the elements when wanted -- a string.char loop
+// over the elements up to the first zero, for instance.)
+//
+// == ON TABLES IS IDENTITY: this VM only deep-compares strings, so two
+// reads of the same title are different table objects and never ==
+// each other. ID checks are an element-wise loop in Lua -- see the
+// title/ID unit test for the pattern. (The string form's == had the
+// same blind spot in NUL-scan clothing, so nothing was given up.)
+//
+// OOM: there is no nil-return path -- __builtin_table_new and
+// __builtin_table_set halt through __oom_handler on heap exhaustion, the
+// same contract memcard.load_table() already has. The routine returns a
+// valid table or never returns.
 //
 // The two forms mirror memcard.save()'s split: no-argument READ is to
 // memcard.title(str) WRITE what memcard.load() is to
@@ -449,19 +466,18 @@ bool emit_vircon32_memcard_title_intrinsic (ASTNode *node, int dest_reg)
 
     // ------------------------------------------------------------------
     // NO ARGUMENT: read the card's full 20-word title block back as a
-    // string. dest_reg == 0 means the result is discarded -- the read
+    // table. dest_reg == 0 means the result is discarded -- the read
     // has no side effect worth keeping (the routine does nothing beyond
-    // reading fixed card addresses and allocating heap that would be
+    // reading fixed card addresses and building a table that would be
     // immediately abandoned, and this VM has no free()), so nothing is
     // emitted then, the same convention as memcard.load() above.
     // ------------------------------------------------------------------
     if (arg_str == NULL) {
-        // The result is a real Lua string (heap-allocated, boxed
-        // RAMSTRING) -- flag the string runtime, the same way NODE_STRING
-        // does. Currently moot in practice (main.c links the whole
-        // runtime unconditionally), but self-documenting the same way
-        // memcard.load_table()'s needs_tables flag is.
-        runtime_req.needs_strings = true;
+        // Building the result table needs the table runtime linked in --
+        // __builtin_table_new plus 20 __builtin_table_set calls -- the
+        // same genuine dependency memcard.load_table()'s needs_tables
+        // flag documents.
+        runtime_req.needs_tables = true;
 
         if (dest_reg == 0) {
             return true;
@@ -470,7 +486,7 @@ bool emit_vircon32_memcard_title_intrinsic (ASTNode *node, int dest_reg)
         emit_asm("    ;; --- Vircon32 memcard.title() Intrinsic (read) ---");
 
         emit_asm("CALL __builtin_vircon32_memcard_get_title");
-        emit_asm("MOV  R%d, R0 ; memcard.title() returns the card's 20-word title as a string", dest_reg);
+        emit_asm("MOV  R%d, R0 ; memcard.title() returns the card's 20 title words as a table", dest_reg);
 
         return true;
     }
