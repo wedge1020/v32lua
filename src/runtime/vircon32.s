@@ -1283,34 +1283,163 @@ _vircon32_volmask_done:
     POP   BP
     RET
 
-;; ============================================================================
-;; __builtin_vircon32_memcard_title: set the memcard's title, one word per
-;; character, into the full VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS (20) title
-;; block. Metadata (VIRCON32_MEMCARD_METADATA_WORDS, including the cursor at
-;; VIRCON32_MEMCARD_CURSOR_ADDR) now lives in its own separate region right
-;; after the title -- see the header comment block near the top of this
-;; file -- so it's never touched here regardless of title length.
-;; ============================================================================
-;;
-;; NOTE: 20 is a LITERAL here, not the symbolic VIRCON32_MEMCARD_TITLE_
-;; DISPLAY_WORDS constant -- emit_variable_map() in emit.c only exports
-;; BASE/DATA_BASE/CURSOR_ADDR/END as %defines for the assembler, not word-
-;; count constants. If a future change adds an export for this one, this
-;; is a good spot to switch it over.
-;;
-;; Stack layout relative to BP:
-;; [BP+2]: title string (boxed, ROM or RAM)
-;;
-;; Returns: R0 = BOXED_NIL
-;;
-;; Truncates to 20 characters if the string is longer; zero-pads the
-;; remainder of the 20 if shorter. One word per character, matching this
-;; VM's own internal string representation (see __builtin_string_len) --
-;; NOT a packed byte string.
-;;
-;; Register use: R1 = source pointer (from __unbox_string). R2 = dest
-;; pointer, starts at VIRCON32_MEMCARD_BASE. R3 = characters written so
-;; far (0-20). R4/R5 are per-iteration scratch.
+; ============================================================================
+; __builtin_vircon32_memcard_get_title: read the memcard's title block back
+; as a Lua string -- the no-argument memcard.title() form
+; ============================================================================
+; Takes NO arguments.
+;
+; Returns: R0 = a fresh heap-allocated string (boxed RAMSTRING) holding
+; ALL VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS (20) title words, or BOXED_NIL
+; on heap exhaustion.
+;
+; THE TITLE BLOCK IS AN ID FIELD, NOT DISPLAY TEXT: this is a FIXED-WIDTH
+; transaction. Exactly 20 words are copied, verbatim, every call -- no
+; early exit at a zero word, no conversion. Zero words come back as
+; embedded NUL characters, physically present in the returned buffer.
+;
+; BIT-EXACT, NO CFI: words are copied raw, pairing with
+; __builtin_vircon32_memcard_title now that its per-character CIF is
+; dropped -- title(str) then title() round-trips a string ID word-for-word.
+; It also means words written by ANY other means (memcard.save(value,
+; position) at positions -5..-24, or an external card formatter) come
+; back byte-identical, which is the whole point of treating the block as
+; an ID. The old float encoding is gone from both directions; a card
+; still carrying float-pattern words from the pre-CIF-drop writer should
+; be re-titled before its title is used as an ID (those words read back
+; as garbage characters now).
+;
+; NUL-TERMINATION CAVEAT: the buffer physically holds all 20 words plus a
+; terminator, but this VM's string operations are NUL-scanning --
+; string.len, ==, .., print, string.sub all see only the prefix before
+; the first zero word. Two IDs differing only after a zero word are
+; indistinguishable through those operations; the full-width content is
+; observable by writing it back to a card (memcard.title of it preserves
+; it up to the first embedded zero -- see the writer's note) or by
+; reading the card raw. A fresh/never-written card reads back as a
+; string whose 20 buffer words are all zero -- string.len reports 0.
+;
+; FIXED ALLOCATION: exactly 21 words per call -- 20 title words + the NUL
+; terminator. No count pass; the width is a compile-time constant. This
+; VM's __malloc has no free(), so the allocation is permanent, but 21
+; words is the true cost of the transaction -- there is no smaller exact
+; answer. OOM returns BOXED_NIL, the string runtime's convention
+; (string.char/string.sub/strcat), never a half-built string.
+;
+; Register use: R1 = card read pointer, starts at VIRCON32_MEMCARD_BASE.
+; R3 = heap pointer after the allocation, kept for the return. R4 =
+; words-remaining counter (assigned after the CALL, so it needn't survive
+; it). R5 = heap write pointer. R2 = per-iteration scratch. R6 unused.
+; No stack locals are needed.
+;
+; NOTE: 20 (and 21) are LITERALS here for the same reason as in
+; __builtin_vircon32_memcard_title below -- emit_variable_map() in
+; emit.c only exports BASE/DATA_BASE/CURSOR_ADDR/END as %defines for the
+; assembler, not word-count constants. If a future change adds an export
+; for this one, both routines should switch over together.
+;
+; UNVERIFIED: written to the same standard as the rest of this file, but
+; not yet run through v32sim. Flagging per this project's usual
+; verification discipline.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_vircon32_memcard_get_title:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; --- 1. Allocate the fixed 21 words: 20 title words + NUL ---
+    MOV   R2, 21
+    PUSH  R2                          ; __malloc arg: size in WORDS
+    CALL  __malloc
+    IADD  SP, 1
+    MOV   R3, R0                      ; R3 = heap pointer (kept for return)
+
+    ;; --- 2. OOM check via scratch -- R3 must stay intact ---
+    MOV   R2, R3
+    IEQ   R2, 0
+    JT    R2, _memcard_get_title_oom
+
+    ;; --- 3. Copy ALL 20 title words verbatim -- no CFI, no early exit ---
+    MOV   R1, VIRCON32_MEMCARD_BASE   ; R1 = card read pointer
+    MOV   R5, R3                      ; R5 = heap write pointer
+    MOV   R4, 20                      ; R4 = words remaining
+
+_memcard_get_title_copy_loop:
+    MOV   R2, R4                      ; scratch copy -- IEQ is destructive
+    IEQ   R2, 0
+    JT    R2, _memcard_get_title_copy_done
+    MOV   R2, [R1]
+    MOV   [R5], R2                    ; raw word, bit-exact
+    IADD  R1, 1
+    IADD  R5, 1
+    ISUB  R4, 1
+    JMP   _memcard_get_title_copy_loop
+
+_memcard_get_title_copy_done:
+    MOV   R2, 0
+    MOV   [R5], R2                    ; NUL terminator (word 21)
+
+    MOV   R0, R3                      ; return heap pointer
+    OR    R0, BOXED_RAMSTRING         ; boxed as a RAM string
+    JMP   _memcard_get_title_done
+
+_memcard_get_title_oom:
+    MOV   R0, BOXED_NIL               ; OOM, matching string.s convention
+
+_memcard_get_title_done:
+    MOV   SP, BP
+    POP   BP
+    RET
+
+; ============================================================================
+; __builtin_vircon32_memcard_title: set the memcard's title, one word per
+; character, into the full VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS (20) title
+; block. Metadata (VIRCON32_MEMCARD_METADATA_WORDS, including the cursor at
+; VIRCON32_MEMCARD_CURSOR_ADDR) now lives in its own separate region right
+; after the title -- see the header comment block near the top of this
+; file -- so it's never touched here regardless of title length.
+; ============================================================================
+;
+; CIF DROPPED -- CHARACTERS ARE STORED RAW NOW: the copy loop used to CIF
+; each character into a float before its store, so the card words held
+; float encodings of char codes. The title block is an ID field, so both
+; directions are bit-exact word copies now: characters go in as the same
+; raw words this VM's own internal string representation uses (one word
+; per character -- see __builtin_string_len; NOT a packed byte string, and
+; no longer a float encoding either), and
+; __builtin_vircon32_memcard_get_title above copies them back verbatim.
+;
+; COMPATIBILITY NOTE: cards written by the pre-drop writer carry float
+; bit patterns in their title words. memcard.title() now reads those back
+; as raw garbage characters, and memcard.load(-5..-24) reads them as
+; denormal floats. A card still carrying an old-format title should be
+; re-titled once before its title is used as an ID.
+;
+; WRITE SHAPE UNCHANGED: the copy still stops at STR's OWN NUL terminator
+; -- a short Lua string's buffer must not be read past its end -- and
+; zero-pads the remainder of the 20. Consequence: an ID containing a
+; zero word mid-stream cannot be written through this form at all (a Lua
+; string in this VM cannot carry one past its terminator); those words
+; must be written raw via memcard.save(value, position) at positions
+; -5..-24, which memcard.title() then reads back verbatim.
+;
+; NOTE: 20 is a LITERAL here, not the symbolic VIRCON32_MEMCARD_TITLE_
+; DISPLAY_WORDS constant -- emit_variable_map() in emit.c only exports
+; BASE/DATA_BASE/CURSOR_ADDR/END as %defines for the assembler, not word-
+; count constants. If a future change adds an export for this one, this
+; is a good spot to switch it over.
+;
+; Stack layout relative to BP:
+; [BP+2]: title string (boxed, ROM or RAM)
+;
+; Returns: R0 = BOXED_NIL
+;
+; Truncates to 20 characters if the string is longer; zero-pads the
+; remainder of the 20 if shorter.
+;
+; Register use: R1 = source pointer (from __unbox_string). R2 = dest
+; pointer, starts at VIRCON32_MEMCARD_BASE. R3 = characters written so
+; far (0-20). R4/R5 are per-iteration scratch.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 __builtin_vircon32_memcard_title:
@@ -1333,8 +1462,7 @@ _memcard_title_copy_loop:
     JT    R4, _memcard_title_pad_loop ; hit NUL -> pad the remainder with 0
     MOV   R4, [R1]                    ; IEQ above clobbered R4 with its 0/1
                                        ; result -- reload the real character
-    CIF   R4
-    MOV   [R2], R4
+    MOV   [R2], R4                    ; raw character word (CIF dropped)
     IADD  R1, 1
     IADD  R2, 1
     IADD  R3, 1

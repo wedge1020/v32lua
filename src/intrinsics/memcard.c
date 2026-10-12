@@ -12,7 +12,8 @@
 //   memcard.load(position)          -> value   (raw read, exactly 1 word)
 //   memcard.load()                  -> value   (position 0, unchanged)
 //   memcard.load_table(position)    -> table or nil  (see below)
-//   memcard.title(str)              -> nil     (sets the 16-word title)
+//   memcard.title(str)              -> nil     (writes the 20-word title)
+//   memcard.title()                 -> string  (reads all 20 title words)
 //   memcard[position]                  == memcard.load(position)
 //   memcard[position] = value          == memcard.save(value, position)
 //
@@ -396,28 +397,84 @@ bool emit_vircon32_memcard_load_table_intrinsic (ASTNode *node, int dest_reg)
 }
 
 // ============================================================================
-// memcard.title(STR) -> nil
+// memcard.title([STR]) -> string | nil
 //
-// Writes STR's characters into the memcard's title region, one word per
-// character -- matching this VM's own internal string representation, NOT
-// a packed byte string. The full VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS (20)
-// title block is available for this -- metadata (including the auto-append
-// cursor, VIRCON32_MEMCARD_CURSOR_ADDR in v32lua.h) now lives in its own
-// separate region right after the title, not carved out of it. Truncated to
-// 20 characters if longer; padded with 0-words if shorter. Always a CALL:
-// STR's length isn't known at compile time unless it's a literal, and even
-// then sharing the runtime copy loop is simpler than unrolling it per call
-// site.
+// WRITE form, memcard.title(str): writes STR's characters into the
+// memcard's title region, one raw word per character -- exactly this
+// VM's own internal string representation (the runtime routine's former
+// per-character CIF is dropped so the title block, an ID field,
+// round-trips bit-exactly; see vircon32.s). The full
+// VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS (20) title block is available for
+// this -- metadata (including the auto-append cursor,
+// VIRCON32_MEMCARD_CURSOR_ADDR in v32lua.h) lives in its own separate
+// region right after the title, not carved out of it. Truncated to 20
+// characters if longer; padded with 0-words if shorter. Still NUL-stop
+// against STR itself (a Lua string in this VM cannot carry a zero word
+// past its terminator), so an ID with a zero word mid-stream has to be
+// written raw via memcard.save(value, position) at positions -5..-24 --
+// and memcard.title() below reads it back verbatim. Always a CALL: STR's
+// length isn't known at compile time unless it's a literal, and even
+// then sharing the runtime copy loop is simpler than unrolling it per
+// call site.
+//
+// READ form, memcard.title() with NO argument: returns the card's title
+// block as a string -- ALL VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS (20)
+// words, verbatim, via __builtin_vircon32_memcard_get_title (see
+// vircon32.s). The block is an ID field, so the transaction is
+// FIXED-WIDTH: it never stops at a zero word, and zero words come back
+// as embedded NUL characters. Caveat the compiler does NOT enforce: this
+// VM's string operations are NUL-scanning -- string.len, ==, .., print,
+// string.sub all see only the prefix before the first zero word, so two
+// IDs differing only after a zero are indistinguishable through those
+// operations; the full 20-word content lives in the buffer (and on the
+// card), observable by writing it back or reading the card raw. A
+// fresh/never-written card reads back as a 20-zero-word buffer, i.e. "".
+// Returns nil ONLY on heap exhaustion (the runtime routine's OOM path),
+// the same convention string.char()/string.sub()/strcat already follow.
+// Also always a CALL: the title lives on the card -- a cross-session
+// quantity never known at compile time -- and the result has to come
+// off the heap anyway.
+//
+// The two forms mirror memcard.save()'s split: no-argument READ is to
+// memcard.title(str) WRITE what memcard.load() is to
+// memcard.save(value, position). Unlike save()/load(), though, they share
+// one entry point rather than one being bracket sugar for the other --
+// Lua call syntax can't distinguish them any other way.
 // ============================================================================
 bool emit_vircon32_memcard_title_intrinsic (ASTNode *node, int dest_reg)
 {
     ASTNode *arg_str = node->as.call.args_head;
 
+    runtime_req.needs_vircon32 = true;
+
+    // ------------------------------------------------------------------
+    // NO ARGUMENT: read the card's full 20-word title block back as a
+    // string. dest_reg == 0 means the result is discarded -- the read
+    // has no side effect worth keeping (the routine does nothing beyond
+    // reading fixed card addresses and allocating heap that would be
+    // immediately abandoned, and this VM has no free()), so nothing is
+    // emitted then, the same convention as memcard.load() above.
+    // ------------------------------------------------------------------
     if (arg_str == NULL) {
-        compiler_error(ERR_SEMANTIC, node->line_number,
-                       "memcard.title() requires a string argument: memcard.title(\"...\")");
-        return false;
+        // The result is a real Lua string (heap-allocated, boxed
+        // RAMSTRING) -- flag the string runtime, the same way NODE_STRING
+        // does. Currently moot in practice (main.c links the whole
+        // runtime unconditionally), but self-documenting the same way
+        // memcard.load_table()'s needs_tables flag is.
+        runtime_req.needs_strings = true;
+
+        if (dest_reg == 0) {
+            return true;
+        }
+
+        emit_asm("    ;; --- Vircon32 memcard.title() Intrinsic (read) ---");
+
+        emit_asm("CALL __builtin_vircon32_memcard_get_title");
+        emit_asm("MOV  R%d, R0 ; memcard.title() returns the card's 20-word title as a string", dest_reg);
+
+        return true;
     }
+
     if (arg_str->next != NULL) {
         compiler_warning(ERR_SEMANTIC, node->line_number,
                          "memcard.title() takes exactly 1 argument; extra arguments ignored");
@@ -429,8 +486,6 @@ bool emit_vircon32_memcard_title_intrinsic (ASTNode *node, int dest_reg)
                          "memcard.title(): \"%s\" is longer than %d characters and will be truncated",
                          arg_str->as.string_val.value, VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS);
     }
-
-    runtime_req.needs_vircon32 = true;
 
     emit_asm("    ;; --- Vircon32 memcard.title() Intrinsic ---");
 

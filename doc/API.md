@@ -120,7 +120,8 @@ function behind it. A function of your own with the same name (`spr`,
 | `tilemap.render(MAP, sx, sy, w, h, x, y, tw, th [, skip])` | nil | Draws a block of tiles. |
 | `memcard.save(v [, pos])`, `memcard.load([pos])` | v | Reads/writes one word on the memory card. [Details](#memory-card-memcard) |
 | `memcard.load_table(pos)` | table / nil | Loads a table saved with `memcard.save(t)`. |
-| `memcard.title(str)` | nil | Sets the card's save title. |
+| `memcard.title(str)` | nil | Sets the card's title/id |
+| `memcard.title()` | string | Gets the card's title/id |
 | `memcard[pos]`, `memcard[pos] = v` | | Same as `load` / `save`. |
 | `system.wait()` / `system.halt()` | nil | `WAIT` for the next frame / `HLT`. [Details](#system-system) |
 | `system.date()` / `system.time()` | string, 3 numbers | `"YYYY-MM-DD", y, m, d` / `"HH:MM:SS", h, m, s`. |
@@ -1453,7 +1454,8 @@ memcard.save(value)             -> value   (auto-append; see below)
 memcard.load(position)          -> value   (raw read, exactly 1 word)
 memcard.load()                  -> value   (position 0)
 memcard.load_table(position)    -> table or nil   (see Tables, below)
-memcard.title(str)              -> nil     (sets the 20-word title)
+memcard.title(str)              -> nil     (sets the 20-word title/id)
+memcard.title()                 -> string  (gets the 20-word title/id)
 
 memcard[position]                  == memcard.load(position)
 memcard[position] = value          == memcard.save(value, position)
@@ -1524,21 +1526,33 @@ local cursor = memcard[-1]    -- reads the auto-append cursor
 
 **memcard.title(str) -> nil**
 
-Sets the memory card's title — up to 20 characters, one word per
-character, matching this VM's internal string representation. Longer
-strings are truncated; shorter strings are zero-padded. This is
+Sets  the memory  card's  title/id  — up  to  20  characters, one  word
+per  character,  matching  this   VM's  internal  string  representation.
+Longer strings  are truncated; shorter  strings are zero-padded.  This is
 independent of any `--#title` cart hint, which names the *cartridge*, not
-the *save data* — a single cart can have many memory cards in circulation,
-each with its own title.
+the  *save  data*  — a  single  cart  can  have  many memory  cards  in
+circulation, each with its own title.
 
 ```lua
 memcard.title("My Save File")
 ```
 
+**memcard.title() -> string**
+
+Gets  the  memory  card's  title/id  —  20  characters,  one  word  per
+character,  matching this  VM's internal  string representation.  This is
+independent of any `--#title` cart hint, which names the *cartridge*, not
+the  *save  data*  — a  single  cart  can  have  many memory  cards  in
+circulation, each with its own title.
+
+```lua
+title  = memcard.title()
+```
+
 **Tables: memcard.save() / memcard.load_table()**
 
 `memcard.save(a_table)` — the no-position auto-append form **only** —
-writes a **raw dump** of the table's contents: a straight walk of its
+writes a  **raw dump** of  the table's contents:  a straight walk  of its
 internal hash-bucket storage, the same way you'd `fwrite()` a struct to a
 file in C. It is not a general recursive serializer.
 

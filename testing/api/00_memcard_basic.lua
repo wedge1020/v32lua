@@ -3,23 +3,35 @@
 --@ Vircon32 Lua memcard.* Unit Test -- addressing/layout half
 --@ Self-checking coverage of the addressing/layout side of the native
 --@ memcard.* API: explicit-position save()/load(), the memcard[position]
---@ bracket sugar, memcard.title(), and the title/metadata layout (title:
---@ positions -24..-5, reserved metadata: -4..-1). See API.md's "Memory
---@ card: memcard.*" section for the full specification this test checks
---@ against.
+--@ bracket sugar, memcard.title(str), and the title/metadata layout
+--@ (title: positions -24..-5, reserved metadata: -4..-1). See API.md's
+--@ "Memory card: memcard.*" section for the full specification this
+--@ test checks against.
 --@
---@ Split from the auto-append/table half (memcard_api01.lua) purely
---@ because the two together are too many checks for one screen. Each
---@ section below owns a disjoint memcard position range so sections
---@ can't corrupt each other's data:
+--@ Split from the auto-append/table half (memcard_api01.lua) and from
+--@ the title/ID read-form half (01_memcard_title_id.lua) purely because
+--@ of screen height (640x360): together they are more checks than one
+--@ screen can show. Each section below owns a disjoint memcard position
+--@ range so sections can't corrupt each other's data:
 --@   SECTION 1 (explicit-position primitives): data positions 20..24
 --@   SECTION 2 (bracket sugar):                data positions 30..31
---@   SECTION 3 (title):                        title positions -24..-5
+--@   SECTION 3 (title write form):             title positions -24..-5
 --@   SECTION 4 (metadata region):              positions -4..-1
 --@
 --@ Boolean/identity checks are converted to 1/0, same convention the
 --@ tilemap unit test's out-of-bounds checks use, so every scraped result
 --@ is a plain number or string -- nothing here depends on printed text.
+--@
+--@ RAW WORD NOTE: memcard.title(str) stores characters as RAW words now
+--@ (the runtime routine's former per-character CIF is dropped so the
+--@ block round-trips bit-exactly as an ID). Consequence this test is
+--@ written against: reading a title word through memcard.load()/bracket
+--@ at a negative position returns the RAW BIT PATTERN interpreted as a
+--@ float -- 'M' (77) is the denormal bits 0x0000004D, NOT the number
+--@ 77. Characters are legible through the string API (memcard.title()
+--@ and string.* on its result), so that is where Section 3 checks them.
+--@ Zero pad words are all-zero bits either way, so checks against 0
+--@ survive unchanged.
 
 function test_memcard_layout()
     -- ------------------------------------------------------------------
@@ -75,19 +87,25 @@ function test_memcard_layout()
     __rawasm__("__debug07:")
 
     -- ------------------------------------------------------------------
-    -- SECTION 3: memcard.title() -- 20-word display region, one word per
-    -- character, zero-padded. Title positions -24..-5. 18 characters here
-    -- (was capped at 16 before the title/metadata split -- this string
-    -- would have been silently truncated under the old layout).
+    -- SECTION 3: memcard.title(str) -- 20-word display region, one RAW
+    -- word per character (see the RAW WORD NOTE in the header), zero-
+    -- padded. Title positions -24..-5. 18 characters here (was capped
+    -- at 16 before the title/metadata split -- this string would have
+    -- been silently truncated under the old layout).
     -- ------------------------------------------------------------------
     local title = "MEMCARD TITLE DEMO"   -- 18 characters
     memcard.title(title)
     __rawasm__("__debug_title_write:")
 
     -- === Test 08: every character landed correctly ===
+    -- (Checked through the read form: title words are RAW character
+    -- words now, so comparing memcard[-24 + i] against string.byte()
+    -- would compare a denormal bit pattern against the char-code number
+    -- and fail. The string API is where characters are legible.)
+    local reread08 = memcard.title()
     local title_ok = true
     for i = 1, string.len(title) do
-        if memcard[-24 + (i - 1)] ~= string.byte(title, i) then
+        if string.byte(reread08, i) ~= string.byte(title, i) then
             title_ok = false
         end
     end
@@ -95,6 +113,8 @@ function test_memcard_layout()
     __rawasm__("__debug08:")
 
     -- === Test 09: remainder of the 20-word title is zero-padded ===
+    -- (Pad words are raw all-zero bits, which read back as 0 either way,
+    -- so this check survives the raw encoding unchanged.)
     local pad_ok = true
     for i = string.len(title) + 1, 20 do
         if memcard[-24 + (i - 1)] ~= 0 then
@@ -104,9 +124,12 @@ function test_memcard_layout()
     number_result09 = pad_ok and 1 or 0  -- Expected: 1
     __rawasm__("__debug09:")
 
-    -- === Test 10: title's first character, read via memcard.load() ===
-    -- === instead of bracket sugar -- both spellings hit the same address ===
-    number_result10 = memcard.load(-24)  -- Expected: 77 (ASCII 'M')
+    -- === Test 10: title's first character, via the read form ===
+    -- (memcard.load(-24) used to return 77 under the old float encoding;
+    -- with raw words it returns the denormal bits 0x0000004D instead.
+    -- Both spellings still hit the same address -- the read form is now
+    -- where the character itself is checkable.)
+    number_result10 = string.byte(memcard.title(), 1)  -- Expected: 77 (ASCII 'M')
     __rawasm__("__debug10:")
 
     -- ------------------------------------------------------------------
@@ -149,7 +172,7 @@ function main()
     print(  0, 160, "T07 bracket string= "      .. string_result07)
     print(  0, 180, "T08 title chars ok= "      .. number_result08)
     print(  0, 200, "T09 title pad ok= "        .. number_result09)
-    print(  0, 220, "T10 title char via load= " .. number_result10)
+    print(  0, 220, "T10 title char read= "     .. number_result10)
     print(  0, 240, "T11 meta -4 blank= "       .. number_result11)
     print(  0, 260, "T12 meta -3 blank= "       .. number_result12)
     print(  0, 280, "T13 meta -2 blank= "       .. number_result13)

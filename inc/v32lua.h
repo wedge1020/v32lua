@@ -55,7 +55,7 @@ static inline char *v32lua_strndup (const char *s, size_t n)
 #define  V32LUA_PATH_LIST_SEP  ":"
 #endif
 
-#define  VERSION            "20261011-dev"
+#define  VERSION             "20261012-dev"
 #define  META_CALL_STACK_SIZE  32   // nested calls of callable tables (__call)
 #define  AUTHOR              "Matthew Haas"
 #define  URL                 "https://github.com/wedge1020/v32lua"
