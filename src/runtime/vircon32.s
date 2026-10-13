@@ -875,6 +875,63 @@ _vircon32_play_done:
     RET
 
 ;; ============================================================================
+;; __builtin_vircon32_chanselect: resolve stop()/pause()/resume()'s CHANNEL
+;; ============================================================================
+;; Stack layout relative to BP:
+;; [BP+2]: channel (Lua float 0-15, or BOXED_NIL -> apply to all channels)
+;;
+;; Returns:
+;;   R0 = 1   a channel was named: it has been nil-checked, CFI-ed, clamped
+;;            to 0-15 and written to SPU_SelectedChannel. The caller
+;;            follows up with its per-channel command.
+;;   R0 = 0   the channel was nil: nothing was written. The caller follows
+;;            up with its all-channels command.
+;;
+;; This routine resolves only the CHANNEL half of stop()/pause()/resume();
+;; the emitter's dynamic path calls it and then branches on R0. The command
+;; half is a compile-time constant of the call site, and SPUCommand_*
+;; labels are valid ONLY as operands of OUT -- they cannot be moved into a
+;; register or pushed on the stack. (The old __builtin_vircon32_chancmd
+;; received the two commands as pushed stack words, which forced the
+;; compiler to emit "MOV R0, SPUCommand_..." -- not a real instruction --
+;; so that routine was removed and the commands moved to the call site:)
+;;
+;;   CALL __builtin_vircon32_chanselect
+;;   JT   R0, <selected>
+;;   OUT  SPU_Command, SPUCommand_<AllChannels>       ; nil case
+;;   JMP  <done>
+;; <selected>:
+;;   OUT  SPU_Command, SPUCommand_<SelectedChannel>
+;; <done>:
+;;
+;; The command pairs, chosen by the emitter's table:
+;;   stop(ch)    StopSelectedChannel     stop()    StopAllChannels
+;;   pause(ch)   PauseSelectedChannel    pause()   PauseAllChannels
+;;   resume(ch)  PlaySelectedChannel     resume()  ResumeAllChannels
+;;
+;; resume(ch) uses Play rather than a "resume selected channel" command
+;; because the console has no such command. PlayChannel() leaves a PAUSED
+;; channel's position and loop flag untouched and simply sets it Playing,
+;; so Play IS the per-channel resume. (ResumeAllChannels is literally a
+;; loop calling PlayChannel on every paused channel.)
+;;
+;; Note that Play only resumes a channel that is genuinely PAUSED. On a
+;; STOPPED channel it rewinds to 0 and restarts -- so a "resume" that
+;; restarts from the beginning means the channel had stopped, not paused.
+;; The usual cause is a sound that ran to its end because its loop flag
+;; was lost; see note B on __builtin_vircon32_play above.
+;;
+;; The BOXED_NIL test happens on the raw boxed value, BEFORE the CFI --
+;; once converted, the tag bits are gone and nil is indistinguishable
+;; from 0.0.
+;;
+;; Register use follows the other __builtin_vircon32_* routines: R1-R2
+;; are used freely without saving, since the emitter frees its registers
+;; before the CALL. The channel lives in R1 and is only ever compared
+;; via a throwaway copy in R2, because IEQ/ILT/IGT are destructive.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; ============================================================================
 ;; __builtin_vircon32_chanselect
 ;; [BP+2]: channel (Lua float 0-15, or BOXED_NIL -> all channels)
 ;; Returns: R0 = 1 with SPU_SelectedChannel already written (clamped 0-15),
