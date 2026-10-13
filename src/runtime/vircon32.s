@@ -875,78 +875,41 @@ _vircon32_play_done:
     RET
 
 ;; ============================================================================
-;; __builtin_vircon32_chancmd: issue an SPU command at a channel, or globally
+;; __builtin_vircon32_chanselect
+;; [BP+2]: channel (Lua float 0-15, or BOXED_NIL -> all channels)
+;; Returns: R0 = 1 with SPU_SelectedChannel already written (clamped 0-15),
+;;          R0 = 0 when the channel was nil (caller issues its
+;;          all-channels command itself -- SPUCommand_* labels are only
+;;          valid in OUT operands, so the command cannot travel through
+;;          a register or the stack).
 ;; ============================================================================
-;; Stack layout relative to BP:
-;; [BP+2]: channel      (Lua float 0-15, or BOXED_NIL -> apply to all channels)
-;; [BP+3]: selected_cmd (raw SPU command integer, used when a channel is given)
-;; [BP+4]: all_cmd      (raw SPU command integer, used when channel is nil)
-;;
-;; Returns: R0 = BOXED_NIL
-;;
-;; This one routine backs stop(), pause() and resume(): the three differ only
-;; in which command pair the compiler pushes.
-;;
-;;   stop(ch)    StopSelectedChannel     stop()    StopAllChannels
-;;   pause(ch)   PauseSelectedChannel    pause()   PauseAllChannels
-;;   resume(ch)  PlaySelectedChannel     resume()  ResumeAllChannels
-;;
-;; resume(ch) uses Play rather than a "resume selected channel" command
-;; because the console has no such command. PlayChannel() leaves a PAUSED
-;; channel's position and loop flag untouched and simply sets it Playing, so
-;; Play IS the per-channel resume. (ResumeAllChannels is literally a loop
-;; calling PlayChannel on every paused channel.)
-;;
-;; Note that Play only resumes a channel that is genuinely PAUSED. On a
-;; STOPPED channel it rewinds to 0 and restarts -- so a "resume" that
-;; restarts from the beginning means the channel had stopped, not paused.
-;; The usual cause is a sound that ran to its end because its loop flag was
-;; lost; see note B on __builtin_vircon32_play above.
-;;
-;; The two command arguments are pushed by the compiler as raw hardware
-;; integers (MOV R0, SPUCommand_...), not as Lua floats, so they are OUT-ed
-;; directly with no CFI.
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-__builtin_vircon32_chancmd:
+__builtin_vircon32_chanselect:
     PUSH  BP
     MOV   BP, SP
-
     MOV   R1, [BP+2]
     MOV   R2, R1
     IEQ   R2, BOXED_NIL
-    JT    R2, _vircon32_chancmd_all
-
-    ;; --- A channel was named: select it, clamping to 0-15 first ---
+    JT    R2, _vircon32_chanselect_nil
     CFI   R1
     MOV   R2, R1
     ILT   R2, 0
-    JT    R2, _vircon32_chancmd_low
+    JT    R2, _vircon32_chanselect_low
     MOV   R2, R1
     IGT   R2, 15
-    JT    R2, _vircon32_chancmd_high
-    JMP   _vircon32_chancmd_selected
-
-_vircon32_chancmd_low:
+    JT    R2, _vircon32_chanselect_high
+    JMP   _vircon32_chanselect_out
+_vircon32_chanselect_low:
     MOV   R1, 0
-    JMP   _vircon32_chancmd_selected
-
-_vircon32_chancmd_high:
+    JMP   _vircon32_chanselect_out
+_vircon32_chanselect_high:
     MOV   R1, 15
-
-_vircon32_chancmd_selected:
+_vircon32_chanselect_out:
     OUT   SPU_SelectedChannel, R1
-    MOV   R2, [BP+3]
-    OUT   SPU_Command, R2
-    JMP   _vircon32_chancmd_done
-
-_vircon32_chancmd_all:
-    MOV   R2, [BP+4]
-    OUT   SPU_Command, R2
-
-_vircon32_chancmd_done:
-    MOV   R0, BOXED_NIL
-
+    MOV   R0, 1
+    JMP   _vircon32_chanselect_done
+_vircon32_chanselect_nil:
+    MOV   R0, 0
+_vircon32_chanselect_done:
     MOV   SP, BP
     POP   BP
     RET

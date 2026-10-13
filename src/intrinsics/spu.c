@@ -855,23 +855,30 @@ bool emit_vircon32_channel_cmd_intrinsic (ASTNode *node, int dest_reg, const cha
     // ------------------------------------------------------------------
     emit_asm("    ;; --- Vircon32 %s() Intrinsic ---", lua_name);
 
-    emit_asm("MOV  R0, %s", cmd->all_cmd);
-    emit_asm("PUSH R0 ; Arg 3: command when channel is nil");
-    emit_asm("MOV  R0, %s", cmd->selected_cmd);
-    emit_asm("PUSH R0 ; Arg 2: command for the selected channel");
-
     int chan_reg = allocate_register();
     generate_asm(arg_channel, chan_reg);
     emit_asm("PUSH R%d ; Arg 1: channel", chan_reg);
     unlock_register(chan_reg);
 
-    emit_asm("CALL __builtin_vircon32_chancmd");
-    emit_asm("IADD SP, 3 ; Clean up %s() arguments", lua_name);
+    emit_asm("CALL __builtin_vircon32_chanselect");
+    emit_asm("IADD SP, 1 ; Clean up %s() channel argument", lua_name);
+
+    int         label_id = get_next_label();
+    const char *ctx      = get_current_function_name();
+    char sel_label[160], end_label[160];
+    snprintf(sel_label, sizeof(sel_label), "__%s_%s_chan_selected_%d", ctx, lua_name, label_id);
+    snprintf(end_label,  sizeof(end_label),  "__%s_%s_chan_done_%d",    ctx, lua_name, label_id);
+
+    emit_asm("JT   R0, %s", sel_label);
+    emit_asm("OUT  SPU_Command, %s ; channel was nil -> all channels", cmd->all_cmd);
+    emit_asm("JMP  %s", end_label);
+    emit_asm("%s:\n", sel_label);
+    emit_asm("OUT  SPU_Command, %s", cmd->selected_cmd);
+    emit_asm("%s:\n", end_label);
 
     if (dest_reg != 0) {
         emit_asm("MOV  R%d, BOXED_NIL ; return nil", dest_reg);
     }
-
     return true;
 }
 
