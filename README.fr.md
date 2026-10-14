@@ -204,13 +204,12 @@ compilateur trouve la bibliothèque ainsi installée à côté de lui-même
 **Langue de la documentation.** Par défaut, les deux compilations
 installent les documents dans toutes les langues (`README.md`,
 `README.es.md`, `README.fr.md`, `doc/API.es.md`, ...) et la page de manuel
-en anglais. `DEST_LANG=es` ou `DEST_LANG=fr` (`sudo make sysinstall
+en anglais (`man/v32lua.es.1` et `man/v32lua.fr.1` sont les traduites). `DEST_LANG=es` ou `DEST_LANG=fr` (`sudo make sysinstall
 DEST_LANG=fr`, ou `cmake -S . -B build -DDEST_LANG=fr`) installe plutôt
 cette langue : le README, `doc/API.md` et `doc/USAGE.md` traduits, sous
 ces noms simples (avec les liens entre eux ajustés), à côté des guides qui
 n'existent qu'en anglais (`doc/PICO8.md`, `doc/TIC80.md`, ...), et la page
-de manuel dans cette langue quand elle existe (pour l'instant, seule la
-page anglaise existe). `DEST_LANG=en` n'installe que les documents en
+de manuel dans cette langue (`man/v32lua.es.1`, `man/v32lua.fr.1`). `DEST_LANG=en` n'installe que les documents en
 anglais.
 
 **Zips de publication.** Les zips précompilés de la page

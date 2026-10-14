@@ -195,13 +195,14 @@ without a rebuild.
 
 **Documentation language.** By default both builds install the documents
 in every language (`README.md`, `README.es.md`, `README.fr.md`,
-`doc/API.es.md`, ...) and the English man page. `DEST_LANG=es` or
+`doc/API.es.md`, ...) and the English man page (`man/v32lua.es.1` and `man/v32lua.fr.1` are the
+translated ones). `DEST_LANG=es` or
 `DEST_LANG=fr` (`sudo make sysinstall DEST_LANG=es`, or `cmake -S . -B
 build -DDEST_LANG=es`) installs that language instead: the translated
 README, `doc/API.md` and `doc/USAGE.md` under those plain names (with the
 links between them adjusted), next to the guides that exist only in
 English (`doc/PICO8.md`, `doc/TIC80.md`, ...), and the man page in that
-language when there is one (for now there is only the English page).
+language (`man/v32lua.es.1`, `man/v32lua.fr.1`).
 `DEST_LANG=en` installs only the English documents.
 
 **Release zips.** The prebuilt zips on the

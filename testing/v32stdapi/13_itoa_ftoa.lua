@@ -44,6 +44,14 @@ function main()
     string_ftoa_neg   = ftoa(-2.5, nil)
     string_ftoa_trim  = ftoa(100.25, nil)
 
+    -- fractions that round up to a whole unit carry into the integer
+    -- part (upstream string.h fix: X.999995..X.999999 once gave "X.1")
+    string_ftoa_carry0   = ftoa(0.999999, nil)
+    string_ftoa_carry12  = ftoa(12.999999, nil)
+    string_ftoa_carryneg = ftoa(-0.999999, nil)
+    string_ftoa_carry1k  = ftoa(1023.999999, nil)
+    string_ftoa_nocarry  = ftoa(2.999994, nil)
+
     print(10, 0,  "--- itoa/ftoa unit test ---")
     print(10, 20,  "itoa 42: "     .. string_itoa_pos)
     print(10, 40,  "itoa -1 hex: " .. string_itoa_neg_hex)
@@ -72,5 +80,10 @@ string_ftoa_pi: "3.14159"
 string_ftoa_lead0: "0.05"
 string_ftoa_neg: "-2.5"
 string_ftoa_trim: "100.25"
+string_ftoa_carry0: "1"
+string_ftoa_carry12: "13"
+string_ftoa_carryneg: "-1"
+string_ftoa_carry1k: "1024"
+string_ftoa_nocarry: "2.99999"
 
 --]]

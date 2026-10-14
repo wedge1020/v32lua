@@ -1,0 +1,719 @@
+.TH V32LUA 1 "octobre 2026" "v32lua 20261014-dev" "Commandes utilisateur"
+.SH NOM
+v32lua \- compile un sous-ensemble de Lua en assembleur Vircon32 et en XML de cartouche
+.SH SYNOPSIS
+.B v32lua
+.RB [ \-o
+.IR sortie.asm ]
+.RB [ \-g ]
+.RB [ \-v ]
+.RB [ \-d ]
+.RB [ \-w ]
+.RB [ \-\-api
+.IR api ]
+.RB [ \-\-title
+.IR titre ]
+.RB [ \-\-rate
+.IR hz ]
+.RB [ \-\-fast\-circles ]
+.RB [ \-\-keyboard
+.IR port ]
+.RB [ \-\-mouse
+.IR port ]
+.RB [ \-\-bezel
+.IR art.png " | "
+.BR \-\-no\-bezel ]
+.IR entr\('ee.lua " | " cart.p8 " | " cart.tic
+.br
+.B v32lua
+.B \-\-version
+.br
+.B v32lua
+.B \-\-help
+.SH DESCRIPTION
+.B v32lua
+compile un sous-ensemble de Lua con\(,cu sur mesure \(em variables globales et
+locales, fonctions comme valeurs de premi\(`ere classe, affectation multiple, le
+langage habituel d'instructions et d'expressions, et un ensemble
+d'intrins\(`eques mat\('erielles propres \(`a Vircon32 \(em directement en
+assembleur
+.BR Vircon32 .
+Il n'y a \(`a aucun moment de machine virtuelle \(`a bytecode ni
+d'interpr\('eteur : le source Lua est traduit directement en instructions
+natives du processeur de la console cible, dans le m\(^eme esprit que
+.BR v32c++ (1),
+qui traduit un sous-ensemble de C++ en C Vircon32 pur.
+.PP
+Une compilation produit deux fichiers : un fichier d'assembleur
+(voir
+.BR \-o ,
+ci-dessous) et, \(`a c\(^ot\('e, une d\('efinition XML de la cartouche (m\(^eme nom de
+base, avec l'extension
+.IR .xml )
+qui enregistre le titre et la version de la cartouche, ainsi que les
+ressources de texture, de son et de carte de tuiles d\('eclar\('ees dans le
+source par des indications
+.B \-\-#
+(voir
+.B INDICATIONS DE CARTOUCHE
+ci-dessous). Ce sont deux entr\('ees de la cha\(^ine de construction Vircon32
+habituelle \(em l'assembleur, puis
+.BR packrom (1)
+\(em que
+.B v32lua
+n'invoque pas lui-m\(^eme.
+.PP
+.B v32lua
+ne produit aucune sortie en cas de succ\(`es, sauf si un niveau de d\('etail est
+demand\('e (voir
+.BR \-v ,
+ci-dessous) \(em comme le compilateur C de Vircon32 et
+.BR v32c++ (1).
+Un code de sortie non nul, et un message sur la sortie d'erreur standard,
+signalent un vrai probl\(`eme : une erreur lexicale, de syntaxe, s\('emantique ou
+interne du compilateur. Les erreurs lexicales, de syntaxe, s\('emantiques et
+internes sont signal\('ees en reproduisant la ligne source fautive, avec
+l'\('echec point\('e.
+.SH OPTIONS
+.TP
+.BI \-o " sortie.asm"
+\('Ecrit l'assembleur g\('en\('er\('e dans
+.IR sortie.asm ,
+au lieu du nom par d\('efaut. Si
+.B \-o
+n'est pas donn\('e du tout, le nom de sortie est d\('eriv\('e du nom de l'entr\('ee :
+son extension est remplac\('ee par
+.IR .asm ,
+de sorte que
+.I jeu/main.lua
+devient
+.IR jeu/main.asm .
+Le fichier de cartouche
+.I .xml
+est toujours nomm\('e d'apr\(`es ce m\(^eme chemin de sortie (son extension
+remplac\('ee par
+.IR .xml ),
+et non d'apr\(`es le nom de l'entr\('ee ; ainsi
+.B \-o
+d\('etermine aussi o\(`u se trouve le XML.
+.TP
+.B \-g
+G\('en\(`ere un fichier compagnon
+.I sortie.asm.debug
+qui associe les d\('ecalages relatifs de ligne de l'assembleur \(`a la ligne du
+source Lua d'origine et au nom de la fonction englobante, pour chaque ligne
+de code g\('en\('er\('e. Destin\('e au d\('eboguage pas \(`a pas d'une cartouche compil\('ee sous
+.BR v32sim (1),
+et non \(`a \(^etre lu par l'assembleur ou par
+.BR packrom (1).
+.TP
+.BR \-v ", " \-\-verbose
+Signale l'avancement dans les \('etapes internes du compilateur (analyse
+lexicale, pr\('eprocesseur, analyse syntaxique, analyse s\('emantique, g\('en\('eration
+de code) au d\('ebut de chacune. Sans
+.B \-v
+(le d\('efaut), rien n'est affich\('e en cas de succ\(`es.
+.TP
+.BR \-d ", " \-\-debug
+Affiche des informations internes et op\('erationnelles suppl\('ementaires de
+d\('eboguage pendant l'ex\('ecution du compilateur. Sans rapport avec
+.BR \-g  ;
+c'est une sortie pour le d\('eveloppement du compilateur, et non une carte du
+source vers l'assembleur de la cartouche obtenue.
+.TP
+.B \-w
+Supprime tous les avertissements du compilateur (par exemple l'absence de
+.B WAIT
+dans un point d'entr\('ee
+.B main()
+ou un ordre de ressources de cartouche incoh\('erent). Les erreurs ne sont pas
+touch\('ees et arr\(^etent toujours la compilation.
+.TP
+.BI \-\-api " api"
+S\('electionne la couche d'API :
+.BR pico8 ,
+.BR tic80 ,
+ou
+.B vircon32
+(native). Prend le pas sur une indication
+.B \-\-#api
+du source. Sans cette option l'API est d\('etect\('ee : un fichier
+.I .p8
+est PICO-8, un fichier
+.I .tic
+est TIC-80, et un fichier
+.I .lua
+utilise sa propre indication
+.BR \-\-#api / \-\-#p8
+ou, \(`a d\('efaut, ses points d'entr\('ee
+.RB ( TIC()
+s\('electionne tic80 ;
+.BR _draw() ,
+.BR _update() ,
+.B _update60()
+s\('electionnent pico8 ; sinon native).
+.TP
+.BI \-\-title " titre"
+Titre de la cartouche, utilis\('e tel quel ; prend le pas sur une indication
+.BR \-\-#title .
+Sans l'un ni l'autre, le titre est celui de la cartouche elle-m\(^eme
+(m\('etadonn\('ees
+.B \-\- title:
+de TIC-80, ou premi\(`ere ligne de commentaire de PICO-8) ou le nom du fichier
+d'entr\('ee, pr\('efix\('e par
+.B [PICO8]
+ou
+.B [TIC80]
+dans ces modes d'API.
+.TP
+.BI \-\-rate " hz"
+Fr\('equence d'\('echantillonnage du son synth\('etis\('e \(`a partir d'une cartouche PICO-8
+ou TIC-80 :
+.BR 11025 ,
+.B 22050
+(par d\('efaut) ou
+.BR 44100 .
+Prend le pas sur une indication
+.BR \-\-#rate .
+.B \-\-p8rate
+et
+.B \-\-#p8rate
+sont les anciens noms et fonctionnent toujours.
+.TP
+.B \-\-fast\-circles
+TIC-80 et PICO-8 : dessine les cercles pleins de rayon sup\('erieur \(`a 31 comme
+le disque pr\('erendu de rayon 31, mis \(`a l'\('echelle (un seul dessin GPU au lieu
+d'environ 1,2 par unit\('e de rayon ; environ 1,5 % des pixels du bord diff\(`erent
+de ceux de la console). Les contours sont toujours exacts. \('Equivaut \(`a une
+indication
+.BR \-\-#fast\-circles .
+.TP
+.BI \-\-keyboard " port"
+Port de manette (0\(en3) o\(`u est branch\('e un clavier v32kbd, pour
+.BR key() ", " keyp()
+et
+.B kbd.*
+en mode natif et TIC-80. 2 par d\('efaut, le troisi\(`eme port (la \(Fo Gamepad 3 \(Fc
+de l'\('emulateur), ce qui laisse les ports 0 et 1 aux manettes ordinaires. La
+saisie au clavier n\('ecessite un dispositif v32io (voir
+.BR "CLAVIER ET SOURIS" ).
+\('Equivaut \(`a une indication
+.BR \-\-#keyboard  ;
+un programme peut aussi le changer avec
+.BR kbd.port(n) .
+.TP
+.BI \-\-mouse " port"
+Port de manette (0\(en3) o\(`u est branch\('ee une souris v32mouse, pour
+.B mouse()
+et
+.B mouse.*
+dans tous les modes d'API (ainsi que
+.BR stat(32) \(en stat(34)
+de PICO-8). 3 par d\('efaut, le quatri\(`eme port (la \(Fo Gamepad 4 \(Fc de
+l'\('emulateur). La saisie \(`a la souris n\('ecessite un dispositif v32io (voir
+.BR "CLAVIER ET SOURIS" ).
+\('Equivaut \(`a une indication
+.BR \-\-#mouse  ;
+un programme peut aussi le changer avec
+.BR mouse.port(n) .
+.TP
+.BI \-\-bezel " art.png"
+PICO-8 : dessine les panneaux lat\('eraux \(`a partir de votre propre illustration
+au lieu des panneaux int\('egr\('es : un PNG (ou
+.IR .vtex )
+contenant les deux panneaux c\(^ote \(`a c\(^ote, au format 4:5 (par exemple
+288\(mu360, ou 96\(mu120 agrandi 3\(mu). Prend le pas sur une indication
+.BR \-\-#bezel .
+.TP
+.B \-\-no\-bezel
+PICO-8 : laisse noires les marges d'\('ecran de part et d'autre du canevas au
+lieu de dessiner les panneaux lat\('eraux. Prend le pas sur une indication
+.B \-\-#bezel
+.RB ( off
+ou
+.BR on ).
+.TP
+.B \-\-version
+Affiche la version, l'auteur et l'URL du projet, puis quitte imm\('ediatement
+sans traiter aucune entr\('ee.
+.TP
+.BR \-\-help ", " \-h
+Affiche un bref r\('esum\('e d'utilisation et quitte.
+.SH CODE DE SORTIE
+.TP
+.B 0
+L'entr\('ee a \('et\('e compil\('ee avec succ\(`es.
+.TP
+.B 1
+Aucun fichier d'entr\('ee n'a \('et\('e donn\('e ; un argument inconnu ou en double a \('et\('e
+donn\('e ; ou une erreur lexicale, de syntaxe, s\('emantique ou interne du
+compilateur s'est produite pendant la compilation. Les d\('etails sont affich\('es
+sur la sortie d'erreur standard et, pour une erreur de position dans le
+source, la ligne fautive est reproduite.
+.SH EXEMPLES
+Compiler un seul fichier, en \('ecrivant
+.I programme.asm
+et
+.IR programme.xml  :
+.PP
+.RS
+.nf
+v32lua \-o programme.asm programme.lua
+.fi
+.RE
+.PP
+Compiler avec le nom de sortie par d\('efaut (extension remplac\('ee par
+.IR .asm ),
+en observant chaque \('etape du traitement :
+.PP
+.RS
+.nf
+v32lua \-v jeu.lua
+.fi
+.RE
+.PP
+Compiler avec une carte de d\('eboguage du source vers l'assembleur, pour
+parcourir la cartouche pas \(`a pas dans
+.BR v32sim (1)  :
+.PP
+.RS
+.nf
+v32lua \-g \-o build/jeu.asm src/jeu.lua
+.fi
+.RE
+.PP
+Compiler une cartouche PICO-8 non modifi\('ee (API d\('etect\('ee d'apr\(`es
+l'extension) avec un titre choisi et un son basse fid\('elit\('e, ainsi qu'une
+cartouche binaire TIC-80 :
+.PP
+.RS
+.nf
+v32lua celeste.p8 \-\-title "celeste" \-\-rate 11025
+v32lua jeu.tic
+.fi
+.RE
+.SH POINTS D'ENTR\('EE
+Un programme doit d\('eclarer au moins l'une des fonctions
+.B main()
+ou
+.BR game_loop()  ;
+leur absence est une erreur de compilation.
+.TP
+.B game_loop()
+Si elle existe, le compilateur g\('en\(`ere un harnais d'ex\('ecution continu : la
+console appelle
+.BR game_loop() ,
+\('emet un
+.B WAIT
+pour l'image courante et recommence \(`a l'infini. C'est le point d'entr\('ee
+habituel des jeux d'arcade, analogue \(`a
+.B TIC()
+dans TIC-80.
+.TP
+.B main()
+Si elle existe \(`a la place, la console s'arr\(^ete lorsque
+.B main()
+retourne, imitant le
+.B main()
+d'un C h\(^eberg\('e. L'ex\('ecution continue et le cadencement des images (y compris
+les instructions
+.BR WAIT )
+sont alors la responsabilit\('e du programme ; le compilateur avertit \(`a la
+compilation s'il ne trouve aucun
+.B WAIT
+\('emis dans
+.BR main() .
+.TP
+.B init()
+Si elle existe, en plus de l'une des deux pr\('ec\('edentes, elle s'ex\('ecute
+exactement une fois, apr\(`es l'allocation en RAM des globales de niveau
+sup\('erieur et avant le d\('ebut de la boucle principale.
+.SH NOTES SUR LE LANGAGE
+Cette section est un bref r\('esum\('e, et non une r\('ef\('erence compl\(`ete \(em voir le
+README du projet et
+.I doc/API.md
+pour toute la surface des intrins\(`eques mat\('erielles et le tableau actuel et
+faisant autorit\('e, y compris les lacunes connues en cours de d\('eveloppement.
+.PP
+Pris en charge : variables globales et locales, une
+.B local
+de niveau sup\('erieur \('etant promue en emplacement global plut\(^ot qu'en local de
+pile condamn\('ee (son stockage vivrait sinon dans un cadre qui retourne avant
+l'ex\('ecution de tout code du jeu \(em cela vaut de m\(^eme pour les locales de
+niveau sup\('erieur import\('ees par
+.BR \-\-#include ) ;
+fonctions comme valeurs NaN-box\('ees de premi\(`ere classe ; affectation multiple
+et \('echange de variables sans temporaires utilisateur ;
+.B __asm__
+(qui pr\('eserve registres et pile) et
+.B __rawasm__
+(non prot\('eg\('e) pour l'assembleur en ligne, tous deux avec interpolation de
+cha\(^ines
+.I {nom_var}
+de variables Lua ; une surface native d'intrins\(`eques mat\('erielles \(`a co\(^ut
+nul
+.RI ( ioports.gpu.* ", " ioports.spu.* ", " ioports.inp.* ", "
+.IR music.*/sfx.* ", " tilemap.* ", " system.* ) ;
+des couches d'API compatibles TIC-80 et PICO-8, choisies par cartouche avec
+une indication
+.B \-\-#api
+; et un pr\('eprocesseur textuel
+.B \-\-#include
+pour les projets multi-fichiers, r\('esolu avant le d\('ebut de l'analyse
+syntaxique.
+.PP
+Commodit\('es graphiques de l'API native :
+.B ioports.gpu.clear()
+sans argument (r\('eutilise la couleur d'effacement courante), un nom
+pr\('ed\('efini
+.RB ( \(dqblack\(dq ", " \(dqwhite\(dq ", " \(dqblue\(dq ,
+.BR \(dqred\(dq ", " \(dqgreen\(dq ),
+une couleur emball\('ee
+.I 0xAABBGGRR
+(un litt\('eral, ou une valeur
+.B hex()
+lorsqu'elle vient d'une variable), ou des composantes s\('epar\('ees comme
+.BI clear( r ", " g ", " b " [, " a ])\fR,\fP
+chacune de 0\(en255 avec un alpha de 255 (opaque) par d\('efaut \(em repli\('e en
+constante quand toutes sont des litt\('eraux, emball\('e \(`a l'ex\('ecution sinon. Le
+huiti\(`eme argument de
+.BR spr() ,
+.IR blend_mode ,
+accepte un nombre
+.RB ( 0x20 ", " 0x21 ", " 0x22 )
+ou l'un des litt\('eraux de cha\(^ine
+.BR \(dqalpha\(dq " (ou " \(dqdefault\(dq "), " \(dqadd\(dq ", ou " \(dqsubtract\(dq ,
+r\('esolus \(`a la compilation ; par exemple
+.BR "spr(id, x, y, nil, nil, nil, nil, \(dqadd\(dq)" .
+.BI rgba( r ", " g ", " b " [, " a ])
+renvoie le mot de couleur emball\('e (composantes born\('ees \(`a 0\(en255, alpha 255
+par d\('efaut), et
+.BI color( n )
+transforme en mot de couleur un nombre contenant une couleur emball\('ee ; les
+deux sont ce qu'attendent la couleur de
+.BR spr() ,
+la forme couleur de
+.BR clear()
+et
+.BR ioports.gpu.multiply / bgcolor .
+Un litt\('eral num\('erique \('ecrit dans un port entier est stock\('e comme son mot
+exact de 32 bits.
+.BI rect( x1 ", " y1 ", " x2 ", " y2 " [, " couleur ])
+et
+.B rectfill()
+dessinent le contour d'un rectangle / un rectangle plein entre deux coins
+inclusifs, dans cette couleur emball\('ee (blanc par d\('efaut), dessin\('es avec le
+pixel blanc de la texture du BIOS (texture \-1, r\('egion 256).
+.BR key() ", " keyp()
+et
+.B kbd.*
+lisent un clavier complet via un dispositif v32kbd sur un port de manette
+(voir
+.BR \-\-keyboard ),
+et
+.B mouse()
+(les sept valeurs de TIC-80, dans tous les modes d'API) et
+.B mouse.*
+une souris via un dispositif v32mouse (voir
+.BR \-\-mouse ).
+.PP
+D\('eviations explicites et permanentes par rapport au Lua standard, faites pour
+s'adapter \(`a l'environnement autonome de Vircon32 : uniquement des float32
+IEEE-754, sans le type num\('erique double entier/flottant de Lua 5.3+ \(em les
+entiers au-del\(`a de 2^24 ne sont pas repr\('esentables exactement ;
+.B print()
+exige les coordonn\('ees d'\('ecran
+.B x
+et
+.B y
+comme deux premiers arguments ; un
+.B return
+nu est une erreur de syntaxe (donnez-lui une valeur) ; et toute l'ex\('ecution
+doit avoir lieu dans une fonction atteignable depuis
+.BR main() / game_loop() .
+.PP
+Sont aussi pris en charge : les litt\('eraux de cha\(^ine entre apostrophes et
+longs
+.RB ( [[...]] ),
+les litt\('eraux num\('eriques \(`a exposant
+.RB ( 1e\-3 ),
+.B goto
+avec des
+.B ::\('etiquettes::
+\(`a port\('ee de bloc (r\('ef\('erences vers l'avant comprises), et les appels de la
+biblioth\(`eque de cha\(^ines comme m\('ethodes de valeurs cha\(^ine
+.RB ( s:sub(2,\ #s) ", " (\(dqx\(dq):upper() ).
+Les cha\(^ines utilis\('ees comme cl\('es de table se comparent par contenu.
+.PP
+Une cartouche PICO-8 se compile directement : avec un fichier
+.IR .p8 ,
+seule sa section
+.B __lua__
+est compil\('ee (les num\('eros de ligne se rapportent toujours au fichier
+.IR .p8 )
+et ses sections
+.BR __gfx__ ", " __gff__ " et " __map__
+deviennent la planche de sprites, les drapeaux de sprites et la carte. Un
+programme
+.I .lua
+peut prendre ces ressources dans une cartouche avec
+.BR \-\-#p8\ \(dqcart.p8\(dq .
+.PP
+Sont aussi pris en charge :
+.B for
+num\('erique et g\('en\('erique (avec
+.BR pairs / ipairs ),
+.BR repeat ... until ,
+fermetures avec valeurs amont, fonctions variadiques
+.RB ( ... ),
+valeurs de retour multiples (un appel ou
+.B ...
+final se d\('eploie dans les listes d'arguments, les constructeurs de tables et
+.BR return ,
+jusqu'\(`a 32 valeurs), m\('etatables
+.RB ( __index ", " __newindex ", " __call ", " __tostring ", " __len ,
+.BR __metatable ),
+les op\('erateurs bit \(`a bit sur des mots de 32 bits, l'arithm\('etique sur des
+cha\(^ines num\('eriques,
+.BI tonumber( s ", " base ),
+et la plupart des biblioth\(`eques
+.BR math ", " string " et " table .
+.PP
+Pas encore impl\('ement\('es :
+.BR pcall / error / assert  ;
+.BR string.match / gmatch  ;
+.BR select() ,
+et
+.B next()
+comme fonction appelable ;
+les \('ev\('enements de m\('etatable arithm\('etiques, de comparaison et de
+concat\('enation ;
+le ramasse-miettes (le tas ne fait que cro\(^itre) ;
+et un diagnostic pour la lecture, depuis une fonction, d'une
+.B local
+d\('eclar\('ee dans un bloc situ\('e lexicalement hors de toute fonction au niveau du
+chunk (par exemple dans un
+.B do...end
+isol\('e au niveau du chunk) \(em une telle lecture se compile aujourd'hui
+silencieusement en une globale non initialis\('ee plut\(^ot qu'en la valeur que le
+bloc semblait d\('elimiter.
+.SH CLAVIER ET SOURIS
+La console Vircon32 n'a ni clavier ni souris, seulement quatre manettes.
+.BR key() ", " keyp() ", " kbd.* ", " mouse() ", " mouse.*
+et
+.B stat(32..34)
+de PICO-8 lisent un clavier ou une souris d\('eguis\('es en manette, et ne re\(,coivent
+de saisie
+.B qu'avec
+l'un des \('el\('ements suivants :
+.IP \(bu 2
+l'adaptateur mat\('eriel v32io (une carte Waveshare RP2350-USB-A, R13 retir\('ee,
+ex\('ecutant le micrologiciel v32io), qui fait appara\(^itre un clavier ou une
+souris USB comme une manette nomm\('ee
+.B v32io:kbd
+ou
+.BR v32io:mouse  ;
+il fonctionne avec n'importe quel \('emulateur Vircon32 une fois un profil de
+joystick configur\('e pour lui ;
+.IP \(bu 2
+un \('emulateur Vircon32 modifi\('e qui lit le clavier et la souris de
+l'ordinateur comme des dispositifs v32io : la branche
+.B v32io
+du fork \(`a
+.UR https://github.com/wedge1020/ComputerSoftware
+.UE
+(le dispositif
+.B v32kbd
+comme le
+.BR v32mouse ),
+ou le DesktopEmulator standard avec les correctifs
+.I emulator/v32kbd.patch
+et
+.I emulator/v32mouse.patch
+du projet v32io appliqu\('es.
+.PP
+Par d\('efaut le clavier est lu sur le port de manette 2 et la souris sur le
+port 3 ; voir
+.B \-\-keyboard
+et
+.BR \-\-mouse .
+.PP
+Sans l'un de ces \('el\('ements, aucune saisie clavier ou souris n'est possible : les
+programmes compilent et s'ex\('ecutent, mais aucune touche n'est jamais
+enfonc\('ee et la souris ne bouge jamais. Une manette ordinaire laiss\('ee dans le
+port du clavier ou de la souris est lue comme une manette. Voir
+.I doc/API.md
+pour les protocoles et la mise en place.
+.SH INDICATIONS DE CARTOUCHE
+Les m\('etadonn\('ees et ressources de la cartouche se d\('eclarent par des
+commentaires de ligne
+.BR \-\-# ,
+analys\('es par l'\('etape de pr\('eprocesseur et utilis\('es pour produire le fichier XML
+compagnon :
+.BR \-\-#version ", " \-\-#title ", " \-\-#api ", " \-\-#texture ,
+.BR \-\-#sound ", " \-\-#tilemap ", " \-\-#p8 ", " \-\-#rate ,
+.BR \-\-#bezel ", " \-\-#fast\-circles ", " \-\-#keyboard ,
+.BR \-\-#mouse ", et " \-\-#include .
+Le XML nomme les fichiers
+.I .vtex
+et
+.I .vsnd
+issus du fichier
+.I .png
+ou
+.I .wav
+de chaque indication (m\(^eme dossier, m\(^eme nom).
+Une indication
+.B \-\-#texture
+ou
+.B \-\-#sound
+enregistre la ressource dans le XML et lie aussi son nom \(`a une constante de
+compilation utilisable directement depuis Lua ; les identifiants de ressource
+sont attribu\('es dans l'ordre du source et co\(:incident, c'est garanti, avec leur
+position dans le XML g\('en\('er\('e.
+.B \-\-#include \(dqfichier.lua\(dq
+ins\(`ere textuellement un autre fichier avant l'analyse syntaxique, avec
+d\('eduplication d'inclusion unique et d\('etection de cycles. Le fichier est cherch\('e
+\(`a c\(^ot\('e du fichier qui l'inclut, puis dans le r\('epertoire courant, puis dans
+chaque r\('epertoire de
+.B V32LUA_INCLUDE
+(voir
+.BR ENVIRONNEMENT ),
+puis dans le r\('epertoire de biblioth\(`eque install\('e et enfin dans les
+r\('epertoires de biblioth\(`eque situ\('es \(`a c\(^ot\('e du compilateur lui-m\(^eme (voir
+.BR FICHIERS )  ;
+il n'effectue aucune transformation de port\('ee ; une
+.B local
+au niveau sup\('erieur du fichier inclus est promue en globale exactement comme
+dans un fichier monolithique.
+.SH FICHIERS
+.TP
+.I *.lua
+Source d'entr\('ee, dans le sous-ensemble de Lua que cet outil accepte.
+.TP
+.I *.tic
+Une cartouche TIC-80 (cartouches Lua uniquement), compil\('ee directement : son
+code et les tuiles, sprites, carte, drapeaux, palette, formes d'onde et SFX
+de la banque 0 sont lus.
+.TP
+.I *.p8
+Une cartouche PICO-8, compil\('ee directement (voir
+.BR "NOTES SUR LE LANGAGE" ).
+.TP
+.IR *_pico8.vtex ", " *_sfxNN.vsnd
+G\('en\('er\('es \(`a c\(^ot\('e de la sortie pour les cartouches PICO-8 : la planche de sprites
+(plus des \('echantillons de couleur) et les 64 entr\('ees
+.B __sfx__
+de la cartouche synth\('etis\('ees en sons (22050 Hz par d\('efaut, voir
+.BR \-\-rate ).
+.BR music()
+est s\('equenc\('ee \(`a partir d'eux \(`a l'ex\('ecution.
+.TP
+.IR *_trackN.vsnd ", " *_sfxNN_nMM.vsnd
+G\('en\('er\('es \(`a c\(^ot\('e de la sortie pour les cartouches TIC-80 avec donn\('ees sonores :
+chaque piste musicale que le programme peut jouer, pr\('e-mix\('ee et en boucle, et
+chaque SFX rendu aux notes auxquelles le programme le joue.
+.TP
+.IR pico8_tone0.vsnd " .. " pico8_tone7.vsnd
+Tonalit\('es de remplacement pour les programmes PICO-8 et TIC-80 sans donn\('ees
+sonores qui utilisent
+.BR sfx() / music()
+(un fichier existant de m\(^eme nom est conserv\('e).
+.TP
+.I *.asm
+Assembleur Vircon32 g\('en\('er\('e, pr\(^et \(`a \(^etre remis directement \(`a l'assembleur
+Vircon32.
+.TP
+.I *.xml
+D\('efinition de cartouche g\('en\('er\('ee, nomm\('ee d'apr\(`es le chemin de sortie de
+l'assembleur (et non celui de l'entr\('ee), qui r\('ef\('erence les fichiers
+.I .vtex
+et
+.I .vsnd
+enregistr\('es par les indications de cartouche. Requise par
+.BR packrom (1)
+avec la ROM assembl\('ee.
+.TP
+.I *.asm.debug
+Facultatif, avec
+.BR \-g  :
+une carte orient\('ee ligne des d\('ecalages de ligne de l'assembleur g\('en\('er\('e vers les
+lignes du source Lua d'origine et les noms des fonctions englobantes, \(`a
+l'usage d'un d\('ebogueur tel que
+.BR v32sim (1).
+.PP
+Les ressources de texture et de son nomm\('ees par les indications de cartouche
+ne sont pas lues par
+.BR v32lua  ;
+convertissez-les avec
+.BR png2vircon (1)
+et
+.BR wav2vircon (1)
+avant d'ex\('ecuter
+.BR packrom (1).
+.TP
+.I /usr/local/Vircon32/v32tools/include/v32lua/
+La biblioth\(`eque de
+.BR \-\-#include  :
+les portages de la biblioth\(`eque standard du r\('epertoire
+.I lib/
+de l'arborescence des sources
+.RI ( string.lua ", " math.lua ", ...),"
+install\('es l\(`a par
+.B make sysinstall
+ou
+.BR "cmake \-\-install" .
+Le r\('epertoire est compil\('e dans
+.BR v32lua  ;
+une compilation CMake install\('ee sous un autre pr\('efixe utilise
+.IR <pr\('efixe>/Vircon32/v32tools/include/v32lua ,
+ou
+.I <pr\('efixe>\ev32tools\einclude\ev32lua
+sous Windows.
+.TP
+.IR <dir>/include/v32lua/ ", " <dir>/../Vircon32/v32tools/include/v32lua/
+L\(`a o\(`u les fichiers
+.B \-\-#include
+introuvables ailleurs sont cherch\('es en dernier,
+.I <dir>
+\('etant le r\('epertoire o\(`u se trouve l'ex\('ecutable
+.B v32lua
+: la disposition d'un zip de version et d'une installation Windows
+.RI ( v32lua.exe
+\(`a c\(^ot\('e de
+.IR include\ev32lua ),
+et d'une installation sous un
+.I <pr\('efixe>
+quelconque
+.RI ( <pr\('efixe>/bin/v32lua ).
+Ainsi un zip de version d\('ecompress\('e retrouve sa propre biblioth\(`eque o\(`u qu'on
+le place.
+.TP
+.I inc/config.h
+(dans l'arborescence des sources) Valeurs par d\('efaut de compilation des
+fr\('equences d'\('echantillonnage, des panneaux lat\('eraux, des cercles rapides, des
+ports de clavier et de souris, et des avertissements.
+.SH ENVIRONNEMENT
+.TP
+.B V32LUA_INCLUDE
+R\('epertoires o\(`u l'on cherche les fichiers
+.B \-\-#include
+apr\(`es le r\('epertoire du fichier qui inclut et le r\('epertoire courant, et avant
+le r\('epertoire de biblioth\(`eque install\('e : une liste s\('epar\('ee par des deux-points
+(par des points-virgules sous Windows).
+.SH VOIR AUSSI
+.BR v32c++ (1),
+la documentation du compilateur C et de l'assembleur Vircon32,
+.BR v32opt (1)
+(un optimiseur d'assembleur Vircon32 distinct et g\('en\('eraliste, destin\('e \(`a se
+placer entre cet outil et l'assembleur).
+.PP
+D\('ep\(^ot du projet :
+.I https://github.com/wedge1020/v32lua
+.SH BOGUES
+Signalez les probl\(`emes, y compris tout ce que cet outil compile
+incorrectement ou toute fonctionnalit\('e de Lua que vous aimeriez voir
+prioris\('ee, via le d\('ep\(^ot du projet ci-dessus. Il s'agit d'un logiciel
+v\('eritablement jeune et en d\('eveloppement actif.
+.SH AUTEUR
+Matthew Haas

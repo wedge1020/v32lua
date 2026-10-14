@@ -280,11 +280,10 @@ function ftoa(value, result_text)
     -- v32lua's string.format implements plain %.Nf through the same
     -- rounding ftoa pipeline the compiler uses elsewhere, so this
     -- reproduces the C original's shape directly: sign, integer part,
-    -- '.', then a fraction of up to 5 digits. (One deliberate
-    -- divergence: a fraction that rounds up to a whole unit carries
-    -- into the integer part here -- e.g. 0.999999 -> "1" -- where the
-    -- C original's separate decimal_part arithmetic instead produced
-    -- the malformed "0.1".)
+    -- '.', then a fraction of up to 5 digits. A fraction that rounds up
+    -- to a whole unit carries into the integer part (0.999999 -> "1"),
+    -- which matches the C original since its upstream fix (string.h used
+    -- to print X.999995..X.999999 as the malformed "X.1").
     local text = string.format("%.5f", value)
 
     -- remove rightmost decimal zeroes when needed. string.sub's

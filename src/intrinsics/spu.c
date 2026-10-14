@@ -317,9 +317,11 @@ extern ASTNode *root_node;   // set by the bison grammar; used for the
 //
 // NOTE: Vircon32 has no "ResumeSelectedChannel" command. Re-issuing
 // PlaySelectedChannel on a PAUSED channel resumes it from its current
-// position (a channel only restarts from 0 if it was STOPPED), so Play is
-// the correct per-channel resume. ResumeAllChannels does exist and is used
-// for the no-argument form.
+// position, so Play is the per-channel resume -- but ONLY for a paused
+// channel: on a STOPPED one it restarts from 0 and on a PLAYING one it
+// retriggers from 0. resume(ch) therefore checks the channel's state first
+// (spu_emit_selected_channel_cmd). ResumeAllChannels does exist and is used
+// for the no-argument form; it only touches paused channels.
 typedef struct {
     const char *lua_name;
     const char *selected_cmd;   // when a channel is named
@@ -783,6 +785,42 @@ bool emit_vircon32_play_intrinsic (ASTNode *node, int dest_reg)
 }
 
 // ============================================================================
+// The per-channel command of stop/pause/resume, for the channel already
+// written to SPU_SelectedChannel.
+//
+// stop and pause are one OUT. resume is not: the console has no
+// "ResumeSelectedChannel", and PlaySelectedChannel on a channel that is
+// not PAUSED does not resume anything -- PlayChannel() rewinds a STOPPED
+// channel and RETRIGGERS a PLAYING one, both to position 0. The no-channel
+// form is safe (ResumeAllChannels only touches channels that are Paused),
+// so the per-channel form is made to match: it reads the selected
+// channel's state and issues Play only when that state is paused (0x41),
+// and does nothing for a playing or stopped channel. (The symbolic
+// SPUChannelState_* names are valid only as OUT operands, so the compare
+// uses the number, as music.playing() does.)
+// ============================================================================
+static void spu_emit_selected_channel_cmd (const Vircon32SPUChannelCmd *cmd)
+{
+    if (strcmp(cmd->lua_name, "resume") != 0) {
+        emit_asm("OUT  SPU_Command, %s", cmd->selected_cmd);
+        return;
+    }
+
+    int         lbl = get_next_label();
+    const char *ctx = get_current_function_name();
+    char skip_label[192];
+    snprintf(skip_label, sizeof(skip_label), "__%s_resume_not_paused_%d", ctx, lbl);
+
+    int reg = allocate_register();
+    emit_asm("IN   R%d, SPU_ChannelState ; resume(ch) only acts on a PAUSED channel", reg);
+    emit_asm("IEQ  R%d, 0x41 ; channel_paused", reg);
+    emit_asm("JF   R%d, %s ; playing/stopped: Play would restart it from 0", reg, skip_label);
+    emit_asm("OUT  SPU_Command, %s", cmd->selected_cmd);
+    emit_asm("%s:\n", skip_label);
+    unlock_register(reg);
+}
+
+// ============================================================================
 // stop([CHANNEL]) / pause([CHANNEL]) / resume([CHANNEL])
 //
 // One emitter for all three; `lua_name` selects the command pair.
@@ -841,7 +879,7 @@ bool emit_vircon32_channel_cmd_intrinsic (ASTNode *node, int dest_reg, const cha
 
         emit_asm("    ;; --- Vircon32 %s() Intrinsic (static fold) ---", lua_name);
         emit_asm("OUT  SPU_SelectedChannel, %d", (int) channel_val);
-        emit_asm("OUT  SPU_Command, %s", cmd->selected_cmd);
+        spu_emit_selected_channel_cmd(cmd);
 
         if (dest_reg != 0) {
             emit_asm("MOV  R%d, BOXED_NIL ; return nil", dest_reg);
@@ -873,7 +911,7 @@ bool emit_vircon32_channel_cmd_intrinsic (ASTNode *node, int dest_reg, const cha
     emit_asm("OUT  SPU_Command, %s ; channel was nil -> all channels", cmd->all_cmd);
     emit_asm("JMP  %s", end_label);
     emit_asm("%s:\n", sel_label);
-    emit_asm("OUT  SPU_Command, %s", cmd->selected_cmd);
+    spu_emit_selected_channel_cmd(cmd);
     emit_asm("%s:\n", end_label);
 
     if (dest_reg != 0) {

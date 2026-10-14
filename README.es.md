@@ -206,13 +206,12 @@ recompilar.
 **Idioma de la documentación.** Por defecto, ambas compilaciones
 instalan los documentos en todos los idiomas (`README.md`,
 `README.es.md`, `README.fr.md`, `doc/API.es.md`, ...) y la página de
-manual en inglés. `DEST_LANG=es` o `DEST_LANG=fr` (`sudo make sysinstall
+manual en inglés (`man/v32lua.es.1` y `man/v32lua.fr.1` son las traducidas). `DEST_LANG=es` o `DEST_LANG=fr` (`sudo make sysinstall
 DEST_LANG=es`, o `cmake -S . -B build -DDEST_LANG=es`) instala en cambio
 ese idioma: el README, `doc/API.md` y `doc/USAGE.md` traducidos, con esos
 nombres simples (y los enlaces entre ellos ajustados), junto a las guías
 que solo existen en inglés (`doc/PICO8.md`, `doc/TIC80.md`, ...), y la
-página de manual en ese idioma cuando la haya (por ahora solo existe la
-inglesa). `DEST_LANG=en` instala solo los documentos en inglés.
+página de manual en ese idioma (`man/v32lua.es.1`, `man/v32lua.fr.1`). `DEST_LANG=en` instala solo los documentos en inglés.
 
 **Zips de publicación.** Los zips precompilados de la página de
 [Releases](https://github.com/wedge1020/v32lua/releases) (Windows x86_64 y

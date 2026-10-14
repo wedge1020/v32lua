@@ -107,7 +107,7 @@ nombre (`spr`, `rgba`, `color`, …) reemplaza al intrínseco.
 | Llamada | Devuelve | Qué hace |
 |---|---|---|
 | `music.play(snd [, ch [, loop [, vol [, start]]]])` | canal | Reproduce un sonido, en el canal 0 por defecto. |
-| `music.pause([ch])`, `music.resume([ch])`, `music.stop([ch])` | nil | Control del canal. |
+| `music.pause([ch])`, `music.resume([ch])`, `music.stop([ch])` | nil | Control del canal. `resume(ch)` solo actúa sobre un canal *en pausa* (uno que suena o detenido se deja como está); sin argumento reanuda todos los canales en pausa. |
 | `music.playing([ch])` | booleano | Si el canal se está reproduciendo. |
 | `music.volume(vol [, ch])` | nil | Volumen del canal. |
 | `sfx.play(snd [, ch [, vol [, speed]]])` | canal | Reproduce un efecto en el siguiente de los canales 1–15. |
@@ -123,7 +123,8 @@ nombre (`spr`, `rgba`, `color`, …) reemplaza al intrínseco.
 | `tilemap.render(MAP, sx, sy, w, h, x, y, tw, th [, skip])` | nil | Dibuja un bloque de mosaicos. |
 | `memcard.save(v [, pos])`, `memcard.load([pos])` | v | Lee/escribe una palabra en la tarjeta de memoria. [Detalles](#tarjeta-de-memoria-memcard) |
 | `memcard.load_table(pos)` | tabla / nil | Carga una tabla guardada con `memcard.save(t)`. |
-| `memcard.title(str)` | nil | Establece el título de guardado de la tarjeta. |
+| `memcard.title(str\|tabla)` | nil | Establece el título/id de la tarjeta (una cadena, o una tabla de 20 números). |
+| `memcard.title()` | tabla | Obtiene el título/id de la tarjeta (una tabla con las 20 palabras, índices 1–20). |
 | `memcard[pos]`, `memcard[pos] = v` | | Igual que `load` / `save`. |
 | `system.wait()` / `system.halt()` | nil | `WAIT` hasta el siguiente cuadro / `HLT`. [Detalles](#sistema-system) |
 | `system.date()` / `system.time()` | cadena, 3 números | `"YYYY-MM-DD", a, m, d` / `"HH:MM:SS", h, m, s`. |
@@ -315,9 +316,11 @@ solo funciona si se escribe después del comando. Escríbelo incluso cuando
 sea 0, ya que el comando acaba de reemplazarlo con la bandera del sonido.
 
 Para un canal **En Pausa (Paused)**, `PlayChannel()` no toma ninguna de las
-dos ramas — solo establece `State = Playing`. Eso es lo que hace que Play
-sea el resume correcto por canal, y por qué resume nunca perturba la
-posición o el bucle.
+dos ramas — solo establece `State = Playing`, así que en un canal en pausa
+Play reanuda sin perturbar la posición ni el bucle. En cualquier *otro*
+estado no es un resume: un canal **Detenido** se reinicia, y un canal que
+ya está **Reproduciendo** se redispara desde la posición 0 (verificado
+contra el `PlayChannel()` del emulador).
 
 *Estados de canal y qué significa realmente resume*
 
@@ -326,9 +329,25 @@ posición o el bucle.
 falso).
 
 No existe un comando `ResumeSelectedChannel`. `ResumeAllChannels` es
-literalmente un bucle que llama a `PlayChannel()` en cada canal en pausa,
-así que `resume(ch)` = `PlaySelectedChannel` es el equivalente correcto por
-canal.
+literalmente un bucle que llama a `PlayChannel()` en cada canal **en
+pausa** (deja los demás en paz), así que `music.resume(ch)` es
+`PlaySelectedChannel` **protegido por una comprobación de estado**: el
+compilador lee `SPU_ChannelState` y emite el comando solo cuando el canal
+está En Pausa (`0x41`). Reanudar un canal que suena o está detenido es por
+tanto una no-operación, como ya lo era `resume()` sin argumento. Un Play sin
+protección habría rebobinado al inicio un canal que suena. (Esta protección
+se añadió en `20261014-dev`; las versiones anteriores emitían el Play
+a secas.)
+
+**Constantes del ensamblador.** El ensamblador de Vircon32 acepta nombres de
+puerto (`SPU_Command`, ...) y nombres de valor
+(`SPUCommand_PlaySelectedChannel`, `SPUChannelState_*`, `GPUCommand_*`,
+`GPUBlendingMode_*`) **solo como operandos de `IN` / `OUT`**; en `MOV`,
+`PUSH` e `IEQ` se rechazan. Por eso el compilador emite siempre el valor
+numérico ahí (la tabla de comandos de `src/intrinsics/spu.c` y el `0x41` de
+arriba); lo que escribas en `__asm__` / `__rawasm__` debe hacer lo mismo:
+`OUT SPU_Command, 0x31` es válido y `MOV R0, SPUCommand_PauseSelectedChannel`
+es un error del ensamblador.
 
 **Un "resume" que reinicia desde el principio significa que el canal
 estaba DETENIDO, no en pausa.** Esa es la firma diagnóstica de una bandera
@@ -339,7 +358,8 @@ Play lo rebobinó.
 comprueba si el canal ya está detenido, a pesar de que la documentación de
 la API en C dice que pausar "no tiene efecto si ya está detenido". Así que
 pausar un canal terminado lo deja En Pausa en la posición 0, y un resume
-posterior reproduce desde el inicio. Protégete con una comprobación
+posterior lo reproduce desde el inicio (un resume real de un canal En Pausa,
+desde la posición 0). Protégete con una comprobación
 `SPU_ChannelState == 0x42` si eso importa.
 
 *Tipos de puerto*
@@ -1562,7 +1582,8 @@ memcard.save(value)             -> value   (auto-anexado; ver abajo)
 memcard.load(position)          -> value   (lectura en bruto, exactamente 1 palabra)
 memcard.load()                  -> value   (posición 0)
 memcard.load_table(position)    -> table o nil   (ver Tablas, abajo)
-memcard.title(str)              -> nil     (establece el título de 20 palabras)
+memcard.title(str|tabla)        -> nil     (establece el título/id de 20 palabras)
+memcard.title()                 -> tabla   (obtiene el título/id de 20 palabras, índices 1-20)
 
 memcard[position]                  == memcard.load(position)
 memcard[position] = value          == memcard.save(value, position)
@@ -1637,18 +1658,63 @@ local hi = memcard[0]        -- 1234
 local cursor = memcard[-1]    -- lee el cursor de auto-anexado
 ```
 
-**memcard.title(str) -> nil**
+**memcard.title(str|tabla) -> nil**
 
-Establece el título de la tarjeta de memoria — hasta 20 caracteres, una
-palabra por carácter, coincidiendo con la representación interna de
-cadenas de esta VM. Las cadenas más largas se truncan; las más cortas se
-rellenan con ceros. Esto es independiente de cualquier pista de cartucho
-`--#title`, que nombra al *cartucho*, no a los *datos guardados* — un solo
-cartucho puede tener muchas tarjetas de memoria en circulación, cada una
-con su propio título.
+Establece el título/id de la tarjeta de memoria: 20 palabras al comienzo
+del área de título de la tarjeta. Esto es independiente de cualquier pista
+de cartucho `--#title`, que nombra al *cartucho*, no a los *datos
+guardados* — un solo cartucho puede tener muchas tarjetas de memoria en
+circulación, cada una con su propio título.
+
+Dos formas de argumento:
+
+- **Una cadena.** Un carácter por palabra (coincidiendo con la
+  representación interna de cadenas de esta VM). Una cadena de más de 20
+  caracteres se trunca; una más corta se rellena con ceros.
+- **Una tabla indexada**, para un título que es más un ID que un texto.
+  Los elementos `1..20` son las 20 palabras, cada una un número guardado
+  como su valor entero de 32 bits. Un elemento ausente (`nil`) se guarda
+  como 0; los elementos pasados del 20 se ignoran. Como la palabra que
+  devuelve `memcard.title()` es la conversión inversa exacta,
+  `memcard.title(memcard.title())` conserva cada palabra bit a bit.
+
+Cualquier otra cosa (un número, una función, `true`/`false`/`nil`, o una
+tabla cuyos elementos `1..20` incluyan un no-número, como una cadena) es un
+**pánico en tiempo de ejecución**: la pantalla roja `PANIC` con el mensaje
+*RUNTIME ERROR: memcard.title() MUST BE STRING OR INDEXED TABLE* y el valor
+ofensor, y la consola se detiene. De que la forma de tabla se escriba
+palabra por palabra se desprende:
+
+- las palabras anteriores al elemento ofensor ya se han guardado cuando
+  ocurre el pánico (la escritura no es transaccional); valida antes si eso
+  importa;
+- cada número pasa por la conversión de flotante a entero de la consola,
+  que solo está definida para valores en el rango de 32 bits con signo (y un
+  flotante solo guarda enteros exactos hasta 2^24). Para guardar la palabra
+  `0xFFFFFFFF`, pasa `-1`; un valor de 2^31 o más se convierte de forma
+  distinta según el anfitrión del emulador, así que no cuentes con ello.
 
 ```lua
 memcard.title("My Save File")
+
+local id = {}
+for i = 1, 20 do id[i] = i * 100 end
+memcard.title(id)               -- 20 palabras numéricas
+```
+
+**memcard.title() -> tabla**
+
+Obtiene el título/id de la tarjeta de memoria como una **tabla nueva** de
+20 números, índices `1` a `20` (las tablas de esta versión empiezan en 1),
+una palabra cada uno. Para un título establecido desde una cadena, el
+elemento `n` es el código del carácter `n` (0 pasado el final de la
+cadena). La tabla se reserva de nuevo en cada llamada; el montón no recoge
+basura, así que lee el título una vez, no en cada cuadro. Igual que el
+establecedor, es independiente de cualquier pista de cartucho `--#title`.
+
+```lua
+local title = memcard.title()
+-- title[1] .. title[20]; para "My Save File": 77, 121, 32, 83, ... 0, 0
 ```
 
 **Tablas: memcard.save() / memcard.load_table()**

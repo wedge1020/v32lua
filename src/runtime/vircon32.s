@@ -912,14 +912,20 @@ _vircon32_play_done:
 ;; resume(ch) uses Play rather than a "resume selected channel" command
 ;; because the console has no such command. PlayChannel() leaves a PAUSED
 ;; channel's position and loop flag untouched and simply sets it Playing,
-;; so Play IS the per-channel resume. (ResumeAllChannels is literally a
-;; loop calling PlayChannel on every paused channel.)
+;; so on a paused channel Play IS the per-channel resume. (ResumeAllChannels
+;; is literally a loop calling PlayChannel on every PAUSED channel and
+;; skipping the rest.)
 ;;
-;; Note that Play only resumes a channel that is genuinely PAUSED. On a
-;; STOPPED channel it rewinds to 0 and restarts -- so a "resume" that
-;; restarts from the beginning means the channel had stopped, not paused.
-;; The usual cause is a sound that ran to its end because its loop flag
-;; was lost; see note B on __builtin_vircon32_play above.
+;; But Play is only a resume for a PAUSED channel: on a STOPPED channel it
+;; rewinds to 0 and restarts, and on a PLAYING one it retriggers from 0.
+;; So the emitter (spu_emit_selected_channel_cmd in intrinsics/spu.c)
+;; guards resume(ch)'s per-channel command with IN SPU_ChannelState == 0x41
+;; (Paused) and skips it otherwise; stop(ch) and pause(ch) are unguarded.
+;; The guard is emitted inline at the <selected> label above, not here.
+;; A "resume" that restarts from the beginning therefore no longer happens
+;; on a stopped channel; if a sound restarts when you did not expect it,
+;; the usual cause is a loop flag lost on a sound that ran to its end; see
+;; note B on __builtin_vircon32_play above.
 ;;
 ;; The BOXED_NIL test happens on the raw boxed value, BEFORE the CFI --
 ;; once converted, the tag bits are gone and nil is indistinguishable
@@ -1360,9 +1366,9 @@ _vircon32_volmask_done:
 ; assembler, not word-count constants. If a future change adds an export
 ; for this one, both routines should switch over together.
 ;
-; UNVERIFIED: written to the same standard as the rest of this file, but
-; not yet run through v32sim. Flagging per this project's usual
-; verification discipline.
+; Verified (20261014-dev) on the real CPU core via the headless harness:
+; strings, oversize/empty/sparse/fractional input, and the round trip with
+; the table form of memcard.title().
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 __builtin_vircon32_memcard_get_title:
