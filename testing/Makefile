@@ -103,4 +103,4 @@ clean:
 		echo "========================================"; \
 		$(MAKE) -C $$dir clean; \
 	done
-	@rm -f *.asm *.vbin *.xml *.v32 *.debug *.txt
+	@rm -f *.asm *.vbin *.xml *.v32 *.debug *.txt *.vtex *.vsnd textures/*.vtex

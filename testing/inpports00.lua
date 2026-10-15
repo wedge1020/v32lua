@@ -20,7 +20,7 @@ function game_loop()
 		print (0, 0, "down ")
 	end
 
-	start = ioports.inp.start
+	start = ioports.inp.START
 	if (start >  0) then
 		print (0, 0, "start")
 	end

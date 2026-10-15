@@ -88,4 +88,4 @@ v32: $(XML_OUTS)
 
 # Clean target drops all generated assembly and binary test files
 clean:
-	rm -f *.asm *.vbin *.xml *.v32 *.debug *.txt *.cmd *.out *.err *.want* *.have* *.output
+	rm -f *.asm *.vbin *.xml *.v32 *.debug *.txt *.cmd *.out *.err *.want* *.have* *.output *.vtex *.vsnd
