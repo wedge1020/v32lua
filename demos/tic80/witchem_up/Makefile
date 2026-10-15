@@ -1,6 +1,11 @@
 # --- Configuration ---
 DEMO          = witchem_up
-COMPILER      = ../../../bin/v32lua --rate 11025
+# --allow-float-as-clearcolor: this game calls cls(c1) with c1 = 8, which is not
+# a palette index here but the float 8.0, whose bit pattern (0x41000000) is
+# black at ~25% alpha. The GPU draws a clear as a blended quad, so every
+# frame darkens the last by 25% instead of erasing it: the CRT-style streaks.
+# Without the option cls(c1) is the palette index 8 (opaque black, no streaks).
+COMPILER      = ../../../bin/v32lua --rate 11025 --allow-float-as-clearcolor
 OPTIMIZER     = v32opt -O3 -v
 ASSEMBLER     = assemble
 TEXTURE_TOOL  = png2vircon

@@ -1721,7 +1721,16 @@ int  try_emit_table_set_intrinsic (ASTNode *table_expr, ASTNode *key_expr, ASTNo
                 register_pinned[out_reg] = 1;
                 emit_asm("MOV R%d, R%d ; Copy value for hardware type cast\n", out_reg, val_reg);
 
-                if ((ioports[i].type & IOPORT_TYPE_INTEGER) == IOPORT_TYPE_INTEGER) {
+                if ((ioports[i].type & IOPORT_TYPE_INTEGER) == IOPORT_TYPE_INTEGER &&
+                    (strcmp(ioports[i].asm_port, "GPU_ClearColor")    == 0 ||
+                     strcmp(ioports[i].asm_port, "GPU_MultiplyColor") == 0)) {
+                    // A color word is 32 bits (0xAABBGGRR): from 0x80000000 on
+                    // (alpha >= 128) a bare CFI is out of range, which is
+                    // host-dependent -- 0x80000000 on x86-64, 0x7FFFFFFF on
+                    // ARM64 -- so a number goes through floor + wrap, as color(n).
+                    emit_asm("    ;; --- Intrinsic: Cast Lua Number to 32-bit Color Word ---\n");
+                    emit_number_to_color_word(out_reg);
+                } else if ((ioports[i].type & IOPORT_TYPE_INTEGER) == IOPORT_TYPE_INTEGER) {
                     emit_asm("    ;; --- Intrinsic: Cast Lua Float to Hardware Integer ---\n");
                     emit_asm("CFI R%d\n", out_reg);
                 } else if ((ioports[i].type & IOPORT_TYPE_BOOLEAN) == IOPORT_TYPE_BOOLEAN) {

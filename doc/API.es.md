@@ -85,6 +85,7 @@ nombre (`spr`, `rgba`, `color`, …) reemplaza al intrínseco.
 | `keyp([k [, hold, period]])` | booleano | La tecla `k` se pulsó en este cuadro (autorrepetición con `hold`/`period`, como TIC-80). |
 | `kbd.read()` | número / nil | Siguiente pulsación como el carácter que escribe (Mayús y Bloq Mayús aplicados). |
 | `kbd.event()` | número / nil | Siguiente evento: `+código` pulsada, `-código` soltada. |
+| `kbd.glyph(v)` | número / nil | El carácter de la fuente de la BIOS que representa un valor de `kbd.read()` (acentos, recuadros), o nil si es un código de tecla. |
 | `kbd.port([n])` | número | Puerto de mando del teclado (2 por defecto); cambiarlo empieza de nuevo. |
 | `kbd.capslock()`, `kbd.connected()` | booleano | Estado de Bloq Mayús; dispositivo conectado. |
 | `kbd.clear()` | nil | Descarta los eventos no leídos. |
@@ -849,6 +850,19 @@ bits, calculada al compilar: `ioports.gpu.bgcolor = 0xFF003366` guarda
 `ioports.gpu.x = -5` guarda `-5`, e `ioports.gpu.y = 12.7` guarda `12`.
 Los literales fuera de `[-2^31, 2^32)` se saturan con una advertencia.
 
+**Números dados a puertos de color.** Un número Lua es un flotante: sus bits
+no son un color. Cuando un puerto de *color* (`ioports.gpu.clear`,
+`multiply`, `bgcolor`...), el `color_mult` de `spr` o el color de
+`rect`/`rectfill` recibe un número que no es un literal, el compilador lo
+redondea ahora hacia abajo a entero y lo usa como palabra `0xAABBGGRR`
+(módulo 2^32), con un aviso: un float32 solo conserva 24 bits (alfa ≥ 0x80
+requiere `rgba()`/`hex()`). Antes se enviaban los bits del flotante:
+`ioports.gpu.clear = 8` borraba a negro con 25 % de alfa, que el emulador
+mezcla con el fotograma anterior. `--allow-float-as-clearcolor` (o la
+directiva `--#allow-float-as-clearcolor`) devuelve ese comportamiento solo
+para el color de borrado, a propósito, para una estela de desenfoque. Usa
+`rgba()`, `hex()` o un literal para colores exactos.
+
 **Definiendo regiones de textura**
 
 El `region_id` de `spr()` no se refiere a nada hasta que se haya recortado
@@ -1085,8 +1099,8 @@ teclado y el ratón del ordenador. Puede ser:
   [rama `v32io`](https://github.com/wedge1020/ComputerSoftware/tree/v32io),
   que tiene los dispositivos `v32kbd` y `v32mouse`; o
 - las fuentes del DesktopEmulator original con los dos parches del
-  proyecto v32io aplicados (`emulator/v32kbd.patch`,
-  `emulator/v32mouse.patch`).
+  proyecto v32io aplicados (`emulator/v32io/v32kbd.patch`, `emulator/v32io/v32kbd-text.patch`,
+  `emulator/v32io/v32mouse.patch`).
 
 En su menú *Gamepads*, elegir el mando que espera el programa y
 seleccionar **`v32kbd`** o **`v32mouse`**. `v32kbd` no se puede
@@ -1178,6 +1192,7 @@ key([k])                      -> booleano, k pulsada (sin k: cualquier tecla)
 keyp([k [, hold, period]])    -> booleano, k se pulsó en este cuadro (+ autorrepetición)
 kbd.read()                    -> siguiente carácter escrito (un número), o nil
 kbd.event()                   -> siguiente evento: +código pulsada, -código soltada, o nil
+kbd.glyph(v)                 -> carácter de la fuente de la BIOS de un valor de kbd.read(), o nil para un código de tecla
 kbd.port([n])                 -> puerto de mando del teclado (y lo cambia)
 kbd.capslock()                -> booleano, Bloq Mayús activo
 kbd.connected()               -> booleano, hay algo conectado en ese puerto
@@ -1268,8 +1283,9 @@ function game_loop()
     while c do
         if c == 8 then                          -- Retroceso
             text = string.sub(text, 1, -2)
-        elseif c >= 32 and c < 127 then
-            text = text .. string.char(c)
+        else
+            local g = kbd.glyph(c)              -- nil for a key with no character
+            if g then text = text .. string.char(g) end
         end
         c = kbd.read()
     end
@@ -1282,6 +1298,18 @@ escribe, con Mayús y Bloq Mayús aplicados tal como estaban al pulsarla
 (`"A"`, `"!"`, `"{"` ... como números, según la fuente de la BIOS), y las
 teclas sin carácter como su código (Intro 13, Retroceso 8, flechas 1–4...).
 Las liberaciones se saltan. `nil` cuando no queda nada.
+
+Los caracteres fuera de ASCII US (letras acentuadas, `€`, símbolos de
+recuadro) se escriben con la extensión de *texto* de v32io: el dispositivo
+envía el carácter como un par de eventos, que el código de teclado del
+compilador vuelve a unir (una primera mitad suelta se descarta tras 30
+fotogramas, y un dispositivo reconectado empieza limpio). `kbd.read()`
+devuelve un carácter así como su código en la fuente de la BIOS
+(Windows-1252, 128–255); los símbolos de recuadro 14–31 vuelven como
+**256 + código**, para no confundirse con códigos de tecla (Intro 13,
+flechas 1–4...). `kbd.glyph(v)` lo deshace: da el carácter para `print` o
+`string.char()`, y `nil` para un código de tecla. `kbd.event()` se salta
+los caracteres escritos y solo informa de teclas.
 
 `kbd.event()` devuelve en cambio todos los eventos, pulsaciones y
 liberaciones, como el código de tecla sin Mayús: positivo al pulsar,

@@ -1,4 +1,4 @@
-.TH V32LUA 1 "octobre 2026" "v32lua 20261014-dev" "Commandes utilisateur"
+.TH V32LUA 1 "octobre 2026" "v32lua 20261015-dev" "Commandes utilisateur"
 .SH NOM
 v32lua \- compile un sous-ensemble de Lua en assembleur Vircon32 et en XML de cartouche
 .SH SYNOPSIS
@@ -16,6 +16,7 @@ v32lua \- compile un sous-ensemble de Lua en assembleur Vircon32 et en XML de ca
 .RB [ \-\-rate
 .IR hz ]
 .RB [ \-\-fast\-circles ]
+.RB [ \-\-allow\-float\-as\-clearcolor ]
 .RB [ \-\-keyboard
 .IR port ]
 .RB [ \-\-mouse
@@ -187,6 +188,17 @@ d'environ 1,2 par unit\('e de rayon ; environ 1,5 % des pixels du bord diff\(`er
 de ceux de la console). Les contours sont toujours exacts. \('Equivaut \(`a une
 indication
 .BR \-\-#fast\-circles .
+.TP
+.B \-\-allow\-float\-as\-clearcolor
+Un nombre Lua donné à
+.B ioports.gpu.clear
+ou au
+.B cls()
+TIC-80 garde ses bits float32 comme couleur d'effacement, comme les anciennes
+versions (un effacement translucide qui traîne derrière les objets mobiles).
+Désactivé par défaut : les nombres sont convertis en mot couleur entier. Comme
+la directive
+.BR \-\-#allow\-float\-as\-clearcolor .
 .TP
 .BI \-\-keyboard " port"
 Port de manette (0\(en3) o\(`u est branch\('e un clavier v32kbd, pour
@@ -527,9 +539,10 @@ du fork \(`a
 comme le
 .BR v32mouse ),
 ou le DesktopEmulator standard avec les correctifs
-.I emulator/v32kbd.patch
+.IR emulator/v32io/v32kbd.patch ,
+.IR emulator/v32io/v32kbd-text.patch
 et
-.I emulator/v32mouse.patch
+.I emulator/v32io/v32mouse.patch
 du projet v32io appliqu\('es.
 .PP
 Par d\('efaut le clavier est lu sur le port de manette 2 et la souris sur le

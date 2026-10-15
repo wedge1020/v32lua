@@ -338,6 +338,9 @@ works):
   `--no-bezel`: black margins.
 * `--fast-circles`: TIC-80/PICO-8 filled circles above radius 31 drawn as
   a scaled disc.
+* `--allow-float-as-clearcolor`: a Lua number given to `ioports.gpu.clear`
+  or TIC-80 `cls()` keeps its float32 bits as the clear color (old
+  behavior; used for translucent-clear streaks such as `witchem_up`).
 
 The defaults of these options (sample rates per API, side panels on/off
 and a default panel art file, fast circles, warnings) are set in
@@ -444,8 +447,8 @@ Only  one API  surface  is  active per  cartridge;  selecting `tic80`  or
 >   [wedge1020/ComputerSoftware](https://github.com/wedge1020/ComputerSoftware),
 >   [`v32io` branch](https://github.com/wedge1020/ComputerSoftware/tree/v32io)
 >   (both `v32kbd` and `v32mouse`), or the stock DesktopEmulator sources
->   with the v32io project's `emulator/v32kbd.patch` and
->   `emulator/v32mouse.patch` applied.
+>   with the v32io project's `emulator/v32io/v32kbd.patch`, `emulator/v32io/v32kbd-text.patch` and
+>   `emulator/v32io/v32mouse.patch` applied.
 >
 > **Without one of these, keyboard and mouse access is not possible:**
 > programs compile and run, but no key is ever down and the mouse never
@@ -480,6 +483,7 @@ Supported hints:
 | `--#rate 11025` \| `22050` \| `44100` | Sample rate of the sound synthesized from a PICO-8 or TIC-80 cart (default 22050; `--#p8rate` is the old name; see [doc/PICO8.md](doc/PICO8.md#sound)). |
 | `--#bezel off` \| `on` \| `"art.png"` | PICO-8: the side panels beside the 128×128 screen — none, the built-in art, or your own (see [doc/PICO8.md](doc/PICO8.md#side-panels)). |
 | `--#fast-circles` | TIC-80/PICO-8: filled circles above radius 31 are drawn as one scaled disc (faster, edges differ slightly). |
+| `--#allow-float-as-clearcolor` | Same as the command-line option. |
 | `--#keyboard 0`–`3` | Gamepad port of a v32kbd keyboard (v32io adapter or the modified emulator required, see [Keyboard and mouse](#keyboard-and-mouse-v32io)), for `key()`/`keyp()`/`kbd.*` (default 2; see [doc/API.md](doc/API.md#keyboard-key--keyp--kbd)). |
 | `--#mouse 0`–`3` | Gamepad port of a v32mouse mouse (v32io adapter or the modified emulator required, see [Keyboard and mouse](#keyboard-and-mouse-v32io)), for `mouse()`/`mouse.*` and PICO-8's `stat(32..34)` (default 3; see [doc/API.md](doc/API.md#mouse-mouse--mouse)). |
 | `--#texture NAME "path/image.png"` | Registers a texture resource and binds it to a compile-time constant `NAME`. The XML names the `.vtex` file (`image.vtex`) that `png2vircon` makes from the PNG. |
@@ -957,7 +961,7 @@ short sample of the most commonly used entries:
 | **`ioports.inp.A/B/X/Y/L/R/START`** | `INP_GamepadButton*` | Read Only | Action/shoulder button state (`> 0` pressed, `< 0` released). |
 | **`ioports.inp.inputs`** | *Custom Action Subroutine* | Read Only | **Collation intrinsic:** polls all gamepad buttons/axes in one pass, collates them into a single 32-bit bitmask, and casts it to a Lua float. |
 | **`key([k])`**, **`keyp([k [, hold, period]])`** | v32kbd device on a gamepad port | Intrinsic | **Only with a v32io adapter or the modified emulator** ([why](#keyboard-and-mouse-v32io)). A full keyboard through a v32kbd device (gamepad port 2 by default, `--#keyboard N`): key held / went down this frame, TIC-80 style, with key codes or literal names (`"a"`, `"enter"`, `"shift"`) ([details](doc/API.md#keyboard-key--keyp--kbd)). |
-| **`kbd.read()`**, **`kbd.event()`**, **`kbd.port([n])`**, **`kbd.capslock()`**, **`kbd.connected()`**, **`kbd.clear()`** | v32kbd device | Intrinsic | Typed text (Shift and Caps Lock applied), raw press/release events, the keyboard's port, Caps Lock, device present, drop unread events. |
+| **`kbd.read()`**, **`kbd.event()`**, **`kbd.glyph(v)`**, **`kbd.port([n])`**, **`kbd.capslock()`**, **`kbd.connected()`**, **`kbd.clear()`** | v32kbd device | Intrinsic | Typed text (Shift and Caps Lock applied), raw press/release events, the keyboard's port, Caps Lock, device present, drop unread events. |
 | **`mouse()`** | v32mouse device on a gamepad port | Intrinsic | **Only with a v32io adapter or the modified emulator** ([why](#keyboard-and-mouse-v32io)). A mouse through a v32mouse device (gamepad port 3 by default, `--#mouse N`): `x, y, left, middle, right, scrollx, scrolly`, as TIC-80's (scroll always 0) ([details](doc/API.md#mouse-mouse--mouse)). |
 | **`mouse.pressed/released([b])`**, **`mouse.buttons()`**, **`mouse.delta()`**, **`mouse.position([x, y])`**, **`mouse.bounds(...)`**, **`mouse.scale([n])`**, **`mouse.port([n])`**, **`mouse.connected()`** | v32mouse device | Intrinsic | Button edges this frame, buttons held, movement this frame, the pointer, its limits and speed, the mouse's port, device present. |
 

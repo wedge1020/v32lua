@@ -234,6 +234,13 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
         // pixels differ from the console's). Outlines are always exact.
         shapes_fast = true;
     }
+    else if (strcmp(action, "allow-float-as-clearcolor") == 0) {
+        // --#allow-float-as-clearcolor: cls(variable) / ioports.gpu.clear(<number>)
+        // pass the number's float32 bit pattern to the GPU as the clear
+        // color, as before 20261015-dev (see config.h). The command-line
+        // option does the same.
+        allow_float_clearcolor = true;
+    }
     else if (strcmp(action, "version") == 0 && tokens >= 2) {
         // e.g., --#version 1.1
         snprintf(cart_version, sizeof(cart_version), "%.*s", (int) sizeof(cart_version) - 1, param1);

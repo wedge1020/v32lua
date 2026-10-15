@@ -86,6 +86,15 @@ tiles and cells exactly as TIC-80 does (all 16 flip × rotate combinations,
 
 ## Shapes
 
+`cls(c)` clears to a palette color: a number 0–15 (or any number below
+2^24, taken `& 15`, literal or not, through the cart's palette), or a string
+`"#RRGGBB"` / `"0xRRGGBB"` (opaque; with 8 digits the string is taken as a raw
+color word). A literal number of 2^24 or more is a raw `0xAABBGGRR` word. Before,
+a variable holding 8 reached the screen as the float's bits (black at 25 %
+alpha, which the emulator blends: a motion-blur streak) and a hex string
+was read with its channels shifted into the wrong bytes. The old streak is still available
+with `--allow-float-as-clearcolor` (see `demos/tic80/witchem_up`).
+
 `circ`/`circb` draw TIC-80's own pixels (its `drawEllipse()`, Zingl's
 algorithm, on the circle's bounding square; `circ` fills each row between
 the outline's outermost pixels) — checked pixel for pixel by
@@ -185,7 +194,7 @@ apart from the main ones on the device, so keypad 1 (80) is also the main
 1 key, and so on. Codes outside 0–94 are `false` (TIC-80 stops with an
 error). The device must be read every frame; the `TIC()` driver does
 that, also on frames a cart skips its own `key()` calls. The `kbd.*`
-functions (typed text with Shift applied, events, the port) are available
+functions (typed text with Shift applied, accented characters through `kbd.glyph()`, events, the port) are available
 here too.
 
 `mouse()` reads a mouse through a **v32mouse** device (see

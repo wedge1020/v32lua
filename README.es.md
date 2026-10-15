@@ -354,6 +354,9 @@ código fuente, así que un cartucho de PICO-8 o TIC-80 compila sin editarlo
   [doc/PICO8.md](doc/PICO8.md#side-panels)); `--no-bezel`: márgenes negros.
 * `--fast-circles`: los círculos rellenos de TIC-80/PICO-8 de radio mayor
   que 31 se dibujan como un disco escalado.
+* `--allow-float-as-clearcolor`: un número Lua dado a `ioports.gpu.clear`
+  o al `cls()` de TIC-80 conserva sus bits float32 como color de borrado
+  (comportamiento antiguo; usado para estelas, como `witchem_up`).
 
 Los valores por defecto de estas opciones (frecuencias de muestreo por API,
 paneles laterales activados/desactivados y un archivo de arte de panel por
@@ -469,7 +472,7 @@ ella.
 >   [wedge1020/ComputerSoftware](https://github.com/wedge1020/ComputerSoftware),
 >   [rama `v32io`](https://github.com/wedge1020/ComputerSoftware/tree/v32io)
 >   (con `v32kbd` y `v32mouse`), o las fuentes del DesktopEmulator original
->   con los parches `emulator/v32kbd.patch` y `emulator/v32mouse.patch` del
+>   con los parches `emulator/v32io/v32kbd.patch`, `emulator/v32io/v32kbd-text.patch` y `emulator/v32io/v32mouse.patch` del
 >   proyecto v32io aplicados.
 >
 > **Sin una de ellas, el acceso al teclado y al ratón no es posible:** los
@@ -506,6 +509,7 @@ Pistas soportadas:
 | `--#rate 11025` \| `22050` \| `44100` | Frecuencia de muestreo del sonido sintetizado a partir de un cartucho de PICO-8 o TIC-80 (por defecto 22050; `--#p8rate` es el nombre antiguo; ver [doc/PICO8.md](doc/PICO8.md#sound)). |
 | `--#bezel off` \| `on` \| `"arte.png"` | PICO-8: los paneles laterales junto a la pantalla de 128×128 — ninguno, el arte integrado o el tuyo propio (ver [doc/PICO8.md](doc/PICO8.md#side-panels)). |
 | `--#fast-circles` | TIC-80/PICO-8: los círculos rellenos de radio mayor que 31 se dibujan como un único disco escalado (más rápido, los bordes difieren ligeramente). |
+| `--#allow-float-as-clearcolor` | Igual que la opción de la línea de órdenes. |
 | `--#keyboard 0`–`3` | Puerto de mando de un teclado v32kbd (requiere un adaptador v32io o el emulador modificado, ver [Teclado y ratón](#teclado-y-ratón-v32io)), para `key()`/`keyp()`/`kbd.*` (2 por defecto; ver [doc/API.es.md](doc/API.es.md#teclado-key--keyp--kbd)). |
 | `--#mouse 0`–`3` | Puerto de mando de un ratón v32mouse (requiere un adaptador v32io o el emulador modificado, ver [Teclado y ratón](#teclado-y-ratón-v32io)), para `mouse()`/`mouse.*` y `stat(32..34)` de PICO-8 (3 por defecto; ver [doc/API.es.md](doc/API.es.md#ratón-mouse--mouse)). |
 | `--#texture NOMBRE "ruta/imagen.png"` | Registra un recurso de textura y lo vincula a una constante `NOMBRE` en tiempo de compilación. El XML nombra el archivo `.vtex` (`imagen.vtex`) que `png2vircon` genera a partir del PNG. |
@@ -1028,7 +1032,7 @@ uso más común:
 | **`ioports.inp.A/B/X/Y/L/R/START`** | `INP_GamepadButton*` | Solo Lectura | Estado de botón de acción/gatillo (`> 0` presionado, `< 0` liberado). |
 | **`ioports.inp.inputs`** | *Subrutina de Acción Personalizada* | Solo Lectura | **Intrínseco de recopilación:** sondea todos los botones/ejes del mando en una sola pasada, los combina en una única máscara de bits de 32 bits, y la convierte a un flotante de Lua. |
 | **`key([k])`**, **`keyp([k [, hold, period]])`** | dispositivo v32kbd en un puerto de mando | Intrínseco | **Solo con un adaptador v32io o el emulador modificado** ([por qué](#teclado-y-ratón-v32io)). Un teclado completo a través de un dispositivo v32kbd (puerto de mando 2 por defecto, `--#keyboard N`): tecla pulsada / pulsada en este cuadro, al estilo de TIC-80, con códigos de tecla o nombres literales (`"a"`, `"enter"`, `"shift"`) ([detalles](doc/API.es.md#teclado-key--keyp--kbd)). |
-| **`kbd.read()`**, **`kbd.event()`**, **`kbd.port([n])`**, **`kbd.capslock()`**, **`kbd.connected()`**, **`kbd.clear()`** | dispositivo v32kbd | Intrínseco | Texto escrito (con Mayús y Bloq Mayús), eventos de pulsar/soltar, el puerto del teclado, Bloq Mayús, dispositivo presente, descartar eventos no leídos. |
+| **`kbd.read()`**, **`kbd.event()`**, **`kbd.glyph(v)`**, **`kbd.port([n])`**, **`kbd.capslock()`**, **`kbd.connected()`**, **`kbd.clear()`** | dispositivo v32kbd | Intrínseco | Texto escrito (con Mayús y Bloq Mayús), eventos de pulsar/soltar, el puerto del teclado, Bloq Mayús, dispositivo presente, descartar eventos no leídos. |
 | **`mouse()`** | dispositivo v32mouse en un puerto de mando | Intrínseco | **Solo con un adaptador v32io o el emulador modificado** ([por qué](#teclado-y-ratón-v32io)). Un ratón a través de un dispositivo v32mouse (puerto de mando 3 por defecto, `--#mouse N`): `x, y, left, middle, right, scrollx, scrolly`, como el de TIC-80 (desplazamiento siempre 0) ([detalles](doc/API.es.md#ratón-mouse--mouse)). |
 | **`mouse.pressed/released([b])`**, **`mouse.buttons()`**, **`mouse.delta()`**, **`mouse.position([x, y])`**, **`mouse.bounds(...)`**, **`mouse.scale([n])`**, **`mouse.port([n])`**, **`mouse.connected()`** | dispositivo v32mouse | Intrínseco | Cambios de botones en este cuadro, botones pulsados, movimiento en este cuadro, el puntero, sus límites y velocidad, el puerto del ratón, dispositivo presente. |
 

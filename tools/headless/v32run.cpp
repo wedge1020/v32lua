@@ -11,7 +11,8 @@
 //   -g  log GPU commands          -s  log SPU writes
 //   -d  comma list of global names to dump at exit (or "all")
 //   -p  gamepad script: e.g. "0:A=1;5:A=-1"  (port names Left Right Up Down
-//       Start A B X Y L R; value >0 pressed)
+//       Start A B X Y L R; value >0 pressed; "Conn": gamepad 0 plugged
+//       in (>0) or out (0). Only gamepad 0 is scriptable)
 //   -q  quiet: don't print per-frame summary
 //   -c  max cycles total (default frames*CyclesPerFrame)
 //   -t  comma list of hex addresses to trap at (prints trail + call stack)
@@ -299,6 +300,7 @@ int main(int argc, char** argv)
             while (getline(s2, kv, ',')) {
                 string k = kv.substr(0, kv.find('=')); int v = atoi(kv.substr(kv.find('=') + 1).c_str());
                 for (int b = 0; b < 11; b++) if (k == bn[b]) pad[fr].push_back({b + 1, v});
+                if (k == "Conn") pad[fr].push_back({0, v});      // gamepad 0 plugged in (1) / out (0)
             }
         }
     }
@@ -313,7 +315,8 @@ int main(int argc, char** argv)
         g_gpu_rem = g_gpu_capacity;            // V32GPU::ChangeFrame
         TIM.ChangeFrame(); CPU.ChangeFrame();
         PAD.frame();
-        if (pad.count(g_frame)) for (auto& e : pad[g_frame]) PAD.state[0][e.first] = e.second > 0 ? 1 : -1;
+        if (pad.count(g_frame)) for (auto& e : pad[g_frame])
+            PAD.state[0][e.first] = e.first == 0 ? (e.second > 0 ? 1 : 0) : (e.second > 0 ? 1 : -1);
         for (int i = 0; i < Constants::CyclesPerFrame; i++) {
             if (profpath && g_frame >= profstart) g_prof[(uint32_t) CPU.InstructionPointer.AsInteger]++;
             if (bpwatch) {

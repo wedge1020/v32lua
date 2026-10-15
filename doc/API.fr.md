@@ -84,6 +84,7 @@ nom (`spr`, `rgba`, `color`, …) remplace l'intrinsèque.
 | `keyp([k [, hold, period]])` | booléen | La touche `k` s'est enfoncée à cette image (répétition avec `hold`/`period`, comme TIC-80). |
 | `kbd.read()` | nombre / nil | Appui suivant sous forme du caractère tapé (Maj et Verr Maj appliqués). |
 | `kbd.event()` | nombre / nil | Événement suivant : `+code` enfoncée, `-code` relâchée. |
+| `kbd.glyph(v)` | nombre / nil | Le caractère de la police du BIOS que représente une valeur de `kbd.read()` (accents, cadres), ou nil pour un code de touche. |
 | `kbd.port([n])` | nombre | Port de manette du clavier (2 par défaut) ; le changer repart de zéro. |
 | `kbd.capslock()`, `kbd.connected()` | booléen | État de Verr Maj ; périphérique branché. |
 | `kbd.clear()` | nil | Oublie les événements non lus. |
@@ -857,6 +858,20 @@ stocke `0xFF003366` (une conversion de float le saturerait),
 `ioports.gpu.x = -5` stocke `-5` et `ioports.gpu.y = 12.7` stocke `12`.
 Les littéraux hors de `[-2^31, 2^32)` sont saturés avec un avertissement.
 
+**Nombres donnés à des ports couleur.** Un nombre Lua est un flottant : ses
+bits ne forment pas une couleur. Quand un port *couleur*
+(`ioports.gpu.clear`, `multiply`, `bgcolor`...), le `color_mult` de `spr` ou
+la couleur de `rect`/`rectfill` reçoit un nombre qui n'est pas un littéral,
+le compilateur l'arrondit désormais vers le bas en entier et l'utilise
+comme mot `0xAABBGGRR` (modulo 2^32), avec un avertissement : un float32
+ne garde que 24 bits (alpha ≥ 0x80 demande `rgba()`/`hex()`). Avant, ce
+sont les bits du flottant qui partaient : `ioports.gpu.clear = 8` effaçait
+en noir à 25 % d'alpha, que l'émulateur mélange à l'image précédente.
+`--allow-float-as-clearcolor` (ou la directive `--#allow-float-as-clearcolor`)
+rétablit ce comportement pour la couleur d'effacement seulement, à dessein,
+pour une traînée de flou de mouvement. Utilisez `rgba()`, `hex()` ou un
+littéral pour des couleurs exactes.
+
 **Définir des régions de texture**
 
 Le `region_id` de `spr()` ne fait référence à rien tant qu'une région n'a
@@ -1095,8 +1110,8 @@ souris de l'ordinateur. Au choix :
   [branche `v32io`](https://github.com/wedge1020/ComputerSoftware/tree/v32io),
   qui a les périphériques `v32kbd` et `v32mouse` ; ou
 - les sources du DesktopEmulator d'origine avec les deux correctifs du
-  projet v32io appliqués (`emulator/v32kbd.patch`,
-  `emulator/v32mouse.patch`).
+  projet v32io appliqués (`emulator/v32io/v32kbd.patch`, `emulator/v32io/v32kbd-text.patch`,
+  `emulator/v32io/v32mouse.patch`).
 
 Dans son menu *Gamepads*, choisir la manette attendue par le programme et
 sélectionner **`v32kbd`** ou **`v32mouse`**. `v32kbd` ne peut pas être
@@ -1193,6 +1208,7 @@ key([k])                      -> booléen, k enfoncée (sans k : n'importe quell
 keyp([k [, hold, period]])    -> booléen, k enfoncée à cette image (+ répétition)
 kbd.read()                    -> caractère tapé suivant (un nombre), ou nil
 kbd.event()                   -> événement suivant : +code enfoncée, -code relâchée, ou nil
+kbd.glyph(v)                 -> caractère de la police du BIOS pour une valeur de kbd.read(), ou nil pour un code de touche
 kbd.port([n])                 -> port de manette du clavier (et le change)
 kbd.capslock()                -> booléen, Verr Maj actif
 kbd.connected()               -> booléen, quelque chose est branché sur ce port
@@ -1285,8 +1301,9 @@ function game_loop()
     while c do
         if c == 8 then                          -- Retour arrière
             text = string.sub(text, 1, -2)
-        elseif c >= 32 and c < 127 then
-            text = text .. string.char(c)
+        else
+            local g = kbd.glyph(c)              -- nil for a key with no character
+            if g then text = text .. string.char(g) end
         end
         c = kbd.read()
     end
@@ -1300,6 +1317,18 @@ avec Maj et Verr Maj appliqués tels qu'ils étaient au moment de l'appui
 touches sans caractère sous forme de leur code (Entrée 13, Retour arrière 8,
 flèches 1–4...). Les relâchements sont ignorés. `nil` quand il n'y a plus
 rien.
+
+Les caractères hors ASCII US (lettres accentuées, `€`, symboles de cadre)
+sont saisis par l'extension *texte* de v32io : le périphérique envoie le
+caractère sous forme de deux événements, que le code clavier du compilateur
+réassemble (une première moitié seule est abandonnée après 30 images, et un
+périphérique rebranché repart à zéro). `kbd.read()` renvoie un tel
+caractère sous la forme de son code dans la police du BIOS (Windows-1252,
+128–255) ; les symboles de cadre 14–31 reviennent en **256 + code**, pour
+ne pas être pris pour des codes de touche (Entrée 13, flèches 1–4...).
+`kbd.glyph(v)` fait l'inverse : il donne le caractère à passer à `print` ou
+`string.char()`, et `nil` pour un code de touche. `kbd.event()` ignore les
+caractères tapés et ne rapporte que les touches.
 
 `kbd.event()` renvoie au contraire tous les événements, appuis et
 relâchements, sous forme du code de touche sans Maj : positif pour un

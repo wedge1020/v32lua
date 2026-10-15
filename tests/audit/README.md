@@ -41,3 +41,12 @@ must keep them (a string assigned later or in a closure, a shadowing local, a
 loop that counts down or through 0).
 `argcalls.lua`: `math.max/min/pow/fmod(a, f())` (the first argument used to
 be lost across the call) and table constructors passed as call arguments.
+
+## kbd/ — v32kbd typed characters
+
+`kbd/kbd_text.py` replays scripted v32kbd event streams (made by
+`tools/headless/kbdscript.py`, played through gamepad 0 with the pad script's
+`Conn` support) against `kbd/read.lua` and `kbd/event.lua`, checking
+`kbd.read()`, `kbd.glyph()`, `kbd.event()` and `key()`: accented and
+box-drawing characters, the 30-frame prefix timeout and the plug-in reset.
+Run `./kbd/kbd_text.py` (it needs `bin/v32lua` and the headless tools built).

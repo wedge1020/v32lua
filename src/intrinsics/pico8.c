@@ -329,7 +329,9 @@ bool emit_pico8_map_intrinsic(ASTNode *node, int dest_reg) {
 
 /**
  * Emits assembly for PICO-8 cls(color) intrinsic
- * color can be: palette index (0-15), hex string ("0xRRGGBB"), or hex number
+ * color is a palette index (a Lua number: floored and masked with 15 by
+ * __builtin_pico8_cls, so a float32 never reaches the GPU as a color word);
+ * nil clears to color 0.
  */
 bool emit_pico8_cls_intrinsic(ASTNode *node, int dest_reg) {
     emit_asm("    ;; --- PICO-8 cls() Intrinsic ---\n");

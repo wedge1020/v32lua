@@ -284,6 +284,15 @@ static bool is_static_number (ASTNode *e)
     }
 }
 
+// For code outside this file (color arguments, intrinsics/gpu.c): is the
+// expression provably a Lua number (a float32) rather than a raw word, a
+// string or a table? Only valid while the function containing it is being
+// generated.
+bool expr_is_known_number (ASTNode *e)
+{
+    return is_static_number (e);
+}
+
 // A divisor that can't be zero: a non-zero literal, or a `for` variable
 // that only counts up from a positive start.
 static bool is_static_nonzero (ASTNode *e)

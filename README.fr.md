@@ -356,6 +356,9 @@ modification (`--opt=valeur` fonctionne aussi) :
   `--no-bezel` : marges noires.
 * `--fast-circles` : les cercles pleins TIC-80/PICO-8 de rayon supérieur à
   31 sont dessinés comme un disque mis à l'échelle.
+* `--allow-float-as-clearcolor` : un nombre Lua donné à `ioports.gpu.clear`
+  ou au `cls()` TIC-80 garde ses bits float32 comme couleur d'effacement
+  (ancien comportement ; utilisé pour les traînées, comme `witchem_up`).
 
 Les valeurs par défaut de ces options (fréquences d'échantillonnage par
 API, panneaux latéraux activés ou non et fichier d'image de panneau par
@@ -473,8 +476,8 @@ Une seule surface d'API est active par cartouche ; sélectionner `tic80` ou
 >   [wedge1020/ComputerSoftware](https://github.com/wedge1020/ComputerSoftware),
 >   [branche `v32io`](https://github.com/wedge1020/ComputerSoftware/tree/v32io)
 >   (avec `v32kbd` et `v32mouse`), ou les sources du DesktopEmulator
->   d'origine auxquelles on applique les correctifs `emulator/v32kbd.patch`
->   et `emulator/v32mouse.patch` du projet v32io.
+>   d'origine auxquelles on applique les correctifs `emulator/v32io/v32kbd.patch`, `emulator/v32io/v32kbd-text.patch`
+>   et `emulator/v32io/v32mouse.patch` du projet v32io.
 >
 > **Sans l'une d'elles, l'accès au clavier et à la souris est impossible :**
 > les programmes se compilent et s'exécutent, mais aucune touche n'est
@@ -512,6 +515,7 @@ Indices pris en charge :
 | `--#rate 11025` \| `22050` \| `44100` | Fréquence d'échantillonnage du son synthétisé à partir d'une cartouche PICO-8 ou TIC-80 (22050 par défaut ; `--#p8rate` est l'ancien nom ; voir [doc/PICO8.md](doc/PICO8.md#sound)). |
 | `--#bezel off` \| `on` \| `"art.png"` | PICO-8 : les panneaux latéraux à côté de l'écran 128×128 — aucun, les images intégrées, ou les vôtres (voir [doc/PICO8.md](doc/PICO8.md#side-panels)). |
 | `--#fast-circles` | TIC-80/PICO-8 : les cercles pleins de rayon supérieur à 31 sont dessinés comme un seul disque mis à l'échelle (plus rapide, bords légèrement différents). |
+| `--#allow-float-as-clearcolor` | Comme l'option de la ligne de commande. |
 | `--#keyboard 0`–`3` | Port de manette d'un clavier v32kbd (adaptateur v32io ou émulateur modifié nécessaire, voir [Clavier et souris](#clavier-et-souris-v32io)), pour `key()`/`keyp()`/`kbd.*` (2 par défaut ; voir [doc/API.fr.md](doc/API.fr.md#clavier--key--keyp--kbd)). |
 | `--#mouse 0`–`3` | Port de manette d'une souris v32mouse (adaptateur v32io ou émulateur modifié nécessaire, voir [Clavier et souris](#clavier-et-souris-v32io)), pour `mouse()`/`mouse.*` et `stat(32..34)` de PICO-8 (3 par défaut ; voir [doc/API.fr.md](doc/API.fr.md#souris--mouse--mouse)). |
 | `--#texture NOM "chemin/image.png"` | Enregistre une ressource de texture et la lie à une constante `NOM` à la compilation. Le XML nomme le fichier `.vtex` (`image.vtex`) que `png2vircon` produit à partir du PNG. |
@@ -1044,7 +1048,7 @@ utilisées :
 | **`ioports.inp.A/B/X/Y/L/R/START`** | `INP_GamepadButton*` | Lecture Seule | État des boutons d'action/gâchettes (`> 0` pressé, `< 0` relâché). |
 | **`ioports.inp.inputs`** | *Sous-routine d'Action Personnalisée* | Lecture Seule | **Intrinsèque de regroupement :** sonde tous les boutons/axes de la manette en une seule passe, les regroupe en un unique masque de bits sur 32 bits, et le convertit en flottant Lua. |
 | **`key([k])`**, **`keyp([k [, hold, period]])`** | périphérique v32kbd sur un port de manette | Intrinsèque | **Uniquement avec un adaptateur v32io ou l'émulateur modifié** ([pourquoi](#clavier-et-souris-v32io)). Un clavier complet à travers un périphérique v32kbd (port de manette 2 par défaut, `--#keyboard N`) : touche enfoncée / enfoncée à cette image, façon TIC-80, avec des codes de touche ou des noms littéraux (`"a"`, `"enter"`, `"shift"`) ([détails](doc/API.fr.md#clavier--key--keyp--kbd)). |
-| **`kbd.read()`**, **`kbd.event()`**, **`kbd.port([n])`**, **`kbd.capslock()`**, **`kbd.connected()`**, **`kbd.clear()`** | périphérique v32kbd | Intrinsèque | Texte tapé (Maj et Verr Maj appliqués), événements d'appui/relâchement, le port du clavier, Verr Maj, périphérique présent, oubli des événements non lus. |
+| **`kbd.read()`**, **`kbd.event()`**, **`kbd.glyph(v)`**, **`kbd.port([n])`**, **`kbd.capslock()`**, **`kbd.connected()`**, **`kbd.clear()`** | périphérique v32kbd | Intrinsèque | Texte tapé (Maj et Verr Maj appliqués), événements d'appui/relâchement, le port du clavier, Verr Maj, périphérique présent, oubli des événements non lus. |
 | **`mouse()`** | périphérique v32mouse sur un port de manette | Intrinsèque | **Uniquement avec un adaptateur v32io ou l'émulateur modifié** ([pourquoi](#clavier-et-souris-v32io)). Une souris à travers un périphérique v32mouse (port de manette 3 par défaut, `--#mouse N`) : `x, y, left, middle, right, scrollx, scrolly`, comme celui de TIC-80 (défilement toujours 0) ([détails](doc/API.fr.md#souris--mouse--mouse)). |
 | **`mouse.pressed/released([b])`**, **`mouse.buttons()`**, **`mouse.delta()`**, **`mouse.position([x, y])`**, **`mouse.bounds(...)`**, **`mouse.scale([n])`**, **`mouse.port([n])`**, **`mouse.connected()`** | périphérique v32mouse | Intrinsèque | Changements de boutons à cette image, boutons enfoncés, mouvement à cette image, le pointeur, ses limites et sa vitesse, le port de la souris, périphérique présent. |
 

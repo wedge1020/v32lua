@@ -82,6 +82,7 @@ function behind it. A function of your own with the same name (`spr`,
 | `keyp([k [, hold, period]])` | boolean | Key `k` went down this frame (autorepeat with `hold`/`period`, as TIC-80). |
 | `kbd.read()` | number / nil | Next key press as the character it types (Shift, Caps Lock applied). |
 | `kbd.event()` | number / nil | Next event: `+code` pressed, `-code` released. |
+| `kbd.glyph(v)` | number / nil | The BIOS-font character a `kbd.read()` value stands for (accents, box drawing), or nil for a key code. |
 | `kbd.port([n])` | number | Gamepad port of the keyboard (default 2); setting it starts over. |
 | `kbd.capslock()`, `kbd.connected()` | boolean | Caps Lock state; device plugged in. |
 | `kbd.clear()` | nil | Drops unread events. |
@@ -794,6 +795,19 @@ at compile time: `ioports.gpu.bgcolor = 0xFF003366` stores `0xFF003366`
 and `ioports.gpu.y = 12.7` stores `12`. Literals outside `[-2^31, 2^32)`
 saturate with a warning.
 
+**Numbers given to color ports.** A Lua number is a float, so its bits are
+not a color. When a *color* port (`ioports.gpu.clear`, `multiply`,
+`bgcolor`...), `spr`'s `color_mult`, or a `rect`/`rectfill` color receives
+a number that isn't a literal word, the compiler now rounds it down to an
+integer and uses that as the `0xAABBGGRR` word (wrapping modulo 2^32), with
+a warning that a float32 only keeps 24 bits (alpha ≥ 0x80 needs
+`rgba()`/`hex()`). Before, the float's own bits were sent: `ioports.gpu.clear
+= 8` cleared to black at 25 % alpha, which the emulator blends over the old
+frame. `--allow-float-as-clearcolor` (or the `--#allow-float-as-clearcolor`
+hint) brings that old behavior back for the clear color only, on purpose,
+for a motion-blur streak. Use `rgba()`, `hex()` or a literal for exact
+colors.
+
 **Defining texture regions**
 
 `spr()`'s `region_id` doesn't refer to anything until a region has actually
@@ -1017,7 +1031,7 @@ keyboard and mouse. Either:
   [`v32io` branch](https://github.com/wedge1020/ComputerSoftware/tree/v32io),
   which has both the `v32kbd` and the `v32mouse` device; or
 - the stock DesktopEmulator sources with the two patches from the v32io
-  project applied (`emulator/v32kbd.patch`, `emulator/v32mouse.patch`).
+  project applied (`emulator/v32io/v32kbd.patch`, `emulator/v32io/v32kbd-text.patch`, `emulator/v32io/v32mouse.patch`).
 
 In its *Gamepads* menu, pick the gamepad your program expects and select
 **`v32kbd`** or **`v32mouse`**. `v32kbd` can't be selected while any
@@ -1102,6 +1116,7 @@ key([k])                      -> boolean, k held (no k: any key held)
 keyp([k [, hold, period]])    -> boolean, k went down this frame (+ autorepeat)
 kbd.read()                    -> next typed character (a number), or nil
 kbd.event()                   -> next event: +code pressed, -code released, or nil
+kbd.glyph(v)                 -> BIOS-font character of a kbd.read() value, or nil for a key code
 kbd.port([n])                 -> gamepad port of the keyboard (and sets it)
 kbd.capslock()                -> boolean, caps lock on
 kbd.connected()               -> boolean, something is plugged into that port
@@ -1186,8 +1201,9 @@ function game_loop()
     while c do
         if c == 8 then                          -- Backspace
             text = string.sub(text, 1, -2)
-        elseif c >= 32 and c < 127 then
-            text = text .. string.char(c)
+        else
+            local g = kbd.glyph(c)              -- nil for a key with no character
+            if g then text = text .. string.char(g) end
         end
         c = kbd.read()
     end
@@ -1200,6 +1216,17 @@ with Shift and Caps Lock applied as they were when the key went down
 (`"A"`, `"!"`, `"{"` ... as numbers, matching the BIOS font), and keys
 with no character as their code (Enter 13, Backspace 8, arrows 1–4...).
 Releases are skipped. `nil` when nothing is left.
+
+Characters outside US ASCII (accented letters, `€`, box-drawing symbols) are
+typed through the v32io *text* extension: the device sends the character
+as a pair of events, and the compiler's keyboard code puts them back
+together (a lone first half is dropped after 30 frames, and a device
+plugged in again starts clean). `kbd.read()` returns such a character as
+its BIOS font code (Windows-1252, 128–255); the box-drawing symbols 14–31
+come back as **256 + code**, so they can't be mistaken for key codes
+(Enter 13, arrows 1–4...). `kbd.glyph(v)` undoes that: it gives the
+character to `print` or `string.char()`, and `nil` for a key code.
+`kbd.event()` skips typed characters and only reports keys.
 
 `kbd.event()` returns every event instead, presses and releases, as the
 key code with no Shift applied: positive for a press, negative for a

@@ -240,61 +240,111 @@ bool emit_tic80_btnp_intrinsic(ASTNode *node, int dest_reg) {
 }
 
 /**
- * Emits assembly for TIC-80 cls(color) intrinsic
- * color can be: palette index (0-15), hex string ("0xRRGGBB"), or hex number
+ * Emits assembly for TIC-80 cls(color) intrinsic.
+ *
+ * color is a palette index, as for every TIC-80 color argument:
+ *   - a numeric literal below 2^24 in magnitude is looked up in the palette
+ *     here (masked with 15, as at run time);
+ *   - a larger numeric literal is a packed 0xAABBGGRR word (an opaque or
+ *     translucent color has its alpha in the top byte), folded to the raw
+ *     32-bit word as ioports.gpu.clear() does -- it used to be emitted as
+ *     the literal's float32 bit pattern;
+ *   - a string is a hex color: "0xRRGGBB" / "#RRGGBB" (opaque), or
+ *     "0xAABBGGRR", the raw word (8 digits). It used to be parsed as
+ *     0xRRGGBB and then OR'd with 0xFF into the LOW byte -- the red channel
+ *     in the GPU's 0xAABBGGRR layout, not alpha -- giving 0x00RRGGFF;
+ *   - anything else (a variable, an expression) is a palette index looked
+ *     up at run time (__builtin_tic80_cls): floor, & 15, palette. It used to
+ *     be passed to GPU_ClearColor as it was, and a Lua number is a float32:
+ *     cls(c) with c = 8 gave 0x41000000, black at ~25% alpha, which the GPU
+ *     composites over the last frame instead of replacing it (a "CRT streak"
+ *     in witchem_up). --allow-float-as-clearcolor keeps that old behaviour.
  */
 bool emit_tic80_cls_intrinsic(ASTNode *node) {
     emit_asm("    ;; --- TIC-80 cls() Intrinsic ---\n");
 
     ASTNode *arg = node->as.call.args_head;
+    double   num;
 
     if (arg == NULL) {
         // Default: clear to black (palette index 0)
         emit_asm("MOV R1, 0x%.8X ; cls() with palette index 0\n",
                  tic80_palette[0]);
     }
-    else if (arg->type == NODE_NUMBER) {
-        double val = arg->as.number.val;
-        int int_val = (int)val;
-
-        if (int_val >= 0 && int_val < 16) {
+    else if (spu_static_number(arg, &num)) {
+        double t = trunc(num);
+        if (t > -16777216.0 && t < 16777216.0) {
+            // a palette index: masked with 15 like every TIC-80 color
+            int index = ((int) t) & 15;
             emit_asm("MOV R1, 0x%.8X ; Palette index %d\n",
-                     tic80_palette[int_val], int_val);
+                     tic80_palette[index], index);
         } else {
-            // Treat as direct color value
-            emit_asm("MOV R1, ");
-            generate_asm(arg, 1);
-            emit_asm("\n");
+            // A packed color word, not a number to convert at run time:
+            // 2^31..2^32-1 are unsigned, negative values two's complement
+            // (0xFF000000 == -16777216).
+            unsigned int word;
+            if (t >= 4294967296.0 || t < -2147483648.0) {
+                word = (t < 0.0) ? 0x80000000u : 0xFFFFFFFFu;
+                compiler_warning(ERR_SEMANTIC, node->line_number,
+                    "cls(%g): not a palette index (0-15) or a 32-bit color; saturated to 0x%08X",
+                    num, word);
+            } else if (t < 0.0) {
+                word = (unsigned int) (long long) (t + 4294967296.0);
+            } else {
+                word = (unsigned int) (long long) t;
+            }
+            emit_asm("MOV R1, 0x%.8X ; Packed color literal (raw word, not a palette index)\n", word);
         }
     }
     else if (arg->type == NODE_STRING) {
-        // Parse hex string like "0xFFFFCCCC" or "#RRGGBB"
+        // Hex color string: "0xRRGGBB" / "#RRGGBB" = RRGGBB, opaque;
+        // "0xAABBGGRR" (8 digits) = the packed word as it is.
         const char *color_str = arg->as.string_val.value;
-        unsigned int color = 0xFF000000; // Default black if parse fails
+        const char *digits    = NULL;
+        if (color_str[0] == '0' && (color_str[1] == 'x' || color_str[1] == 'X')) digits = color_str + 2;
+        else if (color_str[0] == '#')                                            digits = color_str + 1;
 
-        if (color_str[0] == '0' && (color_str[1] == 'x' || color_str[1] == 'X')) {
-            if (sscanf(color_str + 2, "%x", &color) == 1) {
-                // Ensure alpha channel is set for 6-digit hex (0xRRGGBB)
-                if (strlen(color_str) == 8) { // "0xRRGGBB" is 8 chars
-                    color |= 0xFF; // Make opaque
+        unsigned int color = 0xFF000000;   // black if it can't be parsed
+        bool         ok    = false;
+        if (digits != NULL) {
+            size_t n = strlen(digits);
+            if ((n == 6 || n == 8) && strspn(digits, "0123456789abcdefABCDEF") == n) {
+                unsigned int v = (unsigned int) strtoul(digits, NULL, 16);
+                if (n == 6) {
+                    // RRGGBB -> 0xFFBBGGRR
+                    color = 0xFF000000u | ((v & 0xFF) << 16) | (v & 0xFF00) | ((v >> 16) & 0xFF);
+                } else {
+                    color = v;
                 }
+                ok = true;
             }
         }
-        // Handle CSS-style hex (#RRGGBB)
-        else if (color_str[0] == '#' && strlen(color_str) == 7) {
-            if (sscanf(color_str + 1, "%x", &color) == 1) {
-                color |= 0xFF; // Make opaque
-            }
+        if (!ok) {
+            compiler_warning(ERR_SEMANTIC, node->line_number,
+                "cls(\"%s\"): not a hex color (\"0xRRGGBB\", \"#RRGGBB\" or \"0xAABBGGRR\"); "
+                "clearing to black", color_str);
         }
-
         emit_asm("MOV R1, 0x%.8X ; Hex color from string\n", color);
     }
-    else {
-        // Dynamic expression - evaluate at runtime
+    else if (allow_float_clearcolor) {
+        // --allow-float-as-clearcolor: the value's own bit pattern is the
+        // clear color (a float32 -- see above), exactly as before.
         int reg = allocate_register();
         generate_asm(arg, reg);
-        emit_asm("MOV R1, R%d ; Color from expression\n", reg);
+        emit_asm("MOV R1, R%d ; Color from expression (float bit pattern, --allow-float-as-clearcolor)\n", reg);
         unlock_register(reg);
+    }
+    else {
+        // Dynamic expression: a palette index, resolved at run time
+        int reg = allocate_register();
+        register_pinned[reg] = 1;
+        generate_asm(arg, reg);
+        emit_asm("PUSH R%d ; Arg 1: palette index\n", reg);
+        register_pinned[reg] = 0;
+        unlock_register(reg);
+        emit_asm("CALL __builtin_tic80_cls\n");
+        emit_asm("IADD SP, 1 ; Clean up cls() arguments\n");
+        return true;
     }
 
     emit_asm("OUT GPU_ClearColor, R1\n");

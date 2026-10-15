@@ -848,10 +848,21 @@ _tic80_btnp_end:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-;; __builtin_tic80_cls: Clear screen to color
+;; __builtin_tic80_cls: Clear screen to a palette color
 ;;
-;; Stack: [BP+2] = color (palette index 0-15 or 32-bit RGBA value)
-;; Uses: R1-R4
+;; Stack: [BP+2] = color, a palette index as a Lua number. Like every other
+;; TIC-80 color argument it is truncated (__tic80_trunc: nil and non-numbers
+;; are 0) and masked with 15, then looked up in __tic80_palette (one word
+;; per color, 0xAABBGGRR). This is the path of cls(<variable>); literals are
+;; resolved at compile time (emit_tic80_cls_intrinsic).
+;;
+;; It used to hand the value to GPU_ClearColor as it was: a Lua number is a
+;; float32, so cls(8) from a variable cleared with 0x41000000 -- black at
+;; about 25% alpha -- and since the GPU draws a clear as a blended quad each
+;; frame faded the last one instead of erasing it. (--allow-float-as-clearcolor
+;; asks for that back; it never reaches this routine.) The lookup here also
+;; had a stray `SHL 2`, indexing the palette four words per color.
+;; Clobbers R0-R1.
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -859,27 +870,12 @@ __builtin_tic80_cls:
     PUSH  BP
     MOV   BP, SP
 
-    MOV   R1, [BP+2]        ; Load color argument
-
-    ;; If color is a small integer (0-15), map to palette
-    MOV   R2, R1
-    CFI   R2                ; Convert to integer in R2
-
-    ;; Check if 0 <= R2 < 16 (palette index range)
-    ILT   R2, 0
-    JT    R2, _tic80_cls_use_direct
-    IGE   R2, 16
-    JT    R2, _tic80_cls_use_direct
-
-    ;; Palette lookup: R2 is valid index 0-15
-    ;; Each palette entry is 4 bytes, so offset = R2 * 4
-    SHL   R2, 2            ; R2 = R2 * 4
-    MOV   R3, __tic80_palette
-    IADD  R3, R2
-    MOV   R1, [R3]        ; Load 32-bit color from palette
-
-_tic80_cls_use_direct:
-    ;; R1 now contains the 32-bit RGBA color
+    MOV   R1, [BP+2]
+    CALL  __tic80_trunc
+    AND   R1, 15
+    MOV   R0, __tic80_palette
+    IADD  R1, R0
+    MOV   R1, [R1]
     OUT   GPU_ClearColor, R1
     OUT   GPU_Command, GPUCommand_ClearScreen
 

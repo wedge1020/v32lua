@@ -35,6 +35,7 @@ Lancez `v32lua --help` pour voir toutes les options ; les plus courantes :
 | `--rate 11025\|22050\|44100` | Fréquence d'échantillonnage du son produit à partir d'une cartouche PICO-8 ou TIC-80. |
 | `--bezel FICHIER`, `--no-bezel` | Panneaux latéraux PICO-8 : vos propres images, ou aucun. |
 | `--fast-circles` | PICO-8/TIC-80 : dessine plus vite les grands cercles pleins (bords légèrement différents). |
+| `--allow-float-as-clearcolor` | Un nombre Lua donné à `ioports.gpu.clear` ou au `cls()` TIC-80 garde ses bits float32 comme couleur d'effacement, comme les anciennes versions (effacement translucide = traînée de flou). Désactivé par défaut. |
 | `--keyboard 0-3` | Port de manette d'un clavier v32kbd (`key()`, `keyp()`, `kbd.*`) ; 2 par défaut. Demande un périphérique v32io (voir plus bas). |
 | `--mouse 0-3` | Port de manette d'une souris v32mouse (`mouse()`, `mouse.*`, `stat(32..34)` de PICO-8) ; 3 par défaut. Demande un périphérique v32io (voir plus bas). |
 | `--version`, `--help` | Version, utilisation. |
@@ -68,6 +69,7 @@ haut du fichier.
 | `--#api "pico8"` / `"tic80"` | Choisit une API de compatibilité. |
 | `--#p8 "cart.p8"` | PICO-8 : utilise les sprites, les drapeaux et la carte d'un fichier `.p8`. |
 | `--#rate 22050`, `--#bezel off`, `--#fast-circles`, `--#keyboard 2`, `--#mouse 3` | Comme les options de la ligne de commande, qui ont priorité. |
+| `--#allow-float-as-clearcolor` | Comme l'option de la ligne de commande. |
 
 ```lua
 --#title "Space Invaders Vircon32"

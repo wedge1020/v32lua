@@ -202,7 +202,7 @@ bool emit_vircon32_spr_intrinsic(ASTNode *node, int dest_reg)
             emit_asm("PUSH R0\n");
         } else {
             int reg = allocate_register();
-            generate_asm(args[6], reg);
+            emit_color_word_arg(args[6], reg, "spr", node->line_number, false);
             emit_asm("PUSH R%d ; Arg 7: color_mult (raw packed RGBA)\n", reg);
             unlock_register(reg);
         }
@@ -545,7 +545,7 @@ bool emit_vircon32_rect_intrinsic (ASTNode *node, int dest_reg, bool filled)
     } else {
         int reg = allocate_register ();
         register_pinned[reg] = 1;
-        generate_asm (args[4], reg);
+        emit_color_word_arg (args[4], reg, name, node->line_number, false);
         emit_asm ("PUSH R%d ; color (raw packed RGBA)\n", reg);
         register_pinned[reg] = 0;
         unlock_register (reg);

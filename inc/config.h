@@ -83,6 +83,21 @@
 #define V32LUA_DEFAULT_FAST_CIRCLES 0
 #endif
 
+// TIC-80: cls(c) with a VARIABLE c is a palette index, like every other
+// TIC-80 color argument (floored, & 15, looked up in the cart's palette).
+// Before 20261015-dev the value was handed to the GPU as the clear color
+// word, so a Lua number went in as its float32 bit pattern: cls(c) with
+// c = 8 cleared to black at about 25% alpha (0x41000000), and the GPU
+// draws a clear as a blended quad, so every frame faded the one before
+// (witchem_up's CRT streaks). 1 keeps that old behaviour (the number's bit
+// pattern is the clear color, for cls(variable) and for
+// ioports.gpu.clear(<number expression>)); 0 = palette index (default).
+// --allow-float-as-clearcolor / --#allow-float-as-clearcolor turn it on
+// for one cart.
+#ifndef V32LUA_DEFAULT_ALLOW_FLOAT_CLEARCOLOR
+#define V32LUA_DEFAULT_ALLOW_FLOAT_CLEARCOLOR 0
+#endif
+
 // PICO-8: the side panels ("bezel") beside the 128x128 screen. 1 = on
 // (default), 0 = black margins. --no-bezel / --#bezel off, --bezel FILE.
 #ifndef V32LUA_DEFAULT_PICO8_BEZEL

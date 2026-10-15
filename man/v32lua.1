@@ -1,4 +1,4 @@
-.TH V32LUA 1 "October 2026" "v32lua 20261014-dev" "User Commands"
+.TH V32LUA 1 "October 2026" "v32lua 20261015-dev" "User Commands"
 .SH NAME
 v32lua \- compile a subset of Lua to Vircon32 assembly and cartridge XML
 .SH SYNOPSIS
@@ -16,6 +16,7 @@ v32lua \- compile a subset of Lua to Vircon32 assembly and cartridge XML
 .RB [ \-\-rate
 .IR hz ]
 .RB [ \-\-fast\-circles ]
+.RB [ \-\-allow\-float\-as\-clearcolor ]
 .RB [ \-\-keyboard
 .IR port ]
 .RB [ \-\-mouse
@@ -183,6 +184,17 @@ pre-rendered radius-31 disc, scaled (one GPU draw instead of about 1.2
 per unit of radius; roughly 1.5% of the edge pixels differ from the
 console's). Outlines are always exact. Same as a
 .B \-\-#fast\-circles
+hint.
+.TP
+.B \-\-allow\-float\-as\-clearcolor
+A Lua number given to
+.B ioports.gpu.clear
+or TIC-80
+.B cls()
+keeps its float32 bits as the clear color, as in older versions (a translucent
+clear that smears moving objects). Off by default: numbers are converted to an
+integer color word. Same as a
+.B \-\-#allow\-float\-as\-clearcolor
 hint.
 .TP
 .BI \-\-keyboard " port"
@@ -514,9 +526,10 @@ branch of the fork at
 and the
 .B v32mouse
 device), or the stock DesktopEmulator with the v32io project's
-.I emulator/v32kbd.patch
+.IR emulator/v32io/v32kbd.patch ,
+.IR emulator/v32io/v32kbd-text.patch
 and
-.I emulator/v32mouse.patch
+.I emulator/v32io/v32mouse.patch
 applied.
 .PP
 By default the keyboard is read from gamepad port 2 and the mouse from

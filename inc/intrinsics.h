@@ -53,6 +53,11 @@ bool  is_rgba_intrinsic_call  (ASTNode *node);
 bool  is_color_intrinsic_call (ASTNode *node);
 bool  emit_color_intrinsic    (ASTNode *node, int dest_reg);
 bool  color_static_word       (ASTNode *arg, unsigned int *word);
+extern bool allow_float_clearcolor;      // --allow-float-as-clearcolor (config.h)
+extern bool g_cli_float_clearcolor_set;
+bool  expr_is_known_number    (ASTNode *e);      // node/math.c: provably a Lua number
+void  emit_number_to_color_word (int reg);        // reg: Lua number -> raw 32-bit word
+void  emit_color_word_arg     (ASTNode *arg, int reg, const char *what, int line, bool clear_port);
 bool  emit_spu_cmd_intrinsic       (ASTNode *, int);
 bool  emit_hex_intrinsic(ASTNode *, int);
 void  emit_get_gamepad_inputs_intrinsic (int);

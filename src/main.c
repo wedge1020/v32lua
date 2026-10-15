@@ -76,6 +76,10 @@ static void  print_usage (const char *prog_name)
     fprintf (stdout, "  --fast-circles   TIC-80/PICO-8: draw filled circles above radius 31 as a\n");
     fprintf (stdout, "                   scaled disc (1 draw instead of ~1.2 per radius; about\n");
     fprintf (stdout, "                   1.5%% of the edge pixels differ). Outlines stay exact\n");
+    fprintf (stdout, "  --allow-float-as-clearcolor\n");
+    fprintf (stdout, "                   TIC-80: cls(variable) hands the variable's float bit pattern\n");
+    fprintf (stdout, "                   to the GPU as the clear color (the old behaviour; witchem_up's\n");
+    fprintf (stdout, "                   translucent-clear streaks) instead of a palette index\n");
     fprintf (stdout, "  --keyboard <n>   Gamepad port (0-3) of a v32kbd keyboard, for key()/keyp()/\n");
     fprintf (stdout, "                   kbd.*. Default %d (inc/config.h)\n", V32LUA_DEFAULT_KEYBOARD_PORT);
     fprintf (stdout, "                   (needs a v32io adapter or the modified emulator)\n");
@@ -212,6 +216,9 @@ int  main (int  argc, char** argv)
             g_cli_bezel_set = true;
         } else if (strcmp(argv[i], "--fast-circles") == 0) {
             shapes_fast = true;
+        } else if (strcmp(argv[i], "--allow-float-as-clearcolor") == 0) {
+            allow_float_clearcolor = true;
+            g_cli_float_clearcolor_set = true;
         } else if ((val = option_value(argc, argv, &i, "--keyboard")) != NULL) {
             if (val[0] < '0' || val[0] > '3' || val[1] != '\0') {
                 fprintf(stderr, "Compiler Error: --keyboard must be a gamepad port 0-3 (got '%s')\n", val);

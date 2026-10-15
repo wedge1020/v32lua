@@ -34,6 +34,7 @@ Run `v32lua --help` for every option; the common ones:
 | `--rate 11025\|22050\|44100` | Sample rate of the sound made from a PICO-8 or TIC-80 cart. |
 | `--bezel FILE`, `--no-bezel` | PICO-8 side panels: your own art, or none. |
 | `--fast-circles` | PICO-8/TIC-80: draw big filled circles faster (slightly different edges). |
+| `--allow-float-as-clearcolor` | A Lua number given to `ioports.gpu.clear` or TIC-80 `cls()` keeps its float32 bits as the clear color, as in older versions (translucent clear = motion-blur streak). Off by default. |
 | `--keyboard 0-3` | Gamepad port of a v32kbd keyboard (`key()`, `keyp()`, `kbd.*`); default 2. Needs a v32io device (below). |
 | `--mouse 0-3` | Gamepad port of a v32mouse mouse (`mouse()`, `mouse.*`, PICO-8 `stat(32..34)`); default 3. Needs a v32io device (below). |
 | `--version`, `--help` | Version, usage. |
@@ -64,6 +65,7 @@ reads as cartridge settings. Put them at the top of the file.
 | `--#api "pico8"` / `"tic80"` | Chooses a compatibility API. |
 | `--#p8 "cart.p8"` | PICO-8: use the sprites, flags and map of a `.p8` file. |
 | `--#rate 22050`, `--#bezel off`, `--#fast-circles`, `--#keyboard 2`, `--#mouse 3` | Same as the command-line options, which take precedence. |
+| `--#allow-float-as-clearcolor` | Same as the command-line option. |
 
 ```lua
 --#title "Space Invaders Vircon32"

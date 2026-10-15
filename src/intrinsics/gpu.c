@@ -363,6 +363,58 @@ bool color_static_word (ASTNode *arg, unsigned int *word)
     return true;
 }
 
+// --allow-float-as-clearcolor / --#allow-float-as-clearcolor (config.h):
+// a Lua number given as a clear color keeps being passed as its float32
+// bit pattern, as it was before 20261015-dev.
+bool allow_float_clearcolor      = V32LUA_DEFAULT_ALLOW_FLOAT_CLEARCOLOR;
+bool g_cli_float_clearcolor_set  = false;
+
+// reg holds a Lua number: turn it into the raw 32-bit word color(n) gives
+// (floored, wrapped into 32 bits; nil and other boxed values give 0). This
+// is what a number needs before it can be a color word: written as it is
+// (a float32 bit pattern) it is a different color, and through CFI -- what
+// integer ports do -- a value from 2^31 on is out of range, which is
+// host-dependent (0x80000000 on x86-64, 0x7FFFFFFF on ARM64). Clobbers R0.
+void emit_number_to_color_word (int reg)
+{
+    runtime_req.needs_math = true;       // __bit_in lives in math.s
+    emit_asm ("    ;; --- Lua number -> raw 32-bit color word (floor, wrap) ---\n");
+    emit_asm ("PUSH R1\n");
+    emit_asm ("PUSH R2\n");
+    emit_asm ("PUSH R3\n");
+    emit_asm ("PUSH R7\n");
+    emit_asm ("MOV R1, R%d\n", reg);
+    emit_asm ("MOV R7, 0 ; integer (not 16.16) conversion\n");
+    emit_asm ("CALL __bit_in\n");
+    emit_asm ("MOV R0, R1\n");
+    emit_asm ("POP R7\n");
+    emit_asm ("POP R3\n");
+    emit_asm ("POP R2\n");
+    emit_asm ("POP R1\n");
+    emit_asm ("MOV R%d, R0\n", reg);
+}
+
+// Evaluates the argument of a "raw packed 0xAABBGGRR word" slot (spr()'s
+// color_mult, rect()/rectfill()'s color, ioports.gpu.clear(color)) into
+// reg. Such an argument is passed through untouched, because a word from
+// rgba(), hex() or color() is not a Lua number -- except when the
+// expression is PROVABLY a Lua number (arithmetic, a local that only ever
+// holds numbers): that is a float32, whose bit pattern is never the color
+// it looks like, so it is converted like color(n) and a warning says how
+// much precision a float32 has. With clear_port and
+// --allow-float-as-clearcolor the old pass-through stays.
+void emit_color_word_arg (ASTNode *arg, int reg, const char *what, int line, bool clear_port)
+{
+    generate_asm (arg, reg);
+    if (!expr_is_known_number (arg)) return;
+    if (clear_port && allow_float_clearcolor) return;
+    compiler_warning (ERR_SEMANTIC, line,
+        "%s(): the color is a Lua number (a float32: only 24 significant bits), so it is "
+        "converted to a 32-bit word and low bits may be lost; build it with rgba(r, g, b [, a]) "
+        "or hex(\"0x...\") for an exact color", what);
+    emit_number_to_color_word (reg);
+}
+
 /**
  * color(n) -- native Vircon32 mode: a number as the RAW 32-bit word
  * (0xAABBGGRR for a color), for color_mult, ioports.gpu.clear(color),
@@ -402,25 +454,13 @@ bool emit_color_intrinsic (ASTNode *node, int dest_reg)
             emit_asm ("MOV R%d, 0x%08X ; color(%.0f)\n", dest_reg, word, v);
         return true;
     }
-    runtime_req.needs_math = true;       // __bit_in lives in math.s
     int r = allocate_register ();
     generate_asm (arg, r);
     ensure_in_register (r);
     emit_asm ("    ;; --- Intrinsic: color() -> raw 32-bit word (floor, wrap) ---\n");
-    emit_asm ("PUSH R1\n");
-    emit_asm ("PUSH R2\n");
-    emit_asm ("PUSH R3\n");
-    emit_asm ("PUSH R7\n");
-    emit_asm ("MOV R1, R%d\n", r);
-    emit_asm ("MOV R7, 0 ; integer (not 16.16) conversion\n");
-    emit_asm ("CALL __bit_in\n");
-    emit_asm ("MOV R0, R1\n");
-    emit_asm ("POP R7\n");
-    emit_asm ("POP R3\n");
-    emit_asm ("POP R2\n");
-    emit_asm ("POP R1\n");
+    emit_number_to_color_word (r);
     if (dest_reg != 0)
-        emit_asm ("MOV R%d, R0 ; color() result (a raw word, not a number)\n", dest_reg);
+        emit_asm ("MOV R%d, R%d ; color() result (a raw word, not a number)\n", dest_reg, r);
     unlock_register (r);
     return true;
 }
@@ -515,7 +555,7 @@ void emit_gpu_clear_intrinsic(ASTNode *node, int dest_reg) {
             emit_asm ("MOV R%d, 0x%.8X ; Packed color literal (raw word, not float)\n",
                       color_reg, word);
         } else {
-            generate_asm(arg, color_reg);
+            emit_color_word_arg(arg, color_reg, "ioports.gpu.clear", node->line_number, true);
         }
         emit_asm ("OUT GPU_ClearColor, R%d\n", color_reg);
         register_pinned[color_reg] = 0;

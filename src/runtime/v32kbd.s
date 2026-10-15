@@ -23,6 +23,26 @@
 ;; 8 backspace, 9 tab, 10/11 left/right ctrl, 12 left alt, 13 enter,
 ;; 14-25 F1-F12, 26 right alt, 27 escape, 28/29 left/right gui, 127 delete.
 ;;
+;; TYPED CHARACTERS (v32io, keyboard.h 2026/10/14): a key code can't say what
+;; a key typed when that is not ASCII (an accented letter from a dead key or
+;; AltGr, the euro sign, a box drawing character...), so the device can send
+;; the CHARACTER, in the BIOS font's set (Windows-1252, with box drawing
+;; characters in the codes 14-31), as 2 consecutive events: a codepage PREFIX
+;; whose key code is one of the 2 left unused, then the PAYLOAD, the low 7
+;; bits of the character in the key code field:
+;;
+;;   30 (PAGE_HIGH) + payload -> character 128 + payload (128-255)
+;;   31 (PAGE_LOW)  + payload -> character payload       (0-127)
+;;
+;; Both are sent as key RELEASES (a decoder from before this saw two releases
+;; and no key press); either action is accepted here. The payload is taken
+;; whatever its code (0, 30 and 31 included). A prefix not followed by its
+;; payload within 30 frames (V32KBD_PAGE_TIMEOUT) is forgotten, and so is one
+;; waiting when the device is plugged in again. A typed character is queued
+;; as text: kbd.read() returns its BIOS code, plus 256 under 32 (the codes
+;; that are also key codes; kbd.glyph() undoes it), kbd.event() skips it, and
+;; it never touches the held keys.
+;;
 ;; State (fixed RAM, %defines from v32kbd.c):
 ;;   V32KBD_PORT    gamepad port of the keyboard (raw int 0-3)
 ;;   V32KBD_STROBE  last strobe side seen (0 none yet, 1 left, 2 right)
@@ -30,12 +50,16 @@
 ;;   V32KBD_CAPS    caps lock (0/1), toggled by each caps lock press
 ;;   V32KBD_HELD    number of keys held
 ;;   V32KBD_ANYP    frame on which the latest press is visible (keyp())
+;;   V32KBD_PAGE    codepage prefix waiting for its payload (0 none, 30, 31)
+;;   V32KBD_PAGEFRAME  frame on which that prefix arrived
+;;   V32KBD_CONN    the device was plugged in at the last poll (0 / 1)
 ;;   V32KBD_DOWN    128 words: frame on which each key's press is visible,
 ;;                  -1 while the key is up
 ;;   V32KBD_QUEUE   ring of V32KBD_QUEUE_SIZE (64) events for kbd.read() /
 ;;                  kbd.event(), V32KBD_QHEAD oldest, V32KBD_QCOUNT waiting.
-;;                  Entry: code | pressed << 7 | symbol << 8. Full -> new
-;;                  events are dropped (as in the C library).
+;;                  Entry: code | pressed << 7 | symbol << 8 | text << 16
+;;                  (text: a typed character: code 0, symbol its BIOS code).
+;;                  Full -> new events are dropped (as in the C library).
 ;;
 ;; "Visible" frame: an event read by __v32kbd_frame_end (right before a
 ;; WAIT) belongs to the NEXT frame -- that is when the program can act on
@@ -77,6 +101,10 @@ _v32kbd_reset_loop:
     MOV   [V32KBD_HELD], R1
     MOV   [V32KBD_QHEAD], R1
     MOV   [V32KBD_QCOUNT], R1
+    MOV   [V32KBD_PAGE], R1
+    MOV   R1, [V32KBD_PORT]
+    CALL  __v32io_connected
+    MOV   [V32KBD_CONN], R0         ; plugged in now: not "just plugged in" later
     MOV   R1, [V32KBD_PORT]
     CALL  __v32io_read
     AND   R0, 3
@@ -132,6 +160,20 @@ __v32kbd_poll:
     MOV   [V32KBD_POLLED], R5
     IADD  R5, R1                    ; R5 = visible frame
 
+    ;; A gamepad that has just been plugged in shows every control released,
+    ;; so the history of the device is lost: the strobe starts over (the first
+    ;; event is a new one, whatever side it is) and a codepage prefix that was
+    ;; waiting won't get its payload (as v32io_plugged() in keyboard.h)
+    MOV   R1, [V32KBD_PORT]
+    CALL  __v32io_connected         ; R0 = 1 / 0
+    MOV   R2, [V32KBD_CONN]
+    MOV   [V32KBD_CONN], R0
+    JT    R2, _v32kbd_poll_read     ; was plugged in already
+    JF    R0, _v32kbd_poll_read     ; still not
+    MOV   R0, 0
+    MOV   [V32KBD_STROBE], R0
+    MOV   [V32KBD_PAGE], R0
+_v32kbd_poll_read:
     MOV   R1, [V32KBD_PORT]
     CALL  __v32io_read              ; R0 = packed controls
     MOV   R2, R0
@@ -147,7 +189,45 @@ __v32kbd_poll:
 
     MOV   R1, R0
     SHL   R1, -4
-    AND   R1, 127                   ; R1 = key code
+    AND   R1, 127                   ; R1 = key code (or a payload)
+
+    ;; --- a codepage prefix is waiting: this event is its payload (any code,
+    ;; 0 and 30/31 included, whatever the action). One that waited too long
+    ;; was lost with its payload: forget it, and read this as a regular event
+    MOV   R2, [V32KBD_PAGE]
+    JF    R2, _v32kbd_poll_nopage
+    MOV   R3, 0
+    MOV   [V32KBD_PAGE], R3
+    IN    R3, TIM_FrameCounter
+    MOV   R4, [V32KBD_PAGEFRAME]
+    ISUB  R3, R4                    ; frames it waited
+    IGT   R3, 30                    ; V32KBD_PAGE_TIMEOUT
+    JT    R3, _v32kbd_poll_nopage
+    IEQ   R2, 30                    ; PAGE_HIGH: characters 128-255
+    JF    R2, _v32kbd_poll_page_char
+    IADD  R1, 128
+_v32kbd_poll_page_char:
+    JF    R1, _v32kbd_poll_done     ; character 0 is nothing
+    MOV   R0, R1
+    SHL   R0, 8
+    OR    R0, 0x10080               ; text, pressed; key code 0
+    JMP   _v32kbd_poll_enqueue
+
+    ;; --- a codepage prefix carries no key: it announces a character ---
+_v32kbd_poll_nopage:
+    MOV   R2, R1
+    IEQ   R2, 30                    ; V32KEY_PAGE_HIGH
+    JT    R2, _v32kbd_poll_prefix
+    MOV   R2, R1
+    IEQ   R2, 31                    ; V32KEY_PAGE_LOW
+    JF    R2, _v32kbd_poll_regular
+_v32kbd_poll_prefix:
+    MOV   [V32KBD_PAGE], R1
+    IN    R3, TIM_FrameCounter
+    MOV   [V32KBD_PAGEFRAME], R3
+    JMP   _v32kbd_poll_done
+
+_v32kbd_poll_regular:
     JF    R1, _v32kbd_poll_done     ; code 0 is never sent
     MOV   R2, R1
     IADD  R2, V32KBD_DOWN           ; R2 = &DOWN[code]
@@ -192,13 +272,16 @@ _v32kbd_poll_release_set:
 
     ;; --- queue: R1 = code, R3 = pressed flag, R0 = symbol ---
 _v32kbd_poll_queue:
+    SHL   R0, 8
+    OR    R0, R3
+    OR    R0, R1
+
+    ;; --- enqueue the entry in R0 (full: dropped) ---
+_v32kbd_poll_enqueue:
     MOV   R2, [V32KBD_QCOUNT]
     MOV   R4, R2
     IGE   R4, V32KBD_QUEUE_SIZE
     JT    R4, _v32kbd_poll_done     ; full: dropped
-    SHL   R0, 8
-    OR    R0, R3
-    OR    R0, R1
     MOV   R4, [V32KBD_QHEAD]
     IADD  R4, R2
     AND   R4, 63                    ; V32KBD_QUEUE_SIZE - 1
@@ -507,6 +590,12 @@ _v32kbd_keyp_return:
 ;;          raw 1: kbd.event() -- next event of any kind: +code for a
 ;;                                press, -code for a release (no shift)
 ;; Returns a number, or nil when nothing is left. Preserves R1-R13.
+;;
+;; A character typed through a codepage prefix (accented letters, box
+;; drawing...) is returned by kbd.read() as its BIOS font code: 128-255, or
+;; 32-126; below 32 (which are also key codes) as that code + 256. Use
+;; kbd.glyph() to turn any kbd.read() value into the code to draw.
+;; kbd.event() leaves typed characters out: they are not keys.
 ;; ============================================================================
 __builtin_v32kbd_read:
     PUSH  BP
@@ -533,9 +622,20 @@ _v32kbd_read_next:
     MOV   R2, [BP+2]
     JT    R2, _v32kbd_read_event
     JF    R1, _v32kbd_read_next     ; kbd.read() skips releases
-    SHL   R0, -8                    ; symbol
+    MOV   R2, R0
+    AND   R2, 0x10000               ; a typed character?
+    SHL   R0, -8
+    AND   R0, 255                   ; symbol
+    JF    R2, _v32kbd_read_number
+    MOV   R2, R0
+    ILT   R2, 32
+    JF    R2, _v32kbd_read_number
+    IADD  R0, 256                   ; V32KBD_GLYPH: below 32 it is also a key code
     JMP   _v32kbd_read_number
 _v32kbd_read_event:
+    MOV   R2, R0
+    AND   R2, 0x10000
+    JT    R2, _v32kbd_read_next     ; typed characters are not keys: skipped
     AND   R0, 127                   ; code
     JT    R1, _v32kbd_read_number
     ISGN  R0                        ; release: negative
@@ -605,6 +705,56 @@ __builtin_v32kbd_clear:
     MOV   R0, 0
     MOV   [V32KBD_QCOUNT], R0
     MOV   R0, BOXED_NIL
+    RET
+
+;; ============================================================================
+;; __builtin_v32kbd_glyph: kbd.glyph(v)
+;; [BP+2] = a value kbd.read() returned. Returns the BIOS font character to
+;; draw (the region number print() uses; what string.char() takes), or nil
+;; when the value is not a typed character: a key with no character (arrows,
+;; F keys, escape, delete...), nothing, or not a number.
+;;   32-126, 128-255   itself
+;;   257-287           the value - 256: a typed character below 32 (box
+;;                     drawing), which kbd.read() shifted by 256 so it can't
+;;                     be taken for a key code
+;; Same as v32kbd_glyph() in keyboard.h (which gives 0 instead of nil).
+;; Doesn't read the device. Preserves R1-R13.
+;; ============================================================================
+__builtin_v32kbd_glyph:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    MOV   R1, [BP+2]
+    CALL  __v32kbd_int              ; R1 = raw int, -1 for nil / non-numbers
+    MOV   R0, R1
+    ILT   R0, 32
+    JT    R0, _v32kbd_glyph_none    ; key codes (and nothing)
+    MOV   R0, R1
+    ILT   R0, 127
+    JT    R0, _v32kbd_glyph_ok      ; 32-126
+    MOV   R0, R1
+    ILT   R0, 128
+    JT    R0, _v32kbd_glyph_none    ; 127: delete
+    MOV   R0, R1
+    ILT   R0, 256
+    JT    R0, _v32kbd_glyph_ok      ; 128-255
+    MOV   R0, R1
+    IGT   R0, 256
+    JF    R0, _v32kbd_glyph_none
+    MOV   R0, R1
+    ILT   R0, 288
+    JF    R0, _v32kbd_glyph_none    ; 257-287: below 32, shifted by 256
+    ISUB  R1, 256
+_v32kbd_glyph_ok:
+    MOV   R0, R1
+    CIF   R0
+    JMP   _v32kbd_glyph_return
+_v32kbd_glyph_none:
+    MOV   R0, BOXED_NIL
+_v32kbd_glyph_return:
+    POP   R1
+    MOV   SP, BP
+    POP   BP
     RET
 
 ;; ============================================================================

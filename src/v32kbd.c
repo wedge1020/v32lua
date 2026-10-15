@@ -16,6 +16,7 @@
 //   key([k])                     -- is key k held (any key, without k)
 //   keyp([k [, hold, period]])   -- was k pressed this frame (+ autorepeat)
 //   kbd.read()                   -- next typed character (number) or nil
+//   kbd.glyph(v)                 -- BIOS font code to draw for a kbd.read() value, or nil
 //   kbd.event()                  -- next event: +code press, -code release, nil
 //   kbd.port([n])                -- gamepad port of the keyboard (get / set)
 //   kbd.capslock()               -- caps lock state
@@ -51,7 +52,10 @@ static int v32kbd_ram_base = -1;
 #define KBD_OFF_ANYP    5      // frame on which the last press is visible
 #define KBD_OFF_QHEAD   6      // event queue: index of the oldest entry
 #define KBD_OFF_QCOUNT  7      // event queue: entries waiting
-#define KBD_OFF_DOWN    8      // 128 words: frame each key went down, -1 up
+#define KBD_OFF_PAGE    8      // codepage prefix waiting for its payload (0 none, 30, 31)
+#define KBD_OFF_PAGEFR  9      // frame on which that prefix arrived
+#define KBD_OFF_CONN    10     // the device was plugged in at the last poll (0 / 1)
+#define KBD_OFF_DOWN    11     // 128 words: frame each key went down, -1 up
 #define KBD_OFF_QUEUE   (KBD_OFF_DOWN + 128)    // 64 words: the event queue
 #define KBD_RAM_WORDS   (KBD_OFF_QUEUE + V32KBD_QUEUE_SIZE)
 
@@ -169,9 +173,12 @@ int v32kbd_emit_defines (FILE *f)
     fprintf (f, "%%define  V32KBD_ANYP              0x%.8X\n", v32kbd_ram_base + KBD_OFF_ANYP);
     fprintf (f, "%%define  V32KBD_QHEAD             0x%.8X\n", v32kbd_ram_base + KBD_OFF_QHEAD);
     fprintf (f, "%%define  V32KBD_QCOUNT            0x%.8X\n", v32kbd_ram_base + KBD_OFF_QCOUNT);
+    fprintf (f, "%%define  V32KBD_PAGE              0x%.8X\n", v32kbd_ram_base + KBD_OFF_PAGE);
+    fprintf (f, "%%define  V32KBD_PAGEFRAME         0x%.8X\n", v32kbd_ram_base + KBD_OFF_PAGEFR);
+    fprintf (f, "%%define  V32KBD_CONN              0x%.8X\n", v32kbd_ram_base + KBD_OFF_CONN);
     fprintf (f, "%%define  V32KBD_DOWN              0x%.8X\n", v32kbd_ram_base + KBD_OFF_DOWN);
     fprintf (f, "%%define  V32KBD_QUEUE             0x%.8X\n", v32kbd_ram_base + KBD_OFF_QUEUE);
-    return 12;
+    return 15;
 }
 
 // Startup (generate_global_setup): state reset, strobe baseline.
@@ -370,6 +377,29 @@ bool try_emit_kbd_namespace_intrinsic (ASTNode *node, int dest_reg, const char *
         return true;
     }
 
+    // kbd.glyph(v): the BIOS font code to draw for a value kbd.read() gave
+    // (a typed character sent through a codepage prefix: accented letters,
+    // box drawing; below 32 kbd.read() adds 256), nil if it is not one
+    if (strcmp (func_name, "kbd.glyph") == 0) {
+        ASTNode *arg = node->as.call.args_head;
+        if (arg == NULL || arg->next != NULL) {
+            compiler_error (ERR_SEMANTIC, node->line_number,
+                "kbd.glyph() takes 1 argument: kbd.glyph(value), a value kbd.read() returned");
+            return false;
+        }
+        emit_asm ("    ;; --- kbd.glyph() (v32kbd) ---\n");
+        int reg = allocate_register ();
+        register_pinned[reg] = 1;
+        generate_asm (arg, reg);
+        emit_asm ("PUSH R%d ; value\n", reg);
+        register_pinned[reg] = 0;
+        unlock_register (reg);
+        emit_asm ("CALL __builtin_v32kbd_glyph\n");
+        emit_asm ("IADD SP, 1\n");
+        if (dest_reg != 0) emit_asm ("MOV R%d, R0\n", dest_reg);
+        return true;
+    }
+
     if (strcmp (func_name, "kbd.port") == 0) {
         ASTNode *arg = node->as.call.args_head;
         if (arg != NULL && arg->next != NULL) {
@@ -412,7 +442,7 @@ bool try_emit_kbd_namespace_intrinsic (ASTNode *node, int dest_reg, const char *
     }
 
     compiler_error (ERR_SEMANTIC, node->line_number,
-        "Unknown keyboard function '%s' (kbd.read, kbd.event, kbd.port, kbd.capslock, "
-        "kbd.connected, kbd.clear)", func_name);
+        "Unknown keyboard function '%s' (kbd.read, kbd.glyph, kbd.event, kbd.port, "
+        "kbd.capslock, kbd.connected, kbd.clear)", func_name);
     return false;
 }
