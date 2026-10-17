@@ -42,7 +42,7 @@ Ejecuta `v32lua --help` para ver todas las opciones; las más comunes:
 | `--bezel ARCHIVO`, `--no-bezel` | Paneles laterales de PICO-8: tu propio arte, o ninguno. |
 | `--fast-circles` | PICO-8/TIC-80: dibuja más rápido los círculos rellenos grandes (bordes ligeramente distintos). |
 | `--allow-float-as-clearcolor` | Un número Lua dado a `ioports.gpu.clear` o al `cls()` de TIC-80 conserva sus bits float32 como color de borrado, como las versiones antiguas (borrado translúcido = estela de desenfoque). Desactivado por defecto. |
-| `--xml-preserve-paths` | Conserva en el XML las rutas de `--#texture`/`--#sound` tal como se escribieron y escribe el XML junto al archivo fuente ([sección 3](#3-el-xml-del-cartucho)). |
+| `--xml-preserve-paths` | Conserva en el XML las rutas de `--#texture`/`--#sound` tal como se escribieron y escribe el XML en la carpeta del proyecto, junto al fuente o en su directorio padre cuando el fuente está en `src/` y la salida en una hermana como `obj/` ([sección 3](#3-el-xml-del-cartucho)). |
 | `--keyboard 0-3` | Puerto de mando de un teclado v32kbd (`key()`, `keyp()`, `kbd.*`); 2 por defecto. Necesita un dispositivo v32io (ver abajo). |
 | `--mouse 0-3` | Puerto de mando de un ratón v32mouse (`mouse()`, `mouse.*`, `stat(32..34)` de PICO-8); 3 por defecto. Necesita un dispositivo v32io (ver abajo). |
 | `--version`, `--help` | Versión, uso. |
@@ -157,15 +157,22 @@ prevalece sobre la pista), o mantén ambos títulos idénticos con
 explícito siempre prevalece sobre `no-diff-opt-title`.
 
 **`--xml-preserve-paths`** restaura las rutas tal como se escribieron en las
-pistas (`assets/textures/ship.vtex`), escribe el XML en el directorio del
-archivo *fuente* en lugar de junto a la salida (el punto de referencia de las
-propias pistas: `src/game.xml` para `-o obj/game.asm src/game.lua`, con
-`src/gameOpt.xml` a su lado) y hace que `<binary>` sea la ruta del `.vbin`
-relativa a ese directorio (`../obj/game.vbin`). Los recursos que genera el
-propio compilador (cartuchos PICO-8 y TIC-80, más abajo) quedan junto a la
-salida, así que también se nombran relativos a ese directorio
-(`../obj/game_pico8.vtex`). Úsalo cuando tus recursos ya viven junto al
-código fuente y quieres el XML allí.
+pistas (`assets/textures/ship.vtex`) y escribe el XML en la *carpeta del
+proyecto* en lugar de junto a la salida: el directorio del archivo *fuente*
+(el punto de referencia de las propias pistas) o su directorio padre, cuando
+el fuente está en una carpeta llamada `src` y la salida en una hermana como
+`obj/`. Así, `-o obj/game.asm src/game.lua` da `game.xml` y `gameOpt.xml`
+junto a `src/` y `obj/`, el mismo lugar que los
+[scripts de compilación](#6-scripts-de-compilación-makesh-y-makebat).
+`<binary>` pasa a ser la ruta del `.vbin` relativa al XML (`obj/game.vbin`) y,
+como el XML subió un nivel, las rutas de las pistas se rebasan sobre él
+(`src/assets/textures/ship.vtex`). Los recursos que genera el propio
+compilador (cartuchos PICO-8 y TIC-80, más abajo) quedan junto a la salida,
+así que también se nombran relativos al XML (`obj/game_pico8.vtex`). Cuando
+el fuente no está en `src/` (o la salida no está en una hermana suya), el XML
+va al directorio del propio fuente y las rutas quedan tal como se escribieron
+(`../obj/game.vbin`). Úsalo cuando tus recursos ya viven junto al código
+fuente y quieres el XML allí.
 
 ## 4. Convertir los recursos, ensamblar y empaquetar
 

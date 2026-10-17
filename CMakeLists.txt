@@ -435,10 +435,29 @@ install(TARGETS v32lua
         RUNTIME DESTINATION "${V32LUA_INSTALL_BINDIR}"
         COMPONENT binaries)
 
-install(FILES "${V32LUA_MAN_SOURCE}"
-        DESTINATION "${V32LUA_INSTALL_MANDIR}"
-        RENAME v32lua.1
-        COMPONENT documentation)
+# On Unix-like systems the manual page is installed gzipped (v32lua.1.gz),
+# as man-db and the distributions' packaging expect; Windows has no man(1),
+# so it stays plain there.
+find_program(V32LUA_GZIP gzip)
+if(NOT TARGET_OS STREQUAL "windows" AND V32LUA_GZIP)
+    set(V32LUA_MAN_GZ "${CMAKE_CURRENT_BINARY_DIR}/v32lua.1.gz")
+    add_custom_command(
+        OUTPUT  "${V32LUA_MAN_GZ}"
+        COMMAND "${CMAKE_COMMAND}" -E env sh -c "\"$1\" -9cn \"$2\" > \"$3\"" sh
+                "${V32LUA_GZIP}" "${CMAKE_CURRENT_SOURCE_DIR}/${V32LUA_MAN_SOURCE}" "${V32LUA_MAN_GZ}"
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${V32LUA_MAN_SOURCE}"
+        VERBATIM)
+    add_custom_target(v32lua_manpage ALL DEPENDS "${V32LUA_MAN_GZ}")
+    install(FILES "${V32LUA_MAN_GZ}"
+            DESTINATION "${V32LUA_INSTALL_MANDIR}"
+            RENAME v32lua.1.gz
+            COMPONENT documentation)
+else()
+    install(FILES "${V32LUA_MAN_SOURCE}"
+            DESTINATION "${V32LUA_INSTALL_MANDIR}"
+            RENAME v32lua.1
+            COMPONENT documentation)
+endif()
 
 # The standard-library ports --#include finds through V32LUA_INCLUDE_PATH.
 #

@@ -353,9 +353,12 @@ void emit_runtime_init(FILE *out) {
 // With preserve_paths (--xml-preserve-paths):
 //
 //   * each --#texture/--#sound path is kept as written in the hint (only the
-//     extension changes), the XML goes in the directory of the SOURCE file
-//     (the hints' own point of reference) under the output's base name, and
-//     <binary> is the .vbin path relative to that directory.
+//     extension changes), the XML goes in the PROJECT folder under the
+//     output's base name -- the source file's directory (the hints' own point
+//     of reference), or its parent when the source is in src/ and the output
+//     in a sibling such as obj/ -- and <binary> is the .vbin path relative to
+//     it. Hint paths are re-based onto that folder when it is the parent
+//     (textures/ship.png becomes src/textures/ship.vtex).
 //   * assets the compiler itself generates (PICO-8/TIC-80 sprite sheets and
 //     sounds) live beside the output file, so they are written relative to
 //     the XML's directory too.
@@ -364,7 +367,8 @@ void emit_runtime_init(FILE *out) {
 // game.xml -> game.vbin, gameOpt.xml -> gameOpt.vbin, identical otherwise.
 // ----------------------------------------------------------------------------
 
-static int g_xml_warn_collisions = 1;     // once per run, not once per XML
+static int   g_xml_warn_collisions = 1;     // once per run, not once per XML
+static char *g_xml_src_dir         = NULL;  // the source file's directory (for --xml-preserve-paths)
 
 // Components of `buf` ('/' or '\' separated) with empty, "." and ".." parts
 // dropped; `parts` points into `buf`. Returns the count.
@@ -458,7 +462,19 @@ char **cart_xml_resolve_names (CARTresource *head, int count, const char *tag,
         if (preserve_paths)
         {
             // Hints as written; compiler-made files (beside the output) from the XML's directory.
-            names[i] = res[i]->generated ? path_relative_to (xml_dir, full[i]) : strdup (full[i]);
+            if (res[i]->generated || g_xml_src_dir == NULL)
+            {
+                names[i] = res[i]->generated ? path_relative_to (xml_dir, full[i]) : strdup (full[i]);
+            }
+            else
+            {
+                // A hint path is relative to the source file; the XML may sit one level up.
+                char *from_src = malloc (strlen (g_xml_src_dir) + strlen (full[i]) + 2);
+                if (from_src == NULL) { fprintf (stderr, "Compiler Error: Memory allocation failed for XML paths.\n"); exit (2); }
+                sprintf (from_src, "%s/%s", g_xml_src_dir, full[i]);
+                names[i] = path_relative_to (xml_dir, from_src);
+                free (from_src);
+            }
             continue;
         }
 
@@ -531,7 +547,9 @@ static void xml_emit_resources (FILE *xml, CARTresource *head, const char *tag,
 }
 
 // Where the XML for `output_filename` goes (malloc'd): beside the output, or
-// (preserve_paths) under the same name in the source file's directory.
+// (preserve_paths) under the same name in the project folder -- the source
+// file's directory, or its parent when the source is in src/ and the output
+// in a sibling such as obj/ (path_project_dir).
 char *cart_xml_filename (const char *output_filename, const char *source_filename,
                          int preserve_paths)
 {
@@ -539,7 +557,7 @@ char *cart_xml_filename (const char *output_filename, const char *source_filenam
 
     if (!preserve_paths) return xml_name;
 
-    char   *dir    = path_dirname (source_filename);
+    char   *dir    = path_project_dir (source_filename, output_filename);
     size_t  cap    = strlen (dir) + strlen (xml_name) + 2;
     char   *result = malloc (cap);
 
@@ -664,6 +682,8 @@ void  cart_xml_set_quiet (int quiet)
 void  emit_cart_xml (const char *output_filename, const char *source_filename,
                      int preserve_paths, int verbose)
 {
+    free (g_xml_src_dir);
+    g_xml_src_dir = path_dirname (source_filename);
     g_xml_warn_collisions = 1;
     write_cart_xml (output_filename, source_filename, preserve_paths, "", verbose);
     g_xml_warn_collisions = 0;          // the Opt twin would only repeat the warnings

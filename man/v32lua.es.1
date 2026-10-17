@@ -240,11 +240,13 @@ Conserva en el XML cada ruta de
 /
 .B \-\-#sound
 tal como se escribi\('o en la indicaci\('on (solo cambia la extensi\('on), escribe el XML en el
-directorio del archivo fuente en lugar de junto a la salida, y hace que
+carpeta del proyecto en lugar de junto a la salida (el directorio del archivo fuente, o su
+directorio padre cuando el fuente est\('a en una carpeta llamada \fIsrc\fR y la salida en una
+hermana como \fIobj\fR), y hace que
 .B <binary>
 sea la ruta del
 .I .vbin
-relativa a ese directorio. Por defecto el XML queda junto a la salida y solo
+relativa a ella. Por defecto el XML queda junto a la salida y solo
 contiene nombres de archivo (\fIship.vtex\fR, no \fItextures/ship.vtex\fR), porque
 .BR packrom (1)
 resuelve todas sus rutas relativas al propio XML. V\('ease
@@ -706,17 +708,18 @@ Con
 .B \-\-xml\-preserve\-paths
 las rutas de las indicaciones se conservan tal como se escribieron
 .RI ( textures/ship.vtex ),
-el XML va al directorio del archivo fuente
-.RI ( src/game.xml
-para
+el XML va a la carpeta del proyecto: el directorio del archivo fuente, o su directorio padre cuando el fuente
+est\('a en una carpeta llamada \fIsrc\fR y la salida en una hermana como \fIobj\fR (as\('i,
 .B "\-o obj/game.asm src/game.lua"
-), y
+deja \fIgame.xml\fR junto a \fIsrc\fR y \fIobj\fR, donde van los scripts de compilaci\('on), y
 .B <binary>
 pasa a ser la ruta del
 .I .vbin
 relativa a \('el
-.RI ( ../obj/game.vbin ).
-Los recursos generados tambi\('en se nombran relativos a ese directorio.
+.RI ( obj/game.vbin ).
+Las rutas de las indicaciones tambi\('en pasan a ser relativas al XML
+.RI ( src/textures/ship.vtex )
+y los recursos generados se nombran relativos a su directorio.
 .PP
 El t\('itulo del gemelo es el t\('itulo normal seguido de
 .IR " [optimized]" ,

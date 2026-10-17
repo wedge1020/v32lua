@@ -520,26 +520,15 @@ void emit_build_scripts (const char *output_filename, const char *source_filenam
     Plan   plan;
     char  *src_dir   = path_dirname (source_filename);
     char  *out_dir   = path_dirname (output_filename);
-    char  *abs_src   = path_absolute (src_dir);
-    char  *abs_out   = path_absolute (out_dir);
 
     memset (&plan, 0, sizeof (plan));
 
     // Project folder: beside the source, or one up when the source is in
     // "src" and the output goes to a sibling folder (src/ and obj/).
-    plan.script_dir = dup_or_die (abs_src);
-    if (strcmp (path_basename (abs_src), "src") == 0 && strcmp (abs_src, abs_out) != 0)
     {
-        char *up_src = path_dirname (abs_src);
-        char *up_out = path_dirname (abs_out);
-        if (strcmp (up_src, up_out) == 0)
-        {
-            free (plan.script_dir);
-            plan.script_dir = up_src;
-            up_src = NULL;
-        }
-        free (up_src);
-        free (up_out);
+        char *proj = path_project_dir (source_filename, output_filename);
+        plan.script_dir = path_absolute (proj);
+        free (proj);
     }
 
     plan.opts       = opts;
@@ -588,5 +577,5 @@ void emit_build_scripts (const char *output_filename, const char *source_filenam
     free (plan.vbin); free (plan.vbin_opt); free (plan.xml); free (plan.xml_opt);
     free (plan.rom); free (plan.rom_opt); free (plan.script_dir);
     free (vbin_full); free (asm_opt); free (vbin_opt); free (xml_full); free (xml_opt);
-    free (xml_dir); free (src_dir); free (out_dir); free (abs_src); free (abs_out);
+    free (xml_dir); free (src_dir); free (out_dir);
 }

@@ -175,7 +175,7 @@ v32c++), junto a las `DevTools/` oficiales:
 | | Linux / macOS | Windows (CMake) |
 | --- | --- | --- |
 | compilador | `/usr/local/bin/v32lua` | `C:\Program Files\Vircon32\v32tools\v32lua.exe` |
-| página de manual | `/usr/local/share/man/man1/v32lua.1` | `...\v32tools\docs\v32lua\v32lua.1` |
+| página de manual | `/usr/local/share/man/man1/v32lua.1.gz` (comprimida con gzip) | `...\v32tools\docs\v32lua\v32lua.1` |
 | biblioteca de `--#include` (`lib/*.lua`) | `/usr/local/Vircon32/v32tools/include/v32lua` | `...\v32tools\include\v32lua` |
 | documentación | `/usr/local/Vircon32/v32tools/docs/v32lua` | `...\v32tools\docs\v32lua` |
 
@@ -370,8 +370,10 @@ código fuente, así que un cartucho de PICO-8 o TIC-80 compila sin editarlo
 * `--fast-circles`: los círculos rellenos de TIC-80/PICO-8 de radio mayor
   que 31 se dibujan como un disco escalado.
 * `--xml-preserve-paths`: conserva en el XML del cartucho las rutas de
-  `--#texture` / `--#sound` tal como se escribieron, y escribe el XML junto
-  al archivo fuente en lugar de junto a la salida (consulta
+  `--#texture` / `--#sound` tal como se escribieron, y escribe el XML en la
+  carpeta del proyecto (junto al archivo fuente, o en su directorio padre si el
+  fuente está en `src/` y la salida en una hermana como `obj/`) en lugar de
+  junto a la salida (consulta
   [El XML del cartucho](#el-xml-del-cartucho)).
 * `--allow-float-as-clearcolor`: un número Lua dado a `ioports.gpu.clear`
   o al `cls()` de TIC-80 conserva sus bits float32 como color de borrado
@@ -582,11 +584,14 @@ cuyas rutas completas se reducen a un mismo nombre (que difieren solo en la
 extensión, por ejemplo) provocan un aviso.
 
 `--xml-preserve-paths` restaura las rutas tal como se escribieron
-(`textures/ship.vtex`), escribe el XML en el directorio del archivo *fuente*
-(`src/game.xml` para `-o obj/game.asm src/game.lua`) y hace que `<binary>`
-sea la ruta del `.vbin` relativa a él (`../obj/game.vbin`); los recursos
-generados por el compilador también se nombran relativos al directorio del
-XML.
+(`textures/ship.vtex`), escribe el XML en la *carpeta del proyecto*: el
+directorio del archivo fuente, o su directorio padre cuando el fuente está en
+`src/` y la salida en una carpeta hermana como `obj/` (con
+`-o obj/game.asm src/game.lua` resulta `game.xml` junto a `src/` y `obj/`), y
+hace que `<binary>` sea la ruta del `.vbin` relativa a él (`obj/game.vbin`).
+Las rutas de las pistas pasan a ser relativas al XML (`src/textures/ship.vtex`)
+y los recursos generados por el compilador también se nombran relativos al
+directorio del XML.
 
 Junto a cada XML se escribe un gemelo para la compilación optimizada
 (`obj/gameOpt.xml`, idéntico salvo por `<binary path="gameOpt.vbin" />` y

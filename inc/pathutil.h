@@ -30,4 +30,11 @@ char       *path_relative_to  (const char *from_dir, const char *target);
 // directory, "." and ".." folded, '/' separators). Caller frees.
 char       *path_absolute     (const char *path);
 
+// The project folder for a build of `source_filename` into `output_filename`:
+// the source file's folder -- or, when that folder is named "src" and the
+// output goes to a sibling of it (src/ and obj/ side by side), its parent.
+// Malloc'd, relative to the current directory ("." for it). Where the build
+// scripts go, and (--xml-preserve-paths) the cartridge XML.
+char       *path_project_dir  (const char *source_filename, const char *output_filename);
+
 #endif

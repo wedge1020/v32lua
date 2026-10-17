@@ -238,12 +238,13 @@ Keep each
 /
 .B \-\-#sound
 path in the XML as written in the hint (only the extension changes), write the
-XML into the directory of the source file instead of beside the output, and
-make
+XML into the project folder instead of beside the output (the source file's
+directory, or its parent when the source is in a folder named \fIsrc\fR and the
+output in a sibling such as \fIobj\fR), and make
 .B <binary>
 the
 .I .vbin
-path relative to that directory. By default the XML sits beside the output and
+path relative to it. By default the XML sits beside the output and
 holds bare file names only (\fIship.vtex\fR, not \fItextures/ship.vtex\fR),
 because
 .BR packrom (1)
@@ -699,17 +700,18 @@ With
 .B \-\-xml\-preserve\-paths
 the hint paths are kept as written
 .RI ( textures/ship.vtex ),
-the XML goes into the source file's directory
-.RI ( src/game.xml
-for
+the XML goes into the project folder: the source file's directory, or its parent when the source is in a
+folder named \fIsrc\fR and the output in a sibling such as \fIobj\fR (so
 .B "\-o obj/game.asm src/game.lua"
-), and
+gives \fIgame.xml\fR beside \fIsrc\fR and \fIobj\fR, where the build scripts go), and
 .B <binary>
 becomes the
 .I .vbin
 path relative to it
-.RI ( ../obj/game.vbin ).
-Generated assets are named relative to that directory too.
+.RI ( obj/game.vbin ).
+Hint paths are then relative to the XML too
+.RI ( src/textures/ship.vtex ),
+and generated assets are named relative to its directory.
 .PP
 The twin's title is the regular title followed by
 .IR " [optimized]" ,

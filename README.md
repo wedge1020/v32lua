@@ -166,7 +166,7 @@ and v32c++), next to the official `DevTools/`:
 | | Linux / macOS | Windows (CMake) |
 | --- | --- | --- |
 | compiler | `/usr/local/bin/v32lua` | `C:\Program Files\Vircon32\v32tools\v32lua.exe` |
-| man page | `/usr/local/share/man/man1/v32lua.1` | `...\v32tools\docs\v32lua\v32lua.1` |
+| man page | `/usr/local/share/man/man1/v32lua.1.gz` (gzipped) | `...\v32tools\docs\v32lua\v32lua.1` |
 | `--#include` library (`lib/*.lua`) | `/usr/local/Vircon32/v32tools/include/v32lua` | `...\v32tools\include\v32lua` |
 | documentation | `/usr/local/Vircon32/v32tools/docs/v32lua` | `...\v32tools\docs\v32lua` |
 
@@ -353,8 +353,9 @@ works):
 * `--fast-circles`: TIC-80/PICO-8 filled circles above radius 31 drawn as
   a scaled disc.
 * `--xml-preserve-paths`: keep the `--#texture` / `--#sound` paths in the
-  cartridge XML as written, and write the XML beside the source file
-  instead of beside the output (see [The cartridge XML](#the-cartridge-xml)).
+  cartridge XML as written, and write the XML in the project folder (beside
+  the source file, or in its parent when the source is in `src/` and the
+  output in a sibling such as `obj/`) instead of beside the output (see [The cartridge XML](#the-cartridge-xml)).
 * `--allow-float-as-clearcolor`: a Lua number given to `ioports.gpu.clear`
   or TIC-80 `cls()` keeps its float32 bits as the clear color (old
   behavior; used for translucent-clear streaks such as `witchem_up`).
@@ -554,10 +555,15 @@ only two assets whose whole paths collapse to one name (differing by
 extension, say) draw a warning.
 
 `--xml-preserve-paths` restores the paths as written (`textures/ship.vtex`),
-writes the XML into the *source file's* directory instead (`src/game.xml`
-for `-o obj/game.asm src/game.lua`), and makes `<binary>` the `.vbin` path
-relative to it (`../obj/game.vbin`); compiler-generated assets are
-named relative to the XML's directory too.
+writes the XML into the *project folder* instead — the source file's
+directory, or its parent when the source is in `src/` and the output in a
+sibling such as `obj/`, so `-o obj/game.asm src/game.lua` gives `game.xml`
+beside `src/` and `obj/` — and makes `<binary>` the `.vbin` path relative
+to it (`obj/game.vbin`). Hint paths are then relative to the XML as well
+(`src/textures/ship.vtex`), and compiler-generated assets are named relative
+to the XML's directory too. (With `src/game.lua` and `-o game.asm`, or a
+source outside a folder named `src`, the XML goes in the source's directory
+as before.)
 
 Next to every XML a twin for the optimized build is written
 (`obj/gameOpt.xml`, identical but for `<binary path="gameOpt.vbin" />` and

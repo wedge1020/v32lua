@@ -41,7 +41,7 @@ Run `v32lua --help` for every option; the common ones:
 | `--bezel FILE`, `--no-bezel` | PICO-8 side panels: your own art, or none. |
 | `--fast-circles` | PICO-8/TIC-80: draw big filled circles faster (slightly different edges). |
 | `--allow-float-as-clearcolor` | A Lua number given to `ioports.gpu.clear` or TIC-80 `cls()` keeps its float32 bits as the clear color, as in older versions (translucent clear = motion-blur streak). Off by default. |
-| `--xml-preserve-paths` | Keep the `--#texture`/`--#sound` paths in the XML as written and write the XML beside the source file ([section 3](#3-the-cartridge-xml)). |
+| `--xml-preserve-paths` | Keep the `--#texture`/`--#sound` paths in the XML as written and write the XML in the project folder, beside the source or in its parent when the source is in `src/` and the output in a sibling like `obj/` ([section 3](#3-the-cartridge-xml)). |
 | `--keyboard 0-3` | Gamepad port of a v32kbd keyboard (`key()`, `keyp()`, `kbd.*`); default 2. Needs a v32io device (below). |
 | `--mouse 0-3` | Gamepad port of a v32mouse mouse (`mouse()`, `mouse.*`, PICO-8 `stat(32..34)`); default 3. Needs a v32io device (below). |
 | `--version`, `--help` | Version, usage. |
@@ -153,15 +153,21 @@ hint `--#no-diff-opt-title`). An explicit `titleopt` always beats
 `no-diff-opt-title`.
 
 **`--xml-preserve-paths`** restores the paths as written in the hints
-(`assets/textures/ship.vtex`), writes the XML into the directory of the
-*source* file instead of beside the output (the hints' own point of
-reference: `src/game.xml` for `-o obj/game.asm src/game.lua`, with
-`src/gameOpt.xml` next to it), and makes `<binary>` the `.vbin` path
-relative to that directory (`../obj/game.vbin`). Assets the compiler
-generates itself (PICO-8 and TIC-80 carts, below) sit beside the output
-file, so they are named relative to that directory too
-(`../obj/game_pico8.vtex`). Use it when your assets already live next to
-the source and you want the XML there.
+(`assets/textures/ship.vtex`) and writes the XML into the *project folder*
+instead of beside the output: the directory of the *source* file (the hints'
+own point of reference) — or its parent, when the source is in a folder named
+`src` and the output in a sibling such as `obj/`. So `-o obj/game.asm
+src/game.lua` gives `game.xml` and `gameOpt.xml` beside `src/` and `obj/`,
+the same place the [build scripts](#6-build-scripts-makesh-and-makebat) go.
+`<binary>` becomes the `.vbin` path relative to the XML (`obj/game.vbin`),
+and, since the XML moved up a level, the hint paths are re-based onto it
+(`src/assets/textures/ship.vtex`). Assets the compiler generates itself
+(PICO-8 and TIC-80 carts, below) sit beside the output file, so they are
+named relative to the XML too (`obj/game_pico8.vtex`). When the source is not
+in `src/` (or the output is not in a sibling of it), the XML goes in the
+source's own directory, and the paths stay exactly as written
+(`../obj/game.vbin`). Use it when your assets already live next to the
+source and you want the XML there.
 
 ## 4. Convert the assets, assemble and pack
 

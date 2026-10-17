@@ -155,3 +155,34 @@ char *path_absolute (const char *path)
     }
     return result;
 }
+
+char *path_project_dir (const char *source_filename, const char *output_filename)
+{
+    char *src_dir = path_dirname (source_filename);
+    char *out_dir = path_dirname (output_filename);
+    char *abs_src = path_absolute (src_dir);
+    char *abs_out = path_absolute (out_dir);
+    char *project = abs_src;
+
+    if (strcmp (path_basename (abs_src), "src") == 0 && strcmp (abs_src, abs_out) != 0)
+    {
+        char *up_src = path_dirname (abs_src);
+        char *up_out = path_dirname (abs_out);
+        if (strcmp (up_src, up_out) == 0) { project = up_src; up_src = NULL; free (abs_src); abs_src = NULL; }
+        free (up_src);
+        free (up_out);
+    }
+
+    // As a directory relative to the current one: take the path of a file in it.
+    size_t cap  = strlen (project) + 3;
+    char  *file = malloc (cap);
+    if (file == NULL) { fprintf (stderr, "Compiler Error: out of memory\n"); exit (2); }
+    snprintf (file, cap, "%s/x", project);
+    char *rel = path_relative_to (".", file);
+    char *dir = path_dirname (rel);
+
+    if (project == abs_src) abs_src = NULL;
+    free (rel); free (file); free (project);
+    free (abs_src); free (src_dir); free (out_dir); free (abs_out);
+    return dir;
+}

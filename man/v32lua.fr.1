@@ -241,11 +241,13 @@ Conserve dans le XML chaque chemin de
 /
 .B \-\-#sound
 tel qu'\('ecrit dans l'indication (seule l'extension change), \('ecrit le XML dans le
-r\('epertoire du fichier source au lieu de le placer \(`a c\(^ot\('e de la sortie, et fait de
+dossier du projet au lieu de le placer \(`a c\(^ot\('e de la sortie (le r\('epertoire du fichier source, ou son
+parent quand la source est dans un dossier nomm\('e \fIsrc\fR et la sortie dans un dossier voisin
+comme \fIobj\fR), et fait de
 .B <binary>
 le chemin du
 .I .vbin
-relatif \(`a ce r\('epertoire. Par d\('efaut, le XML se trouve \(`a c\(^ot\('e de la sortie et ne
+relatif \(`a celui-ci. Par d\('efaut, le XML se trouve \(`a c\(^ot\('e de la sortie et ne
 contient que des noms de fichiers (\fIship.vtex\fR, pas \fItextures/ship.vtex\fR), car
 .BR packrom (1)
 r\('esout tous ses chemins relativement au XML lui-m\(^eme. Voir
@@ -712,17 +714,18 @@ Avec
 .B \-\-xml\-preserve\-paths
 les chemins des indications sont conserv\('es tels qu'\('ecrits
 .RI ( textures/ship.vtex ),
-le XML va dans le r\('epertoire du fichier source
-.RI ( src/game.xml
-pour
+le XML va dans le dossier du projet : le r\('epertoire du fichier source, ou son parent quand la source est
+dans un dossier nomm\('e \fIsrc\fR et la sortie dans un dossier voisin comme \fIobj\fR (ainsi,
 .B "\-o obj/game.asm src/game.lua"
-), et
+donne \fIgame.xml\fR \(`a c\(^ot\('e de \fIsrc\fR et \fIobj\fR, l\(`a o\(`u vont les scripts de compilation), et
 .B <binary>
 devient le chemin du
 .I .vbin
 relatif \(`a celui-ci
-.RI ( ../obj/game.vbin ).
-Les ressources g\('en\('er\('ees sont elles aussi nomm\('ees par rapport \(`a ce r\('epertoire.
+.RI ( obj/game.vbin ).
+Les chemins des indications deviennent eux aussi relatifs au XML
+.RI ( src/textures/ship.vtex )
+et les ressources g\('en\('er\('ees sont nomm\('ees par rapport \(`a son r\('epertoire.
 .PP
 Le titre du jumeau est le titre normal suivi de
 .IR " [optimized]" ,

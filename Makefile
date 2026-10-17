@@ -131,14 +131,16 @@ uninstall:
 	rm -f ~/bin/bin.$(ARCH)/$(TARGET)$(EXE) ~/bin/$(TARGET)$(EXE)
 
 # System-wide install: the binary to $(BINDIR), the manual page (in
-# DEST_LANG's language) to $(MANDIR), the --#include library (lib/*.lua) to
+# DEST_LANG's language, gzipped as v32lua.1.gz) to $(MANDIR), the --#include library (lib/*.lua) to
 # $(LIBDIR) and the documents (READMEs and doc/, in DEST_LANG's language)
 # to $(DOCDIR) -- the layout `cmake --install` uses with its default prefix
 # (see CMakeLists.txt). May need sudo. `make sysuninstall` removes it again.
 sysinstall: bin/$(TARGET)
 	install -d $(DESTDIR)$(BINDIR) $(DESTDIR)$(MANDIR) $(DESTDIR)$(LIBDIR) $(DESTDIR)$(DOCDIR)/doc
 	install -m 755 $(BIN) $(DESTDIR)$(BINDIR)/$(TARGET)$(EXE)
-	install -m 644 $(MANPAGE) $(DESTDIR)$(MANDIR)/v32lua.1
+	rm -f $(DESTDIR)$(MANDIR)/v32lua.1 $(DESTDIR)$(MANDIR)/v32lua.1.gz
+	gzip -9cn $(MANPAGE) > $(DESTDIR)$(MANDIR)/v32lua.1.gz
+	chmod 644 $(DESTDIR)$(MANDIR)/v32lua.1.gz
 	install -m 644 lib/*.lua $(DESTDIR)$(LIBDIR)/
 	@set -e; for f in $(EN_DOCS); do \
 	    src=$$f; \
@@ -154,7 +156,7 @@ ifeq ($(DOC_LANG),all)
 	    install -m 644 "$$f" "$(DESTDIR)$(DOCDIR)/$$f"; \
 	done
 endif
-	@echo "Installed $(TARGET) to $(BINDIR), its manual page ($(MANPAGE)) to $(MANDIR),"
+	@echo "Installed $(TARGET) to $(BINDIR), its manual page ($(MANPAGE), gzipped) to $(MANDIR),"
 	@echo "the --#include library to $(LIBDIR)"
 	@echo "and the documents ($(DOC_LANG)) to $(DOCDIR)"
 ifneq ($(filter es fr,$(DOC_LANG)),)
@@ -173,7 +175,7 @@ endif
 # them.
 up = $(patsubst %/,%,$(dir $(1)))
 sysuninstall:
-	rm -f $(DESTDIR)$(BINDIR)/$(TARGET)$(EXE) $(DESTDIR)$(MANDIR)/v32lua.1
+	rm -f $(DESTDIR)$(BINDIR)/$(TARGET)$(EXE) $(DESTDIR)$(MANDIR)/v32lua.1 $(DESTDIR)$(MANDIR)/v32lua.1.gz
 	rm -f $(addprefix $(DESTDIR)$(LIBDIR)/,$(notdir $(wildcard lib/*.lua)))
 	rm -f $(addprefix $(DESTDIR)$(DOCDIR)/,$(EN_DOCS) $(TR_DOCS))
 	-@for d in $(DOCDIR)/doc $(DOCDIR) $(call up,$(DOCDIR)) \

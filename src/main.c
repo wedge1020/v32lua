@@ -99,8 +99,10 @@ static void  print_usage (const char *prog_name)
     fprintf (stdout, "                   expected beside it\n");
     fprintf (stdout, "  --xml-preserve-paths\n");
     fprintf (stdout, "                   keep --#texture/--#sound paths as written (textures/ship.vtex),\n");
-    fprintf (stdout, "                   write the XML into the source file's directory, and make\n");
-    fprintf (stdout, "                   <binary> the .vbin path relative to it\n");
+    fprintf (stdout, "                   write the XML into the project folder (the source file's\n");
+    fprintf (stdout, "                   directory, or its parent when the source is in src/ and the\n");
+    fprintf (stdout, "                   output in a sibling such as obj/), and make <binary> the\n");
+    fprintf (stdout, "                   .vbin path relative to it\n");
     fprintf (stdout, "\nBuild scripts:\n");
     fprintf (stdout, "  Make.sh and Make.bat (the usual Vircon32 build scripts: v32lua, png2vircon,\n");
     fprintf (stdout, "                   wav2vircon, assemble, packrom, and v32opt when installed) are\n");

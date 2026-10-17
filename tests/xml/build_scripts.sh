@@ -126,7 +126,9 @@ has t3/Make.sh 'packrom game.xml -o bin/game.v32'
 # ---- --xml-preserve-paths
 proj t4
 "$bin" -w --xml-preserve-paths -o t4/obj/game.asm t4/src/game.lua
-has t4/Make.sh 'packrom src/game.xml -o bin/game.v32'
+has t4/Make.sh 'packrom game.xml -o bin/game.v32'
+[ -f t4/game.xml ] || no "preserve mode: no XML in the project folder"
+has t4/game.xml '<binary path="obj/game.vbin" />'
 has t4/Make.sh 'src/textures/ship.png -o src/textures/ship.vtex'
 
 [ $fail = 0 ] && echo "build_scripts: OK"
