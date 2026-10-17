@@ -48,7 +48,7 @@ endif
 asm: obj/$(DEMO).asm
 
 obj/$(DEMO).asm: prep $(DEMO).lua
-	$(COMPILER)   $(DEBUG_FLAGS) -o obj/$(DEMO).asm    $(DEMO).lua
+	$(COMPILER)   --no-build-scripts $(DEBUG_FLAGS) -o obj/$(DEMO).asm    $(DEMO).lua
 ifneq ($(HAVE_OPTIMIZER),)
 	-$(OPTIMIZER) $(DEBUG_FLAGS) -o obj/$(DEMO)Opt.asm obj/$(DEMO).asm
 endif

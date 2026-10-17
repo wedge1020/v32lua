@@ -131,3 +131,27 @@ char *path_relative_to (const char *from_dir, const char *target)
     for (int i = 0; i < nt; i++) free (to_parts[i]);
     return result;
 }
+
+char *path_absolute (const char *path)
+{
+    enum { MAXP = 256 };
+    char   *parts[MAXP];
+    int     n       = split_normalized (path, parts, MAXP);
+    size_t  cap     = 2;
+    int     drive   = (path[0] != '\0' && path[1] == ':');
+
+    for (int i = 0; i < n; i++) cap += strlen (parts[i]) + 1;
+
+    char *result = malloc (cap);
+    if (result == NULL) { fprintf (stderr, "Compiler Error: out of memory\n"); exit (2); }
+    result[0] = '\0';
+    if (n == 0) strcpy (result, "/");
+    for (int i = 0; i < n; i++)
+    {
+        // "C:" at the front of a Windows path stays without a leading '/'.
+        if (!(i == 0 && drive)) strcat (result, "/");
+        strcat (result, parts[i]);
+        free (parts[i]);
+    }
+    return result;
+}

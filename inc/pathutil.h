@@ -26,4 +26,8 @@ char       *path_dirname      (const char *path);
 // "../obj/game.vbin". Caller frees.
 char       *path_relative_to  (const char *from_dir, const char *target);
 
+// Malloc'd absolute, normalized form of `path` (resolved against the current
+// directory, "." and ".." folded, '/' separators). Caller frees.
+char       *path_absolute     (const char *path);
+
 #endif

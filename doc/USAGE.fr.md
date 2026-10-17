@@ -16,7 +16,7 @@ Le langage et l'API sont décrits dans le [README](../README.fr.md) et dans
 v32lua -o obj/game.asm game.lua
 ```
 
-Cela écrit trois fichiers, l'un à côté de l'autre :
+Cela écrit trois fichiers, l'un à côté de l'autre (plus les scripts de compilation, [section 6](#6-scripts-de-compilation--makesh-et-makebat)) :
 
 * `obj/game.asm` — le programme, en assembleur Vircon32 ;
 * `obj/game.xml` — la définition de cartouche que lit `packrom` ;
@@ -35,6 +35,9 @@ Lancez `v32lua --help` pour voir toutes les options ; les plus courantes :
 | `-v` | Affiche les étapes du compilateur pendant qu'il travaille. |
 | `--api pico8\|tic80\|vircon32` | Choisit l'API ; par défaut, elle est détectée d'après le fichier (`.p8`, `.tic`) ou le source. |
 | `--title "TEXTE"` | Titre de la cartouche. |
+| `--titleopt "TEXTE"` | Titre de la cartouche optimisée (`gameOpt.xml`) ; par défaut, le titre suivi de ` [optimized]`. |
+| `--no-diff-opt-title` | Donne à la cartouche optimisée le même titre qu'à la normale. |
+| `--no-build-scripts` | N'écrit pas `Make.sh` / `Make.bat` ([section 6](#6-scripts-de-compilation--makesh-et-makebat)). |
 | `--rate 11025\|22050\|44100` | Fréquence d'échantillonnage du son produit à partir d'une cartouche PICO-8 ou TIC-80. |
 | `--bezel FICHIER`, `--no-bezel` | Panneaux latéraux PICO-8 : vos propres images, ou aucun. |
 | `--fast-circles` | PICO-8/TIC-80 : dessine plus vite les grands cercles pleins (bords légèrement différents). |
@@ -65,6 +68,8 @@ haut du fichier.
 | Indication | Signification |
 |---|---|
 | `--#title "Texte"` | Titre de la cartouche. |
+| `--#titleopt "Texte"` | Titre de la cartouche optimisée. Sans elle : le titre suivi de ` [optimized]`. |
+| `--#no-diff-opt-title` | La cartouche optimisée garde le même titre que la normale (un `--#titleopt` explicite l'emporte toujours). |
 | `--#version "1.2"` | Version de la cartouche. |
 | `--#texture NOM "chemin/image.png"` | Ajoute une texture. `NOM` devient une globale contenant son numéro de texture (0, 1, 2, … dans l'ordre). |
 | `--#sound NOM "chemin/son.wav"` | Ajoute un son. `NOM` contient son numéro de son (0, 1, 2, …). |
@@ -140,9 +145,18 @@ complets se réduisent au même nom (ne différant que par l'extension, par
 exemple) provoquent encore un avertissement.
 
 **Le jumeau de l'optimiseur.** À côté de `obj/game.xml`, le compilateur
-écrit aussi `obj/gameOpt.xml`, identique sauf `<binary path="gameOpt.vbin" />`,
-pour la compilation optimisée de la [section 5](#5-facultatif--loptimiseur).
-Il est écrit que vous utilisiez l'optimiseur ou non.
+écrit aussi `obj/gameOpt.xml`, identique sauf `<binary path="gameOpt.vbin" />`
+et le titre, pour la compilation optimisée de la
+[section 5](#5-facultatif--loptimiseur). Il est écrit que vous utilisiez
+l'optimiseur ou non.
+
+**Le titre de la cartouche optimisée.** Pour distinguer les deux cartouches
+sur une carte mémoire ou dans un menu, le titre du jumeau est le titre
+normal suivi de ` [optimized]` (`Space Invaders Vircon32 [optimized]`).
+Choisissez le vôtre avec `--#titleopt "Texte"` (ou `--titleopt "Texte"`, qui
+l'emporte sur l'indication), ou gardez les deux titres identiques avec
+`--no-diff-opt-title` (ou l'indication `--#no-diff-opt-title`). Un
+`titleopt` explicite l'emporte toujours sur `no-diff-opt-title`.
 
 **`--xml-preserve-paths`** rétablit les chemins tels qu'écrits dans les
 indications (`assets/textures/ship.vtex`), écrit le XML dans le répertoire du
@@ -197,3 +211,53 @@ donc rien n'est à modifier à la main. Les Makefiles des démos
 cartouche optimisée quand `v32opt` est installé ; un échec dans les
 étapes optimisées n'empêche pas de construire la cartouche normale.
 Copiez-en un comme point de départ pour votre propre projet.
+
+## 6. Scripts de compilation : `Make.sh` et `Make.bat`
+
+Avec le XML, `v32lua` écrit les scripts de compilation traditionnels de
+Vircon32, `Make.sh` (Linux/macOS) et `Make.bat` (Windows), afin qu'un projet
+se compile en une seule commande même sans Makefile :
+
+```bash
+./Make.sh        # ou : Make.bat
+```
+
+Ils reprennent toutes les étapes des sections 1 à 5 pour ce projet, à partir
+des mêmes informations que le XML : ils créent `obj/` et `bin/` (et tout
+dossier nécessaire à une ressource), relancent `v32lua` avec les options
+données, convertissent chaque `--#texture` / `--#sound` avec `png2vircon` /
+`wav2vircon` à l'endroit où le XML l'attend, puis `assemble` et `packrom`
+vers `bin/game.v32`. Chaque commande est suivie de `|| abort_build`
+(`|| goto :failed` dans le fichier batch), et le script se termine par
+`BUILD FAILED` ou `BUILD SUCCESSFUL`.
+
+* **Ils vérifient les outils.** Si `v32lua` n'est pas dans le `PATH`, le
+  script indique qu'il est nécessaire pour compiler le projet et s'arrête.
+  La compilation optimisée (`v32opt`, `assemble`, `packrom` de `gameOpt.xml`
+  vers `bin/gameOpt.v32`) ne s'exécute que si `v32opt` est trouvé ; sinon
+  elle est ignorée et le script réussit quand même. Un échec dans les
+  étapes optimisées n'est qu'un avertissement.
+* **Où ils vont.** À côté du fichier source, ou dans son parent quand la
+  source est dans un dossier nommé `src` et la sortie dans un dossier voisin
+  (`src/game.lua` avec `-o obj/game.asm` les place dans le dossier du
+  projet, pas dans `src/`). Tous les chemins sont relatifs au dossier du
+  script, dans lequel il se place d'abord, il peut donc être lancé de
+  n'importe où.
+* **Vos propres scripts sont à l'abri.** Les premières lignes disent
+  `Generated by v32lua`. Un `Make.sh` ou `Make.bat` sans cette marque n'est
+  jamais écrasé (un avertissement le signale). Les scripts générés sont
+  réécrits à chaque compilation : copiez-en un et retirez la marque pour
+  garder vos modifications. La commande `v32lua` qu'ils contiennent passe
+  `--no-build-scripts`, donc compiler depuis le script ne le réécrit pas.
+* **Les options sont reprises.** `--api`, `--title`, `--titleopt`,
+  `--no-diff-opt-title`, `--rate`, `--bezel`, `--no-bezel`, `--fast-circles`,
+  `--allow-float-as-clearcolor`, `--keyboard`, `--mouse`,
+  `--xml-preserve-paths` et `-w` sont répétées dans la ligne `v32lua` du
+  script, et `-g` ajoute aussi `assemble -g program`.
+* **Les cartes Tiled** (`tiled2vircon`) ne sont pas couvertes ; utilisez
+  `--#tilemap` ou ajoutez ces lignes à votre copie.
+
+`--no-build-scripts` désactive tout cela (la valeur par défaut peut aussi
+être changée dans `inc/config.h`, `V32LUA_DEFAULT_BUILD_SCRIPTS`). Les
+Makefiles des démos et les suites de tests l'utilisent, car ils compilent à
+leur manière.

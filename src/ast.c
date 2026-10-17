@@ -4,6 +4,10 @@
 char          cart_version[64]    = "1.0";
 char          cart_title[128]     = "Vircon32 Program";
 bool          cart_title_was_set  = false;
+char          cart_title_opt[128] = "";
+bool          cart_title_opt_set  = false;
+bool          g_no_diff_opt_title = false;
+bool          g_cli_titleopt_set  = false;
 bool          g_cli_api_set       = false;
 bool          g_cli_rate_set    = false;
 bool          g_cli_title_set     = false;
@@ -269,6 +273,23 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
             }
             node->as.cart_hint.value = strdup(title_buf);
         }
+    }
+    else if (strcmp(action, "titleopt") == 0) {
+        // e.g., --#titleopt "My Awesome Game (optimized)": the title of the
+        // optimized cart (the Opt XML). Without it: the title + " [optimized]".
+        char title_buf[128] = {0};
+        if (sscanf(raw_hint, "%*s \"%127[^\"]\"", title_buf) == 1) {
+            if (!g_cli_titleopt_set) {    // --titleopt on the command line wins
+                cart_title_opt_set = true;
+                snprintf(cart_title_opt, sizeof(cart_title_opt), "%.*s", (int) sizeof(cart_title_opt) - 1, title_buf);
+            }
+            node->as.cart_hint.value = strdup(title_buf);
+        }
+    }
+    else if (strcmp(action, "no-diff-opt-title") == 0) {
+        // --#no-diff-opt-title: the optimized cart keeps the same title
+        // (no " [optimized]" added). The command-line option does the same.
+        g_no_diff_opt_title = true;
     }
     else if (strcmp(action, "texture") == 0 && tokens == 3) {
         // e.g., --#texture background "filename.png"

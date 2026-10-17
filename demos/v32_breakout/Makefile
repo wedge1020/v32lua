@@ -36,7 +36,7 @@ asm: obj/$(GAME).asm
 
 obj/$(GAME).asm: $(SOURCES) assets/sprites.png
 	@mkdir -p obj bin
-	$(V32LUA) $(DEBUG_FLAGS) -o obj/$(GAME).asm $(GAME).lua
+	$(V32LUA) --no-build-scripts $(DEBUG_FLAGS) -o obj/$(GAME).asm $(GAME).lua
 
 vbin: obj/$(GAME).vbin
 

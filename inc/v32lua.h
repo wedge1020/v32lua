@@ -14,6 +14,7 @@
 #include "enums.h"
 #include "vtex_generator.h"
 #include "pathutil.h"
+#include "buildscript.h"
 #include "pico8_assets.h"
 #include "tic80_assets.h"
 #include "emit.h"

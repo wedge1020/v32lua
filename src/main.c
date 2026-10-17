@@ -68,6 +68,12 @@ static void  print_usage (const char *prog_name)
     fprintf (stdout, "                   cart's own title (TIC-80 '-- title:', PICO-8's first\n");
     fprintf (stdout, "                   comment line) or the file name, prefixed with\n");
     fprintf (stdout, "                   [PICO8] / [TIC80] in those API modes\n");
+    fprintf (stdout, "  --titleopt <text>\n");
+    fprintf (stdout, "                   Title of the optimized (v32opt) cartridge, <name>Opt.xml.\n");
+    fprintf (stdout, "                   Default: the --#titleopt hint, else the title + \" [optimized]\"\n");
+    fprintf (stdout, "  --no-diff-opt-title\n");
+    fprintf (stdout, "                   Give the optimized cartridge the same title as the regular one\n");
+    fprintf (stdout, "                   (an explicit --titleopt / --#titleopt still wins)\n");
     fprintf (stdout, "  --rate <hz>      Sample rate of sounds synthesized from a PICO-8 or TIC-80\n");
     fprintf (stdout, "                   cart: 11025, 22050, 44100. Default 22050 (inc/config.h)\n");
     fprintf (stdout, "  --bezel <file>   PICO-8: custom side-panel art -- a PNG (or .vtex) with both\n");
@@ -95,6 +101,13 @@ static void  print_usage (const char *prog_name)
     fprintf (stdout, "                   keep --#texture/--#sound paths as written (textures/ship.vtex),\n");
     fprintf (stdout, "                   write the XML into the source file's directory, and make\n");
     fprintf (stdout, "                   <binary> the .vbin path relative to it\n");
+    fprintf (stdout, "\nBuild scripts:\n");
+    fprintf (stdout, "  Make.sh and Make.bat (the usual Vircon32 build scripts: v32lua, png2vircon,\n");
+    fprintf (stdout, "                   wav2vircon, assemble, packrom, and v32opt when installed) are\n");
+    fprintf (stdout, "                   written beside the source file, or in its parent when the source\n");
+    fprintf (stdout, "                   is in src/ and the output in a sibling folder such as obj/\n");
+    fprintf (stdout, "  --no-build-scripts\n");
+    fprintf (stdout, "                   do not write Make.sh / Make.bat\n");
     fprintf (stdout, "\nInput files: .lua, .p8 (PICO-8 cart), .tic (TIC-80 cart, Lua only)\n");
 }
 
@@ -176,6 +189,10 @@ static void log_stage (int  stage_num, const char *stage_name, int  verbose)
     }
 }
 
+#define RECORD_OPT(f, v, path) do { if (n_build_opts < 32) { \
+        build_opts[n_build_opts].flag = (f); build_opts[n_build_opts].value = (v); \
+        build_opts[n_build_opts].is_path = (path); n_build_opts++; } } while (0)
+
 int  main (int  argc, char** argv)
 {
     include_set_program_name (argv[0]);
@@ -194,6 +211,9 @@ int  main (int  argc, char** argv)
     const char *cli_title       = NULL;
     int         cli_rate      = 0;
     int         xml_preserve_paths = 0;   // --xml-preserve-paths
+    int         build_scripts      = V32LUA_DEFAULT_BUILD_SCRIPTS;   // --no-build-scripts
+    BuildOpt    build_opts[32];           // options repeated in the generated scripts
+    int         n_build_opts       = 0;
 
     g_verbose_debug             = false;
     g_suppress_warnings         = !V32LUA_DEFAULT_WARNINGS;
@@ -208,8 +228,20 @@ int  main (int  argc, char** argv)
                 return 1;
             }
             cli_api = val;
+            RECORD_OPT ("--api", val, 0);
         } else if ((val = option_value(argc, argv, &i, "--title")) != NULL) {
             cli_title = val;
+            RECORD_OPT ("--title", val, 0);
+        } else if ((val = option_value(argc, argv, &i, "--titleopt")) != NULL) {
+            snprintf (cart_title_opt, sizeof (cart_title_opt), "%.*s", (int) sizeof (cart_title_opt) - 1, val);
+            cart_title_opt_set = true;
+            g_cli_titleopt_set = true;
+            RECORD_OPT ("--titleopt", val, 0);
+        } else if (strcmp(argv[i], "--no-diff-opt-title") == 0) {
+            g_no_diff_opt_title = true;
+            RECORD_OPT ("--no-diff-opt-title", NULL, 0);
+        } else if (strcmp(argv[i], "--no-build-scripts") == 0) {
+            build_scripts = 0;
         } else if ((val = option_value(argc, argv, &i, "--rate")) != NULL ||
                    (val = option_value(argc, argv, &i, "--p8rate")) != NULL) {   // old name
             cli_rate = atoi(val);
@@ -217,20 +249,26 @@ int  main (int  argc, char** argv)
                 fprintf(stderr, "Compiler Error: --rate must be 11025, 22050 or 44100 (got '%s')\n", val);
                 return 1;
             }
+            RECORD_OPT ("--rate", val, 0);
         } else if ((val = option_value(argc, argv, &i, "--bezel")) != NULL) {
             pico8_bezel_file = strdup(val);
             pico8_bezel_enabled = true;
             g_cli_bezel_set = true;
+            RECORD_OPT ("--bezel", val, 1);
         } else if (strcmp(argv[i], "--no-bezel") == 0) {
             pico8_bezel_enabled = false;
             g_cli_bezel_set = true;
+            RECORD_OPT ("--no-bezel", NULL, 0);
         } else if (strcmp(argv[i], "--xml-preserve-paths") == 0) {
             xml_preserve_paths = 1;
+            RECORD_OPT ("--xml-preserve-paths", NULL, 0);
         } else if (strcmp(argv[i], "--fast-circles") == 0) {
             shapes_fast = true;
+            RECORD_OPT ("--fast-circles", NULL, 0);
         } else if (strcmp(argv[i], "--allow-float-as-clearcolor") == 0) {
             allow_float_clearcolor = true;
             g_cli_float_clearcolor_set = true;
+            RECORD_OPT ("--allow-float-as-clearcolor", NULL, 0);
         } else if ((val = option_value(argc, argv, &i, "--keyboard")) != NULL) {
             if (val[0] < '0' || val[0] > '3' || val[1] != '\0') {
                 fprintf(stderr, "Compiler Error: --keyboard must be a gamepad port 0-3 (got '%s')\n", val);
@@ -238,6 +276,7 @@ int  main (int  argc, char** argv)
             }
             v32kbd_default_port = val[0] - '0';
             g_cli_keyboard_set  = true;
+            RECORD_OPT ("--keyboard", val, 0);
         } else if ((val = option_value(argc, argv, &i, "--mouse")) != NULL) {
             if (val[0] < '0' || val[0] > '3' || val[1] != '\0') {
                 fprintf(stderr, "Compiler Error: --mouse must be a gamepad port 0-3 (got '%s')\n", val);
@@ -245,6 +284,7 @@ int  main (int  argc, char** argv)
             }
             v32mouse_default_port = val[0] - '0';
             g_cli_mouse_set       = true;
+            RECORD_OPT ("--mouse", val, 0);
         } else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
             strncpy(output_filename, argv[++i], sizeof(output_filename) - 1);
         } else if (strcmp(argv[i], "-g") == 0) {
@@ -252,6 +292,7 @@ int  main (int  argc, char** argv)
         } else if (strcmp(argv[i], "-w") == 0) {
             o_dowarnings = 0; // disable display of compiler warnings
             g_suppress_warnings = true;
+            RECORD_OPT ("-w", NULL, 0);
         } else if (strcmp(argv[i], "--verbose") == 0 || strcmp(argv[i], "-v") == 0) {
             verbose = 1;
         } else if (strcmp(argv[i], "--debug") == 0 || strcmp(argv[i], "-d") == 0) {
@@ -455,6 +496,9 @@ int  main (int  argc, char** argv)
     }
     if (verbose) {
         fprintf (stdout, "cart title: \"%s\"\n", cart_title);
+        if (cart_title_opt_set)        fprintf (stdout, "optimized cart title: \"%s\"\n", cart_title_opt);
+        else if (g_no_diff_opt_title)  fprintf (stdout, "optimized cart title: same as the cart title\n");
+        else                           fprintf (stdout, "optimized cart title: \"%s [optimized]\"\n", cart_title);
     }
 
     // Sound sample rate: --rate > --#rate > the API's default in config.h
@@ -646,6 +690,10 @@ int  main (int  argc, char** argv)
     }
     
     emit_cart_xml (output_filename, input_filename, xml_preserve_paths, verbose);
+    if (build_scripts) {
+        emit_build_scripts (output_filename, input_filename, xml_preserve_paths,
+                            g_debug_mode ? 1 : 0, build_opts, n_build_opts, verbose);
+    }
 
     if (verbose)
     {

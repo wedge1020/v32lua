@@ -172,6 +172,12 @@ uint32_t tic80_get_palette_color(int index);
 extern char cart_version[64];
 extern char cart_title[128];
 extern bool cart_title_was_set;
+// Title of the optimized cart (the Opt XML): --titleopt / --#titleopt, else
+// the title plus " [optimized]" unless --no-diff-opt-title / --#no-diff-opt-title.
+extern char cart_title_opt[128];
+extern bool cart_title_opt_set;
+extern bool g_no_diff_opt_title;
+extern bool g_cli_titleopt_set;  // --titleopt given
 
 // Command-line overrides (main.c). When set, the matching in-source hint
 // (--#api / --#rate / --#title) is ignored, so a cart compiles unmodified.

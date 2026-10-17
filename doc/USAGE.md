@@ -15,7 +15,7 @@ the [README](../README.md) and [API.md](API.md).
 v32lua -o obj/game.asm game.lua
 ```
 
-This writes three files next to each other:
+This writes three files next to each other (plus the build scripts, [section 6](#6-build-scripts-makesh-and-makebat)):
 
 * `obj/game.asm` — the program, in Vircon32 assembly;
 * `obj/game.xml` — the cartridge definition that `packrom` reads;
@@ -34,6 +34,9 @@ Run `v32lua --help` for every option; the common ones:
 | `-v` | Show the compiler's stages as it runs. |
 | `--api pico8\|tic80\|vircon32` | Choose the API; by default it is detected from the file (`.p8`, `.tic`) or the source. |
 | `--title "TEXT"` | Cartridge title. |
+| `--titleopt "TEXT"` | Title of the optimized cartridge (`gameOpt.xml`); default: the title followed by ` [optimized]`. |
+| `--no-diff-opt-title` | Give the optimized cartridge the same title as the regular one. |
+| `--no-build-scripts` | Don't write `Make.sh` / `Make.bat` ([section 6](#6-build-scripts-makesh-and-makebat)). |
 | `--rate 11025\|22050\|44100` | Sample rate of the sound made from a PICO-8 or TIC-80 cart. |
 | `--bezel FILE`, `--no-bezel` | PICO-8 side panels: your own art, or none. |
 | `--fast-circles` | PICO-8/TIC-80: draw big filled circles faster (slightly different edges). |
@@ -61,6 +64,8 @@ reads as cartridge settings. Put them at the top of the file.
 | Hint | Meaning |
 |---|---|
 | `--#title "Text"` | Cartridge title. |
+| `--#titleopt "Text"` | Title of the optimized cartridge. Without it: the title followed by ` [optimized]`. |
+| `--#no-diff-opt-title` | Optimized cartridge keeps the same title as the regular one (an explicit `--#titleopt` still wins). |
 | `--#version "1.2"` | Cartridge version. |
 | `--#texture NAME "path/image.png"` | Adds a texture. `NAME` becomes a global holding its texture number (0, 1, 2, … in order). |
 | `--#sound NAME "path/sound.wav"` | Adds a sound. `NAME` holds its sound number (0, 1, 2, …). |
@@ -134,9 +139,18 @@ collapse to one name (differing just by extension, say) still draw a
 warning.
 
 **The optimizer's twin.** Beside `obj/game.xml` the compiler also writes
-`obj/gameOpt.xml`, identical except for `<binary path="gameOpt.vbin" />`,
-for the optimized build in [section 5](#5-optional-the-optimizer). It is
-written whether or not you use the optimizer.
+`obj/gameOpt.xml`, identical except for `<binary path="gameOpt.vbin" />`
+and the title, for the optimized build in
+[section 5](#5-optional-the-optimizer). It is written whether or not you
+use the optimizer.
+
+**The optimized cart's title.** So the two cartridges can be told apart
+on a memory card or in a menu, the twin's title is the regular title with
+` [optimized]` added (`Space Invaders Vircon32 [optimized]`). Choose your
+own with `--#titleopt "Text"` (or `--titleopt "Text"`, which wins over the
+hint), or keep the two titles identical with `--no-diff-opt-title` (or the
+hint `--#no-diff-opt-title`). An explicit `titleopt` always beats
+`no-diff-opt-title`.
 
 **`--xml-preserve-paths`** restores the paths as written in the hints
 (`assets/textures/ship.vtex`), writes the XML into the directory of the
@@ -187,3 +201,50 @@ nothing has to be edited by hand. The demo Makefiles (`demos/*/Makefile`,
 `demos/pico8/*/Makefile`, `demos/tic80/*/Makefile`) do all of the above, and build the optimized cart as well when `v32opt`
 is installed; a failure in the optimized steps doesn't stop the regular
 cart from being built. Copy one as a starting point for your own project.
+
+## 6. Build scripts: `Make.sh` and `Make.bat`
+
+Along with the XML, `v32lua` writes the traditional Vircon32 build scripts,
+`Make.sh` (Linux/macOS) and `Make.bat` (Windows), so a project builds with
+one command even if you don't use a Makefile:
+
+```bash
+./Make.sh        # or: Make.bat
+```
+
+They repeat every step of sections 1 to 5 for this project, from the same
+information the XML is made from: they create `obj/` and `bin/` (and any
+folder an asset needs), run `v32lua` again with the options you gave,
+convert each `--#texture` / `--#sound` with `png2vircon` / `wav2vircon`
+into the place the XML expects it, `assemble`, and `packrom` into
+`bin/game.v32`. Every command is followed by `|| abort_build`
+(`|| goto :failed` in the batch file), ending with `BUILD FAILED` or
+`BUILD SUCCESSFUL`.
+
+* **They check for the tools.** If `v32lua` is not in the `PATH`, the script
+  says it is needed to build the project and stops. The optimized build
+  (`v32opt`, `assemble`, `packrom` of `gameOpt.xml` into `bin/gameOpt.v32`)
+  runs only if `v32opt` is found; otherwise it is skipped and the script
+  still succeeds. A failure inside the optimized steps is only a warning.
+* **Where they go.** Beside the source file, or in its parent when the
+  source is in a folder named `src` and the output is in a sibling folder
+  (`src/game.lua`, `-o obj/game.asm` puts them in the project folder, not
+  `src/`). All paths in them are relative to the script's folder, and the
+  script changes into that folder first, so it can be run from anywhere.
+* **Your own scripts are safe.** The first lines say `Generated by v32lua`.
+  A `Make.sh` or `Make.bat` without that mark is never overwritten (a
+  warning says so). The generated ones are rewritten on every compile, so
+  copy one and remove the mark to keep your edits. The `v32lua` command
+  inside them passes `--no-build-scripts`, so building from the script
+  doesn't rewrite it.
+* **Options carry over.** `--api`, `--title`, `--titleopt`,
+  `--no-diff-opt-title`, `--rate`, `--bezel`, `--no-bezel`, `--fast-circles`,
+  `--allow-float-as-clearcolor`, `--keyboard`, `--mouse`,
+  `--xml-preserve-paths` and `-w` are repeated in the script's `v32lua`
+  line, and `-g` also gives `assemble -g program`.
+* **Tiled maps** (`tiled2vircon`) aren't covered; use `--#tilemap`, or add
+  those lines to your own copy.
+
+`--no-build-scripts` turns all of this off (the default can also be changed
+in `inc/config.h`, `V32LUA_DEFAULT_BUILD_SCRIPTS`). The demo Makefiles and
+the test suites pass it, because they build their own way.

@@ -130,6 +130,12 @@
 // the  first  two  for  regular gamepads.  Overridden  by  --keyboard  /
 // --#keyboard, and at run time by kbd.port(n).
 //
+// Write Make.sh / Make.bat beside the source (1) or not (0); --no-build-scripts
+// turns them off on the command line.
+#ifndef V32LUA_DEFAULT_BUILD_SCRIPTS
+#define V32LUA_DEFAULT_BUILD_SCRIPTS  1
+#endif
+
 #ifndef V32LUA_DEFAULT_KEYBOARD_PORT
 #define V32LUA_DEFAULT_KEYBOARD_PORT  2
 #endif

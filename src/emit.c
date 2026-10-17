@@ -434,7 +434,7 @@ static char *xml_name_with_depth (const char *full, int depth, int *total)
 
 // The XML path of every resource in the list, in order (malloc'd array of
 // malloc'd strings, `count` long; the caller frees). See the notes above.
-static char **xml_resolve_names (CARTresource *head, int count, const char *tag,
+char **cart_xml_resolve_names (CARTresource *head, int count, const char *tag,
                                  const char *ext, int preserve_paths, const char *xml_dir)
 {
     char          **names = calloc ((size_t) count + 1, sizeof (char *));
@@ -505,7 +505,7 @@ static void xml_emit_resources (FILE *xml, CARTresource *head, const char *tag,
         return;
     }
 
-    char **names = xml_resolve_names (head, count, tag, ext, preserve_paths, xml_dir);
+    char **names = cart_xml_resolve_names (head, count, tag, ext, preserve_paths, xml_dir);
     int    index = 0;
 
     fprintf (xml, "<%ss>\n", tag);
@@ -532,8 +532,8 @@ static void xml_emit_resources (FILE *xml, CARTresource *head, const char *tag,
 
 // Where the XML for `output_filename` goes (malloc'd): beside the output, or
 // (preserve_paths) under the same name in the source file's directory.
-static char *cart_xml_filename (const char *output_filename, const char *source_filename,
-                                int preserve_paths)
+char *cart_xml_filename (const char *output_filename, const char *source_filename,
+                         int preserve_paths)
 {
     char *xml_name = replace_extension (output_filename, ".xml");
 
@@ -548,6 +548,36 @@ static char *cart_xml_filename (const char *output_filename, const char *source_
     free (dir);
     free (xml_name);
     return result;
+}
+
+// The cart title the XML of `variant` shows ("" = the regular build, "Opt"
+// = the optimized one). The optimized cart uses --titleopt / --#titleopt
+// when given, else the title with " [optimized]" added -- unless
+// --no-diff-opt-title / --#no-diff-opt-title keeps it the same.
+static void cart_title_for_variant (const char *variant, char *out, size_t size)
+{
+    static const char suffix[] = " [optimized]";
+    size_t            slen     = sizeof (suffix) - 1;
+    size_t            tlen     = strlen (cart_title);
+
+    if (variant[0] == '\0' || (!cart_title_opt_set && g_no_diff_opt_title))
+    {
+        snprintf (out, size, "%s", cart_title);
+    }
+    else if (cart_title_opt_set)
+    {
+        snprintf (out, size, "%s", cart_title_opt);
+    }
+    else if (tlen >= slen && strcmp (cart_title + tlen - slen, suffix) == 0)
+    {
+        snprintf (out, size, "%s", cart_title);      // already says so
+    }
+    else
+    {
+        // A long title is cut so the whole fits (cart_title's size).
+        int room = (int) (sizeof (cart_title) - 1 - slen);
+        snprintf (out, size, "%.*s%s", room, cart_title, suffix);
+    }
 }
 
 // Writes one XML. `variant` is "" for the plain build and "Opt" for the
@@ -593,12 +623,14 @@ static void write_cart_xml (const char *output_filename, const char *source_file
 
     fprintf (xml, "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\" ?>\n");
     fprintf (xml, "<rom-definition version=\"1.0\">\n");
-    // XML-escape the title: it can now come from a file name or a cart's
-    // own metadata ("Tom & Jerry", "\"quoted\""), not only from --#title.
+    // XML-escape the title: it can come from a file name or a cart's own
+    // metadata ("Tom & Jerry", "\"quoted\""), not only from --#title.
     char xml_title[sizeof (cart_title) * 6];
     {
+        char shown[sizeof (cart_title)];
+        cart_title_for_variant (variant, shown, sizeof (shown));
         char *w = xml_title;
-        for (const char *r = cart_title; *r; r++) {
+        for (const char *r = shown; *r; r++) {
             const char *e = (*r == '&') ? "&amp;" : (*r == '<') ? "&lt;" : (*r == '>') ? "&gt;"
                           : (*r == '"') ? "&quot;" : NULL;
             if (e) { strcpy (w, e); w += strlen (e); } else { *w++ = *r; }
@@ -620,6 +652,13 @@ static void write_cart_xml (const char *output_filename, const char *source_file
     free (xml_filename);
     free (xml_dir);
     free (vbin_path);
+}
+
+// Collision warnings (and the resource-id check) are printed once per run;
+// the build-script generator turns them off while it asks for the names again.
+void  cart_xml_set_quiet (int quiet)
+{
+    g_xml_warn_collisions = !quiet;
 }
 
 void  emit_cart_xml (const char *output_filename, const char *source_filename,

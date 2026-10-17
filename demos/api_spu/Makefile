@@ -30,7 +30,7 @@ asm: obj/$(DEMO).asm
 
 obj/$(DEMO).asm: $(DEMO).lua
 	@mkdir -p bin obj
-	$(LUA_COMPILER) $(DEBUG_FLAGS) -o obj/$(DEMO).asm $(DEMO).lua
+	$(LUA_COMPILER) --no-build-scripts $(DEBUG_FLAGS) -o obj/$(DEMO).asm $(DEMO).lua
 
 # The XML names blip.vsnd and music.vsnd (the --#sound hints) beside itself, in obj/.
 vsnd: obj/blip.vsnd obj/music.vsnd

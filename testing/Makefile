@@ -23,7 +23,7 @@ all: $(ASM_OUTS)
 # Pattern rule: How to convert a .lua file into a .asm file
 %.asm: %.lua $(COMPILER)
 	@echo "Compiling test case: $< -> $@"
-	$(COMPILER) -g $< -o $@
+	$(COMPILER) --no-build-scripts -g $< -o $@
 
 # Assembly verification: Attempt to assemble all .asm files without halting on errors
 vbin: $(ASM_OUTS)

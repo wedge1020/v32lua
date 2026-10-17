@@ -329,6 +329,7 @@ set(V32LUA_CORE_SRC
     src/tic80_audio.c
     src/vtex_generator.c
     src/pathutil.c
+    src/buildscript.c
     src/shapes.c
     src/v32kbd.c
     src/v32mouse.c)
@@ -549,7 +550,7 @@ if(BUILD_TESTING)
         foreach(program IN LISTS programs)
             get_filename_component(name "${program}" NAME_WE)
             add_test(NAME "${category}/${name}"
-                     COMMAND v32lua -w -g -o "${V32LUA_TEST_OUT}/${category}/${name}.asm" "${program}"
+                     COMMAND v32lua -w --no-build-scripts -g -o "${V32LUA_TEST_OUT}/${category}/${name}.asm" "${program}"
                      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/testing/${category}")
         endforeach()
     endforeach()
@@ -558,12 +559,16 @@ if(BUILD_TESTING)
     add_test(NAME xml/paths
              COMMAND sh "${CMAKE_CURRENT_SOURCE_DIR}/tests/xml/xml_paths.sh" "$<TARGET_FILE:v32lua>")
 
+    # The optimized-cart title and the generated Make.sh / Make.bat.
+    add_test(NAME xml/build_scripts
+             COMMAND sh "${CMAKE_CURRENT_SOURCE_DIR}/tests/xml/build_scripts.sh" "$<TARGET_FILE:v32lua>")
+
     file(GLOB programs "${CMAKE_CURRENT_SOURCE_DIR}/testing/fail/*.lua")
     file(MAKE_DIRECTORY "${V32LUA_TEST_OUT}/fail")
     foreach(program IN LISTS programs)
         get_filename_component(name "${program}" NAME_WE)
         add_test(NAME "fail/${name}"
-                 COMMAND v32lua -w -o "${V32LUA_TEST_OUT}/fail/${name}.asm" "${program}"
+                 COMMAND v32lua -w --no-build-scripts -o "${V32LUA_TEST_OUT}/fail/${name}.asm" "${program}"
                  WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/testing/fail")
         set_tests_properties("fail/${name}" PROPERTIES WILL_FAIL TRUE)
     endforeach()

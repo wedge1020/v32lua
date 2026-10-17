@@ -43,7 +43,7 @@ endif
 asm: obj/$(DEMO).asm
 
 obj/$(DEMO).asm: prep $(DEMO).p8
-	$(COMPILER)   $(DEBUG_FLAGS) -o obj/$(DEMO).asm    $(DEMO).p8
+	$(COMPILER)   --no-build-scripts $(DEBUG_FLAGS) -o obj/$(DEMO).asm    $(DEMO).p8
 ifneq ($(HAVE_OPTIMIZER),)
 	-$(OPTIMIZER) $(DEBUG_FLAGS) -o obj/$(DEMO)Opt.asm obj/$(DEMO).asm
 endif
