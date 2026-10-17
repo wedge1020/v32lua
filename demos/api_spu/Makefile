@@ -31,15 +31,15 @@ asm: obj/$(DEMO).asm
 obj/$(DEMO).asm: $(DEMO).lua
 	@mkdir -p bin obj
 	$(LUA_COMPILER) $(DEBUG_FLAGS) -o obj/$(DEMO).asm $(DEMO).lua
-	mv obj/$(DEMO).xml .
 
-vsnd: blip.vsnd music.vsnd
+# The XML names blip.vsnd and music.vsnd (the --#sound hints) beside itself, in obj/.
+vsnd: obj/blip.vsnd obj/music.vsnd
 
-blip.vsnd: blip.wav
-	$(SOUND_TOOL) -o blip.vsnd blip.wav
+obj/blip.vsnd: blip.wav | prep
+	$(SOUND_TOOL) -o obj/blip.vsnd blip.wav
 
-music.vsnd: music.wav
-	$(SOUND_TOOL) -o music.vsnd music.wav
+obj/music.vsnd: music.wav | prep
+	$(SOUND_TOOL) -o obj/music.vsnd music.wav
 
 # Assemble Assembly to Binary
 vbin: obj/$(DEMO).vbin
@@ -56,9 +56,9 @@ obj/$(DEMO).vbin: obj/$(DEMO).asm
 # Pack ROM cartridge (Depends on the binary and texture to ensure they are built first)
 v32: bin/$(DEMO).v32
 
-bin/$(DEMO).v32: obj/$(DEMO).vbin
-	$(PACKER) $(DEMO).xml -o bin/$(DEMO).v32
+bin/$(DEMO).v32: obj/$(DEMO).vbin obj/blip.vsnd obj/music.vsnd
+	$(PACKER) obj/$(DEMO).xml -o bin/$(DEMO).v32
 
 # --- Clean Up ---
 clean:
-	rm -f bin/*.v32 obj/* textures/*.vtex *.xml *.vsnd
+	rm -f bin/*.v32 obj/*

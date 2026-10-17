@@ -22,7 +22,7 @@ SOURCES := $(GAME).lua \
            src/screens.lua \
            levels/level1.csv
 
-TEXTURES := assets/sprites.vtex
+TEXTURES := obj/sprites.vtex
 
 .PHONY: all asm vbin vtex v32 debug clean
 
@@ -37,9 +37,6 @@ asm: obj/$(GAME).asm
 obj/$(GAME).asm: $(SOURCES) assets/sprites.png
 	@mkdir -p obj bin
 	$(V32LUA) $(DEBUG_FLAGS) -o obj/$(GAME).asm $(GAME).lua
-	@# v32lua emits the cartridge XML next to the ASM output.
-	@# Move it to the project root, matching the official demos.
-	mv obj/$(GAME).xml .
 
 vbin: obj/$(GAME).vbin
 
@@ -48,13 +45,15 @@ obj/$(GAME).vbin: obj/$(GAME).asm
 
 vtex: $(TEXTURES)
 
-assets/sprites.vtex: assets/sprites.png
-	$(TEXTURE_TOOL) assets/sprites.png -o assets/sprites.vtex
+# The XML names sprites.vtex (from --#texture ... "assets/sprites.png") beside itself, in obj/.
+obj/sprites.vtex: assets/sprites.png
+	@mkdir -p obj
+	$(TEXTURE_TOOL) assets/sprites.png -o obj/sprites.vtex
 
 v32: bin/$(GAME).v32
 
 bin/$(GAME).v32: obj/$(GAME).vbin $(TEXTURES)
-	$(PACKER) $(GAME).xml -o bin/$(GAME).v32
+	$(PACKER) obj/$(GAME).xml -o bin/$(GAME).v32
 
 clean:
-	rm -f bin/*.v32 obj/* assets/*.vtex *.xml
+	rm -f bin/*.v32 obj/*

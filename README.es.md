@@ -244,7 +244,7 @@ compila, ensambla y empaqueta el cartucho en `bin/<demo>.v32`. Si el
 optimizador de ensamblador [v32opt](https://github.com/wedge1020/v32opt)
 está en tu `PATH`, la misma ejecución también produce un cartucho
 optimizado, `bin/<demo>Opt.v32` (a partir de `obj/<demo>Opt.asm` y
-`<demo>Opt.xml`). Los pasos optimizados pueden fallar: si `v32opt` o el
+`obj/<demo>Opt.xml`, el XML gemelo que v32lua escribe junto a cada XML). Los pasos optimizados pueden fallar: si `v32opt` o el
 ensamblador rechazan el código optimizado, `make` muestra el error y
 continúa, y el cartucho normal se genera de todos modos. Sin `v32opt`, la
 compilación optimizada se omite con un aviso; desactívala a la fuerza con
@@ -306,8 +306,12 @@ Compílalo con:
 $ v32lua -o program.asm program.lua
 ```
 
-`v32lua` emite `program.asm` y `program.xml` a su lado; entrega ambos al
-ensamblador de Vircon32 y a `packrom` para producir un cartucho ejecutable.
+`v32lua` emite `program.asm` y `program.xml` a su lado (y `programOpt.xml`,
+el mismo cartucho apuntando a `programOpt.vbin`, para una compilación a
+través del optimizador [v32opt](https://github.com/wedge1020/v32opt));
+entrega esos archivos al ensamblador de Vircon32 y a `packrom` para producir
+un cartucho ejecutable. Consulta [El XML del cartucho](#el-xml-del-cartucho)
+para saber dónde espera `packrom` los recursos.
 
 **Uso desde la Línea de Comandos**
 
@@ -354,6 +358,10 @@ código fuente, así que un cartucho de PICO-8 o TIC-80 compila sin editarlo
   [doc/PICO8.md](doc/PICO8.md#side-panels)); `--no-bezel`: márgenes negros.
 * `--fast-circles`: los círculos rellenos de TIC-80/PICO-8 de radio mayor
   que 31 se dibujan como un disco escalado.
+* `--xml-preserve-paths`: conserva en el XML del cartucho las rutas de
+  `--#texture` / `--#sound` tal como se escribieron, y escribe el XML junto
+  al archivo fuente en lugar de junto a la salida (consulta
+  [El XML del cartucho](#el-xml-del-cartucho)).
 * `--allow-float-as-clearcolor`: un número Lua dado a `ioports.gpu.clear`
   o al `cls()` de TIC-80 conserva sus bits float32 como color de borrado
   (comportamiento antiguo; usado para estelas, como `witchem_up`).
@@ -512,7 +520,7 @@ Pistas soportadas:
 | `--#allow-float-as-clearcolor` | Igual que la opción de la línea de órdenes. |
 | `--#keyboard 0`–`3` | Puerto de mando de un teclado v32kbd (requiere un adaptador v32io o el emulador modificado, ver [Teclado y ratón](#teclado-y-ratón-v32io)), para `key()`/`keyp()`/`kbd.*` (2 por defecto; ver [doc/API.es.md](doc/API.es.md#teclado-key--keyp--kbd)). |
 | `--#mouse 0`–`3` | Puerto de mando de un ratón v32mouse (requiere un adaptador v32io o el emulador modificado, ver [Teclado y ratón](#teclado-y-ratón-v32io)), para `mouse()`/`mouse.*` y `stat(32..34)` de PICO-8 (3 por defecto; ver [doc/API.es.md](doc/API.es.md#ratón-mouse--mouse)). |
-| `--#texture NOMBRE "ruta/imagen.png"` | Registra un recurso de textura y lo vincula a una constante `NOMBRE` en tiempo de compilación. El XML nombra el archivo `.vtex` (`imagen.vtex`) que `png2vircon` genera a partir del PNG. |
+| `--#texture NOMBRE "ruta/imagen.png"` | Registra un recurso de textura y lo vincula a una constante `NOMBRE` en tiempo de compilación. El XML nombra el archivo `.vtex` (`imagen.vtex`) que `png2vircon` genera a partir del PNG (consulta [El XML del cartucho](#el-xml-del-cartucho)). |
 | `--#sound NOMBRE "ruta/sonido.wav"` | Registra un recurso de sonido y lo vincula a una constante `NOMBRE` en tiempo de compilación. El XML nombra el archivo `.vsnd` que genera `wav2vircon`. |
 | `--#tilemap NOMBRE "ruta/mapa.csv"` | Registra un mapa de mosaicos desde un archivo CSV, incrustado directamente en la imagen ROM (ver [doc/API.es.md](doc/API.es.md#mapa-de-mosaicos-tilemap)). |
 | `--#include "archivo.lua"` | Empalma textualmente otro archivo Lua en este punto, antes de que comience el análisis (ver abajo). |
@@ -537,6 +545,39 @@ recursos `.vtex` y `.vsnd`. Con esto, y el procesamiento adecuado de
 cualquier dato PNG y WAV, puedes proceder al paso de `packrom`. Los IDs de
 recursos se asignan en el orden del código fuente y se garantiza que
 coincidan con su posición en el XML generado.
+
+<a id="el-xml-del-cartucho"></a>
+**El XML del cartucho**
+
+`packrom` lee todas las rutas del XML relativas al propio archivo XML, así
+que por defecto `v32lua` escribe el XML junto al archivo de `-o` y coloca en
+él solo nombres de archivo: con `-o obj/game.asm` y
+`--#texture SHIP "textures/ship.png"` obtienes `obj/game.xml` con
+
+```xml
+<binary path="game.vbin" />
+    <texture path="ship.vtex" /> <!-- SHIP -->
+```
+
+y se esperan los archivos `.vbin`, `.vtex` y `.vsnd` a su lado, en `obj/`.
+Las texturas y sonidos que `v32lua` genera por sí mismo (cartuchos PICO-8 y
+TIC-80) ya se escriben allí. Si dos recursos se reducen al mismo nombre, el
+posterior conserva solo los directorios necesarios para ser único:
+`textures/ship.png` seguido de `textures/extra/ship.png` da `ship.vtex` y
+`extra/ship.vtex` (el segundo se espera en `obj/extra/`); solo dos recursos
+cuyas rutas completas se reducen a un mismo nombre (que difieren solo en la
+extensión, por ejemplo) provocan un aviso.
+
+`--xml-preserve-paths` restaura las rutas tal como se escribieron
+(`textures/ship.vtex`), escribe el XML en el directorio del archivo *fuente*
+(`src/game.xml` para `-o obj/game.asm src/game.lua`) y hace que `<binary>`
+sea la ruta del `.vbin` relativa a él (`../obj/game.vbin`); los recursos
+generados por el compilador también se nombran relativos al directorio del
+XML.
+
+Junto a cada XML se escribe un gemelo para la compilación optimizada
+(`obj/gameOpt.xml`, idéntico salvo por `<binary path="gameOpt.vbin" />`),
+listo para la salida de `v32opt`; no hace falta ningún paso con `sed`.
 
 **Proyectos Multi-Archivo (`--#include`)**
 

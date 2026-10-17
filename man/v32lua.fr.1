@@ -1,4 +1,4 @@
-.TH V32LUA 1 "octobre 2026" "v32lua 20261015-dev" "Commandes utilisateur"
+.TH V32LUA 1 "octobre 2026" "v32lua 20261017-dev" "Commandes utilisateur"
 .SH NOM
 v32lua \- compile un sous-ensemble de Lua en assembleur Vircon32 et en XML de cartouche
 .SH SYNOPSIS
@@ -17,6 +17,7 @@ v32lua \- compile un sous-ensemble de Lua en assembleur Vircon32 et en XML de ca
 .IR hz ]
 .RB [ \-\-fast\-circles ]
 .RB [ \-\-allow\-float\-as\-clearcolor ]
+.RB [ \-\-xml\-preserve\-paths ]
 .RB [ \-\-keyboard
 .IR port ]
 .RB [ \-\-mouse
@@ -45,13 +46,17 @@ natives du processeur de la console cible, dans le m\(^eme esprit que
 .BR v32c++ (1),
 qui traduit un sous-ensemble de C++ en C Vircon32 pur.
 .PP
-Une compilation produit deux fichiers : un fichier d'assembleur
+Une compilation produit trois fichiers : un fichier d'assembleur
 (voir
 .BR \-o ,
 ci-dessous) et, \(`a c\(^ot\('e, une d\('efinition XML de la cartouche (m\(^eme nom de
 base, avec l'extension
 .IR .xml )
-qui enregistre le titre et la version de la cartouche, ainsi que les
+et son jumeau pour une compilation optimis\('ee
+.RI ( Opt.xml ,
+voir
+.BR "XML DE LA CARTOUCHE" )
+qui enregistrent le titre et la version de la cartouche, ainsi que les
 ressources de texture, de son et de carte de tuiles d\('eclar\('ees dans le
 source par des indications
 .B \-\-#
@@ -96,7 +101,8 @@ remplac\('ee par
 .IR .xml ),
 et non d'apr\(`es le nom de l'entr\('ee ; ainsi
 .B \-o
-d\('etermine aussi o\(`u se trouve le XML.
+d\('etermine aussi o\(`u se trouve le XML (sauf avec
+.BR \-\-xml\-preserve\-paths ).
 .TP
 .B \-g
 G\('en\(`ere un fichier compagnon
@@ -200,6 +206,22 @@ Désactivé par défaut : les nombres sont convertis en mot couleur entier. Comm
 la directive
 .BR \-\-#allow\-float\-as\-clearcolor .
 .TP
+.B \-\-xml\-preserve\-paths
+Conserve dans le XML chaque chemin de
+.B \-\-#texture
+/
+.B \-\-#sound
+tel qu'\('ecrit dans l'indication (seule l'extension change), \('ecrit le XML dans le
+r\('epertoire du fichier source au lieu de le placer \(`a c\(^ot\('e de la sortie, et fait de
+.B <binary>
+le chemin du
+.I .vbin
+relatif \(`a ce r\('epertoire. Par d\('efaut, le XML se trouve \(`a c\(^ot\('e de la sortie et ne
+contient que des noms de fichiers (\fIship.vtex\fR, pas \fItextures/ship.vtex\fR), car
+.BR packrom (1)
+r\('esout tous ses chemins relativement au XML lui-m\(^eme. Voir
+.BR "XML DE LA CARTOUCHE" .
+.TP
 .BI \-\-keyboard " port"
 Port de manette (0\(en3) o\(`u est branch\('e un clavier v32kbd, pour
 .BR key() ", " keyp()
@@ -273,6 +295,10 @@ et
 v32lua \-o programme.asm programme.lua
 .fi
 .RE
+.PP
+(\('ecrit aussi
+.IR programmeOpt.xml ,
+pour une compilation optimis\('ee.)
 .PP
 Compiler avec le nom de sortie par d\('efaut (extension remplac\('ee par
 .IR .asm ),
@@ -575,7 +601,8 @@ issus du fichier
 .I .png
 ou
 .I .wav
-de chaque indication (m\(^eme dossier, m\(^eme nom).
+de chaque indication (m\(^eme nom ; le dossier, dans
+.BR "XML DE LA CARTOUCHE" ).
 Une indication
 .B \-\-#texture
 ou
@@ -599,6 +626,74 @@ il n'effectue aucune transformation de port\('ee ; une
 .B local
 au niveau sup\('erieur du fichier inclus est promue en globale exactement comme
 dans un fichier monolithique.
+.SH XML DE LA CARTOUCHE
+.BR packrom (1)
+lit tous les chemins du XML relativement au fichier XML lui-m\(^eme. Par
+d\('efaut,
+.B v32lua
+\('ecrit donc le XML \(`a c\(^ot\('e du fichier de
+.B \-o
+et n'y place que des noms de fichiers. Avec
+.B "\-o obj/game.asm"
+et
+.B "\-\-#texture SHIP \(dqtextures/ship.png\(dq"
+le fichier
+.I obj/game.xml
+contient
+.RS
+.PP
+.nf
+<binary path="game.vbin" />
+    <texture path="ship.vtex" /> <!-- SHIP -->
+.fi
+.RE
+.PP
+de sorte que les fichiers
+.IR .vbin ", " .vtex " et " .vsnd
+sont attendus \(`a c\(^ot\('e du XML, dans
+.IR obj/ .
+Les textures et sons que
+.B v32lua
+g\('en\(`ere lui-m\(^eme (cartouches PICO-8 et TIC-80) y sont d\('ej\(`a \('ecrits.
+Quand deux ressources se r\('eduisent au m\(^eme nom, la premi\(`ere le garde et chaque
+suivante ne garde que les r\('epertoires n\('ecessaires pour \(^etre unique :
+.I textures/ship.png
+suivi de
+.I textures/extra/ship.png
+donne
+.I ship.vtex
+et
+.I extra/ship.vtex
+(le second attendu dans
+.IR obj/extra/ ).
+Seules deux ressources dont les chemins complets se r\('eduisent au m\(^eme nom (ne
+diff\('erant que par l'extension, par exemple) provoquent un avertissement.
+.PP
+\(`A c\(^ot\('e de chaque XML, un jumeau pour la compilation optimis\('ee est \('ecrit :
+.I obj/gameOpt.xml
+est identique sauf que
+.B <binary>
+nomme
+.IR gameOpt.vbin ,
+pr\(^et pour la sortie d'un optimiseur d'assembleur tel que
+.BR v32opt  ;
+aucune \('etape de modification n'est n\('ecessaire.
+.PP
+Avec
+.B \-\-xml\-preserve\-paths
+les chemins des indications sont conserv\('es tels qu'\('ecrits
+.RI ( textures/ship.vtex ),
+le XML va dans le r\('epertoire du fichier source
+.RI ( src/game.xml
+pour
+.B "\-o obj/game.asm src/game.lua"
+), et
+.B <binary>
+devient le chemin du
+.I .vbin
+relatif \(`a celui-ci
+.RI ( ../obj/game.vbin ).
+Les ressources g\('en\('er\('ees sont elles aussi nomm\('ees par rapport \(`a ce r\('epertoire.
 .SH FICHIERS
 .TP
 .I *.lua
@@ -637,8 +732,8 @@ sonores qui utilisent
 Assembleur Vircon32 g\('en\('er\('e, pr\(^et \(`a \(^etre remis directement \(`a l'assembleur
 Vircon32.
 .TP
-.I *.xml
-D\('efinition de cartouche g\('en\('er\('ee, nomm\('ee d'apr\(`es le chemin de sortie de
+.IR *.xml ", " *Opt.xml
+D\('efinition de cartouche g\('en\('er\('ee et son jumeau pour la compilation optimis\('ee, nomm\('es d'apr\(`es le chemin de sortie de
 l'assembleur (et non celui de l'entr\('ee), qui r\('ef\('erence les fichiers
 .I .vtex
 et

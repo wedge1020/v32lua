@@ -342,7 +342,7 @@ bool register_pico8_sfx_sounds (void)
         snprintf (name, sizeof (name), "__pico8_sfx%02d", n);
         int id = next_sound_id++;
         if (pico8_sfx_base_id < 0) pico8_sfx_base_id = id;
-        cart_resource_append (&sounds_head, &sounds_tail, id, name, path);
+        cart_resource_append_generated (&sounds_head, &sounds_tail, id, name, path);
     }
     return true;
 }

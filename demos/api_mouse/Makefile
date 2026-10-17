@@ -31,8 +31,7 @@ asm: obj/$(DEMO).asm
 obj/$(DEMO).asm: $(DEMO).lua
 	@mkdir -p bin obj
 	$(LUA_COMPILER) $(DEBUG_FLAGS) -o obj/$(DEMO).asm $(DEMO).lua
-	mv obj/$(DEMO).xml .
 
 # --- Clean Up ---
 clean:
-	rm -f bin/*.v32 obj/* assets/*.vtex *.xml
+	rm -f bin/*.v32 obj/* assets/*.vtex

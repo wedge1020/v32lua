@@ -396,7 +396,7 @@ bool pico8_bezel_register_custom (const char *base_path)
     fclose (f);
     free (rgba);
     pico8_bezel_texture_id = next_texture_id;
-    cart_resource_append (&textures_head, &textures_tail, next_texture_id++, "pico8_bezel", name);
+    cart_resource_append_generated (&textures_head, &textures_tail, next_texture_id++, "pico8_bezel", name);
     return true;
 }
 

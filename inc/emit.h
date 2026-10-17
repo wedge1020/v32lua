@@ -18,7 +18,7 @@ extern const char  runtime_pico8_start[];
 extern const char  runtime_tic80_start[];
 extern const char  runtime_constant_start[];
 
-void  emit_cart_xml (const char *, int);
+void  emit_cart_xml (const char *, const char *, int, int);
 void  emit_interpolated_asm (const char *);
 void  emit_string_data_section (void);
 int   emit_variable_map (void);

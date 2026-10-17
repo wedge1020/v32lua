@@ -161,7 +161,7 @@ void generate_vsnd_from_tic80_sounds(const char *output_path) {
     fclose(f);
 
     // Register in global sounds list for XML generation
-    cart_resource_append (&sounds_head, &sounds_tail,
+    cart_resource_append_generated (&sounds_head, &sounds_tail,
                               next_sound_id++, "tic80_sounds", output_path);
 }
 

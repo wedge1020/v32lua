@@ -13,6 +13,7 @@
 #include "config.h"
 #include "enums.h"
 #include "vtex_generator.h"
+#include "pathutil.h"
 #include "pico8_assets.h"
 #include "tic80_assets.h"
 #include "emit.h"
@@ -55,7 +56,7 @@ static inline char *v32lua_strndup (const char *s, size_t n)
 #define  V32LUA_PATH_LIST_SEP  ":"
 #endif
 
-#define  VERSION             "20261015-dev"
+#define  VERSION             "20261017-dev"
 #define  META_CALL_STACK_SIZE  32   // nested calls of callable tables (__call)
 #define  AUTHOR              "Matthew Haas"
 #define  URL                 "https://github.com/wedge1020/v32lua"

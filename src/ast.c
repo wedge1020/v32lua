@@ -103,6 +103,7 @@ CARTresource *cart_resource_append (CARTresource **head, CARTresource **tail,
     res->id       = id;
     res->var_name = (var_name != NULL) ? strdup (var_name) : NULL;
     res->filename = (filename != NULL) ? strdup (filename) : NULL;
+    res->generated = false;
     res->next     = NULL;
 
     if (*tail != NULL) {
@@ -112,6 +113,18 @@ CARTresource *cart_resource_append (CARTresource **head, CARTresource **tail,
     }
     *tail = res;
 
+    return res;
+}
+
+// Same, for a file the compiler itself writes (a PICO-8/TIC-80 sprite sheet,
+// synthesized sound, ...): it sits beside the output file, which is what the
+// cartridge XML needs to know to name it correctly.
+CARTresource *cart_resource_append_generated (CARTresource **head, CARTresource **tail,
+                                              int id, const char *var_name, const char *filename)
+{
+    CARTresource *res = cart_resource_append (head, tail, id, var_name, filename);
+
+    if (res != NULL) res->generated = true;
     return res;
 }
 

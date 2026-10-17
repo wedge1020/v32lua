@@ -52,10 +52,6 @@ obj/$(DEMO).asm: prep $(DEMO).lua
 ifneq ($(HAVE_OPTIMIZER),)
 	-$(OPTIMIZER) $(DEBUG_FLAGS) -o obj/$(DEMO)Opt.asm obj/$(DEMO).asm
 endif
-	mv obj/$(DEMO).xml .
-ifneq ($(HAVE_OPTIMIZER),)
-	sed 's/\.vbin/Opt.vbin/g' $(DEMO).xml > $(DEMO)Opt.xml
-endif
 
 # Assemble Assembly to Binary
 vbin: obj/$(DEMO).vbin
@@ -76,9 +72,9 @@ textures/$(DEMO)_sprites.vtex: textures/$(DEMO)_sprites.png
 v32: bin/$(DEMO).v32
 
 bin/$(DEMO).v32: obj/$(DEMO).vbin
-	$(PACKER) $(DEMO).xml    -o bin/$(DEMO).v32
+	$(PACKER) obj/$(DEMO).xml    -o bin/$(DEMO).v32
 ifneq ($(HAVE_OPTIMIZER),)
-	-$(PACKER) $(DEMO)Opt.xml -o bin/$(DEMO)Opt.v32
+	-$(PACKER) obj/$(DEMO)Opt.xml -o bin/$(DEMO)Opt.v32
 endif
 
 context:
@@ -89,4 +85,4 @@ context:
 
 # --- Clean Up ---
 clean:
-	rm -f bin/*.v32 obj/* textures/*.vtex *.xml
+	rm -f bin/*.v32 obj/* textures/*.vtex

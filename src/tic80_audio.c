@@ -580,7 +580,7 @@ static void t80_register_sound (const char *suffix, T80Buf *b, long len, T80Soun
     t80_write_vsnd (path, b, len);
     snprintf (name, sizeof name, "__tic80_%s", suffix);
     snd->id = next_sound_id++;
-    cart_resource_append (&sounds_head, &sounds_tail, snd->id, name, path);
+    cart_resource_append_generated (&sounds_head, &sounds_tail, snd->id, name, path);
 }
 
 static void t80_render_track (int t)

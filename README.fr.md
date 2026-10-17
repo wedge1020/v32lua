@@ -242,7 +242,7 @@ Chaque démo sous `demos/pico8/` et `demos/tic80/` possède un Makefile qui
 compile, assemble et empaquette la cartouche dans `bin/<demo>.v32`. Si
 l'optimiseur d'assembleur [v32opt](https://github.com/wedge1020/v32opt) est
 dans votre `PATH`, la même exécution produit aussi une cartouche optimisée,
-`bin/<demo>Opt.v32` (à partir de `obj/<demo>Opt.asm` et `<demo>Opt.xml`).
+`bin/<demo>Opt.v32` (à partir de `obj/<demo>Opt.asm` et `obj/<demo>Opt.xml`, le XML jumeau que v32lua écrit à côté de chaque XML).
 Les étapes optimisées ont le droit d'échouer : si `v32opt` ou l'assembleur
 rejette le code optimisé, `make` affiche l'erreur et continue, et la
 cartouche normale est tout de même produite. Sans `v32opt`, la compilation
@@ -305,9 +305,12 @@ Compilez-le avec :
 $ v32lua -o program.asm program.lua
 ```
 
-`v32lua` produit `program.asm` et `program.xml` à ses côtés ; transmettez-
-les à l'assembleur Vircon32 puis à `packrom` pour obtenir une cartouche
-exécutable.
+`v32lua` produit `program.asm` et `program.xml` à ses côtés (ainsi que
+`programOpt.xml`, la même cartouche pointant vers `programOpt.vbin`, pour une
+compilation passant par l'optimiseur [v32opt](https://github.com/wedge1020/v32opt)) ;
+transmettez-les à l'assembleur Vircon32 puis à `packrom` pour obtenir une
+cartouche exécutable. Voir [Le XML de la cartouche](#le-xml-de-la-cartouche)
+pour savoir où `packrom` attend les ressources.
 
 **Utilisation en Ligne de Commande**
 
@@ -356,6 +359,10 @@ modification (`--opt=valeur` fonctionne aussi) :
   `--no-bezel` : marges noires.
 * `--fast-circles` : les cercles pleins TIC-80/PICO-8 de rayon supérieur à
   31 sont dessinés comme un disque mis à l'échelle.
+* `--xml-preserve-paths` : conserve dans le XML de la cartouche les chemins
+  de `--#texture` / `--#sound` tels qu'écrits, et écrit le XML à côté du
+  fichier source au lieu de le placer à côté de la sortie (voir
+  [Le XML de la cartouche](#le-xml-de-la-cartouche)).
 * `--allow-float-as-clearcolor` : un nombre Lua donné à `ioports.gpu.clear`
   ou au `cls()` TIC-80 garde ses bits float32 comme couleur d'effacement
   (ancien comportement ; utilisé pour les traînées, comme `witchem_up`).
@@ -518,7 +525,7 @@ Indices pris en charge :
 | `--#allow-float-as-clearcolor` | Comme l'option de la ligne de commande. |
 | `--#keyboard 0`–`3` | Port de manette d'un clavier v32kbd (adaptateur v32io ou émulateur modifié nécessaire, voir [Clavier et souris](#clavier-et-souris-v32io)), pour `key()`/`keyp()`/`kbd.*` (2 par défaut ; voir [doc/API.fr.md](doc/API.fr.md#clavier--key--keyp--kbd)). |
 | `--#mouse 0`–`3` | Port de manette d'une souris v32mouse (adaptateur v32io ou émulateur modifié nécessaire, voir [Clavier et souris](#clavier-et-souris-v32io)), pour `mouse()`/`mouse.*` et `stat(32..34)` de PICO-8 (3 par défaut ; voir [doc/API.fr.md](doc/API.fr.md#souris--mouse--mouse)). |
-| `--#texture NOM "chemin/image.png"` | Enregistre une ressource de texture et la lie à une constante `NOM` à la compilation. Le XML nomme le fichier `.vtex` (`image.vtex`) que `png2vircon` produit à partir du PNG. |
+| `--#texture NOM "chemin/image.png"` | Enregistre une ressource de texture et la lie à une constante `NOM` à la compilation. Le XML nomme le fichier `.vtex` (`image.vtex`) que `png2vircon` produit à partir du PNG (voir [Le XML de la cartouche](#le-xml-de-la-cartouche)). |
 | `--#sound NOM "chemin/son.wav"` | Enregistre une ressource sonore et la lie à une constante `NOM` à la compilation. Le XML nomme le fichier `.vsnd` que produit `wav2vircon`. |
 | `--#tilemap NOM "chemin/carte.csv"` | Enregistre une tilemap depuis un fichier CSV, intégrée directement dans l'image ROM (voir [doc/API.fr.md](doc/API.fr.md#tilemap--tilemap)). |
 | `--#include "fichier.lua"` | Insère textuellement un autre fichier Lua à cet endroit, avant le début de l'analyse (voir ci-dessous). |
@@ -543,6 +550,39 @@ ressources `.vtex` et `.vsnd`. Avec cela, et le traitement approprié de
 toute donnée PNG et WAV, vous pouvez procéder à l'étape `packrom`. Les
 identifiants de ressources sont attribués dans l'ordre du code source et
 sont garantis de correspondre à leur position dans le XML généré.
+
+<a id="le-xml-de-la-cartouche"></a>
+**Le XML de la cartouche**
+
+`packrom` lit tous les chemins du XML relativement au fichier XML lui-même ;
+par défaut, `v32lua` écrit donc le XML à côté du fichier de `-o` et n'y
+place que des noms de fichiers : avec `-o obj/game.asm` et
+`--#texture SHIP "textures/ship.png"`, vous obtenez `obj/game.xml` contenant
+
+```xml
+<binary path="game.vbin" />
+    <texture path="ship.vtex" /> <!-- SHIP -->
+```
+
+et les fichiers `.vbin`, `.vtex` et `.vsnd` sont attendus à côté, dans
+`obj/`. Les textures et sons que `v32lua` génère lui-même (cartouches PICO-8
+et TIC-80) y sont déjà écrits. Si deux ressources se réduisent au même nom,
+la suivante ne garde que les répertoires nécessaires pour être unique :
+`textures/ship.png` suivi de `textures/extra/ship.png` donne `ship.vtex` et
+`extra/ship.vtex` (le second attendu dans `obj/extra/`) ; seules deux
+ressources dont les chemins complets se réduisent au même nom (ne différant
+que par l'extension, par exemple) provoquent un avertissement.
+
+`--xml-preserve-paths` rétablit les chemins tels qu'écrits
+(`textures/ship.vtex`), écrit le XML dans le répertoire du fichier *source*
+(`src/game.xml` pour `-o obj/game.asm src/game.lua`) et fait de `<binary>`
+le chemin du `.vbin` relatif à celui-ci (`../obj/game.vbin`) ; les
+ressources générées par le compilateur sont elles aussi nommées par rapport
+au répertoire du XML.
+
+À côté de chaque XML, un jumeau pour la compilation optimisée est écrit
+(`obj/gameOpt.xml`, identique sauf `<binary path="gameOpt.vbin" />`), prêt
+pour la sortie de `v32opt` ; aucune étape `sed` n'est nécessaire.
 
 **Projets Multi-Fichiers (`--#include`)**
 

@@ -86,6 +86,15 @@ static void  print_usage (const char *prog_name)
     fprintf (stdout, "  --mouse <n>      Gamepad port (0-3) of a v32mouse mouse, for mouse()/mouse.*\n");
     fprintf (stdout, "                   (PICO-8: stat(32..34)). Default %d (inc/config.h)\n", V32LUA_DEFAULT_MOUSE_PORT);
     fprintf (stdout, "                   (needs a v32io adapter or the modified emulator)\n");
+    fprintf (stdout, "\nCartridge XML (packrom reads every path in it relative to the XML itself):\n");
+    fprintf (stdout, "  Default: the XML (and its optimizer twin, <name>Opt.xml) is written beside the\n");
+    fprintf (stdout, "                   -o file and holds bare file names (<binary path=\"game.vbin\" />,\n");
+    fprintf (stdout, "                   textures/ship.png -> ship.vtex), the converted assets being\n");
+    fprintf (stdout, "                   expected beside it\n");
+    fprintf (stdout, "  --xml-preserve-paths\n");
+    fprintf (stdout, "                   keep --#texture/--#sound paths as written (textures/ship.vtex),\n");
+    fprintf (stdout, "                   write the XML into the source file's directory, and make\n");
+    fprintf (stdout, "                   <binary> the .vbin path relative to it\n");
     fprintf (stdout, "\nInput files: .lua, .p8 (PICO-8 cart), .tic (TIC-80 cart, Lua only)\n");
 }
 
@@ -184,6 +193,7 @@ int  main (int  argc, char** argv)
     const char *cli_api         = NULL;
     const char *cli_title       = NULL;
     int         cli_rate      = 0;
+    int         xml_preserve_paths = 0;   // --xml-preserve-paths
 
     g_verbose_debug             = false;
     g_suppress_warnings         = !V32LUA_DEFAULT_WARNINGS;
@@ -214,6 +224,8 @@ int  main (int  argc, char** argv)
         } else if (strcmp(argv[i], "--no-bezel") == 0) {
             pico8_bezel_enabled = false;
             g_cli_bezel_set = true;
+        } else if (strcmp(argv[i], "--xml-preserve-paths") == 0) {
+            xml_preserve_paths = 1;
         } else if (strcmp(argv[i], "--fast-circles") == 0) {
             shapes_fast = true;
         } else if (strcmp(argv[i], "--allow-float-as-clearcolor") == 0) {
@@ -492,7 +504,7 @@ int  main (int  argc, char** argv)
             snprintf (sheet_name, sizeof (sheet_name), "tic80_spritesheet_%d", tex_idx);
             snprintf (sheet_path, sizeof (sheet_path), "%s_colorkey_%d", base_path, tex_idx);
 
-            cart_resource_append (&textures_head, &textures_tail,
+            cart_resource_append_generated (&textures_head, &textures_tail,
                                   next_texture_id++, sheet_name, sheet_path);
         }
         register_shapes_texture (program_text, base_path, true);
@@ -525,7 +537,7 @@ int  main (int  argc, char** argv)
                 "PICO-8 carts cannot declare --#texture resources: texture 0 "
                 "is reserved for the PICO-8 sprite sheet");
         }
-        cart_resource_append (&textures_head, &textures_tail,
+        cart_resource_append_generated (&textures_head, &textures_tail,
                               0, "pico8_spritesheet", sheet_path);
         next_texture_id++;
         register_shapes_texture (program_text, base_path, false);
@@ -631,10 +643,9 @@ int  main (int  argc, char** argv)
     if (verbose)
     {
         fprintf (stdout, "saving output file\n");
-        fprintf (stdout, "saving cart config file\n");
     }
     
-    emit_cart_xml (output_filename, verbose);
+    emit_cart_xml (output_filename, input_filename, xml_preserve_paths, verbose);
 
     if (verbose)
     {

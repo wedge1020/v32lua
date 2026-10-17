@@ -15,12 +15,15 @@ the [README](../README.md) and [API.md](API.md).
 v32lua -o obj/game.asm game.lua
 ```
 
-This writes two files next to each other:
+This writes three files next to each other:
 
 * `obj/game.asm` — the program, in Vircon32 assembly;
-* `obj/game.xml` — the cartridge definition that `packrom` reads.
+* `obj/game.xml` — the cartridge definition that `packrom` reads;
+* `obj/gameOpt.xml` — the same cartridge for a build through the
+  [optimizer](#5-optional-the-optimizer) (it points at `gameOpt.vbin`).
 
-Without `-o`, the output is `game.asm` (and `game.xml`) beside the source.
+Without `-o`, the output is `game.asm` (and `game.xml`, `gameOpt.xml`)
+beside the source.
 Run `v32lua --help` for every option; the common ones:
 
 | Option | Effect |
@@ -35,6 +38,7 @@ Run `v32lua --help` for every option; the common ones:
 | `--bezel FILE`, `--no-bezel` | PICO-8 side panels: your own art, or none. |
 | `--fast-circles` | PICO-8/TIC-80: draw big filled circles faster (slightly different edges). |
 | `--allow-float-as-clearcolor` | A Lua number given to `ioports.gpu.clear` or TIC-80 `cls()` keeps its float32 bits as the clear color, as in older versions (translucent clear = motion-blur streak). Off by default. |
+| `--xml-preserve-paths` | Keep the `--#texture`/`--#sound` paths in the XML as written and write the XML beside the source file ([section 3](#3-the-cartridge-xml)). |
 | `--keyboard 0-3` | Gamepad port of a v32kbd keyboard (`key()`, `keyp()`, `kbd.*`); default 2. Needs a v32io device (below). |
 | `--mouse 0-3` | Gamepad port of a v32mouse mouse (`mouse()`, `mouse.*`, PICO-8 `stat(32..34)`); default 3. Needs a v32io device (below). |
 | `--version`, `--help` | Version, usage. |
@@ -92,39 +96,68 @@ The resource names are set before `init()` or `main()` runs.
 
 ## 3. The cartridge XML
 
-For the example above, `obj/game.xml` is:
+`packrom` reads every path in the XML **relative to the XML file itself**.
+So `v32lua` writes the XML beside the `-o` file, and puts only file names
+in it. For the example above, `obj/game.xml` is:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="no" ?>
 <rom-definition version="1.0">
     <rom type="cartridge" title="Space Invaders Vircon32" version="1.2" />
-<binary path="obj/game.vbin" />
+<binary path="game.vbin" />
 <textures>
-    <texture path="assets/textures/background.vtex" /> <!-- bg_space -->
-    <texture path="assets/textures/ship.vtex" /> <!-- spr_player -->
+    <texture path="background.vtex" /> <!-- bg_space -->
+    <texture path="ship.vtex" /> <!-- spr_player -->
 </textures>
 <sounds>
-    <sound path="assets/sounds/laser.vsnd" /> <!-- sfx_laser -->
-    <sound path="assets/music/stage1.vsnd" /> <!-- bgm_stage1 -->
+    <sound path="laser.vsnd" /> <!-- sfx_laser -->
+    <sound path="stage1.vsnd" /> <!-- bgm_stage1 -->
 </sounds>
 </rom-definition>
 ```
 
 The XML names the converted files: `.vtex` for each texture and `.vsnd`
-for each sound, in the same folder and with the same name as the file in
-the hint. The order of the entries is the order of the hints, which is
-what makes `bg_space` texture 0 and so on. Paths are used as written, so
-write them relative to the folder you run `packrom` in.
+for each sound, with the name of the file in the hint and its folder
+dropped. The order of the entries is the order of the hints, which is
+what makes `bg_space` texture 0 and so on. The `.vbin`, `.vtex` and
+`.vsnd` files are expected **beside the XML**, in `obj/` here (the next
+section converts them there). Because everything is relative to the XML,
+the project can be built from any folder, and nothing needs to be moved
+or edited by hand.
+
+**Same names in different folders.** If two assets collapse to the same
+name, the first keeps it and each later one keeps just enough of its
+folders to be unique: `textures/ship.png` followed by
+`textures/extra/ship.png` gives `ship.vtex` and `extra/ship.vtex`, the
+second expected in `obj/extra/`. Only two assets whose whole paths
+collapse to one name (differing just by extension, say) still draw a
+warning.
+
+**The optimizer's twin.** Beside `obj/game.xml` the compiler also writes
+`obj/gameOpt.xml`, identical except for `<binary path="gameOpt.vbin" />`,
+for the optimized build in [section 5](#5-optional-the-optimizer). It is
+written whether or not you use the optimizer.
+
+**`--xml-preserve-paths`** restores the paths as written in the hints
+(`assets/textures/ship.vtex`), writes the XML into the directory of the
+*source* file instead of beside the output (the hints' own point of
+reference: `src/game.xml` for `-o obj/game.asm src/game.lua`, with
+`src/gameOpt.xml` next to it), and makes `<binary>` the `.vbin` path
+relative to that directory (`../obj/game.vbin`). Assets the compiler
+generates itself (PICO-8 and TIC-80 carts, below) sit beside the output
+file, so they are named relative to that directory too
+(`../obj/game_pico8.vtex`). Use it when your assets already live next to
+the source and you want the XML there.
 
 ## 4. Convert the assets, assemble and pack
 
 With the [Vircon32 DevTools](https://github.com/vircon32/ComputerSoftware/releases):
 
 ```bash
-png2vircon assets/textures/background.png -o assets/textures/background.vtex
-png2vircon assets/textures/ship.png       -o assets/textures/ship.vtex
-wav2vircon assets/sounds/laser.wav        -o assets/sounds/laser.vsnd
-wav2vircon assets/music/stage1.wav        -o assets/music/stage1.vsnd
+png2vircon assets/textures/background.png -o obj/background.vtex
+png2vircon assets/textures/ship.png       -o obj/ship.vtex
+wav2vircon assets/sounds/laser.wav        -o obj/laser.vsnd
+wav2vircon assets/music/stage1.wav        -o obj/stage1.vsnd
 
 assemble -o obj/game.vbin obj/game.asm
 packrom obj/game.xml -o bin/game.v32
@@ -135,7 +168,8 @@ packrom obj/game.xml -o bin/game.v32
 16-bit stereo WAV files for `wav2vircon`.
 
 PICO-8 and TIC-80 carts need no assets of their own: the compiler writes
-their textures and sounds itself and names them in the XML.
+their textures and sounds itself, beside the output (`obj/game_pico8.vtex`,
+`obj/game_sfx00.vsnd`, ...), and names them in the XML.
 
 ## 5. Optional: the optimizer
 
@@ -145,11 +179,11 @@ run faster; it goes between compiling and assembling:
 ```bash
 v32opt -O3 -o obj/gameOpt.asm obj/game.asm
 assemble -o obj/gameOpt.vbin obj/gameOpt.asm
-sed 's/\.vbin/Opt.vbin/g' obj/game.xml > obj/gameOpt.xml
 packrom obj/gameOpt.xml -o bin/gameOpt.v32
 ```
 
-The demo Makefiles (`demos/pico8/*/Makefile`, `demos/tic80/*/Makefile`)
-do all of the above, and build the optimized cart as well when `v32opt`
+`obj/gameOpt.xml` is the twin the compiler already wrote (section 3), so
+nothing has to be edited by hand. The demo Makefiles (`demos/*/Makefile`,
+`demos/pico8/*/Makefile`, `demos/tic80/*/Makefile`) do all of the above, and build the optimized cart as well when `v32opt`
 is installed; a failure in the optimized steps doesn't stop the regular
 cart from being built. Copy one as a starting point for your own project.

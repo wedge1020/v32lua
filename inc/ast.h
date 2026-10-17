@@ -11,6 +11,7 @@ struct cart_resource
     int           id;
     char         *var_name;
     char         *filename;
+    bool          generated;   // written by the compiler itself (PICO-8/TIC-80 assets), beside the output
     CARTresource *next;
 };
 
@@ -205,6 +206,7 @@ ASTNode *make_node_table_set         (ASTNode    *, ASTNode    *, ASTNode *);
 ASTNode *make_node_boolean           (bool);
 ASTNode *make_node_nil               (void);
 CARTresource *cart_resource_append   (CARTresource **, CARTresource **, int, const char *, const char *);
+CARTresource *cart_resource_append_generated (CARTresource **, CARTresource **, int, const char *, const char *);
 bool     try_get_immediate_operand   (ASTNode    *, char       *, size_t);
 
 #endif

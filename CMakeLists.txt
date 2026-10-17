@@ -328,6 +328,7 @@ set(V32LUA_CORE_SRC
     src/tic80_cart.c
     src/tic80_audio.c
     src/vtex_generator.c
+    src/pathutil.c
     src/shapes.c
     src/v32kbd.c
     src/v32mouse.c)
@@ -552,6 +553,10 @@ if(BUILD_TESTING)
                      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/testing/${category}")
         endforeach()
     endforeach()
+
+    # The cartridge XML (default bare names, --xml-preserve-paths, the Opt twin).
+    add_test(NAME xml/paths
+             COMMAND sh "${CMAKE_CURRENT_SOURCE_DIR}/tests/xml/xml_paths.sh" "$<TARGET_FILE:v32lua>")
 
     file(GLOB programs "${CMAKE_CURRENT_SOURCE_DIR}/testing/fail/*.lua")
     file(MAKE_DIRECTORY "${V32LUA_TEST_OUT}/fail")

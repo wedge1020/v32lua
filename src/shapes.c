@@ -164,7 +164,7 @@ void register_shapes_texture (const char *src, const char *base_path, bool tic80
         return;
     }
     shapes_texture_id = next_texture_id;
-    cart_resource_append (&textures_head, &textures_tail, next_texture_id++, "shapes", path);
+    cart_resource_append_generated (&textures_head, &textures_tail, next_texture_id++, "shapes", path);
 }
 
 // __shapes_init (called by the API's init) sets up the regions; without an

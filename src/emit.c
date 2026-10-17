@@ -333,61 +333,253 @@ void emit_runtime_init(FILE *out) {
     fprintf(out, "    MOV [HEAP_POINTER], %d\n", heap_start_addr);
 }
 
-void  emit_cart_xml (const char *input_filename, int  verbose)
-{
-    // 1. Allocate enough memory for the filename plus ".xml" and the null terminator
-    size_t  len           = strlen (input_filename);
-    char   *xml_filename  = (char *) malloc (len + 5); 
-    char   *vbin_path     = (char *) malloc (len + 6); 
-    char   *resource      = NULL;
-    char   *last_dot      = NULL;
+// ----------------------------------------------------------------------------
+// Cartridge XML
+//
+// packrom resolves every path in the XML relative to the XML file itself. So,
+// by default (preserve_paths == 0):
+//
+//   * the XML is written beside the output file (-o obj/game.asm gives
+//     obj/game.xml) and holds BARE file names: <binary path="game.vbin" />,
+//     <texture path="spaceship.vtex" /> for --#texture S "textures/spaceship.png".
+//     The produced .vbin/.vtex/.vsnd files are expected beside the XML.
+//   * two assets that collapse to the same file name keep as much of their
+//     directories as it takes to tell them apart: textures/ship.png followed
+//     by textures/extra/ship.png gives ship.vtex and extra/ship.vtex (the
+//     latter expected in <xml dir>/extra/). The first one to claim a name
+//     keeps the short form; only two assets whose whole paths collapse to the
+//     same name still draw a warning.
+//
+// With preserve_paths (--xml-preserve-paths):
+//
+//   * each --#texture/--#sound path is kept as written in the hint (only the
+//     extension changes), the XML goes in the directory of the SOURCE file
+//     (the hints' own point of reference) under the output's base name, and
+//     <binary> is the .vbin path relative to that directory.
+//   * assets the compiler itself generates (PICO-8/TIC-80 sprite sheets and
+//     sounds) live beside the output file, so they are written relative to
+//     the XML's directory too.
+//
+// A twin for the optimized build (v32opt) is written next to every XML:
+// game.xml -> game.vbin, gameOpt.xml -> gameOpt.vbin, identical otherwise.
+// ----------------------------------------------------------------------------
 
-    if (xml_filename     == NULL)
+static int g_xml_warn_collisions = 1;     // once per run, not once per XML
+
+// Components of `buf` ('/' or '\' separated) with empty, "." and ".." parts
+// dropped; `parts` points into `buf`. Returns the count.
+static int xml_split_components (char *buf, const char **parts, int max_parts)
+{
+    int n = 0;
+
+    for (char *tok = buf; *tok != '\0'; )
     {
-        fprintf (stderr, "Compiler Error: Memory allocation failed for XML filename.\n");
+        char *end = tok;
+        while (*end != '\0' && *end != '/' && *end != '\\') end++;
+        char saved = *end;
+        *end = '\0';
+        if (tok[0] != '\0' && strcmp (tok, ".") != 0 && strcmp (tok, "..") != 0 && n < max_parts)
+        {
+            parts[n++] = tok;
+        }
+        if (saved == '\0') break;
+        tok = end + 1;
+    }
+    return n;
+}
+
+// The file `r` names once converted: the hint's extension swapped for `ext`
+// (".vtex"/".vsnd"). A compiler-generated resource is registered without its
+// extension (or already with it), so `ext` is appended only when missing --
+// swapping would eat the tail of a name such as "obj/my.game_pico8".
+static char *xml_full_name (const CARTresource *r, const char *ext)
+{
+    if (r->generated)
+    {
+        size_t len = strlen (r->filename), elen = strlen (ext);
+        char  *out = malloc (len + elen + 1);
+
+        if (out == NULL) { fprintf (stderr, "Compiler Error: Memory allocation failed for XML path.\n"); exit (2); }
+        strcpy (out, r->filename);
+        if (len < elen || strcmp (out + len - elen, ext) != 0) strcat (out, ext);
+        return out;
+    }
+    return replace_extension (r->filename, ext);
+}
+
+// `full` reduced to its last `depth` components, joined with '/'.
+// *total receives how many components `full` has.
+static char *xml_name_with_depth (const char *full, int depth, int *total)
+{
+    char        *buf   = strdup (full);
+    const char  *parts[64];
+    int          n     = xml_split_components (buf, parts, 64);
+    char        *joined;
+
+    if (n == 0) { parts[0] = path_basename (full); n = 1; }
+    if (depth > n) depth = n;
+
+    joined = malloc (strlen (full) + 2);
+    if (buf == NULL || joined == NULL) { fprintf (stderr, "Compiler Error: Memory allocation failed for XML path.\n"); exit (2); }
+    joined[0] = '\0';
+    for (int k = n - depth; k < n; k++)
+    {
+        if (k > n - depth) strcat (joined, "/");
+        strcat (joined, parts[k]);
+    }
+    *total = n;
+    free (buf);
+    return joined;
+}
+
+// The XML path of every resource in the list, in order (malloc'd array of
+// malloc'd strings, `count` long; the caller frees). See the notes above.
+static char **xml_resolve_names (CARTresource *head, int count, const char *tag,
+                                 const char *ext, int preserve_paths, const char *xml_dir)
+{
+    char          **names = calloc ((size_t) count + 1, sizeof (char *));
+    char          **full  = calloc ((size_t) count + 1, sizeof (char *));
+    CARTresource  **res   = calloc ((size_t) count + 1, sizeof (CARTresource *));
+    int             i     = 0;
+
+    if (names == NULL || full == NULL || res == NULL)
+    {
+        fprintf (stderr, "Compiler Error: Memory allocation failed for XML paths.\n");
         exit (2);
     }
-
-    if (vbin_path        == NULL)
+    for (CARTresource *r = head; r != NULL && i < count; r = r->next, i++)
     {
-        fprintf (stderr, "Compiler Error: Memory allocation failed for VBIN filename.\n");
-        exit (3);
+        res[i]  = r;
+        full[i] = xml_full_name (r, ext);
     }
 
-    // 2. Copy the input filename (e.g., "example.lua")
-    strcpy (vbin_path,    input_filename);
-    last_dot              = strrchr (vbin_path, '.');
-    if (last_dot         != NULL)
+    for (i = 0; i < count; i++)
     {
-        // Overwrite from the dot onward: "example.lua" -> "example.xml"
-        strcpy (last_dot, ".vbin");
-    }
-    else
-    {
-        // If no extension was found (e.g., "example"), just append ".xml"
-        strcat (vbin_path, ".vbin");
+        if (preserve_paths)
+        {
+            // Hints as written; compiler-made files (beside the output) from the XML's directory.
+            names[i] = res[i]->generated ? path_relative_to (xml_dir, full[i]) : strdup (full[i]);
+            continue;
+        }
+
+        int depth = 1, total = 1, clash;
+        for (;;)
+        {
+            free (names[i]);
+            names[i] = xml_name_with_depth (full[i], depth, &total);
+            clash    = 0;
+            for (int j = 0; j < i; j++)
+            {
+                if (strcmp (names[j], names[i]) != 0) continue;
+                if (strcmp (res[j]->filename, res[i]->filename) == 0) continue;   // the very same file listed twice
+                clash = 1;
+                if (depth >= total && g_xml_warn_collisions)
+                {
+                    fprintf (stderr, "---- warning: %s '%s' and '%s' both become '%s' in the XML ----\n",
+                             tag, res[j]->var_name ? res[j]->var_name : "<unnamed>",
+                             res[i]->var_name ? res[i]->var_name : "<unnamed>", names[i]);
+                }
+                break;
+            }
+            if (!clash || depth >= total) break;
+            depth++;
+        }
     }
 
-    // 3. Find the last dot to locate the file extension
-    strcpy (xml_filename, input_filename);
-    last_dot              = strrchr (xml_filename, '.');
-    if (last_dot         != NULL)
+    for (i = 0; i < count; i++) free (full[i]);
+    free (full);
+    free (res);
+    return names;
+}
+
+// One <textures>...</textures> or <sounds>...</sounds> block.
+static void xml_emit_resources (FILE *xml, CARTresource *head, const char *tag,
+                                const char *ext, int preserve_paths, const char *xml_dir)
+{
+    int count = 0;
+
+    for (CARTresource *r = head; r != NULL; r = r->next) count++;
+    if (count == 0)
     {
-        // Overwrite from the dot onward: "example.lua" -> "example.xml"
-        strcpy (last_dot, ".xml");
-    }
-    else
-    {
-        // If no extension was found (e.g., "example"), just append ".xml"
-        strcat (xml_filename, ".xml");
+        fprintf (xml, "<%ss />\n", tag);
+        return;
     }
 
-    // 4. Open the newly named XML file for writing
-    FILE *xml          = fopen (xml_filename, "w");
-    if (xml           == NULL)
+    char **names = xml_resolve_names (head, count, tag, ext, preserve_paths, xml_dir);
+    int    index = 0;
+
+    fprintf (xml, "<%ss>\n", tag);
+    for (CARTresource *curr = head; curr != NULL; curr = curr->next, index++)
+    {
+        // Vircon32 numbers resources by their position here. If that ever
+        // stops matching the id the compiler baked into the generated
+        // code, every reference silently targets the wrong resource --
+        // so say so loudly instead.
+        if (curr->id != index && g_xml_warn_collisions)
+        {
+            compiler_warning (ERR_INTERNAL, -1,
+                "cart XML: %s '%s' has resource id %d but is emitted at "
+                "position %d; generated code will reference the wrong %s",
+                tag, (curr->var_name != NULL) ? curr->var_name : "<unnamed>",
+                curr->id, index, tag);
+        }
+        fprintf (xml, "    <%s path=\"%s\" /> <!-- %s -->\n", tag, names[index], curr->var_name);
+        free (names[index]);
+    }
+    free (names);
+    fprintf (xml, "</%ss>\n", tag);
+}
+
+// Where the XML for `output_filename` goes (malloc'd): beside the output, or
+// (preserve_paths) under the same name in the source file's directory.
+static char *cart_xml_filename (const char *output_filename, const char *source_filename,
+                                int preserve_paths)
+{
+    char *xml_name = replace_extension (output_filename, ".xml");
+
+    if (!preserve_paths) return xml_name;
+
+    char   *dir    = path_dirname (source_filename);
+    size_t  cap    = strlen (dir) + strlen (xml_name) + 2;
+    char   *result = malloc (cap);
+
+    if (result == NULL) { fprintf (stderr, "Compiler Error: Memory allocation failed for XML filename.\n"); exit (2); }
+    snprintf (result, cap, "%s/%s", dir, path_basename (xml_name));
+    free (dir);
+    free (xml_name);
+    return result;
+}
+
+// Writes one XML. `variant` is "" for the plain build and "Opt" for the
+// optimized one: it goes before the extension of both the XML's name and
+// the <binary> it references.
+static void write_cart_xml (const char *output_filename, const char *source_filename,
+                            int preserve_paths, const char *variant, int verbose)
+{
+    char *plain_xml    = cart_xml_filename (output_filename, source_filename, preserve_paths);
+    char *variant_ext  = malloc (strlen (variant) + 8);
+    char *xml_filename;
+    char *xml_dir;
+    char *vbin_full;
+    char *vbin_path;
+
+    if (variant_ext == NULL) { fprintf (stderr, "Compiler Error: Memory allocation failed for XML filename.\n"); exit (2); }
+    sprintf (variant_ext, "%s.xml", variant);
+    xml_filename = replace_extension (plain_xml, variant_ext);
+    free (plain_xml);
+
+    sprintf (variant_ext, "%s.vbin", variant);
+    xml_dir   = path_dirname (xml_filename);
+    vbin_full = replace_extension (output_filename, variant_ext);
+    vbin_path = preserve_paths ? path_relative_to (xml_dir, vbin_full)
+                               : strdup (path_basename (vbin_full));
+    free (variant_ext);
+    free (vbin_full);
+
+    FILE *xml = fopen (xml_filename, "w");
+    if (xml  == NULL)
     {
         fprintf (stderr, "Compiler Error: Could not create XML cart file '%s'.\n", xml_filename);
-        free (xml_filename);
         exit (4);
     }
 
@@ -399,7 +591,6 @@ void  emit_cart_xml (const char *input_filename, int  verbose)
         }
     }
 
-    // 5. Emit the Vircon32 XML configuration
     fprintf (xml, "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\" ?>\n");
     fprintf (xml, "<rom-definition version=\"1.0\">\n");
     // XML-escape the title: it can now come from a file name or a cart's
@@ -416,119 +607,29 @@ void  emit_cart_xml (const char *input_filename, int  verbose)
     }
     fprintf (xml, "    <rom type=\"cartridge\" title=\"%s\" version=\"%s\" />\n", xml_title, cart_version);
     fprintf (xml, "<binary path=\"%s\" />\n", vbin_path);
-    
-    if (textures_head != NULL) {
-        fprintf(xml, "<textures>\n");
-        CARTresource* curr = textures_head;
-        int           index = 0;
-
-        while (curr        != NULL)
-        {
-            // Vircon32 numbers textures by their position here. If that ever
-            // stops matching the id the compiler baked into the generated
-            // code, every texture reference silently targets the
-            // wrong texture -- so say so loudly instead.
-            if (curr->id != index) {                   // <-- ADD
-                compiler_warning (ERR_INTERNAL, -1,
-                    "cart XML: texture '%s' has resource id %d but is emitted at "
-                    "position %d; generated code will reference the wrong texture",
-                    (curr->var_name != NULL) ? curr->var_name : "<unnamed>",
-                    curr->id, index);
-            }
-
-            len           = strlen (curr -> filename);
-            resource      = (char *) malloc (sizeof (char) * (len + 6));
-            last_dot      = NULL;
-
-            strcpy (resource,    curr -> filename);
-            last_dot              = strrchr (resource, '.');
-            if (last_dot         != NULL)
-            {
-                // Overwrite from the dot onward: "example.lua" -> "example.xml"
-                strcpy (last_dot, ".vtex");
-            }
-            else
-            {
-                // If no extension was found (e.g., "example"), just append ".xml"
-                strcat (resource, ".vtex");
-            }
-            fprintf(xml, "    <texture path=\"%s\" /> <!-- %s -->\n", 
-                    resource, curr -> var_name);
-            curr = curr->next;
-            index++;
-            free (resource);
-            resource      = NULL;
-        }
-        fprintf(xml, "</textures>\n");
-    }
-    else
-    {
-        fprintf (xml, "<textures />\n");
-    }
-    
-    if (sounds_head        != NULL)
-    {
-        fprintf (xml, "<sounds>\n");
-        CARTresource *curr  = sounds_head;
-        int           index = 0;                       // <-- ADD
-
-        while (curr        != NULL)
-        {
-            // Vircon32 numbers sounds by their position here. If that ever
-            // stops matching the id the compiler baked into the generated
-            // code, every play()/chansound reference silently targets the
-            // wrong sound -- so say so loudly instead.
-            if (curr->id != index) {                   // <-- ADD
-                compiler_warning (ERR_INTERNAL, -1,
-                    "cart XML: sound '%s' has resource id %d but is emitted at "
-                    "position %d; generated code will reference the wrong sound",
-                    (curr->var_name != NULL) ? curr->var_name : "<unnamed>",
-                    curr->id, index);
-            }
-
-            len           = strlen (curr -> filename);
-            resource      = (char *) malloc (sizeof (char) * (len + 6));
-            last_dot      = NULL;
-
-            strcpy (resource,    curr -> filename);
-            last_dot              = strrchr (resource, '.');
-            if (last_dot         != NULL)
-            {
-                strcpy (last_dot, ".vsnd");
-            }
-            else
-            {
-                strcat (resource, ".vsnd");
-            }
-            fprintf (xml, "    <sound path=\"%s\" /> <!-- %s -->\n",
-                     resource, curr -> var_name);
-            curr            = curr -> next;
-            index++;
-            free (resource);
-            resource      = NULL;
-        }
-        fprintf (xml, "</sounds>\n");
-    }
-    else
-    {
-        fprintf (xml, "<sounds />\n");
-    }
-
-    fprintf(xml, "</rom-definition>\n");
-
+    xml_emit_resources (xml, textures_head, "texture", ".vtex", preserve_paths, xml_dir);
+    xml_emit_resources (xml, sounds_head,   "sound",   ".vsnd", preserve_paths, xml_dir);
+    fprintf (xml, "</rom-definition>\n");
     fclose (xml);
 
-    // Remove direct stdout printing; rely on main.c stage reporting
     if (verbose)
     {
-        ;
-        // Optional debug detail if desired:
-        // printf("; Generated Vircon32 cart config: %s\n", xml_filename);
-        //printf("; Successfully generated Vircon32 cart config: %s\n", xml_filename);
+        fprintf (stdout, "saving cart config file %s\n", xml_filename);
     }
 
     free (xml_filename);
+    free (xml_dir);
     free (vbin_path);
+}
+
+void  emit_cart_xml (const char *output_filename, const char *source_filename,
+                     int preserve_paths, int verbose)
+{
+    g_xml_warn_collisions = 1;
+    write_cart_xml (output_filename, source_filename, preserve_paths, "", verbose);
+    g_xml_warn_collisions = 0;          // the Opt twin would only repeat the warnings
+    write_cart_xml (output_filename, source_filename, preserve_paths, "Opt", verbose);
+    g_xml_warn_collisions = 1;
 }
 
 // Jump to target_label if reg is truthy (not nil, not false) / falsy.

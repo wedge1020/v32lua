@@ -30,7 +30,6 @@ asm: obj/$(DEMO).asm
 obj/$(DEMO).asm: $(DEMO).lua
 	@mkdir -p bin obj
 	$(LUA_COMPILER) $(DEBUG_FLAGS) -o obj/$(DEMO).asm $(DEMO).lua
-	mv obj/$(DEMO).xml .
 
 # Assemble Assembly to Binary
 vbin: obj/$(DEMO).vbin
@@ -39,17 +38,19 @@ obj/$(DEMO).vbin: obj/$(DEMO).asm
 	$(ASSEMBLER) $(ASM_DEBUG_FLAGS) -o obj/$(DEMO).vbin obj/$(DEMO).asm
 
 # Process PNG sprite sheet to Vircon texture
-vtex: assets/$(DEMO)_sprites.vtex
+# (the --#texture hint says assets/$(DEMO)_sprites.png; the XML names $(DEMO)_sprites.vtex,
+# expected beside it in obj/)
+vtex: obj/$(DEMO)_sprites.vtex
 
-assets/$(DEMO)_sprites.vtex: assets/$(DEMO)_sprites.png
-	$(TEXTURE_TOOL) assets/$(DEMO)_sprites.png -o assets/$(DEMO)_sprites.vtex
+obj/$(DEMO)_sprites.vtex: assets/$(DEMO)_sprites.png | prep
+	$(TEXTURE_TOOL) assets/$(DEMO)_sprites.png -o obj/$(DEMO)_sprites.vtex
 
 # Pack ROM cartridge (Depends on the binary and texture to ensure they are built first)
 v32: bin/$(DEMO).v32
 
-bin/$(DEMO).v32: obj/$(DEMO).vbin
-	$(PACKER) $(DEMO).xml -o bin/$(DEMO).v32
+bin/$(DEMO).v32: obj/$(DEMO).vbin obj/$(DEMO)_sprites.vtex
+	$(PACKER) obj/$(DEMO).xml -o bin/$(DEMO).v32
 
 # --- Clean Up ---
 clean:
-	rm -f bin/*.v32 obj/* assets/*.vtex *.xml
+	rm -f bin/*.v32 obj/*

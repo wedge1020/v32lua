@@ -1,4 +1,4 @@
-.TH V32LUA 1 "October 2026" "v32lua 20261015-dev" "User Commands"
+.TH V32LUA 1 "October 2026" "v32lua 20261017-dev" "User Commands"
 .SH NAME
 v32lua \- compile a subset of Lua to Vircon32 assembly and cartridge XML
 .SH SYNOPSIS
@@ -17,6 +17,7 @@ v32lua \- compile a subset of Lua to Vircon32 assembly and cartridge XML
 .IR hz ]
 .RB [ \-\-fast\-circles ]
 .RB [ \-\-allow\-float\-as\-clearcolor ]
+.RB [ \-\-xml\-preserve\-paths ]
 .RB [ \-\-keyboard
 .IR port ]
 .RB [ \-\-mouse
@@ -44,13 +45,17 @@ instructions for the target console's CPU, in the same spirit as
 .BR v32c++ (1)
 lowering a C++ subset to plain Vircon32 C.
 .PP
-A compile produces two files: an assembly file
+A compile produces three files: an assembly file
 (see
 .BR \-o ,
 below) and, alongside it, a cartridge XML definition (the same base
 name with a
 .I .xml
-extension) that records the cart's title, version, and any texture,
+extension) and its twin for an optimized build
+.RI ( Opt.xml ,
+see
+.BR "CARTRIDGE XML" ),
+which record the cart's title, version, and any texture,
 sound, and tilemap resources declared with
 .B \-\-#
 hints in the source (see
@@ -94,7 +99,9 @@ extension replaced with
 .IR .xml ),
 not from the input filename, so
 .B \-o
-also controls where the XML lands.
+also controls where the XML lands (unless
+.B \-\-xml\-preserve\-paths
+is given).
 .TP
 .B \-g
 Generate a companion
@@ -197,6 +204,24 @@ integer color word. Same as a
 .B \-\-#allow\-float\-as\-clearcolor
 hint.
 .TP
+.B \-\-xml\-preserve\-paths
+Keep each
+.B \-\-#texture
+/
+.B \-\-#sound
+path in the XML as written in the hint (only the extension changes), write the
+XML into the directory of the source file instead of beside the output, and
+make
+.B <binary>
+the
+.I .vbin
+path relative to that directory. By default the XML sits beside the output and
+holds bare file names only (\fIship.vtex\fR, not \fItextures/ship.vtex\fR),
+because
+.BR packrom (1)
+resolves every path in it relative to the XML itself. See
+.BR "CARTRIDGE XML" .
+.TP
 .BI \-\-keyboard " port"
 Gamepad port (0\(en3) where a v32kbd keyboard is plugged in, for
 .BR key() ", " keyp()
@@ -271,6 +296,10 @@ and
 v32lua \-o program.asm program.lua
 .fi
 .RE
+.PP
+(also writing
+.I programOpt.xml ,
+for an optimized build.)
 .PP
 Compile with the default output name (extension swapped for
 .IR .asm ),
@@ -561,7 +590,9 @@ files made from each hint's
 .I .png
 or
 .I .wav
-file (same folder, same name).
+file (same name; see
+.B CARTRIDGE XML
+for the folder).
 A
 .B \-\-#texture
 or
@@ -583,6 +614,74 @@ directories next to the compiler itself (see
 .B local
 at the included file's own top level is promoted to a global exactly
 as in a monolithic file.
+.SH CARTRIDGE XML
+.BR packrom (1)
+reads every path in the XML relative to the XML file itself. By default,
+therefore,
+.B v32lua
+writes the XML beside the
+.B \-o
+file and puts only file names in it. With
+.B "\-o obj/game.asm"
+and
+.B "\-\-#texture SHIP \(dqtextures/ship.png\(dq"
+the file
+.I obj/game.xml
+contains
+.RS
+.PP
+.nf
+<binary path="game.vbin" />
+    <texture path="ship.vtex" /> <!-- SHIP -->
+.fi
+.RE
+.PP
+so the
+.IR .vbin ", " .vtex " and " .vsnd
+files are expected beside the XML, in
+.IR obj/ .
+Textures and sounds that
+.B v32lua
+generates itself (PICO-8 and TIC-80 carts) are written there already.
+When two assets collapse to the same name, the first keeps it and each later
+one keeps just enough of its directories to be unique:
+.I textures/ship.png
+followed by
+.I textures/extra/ship.png
+gives
+.I ship.vtex
+and
+.I extra/ship.vtex
+(the latter expected in
+.IR obj/extra/ ).
+Only two assets whose whole paths collapse to one name (differing just by
+extension, say) draw a warning.
+.PP
+Beside every XML a twin for the optimized build is written:
+.I obj/gameOpt.xml
+is identical except that
+.B <binary>
+names
+.IR gameOpt.vbin ,
+ready for the output of an assembly optimizer such as
+.BR v32opt ;
+no editing step is needed.
+.PP
+With
+.B \-\-xml\-preserve\-paths
+the hint paths are kept as written
+.RI ( textures/ship.vtex ),
+the XML goes into the source file's directory
+.RI ( src/game.xml
+for
+.B "\-o obj/game.asm src/game.lua"
+), and
+.B <binary>
+becomes the
+.I .vbin
+path relative to it
+.RI ( ../obj/game.vbin ).
+Generated assets are named relative to that directory too.
 .SH FILES
 .TP
 .I *.lua
@@ -619,9 +718,9 @@ Placeholder tones for PICO-8 and TIC-80 programs without sound data that use
 Generated Vircon32 assembly, ready to be handed to the Vircon32
 assembler directly.
 .TP
-.I *.xml
-Generated cartridge definition, named from the assembly output path
-(not the input path), referencing any
+.IR *.xml ", " *Opt.xml
+Generated cartridge definition and its optimized-build twin, named from the
+assembly output path (not the input path), referencing any
 .I .vtex
 and
 .I .vsnd

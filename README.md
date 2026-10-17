@@ -233,7 +233,8 @@ Each demo under `demos/pico8/` and `demos/tic80/` has a Makefile that
 compiles, assembles and packs the cart into `bin/<demo>.v32`. If the
 [v32opt](https://github.com/wedge1020/v32opt) assembly optimizer is in
 your `PATH`, the same run also builds an optimized cart, `bin/<demo>Opt.v32`
-(from `obj/<demo>Opt.asm` and `<demo>Opt.xml`). The optimized steps are
+(from `obj/<demo>Opt.asm` and `obj/<demo>Opt.xml`, the XML twin v32lua
+writes beside every XML). The optimized steps are
 allowed to fail: if `v32opt` or the assembler rejects the optimized code,
 `make` prints the error and carries on, and the regular cart is still
 built. Without `v32opt` the optimized build is skipped with a note; force
@@ -295,8 +296,12 @@ Compile it with:
 $ v32lua -o program.asm program.lua
 ```
 
-`v32lua` emits  `program.asm` and `program.xml` alongside  it; hand those
-to the Vircon32 assembler and `packrom` to produce a runnable cartridge.
+`v32lua` emits  `program.asm` and `program.xml` alongside  it (and
+`programOpt.xml`, the same cartridge pointing at `programOpt.vbin`, for a
+build through the [v32opt](https://github.com/wedge1020/v32opt) optimizer);
+hand those to the Vircon32 assembler and `packrom` to produce a runnable
+cartridge. See [The cartridge XML](#the-cartridge-xml) for where `packrom`
+expects the assets.
 
 **Command-Line Usage**
 
@@ -338,6 +343,9 @@ works):
   `--no-bezel`: black margins.
 * `--fast-circles`: TIC-80/PICO-8 filled circles above radius 31 drawn as
   a scaled disc.
+* `--xml-preserve-paths`: keep the `--#texture` / `--#sound` paths in the
+  cartridge XML as written, and write the XML beside the source file
+  instead of beside the output (see [The cartridge XML](#the-cartridge-xml)).
 * `--allow-float-as-clearcolor`: a Lua number given to `ioports.gpu.clear`
   or TIC-80 `cls()` keeps its float32 bits as the clear color (old
   behavior; used for translucent-clear streaks such as `witchem_up`).
@@ -486,7 +494,7 @@ Supported hints:
 | `--#allow-float-as-clearcolor` | Same as the command-line option. |
 | `--#keyboard 0`–`3` | Gamepad port of a v32kbd keyboard (v32io adapter or the modified emulator required, see [Keyboard and mouse](#keyboard-and-mouse-v32io)), for `key()`/`keyp()`/`kbd.*` (default 2; see [doc/API.md](doc/API.md#keyboard-key--keyp--kbd)). |
 | `--#mouse 0`–`3` | Gamepad port of a v32mouse mouse (v32io adapter or the modified emulator required, see [Keyboard and mouse](#keyboard-and-mouse-v32io)), for `mouse()`/`mouse.*` and PICO-8's `stat(32..34)` (default 3; see [doc/API.md](doc/API.md#mouse-mouse--mouse)). |
-| `--#texture NAME "path/image.png"` | Registers a texture resource and binds it to a compile-time constant `NAME`. The XML names the `.vtex` file (`image.vtex`) that `png2vircon` makes from the PNG. |
+| `--#texture NAME "path/image.png"` | Registers a texture resource and binds it to a compile-time constant `NAME`. The XML names the `.vtex` file (`image.vtex`) that `png2vircon` makes from the PNG (see [The cartridge XML](#the-cartridge-xml)). |
 | `--#sound NAME "path/sound.wav"` | Registers a sound resource and binds it to a compile-time constant `NAME`. The XML names the `.vsnd` file that `wav2vircon` makes. |
 | `--#tilemap NAME "path/map.csv"` | Registers a tilemap from a CSV file, embedded directly into the ROM image (see [doc/API.md](doc/API.md#tilemap-tilemap)). |
 | `--#include "file.lua"` | Textually splices another Lua file in at this point, before parsing begins (see below). |
@@ -511,6 +519,38 @@ complete  Vircon32  XML cartridge  definition  file  linking `.vtex`  and
 data, you can proceed to the `packrom` step. Resource IDs are assigned in
 source order and are guaranteed to  match their position in the generated
 XML.
+
+<a id="the-cartridge-xml"></a>
+**The cartridge XML**
+
+`packrom` reads every path in the XML relative to the XML file itself, so
+by default `v32lua` writes the XML beside the `-o` file and puts only file
+names in it: with `-o obj/game.asm` and
+`--#texture SHIP "textures/ship.png"` you get `obj/game.xml` containing
+
+```xml
+<binary path="game.vbin" />
+    <texture path="ship.vtex" /> <!-- SHIP -->
+```
+
+and the `.vbin`, `.vtex` and `.vsnd` files are expected beside it, in
+`obj/`. Textures and sounds that `v32lua` generates itself (PICO-8 and
+TIC-80 carts) are written there already. If two assets collapse to the
+same name, the later one keeps just enough of its directories to be
+unique: `textures/ship.png` followed by `textures/extra/ship.png` gives
+`ship.vtex` and `extra/ship.vtex` (the second expected in `obj/extra/`);
+only two assets whose whole paths collapse to one name (differing by
+extension, say) draw a warning.
+
+`--xml-preserve-paths` restores the paths as written (`textures/ship.vtex`),
+writes the XML into the *source file's* directory instead (`src/game.xml`
+for `-o obj/game.asm src/game.lua`), and makes `<binary>` the `.vbin` path
+relative to it (`../obj/game.vbin`); compiler-generated assets are
+named relative to the XML's directory too.
+
+Next to every XML a twin for the optimized build is written
+(`obj/gameOpt.xml`, identical but for `<binary path="gameOpt.vbin" />`),
+ready for `v32opt` output; no `sed` step is needed.
 
 **Multi-File Projects (`--#include`)**
 

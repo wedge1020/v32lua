@@ -229,7 +229,7 @@ void register_pico8_tone_bank (void)
         if (pico8_tone_base_id < 0) {
             pico8_tone_base_id = assigned_id;
         }
-        cart_resource_append (&sounds_head, &sounds_tail, assigned_id,
+        cart_resource_append_generated (&sounds_head, &sounds_tail, assigned_id,
                               tone_names[i], path);
     }
 }

@@ -16,12 +16,15 @@ Le langage et l'API sont décrits dans le [README](../README.fr.md) et dans
 v32lua -o obj/game.asm game.lua
 ```
 
-Cela écrit deux fichiers, l'un à côté de l'autre :
+Cela écrit trois fichiers, l'un à côté de l'autre :
 
 * `obj/game.asm` — le programme, en assembleur Vircon32 ;
-* `obj/game.xml` — la définition de cartouche que lit `packrom`.
+* `obj/game.xml` — la définition de cartouche que lit `packrom` ;
+* `obj/gameOpt.xml` — la même cartouche pour une compilation avec
+  l'[optimiseur](#5-facultatif--loptimiseur) (elle pointe vers `gameOpt.vbin`).
 
-Sans `-o`, la sortie est `game.asm` (et `game.xml`) à côté du source.
+Sans `-o`, la sortie est `game.asm` (et `game.xml`, `gameOpt.xml`) à côté
+du source.
 Lancez `v32lua --help` pour voir toutes les options ; les plus courantes :
 
 | Option | Effet |
@@ -36,6 +39,7 @@ Lancez `v32lua --help` pour voir toutes les options ; les plus courantes :
 | `--bezel FICHIER`, `--no-bezel` | Panneaux latéraux PICO-8 : vos propres images, ou aucun. |
 | `--fast-circles` | PICO-8/TIC-80 : dessine plus vite les grands cercles pleins (bords légèrement différents). |
 | `--allow-float-as-clearcolor` | Un nombre Lua donné à `ioports.gpu.clear` ou au `cls()` TIC-80 garde ses bits float32 comme couleur d'effacement, comme les anciennes versions (effacement translucide = traînée de flou). Désactivé par défaut. |
+| `--xml-preserve-paths` | Conserve dans le XML les chemins de `--#texture`/`--#sound` tels qu'écrits et écrit le XML à côté du fichier source ([section 3](#3-le-xml-de-la-cartouche)). |
 | `--keyboard 0-3` | Port de manette d'un clavier v32kbd (`key()`, `keyp()`, `kbd.*`) ; 2 par défaut. Demande un périphérique v32io (voir plus bas). |
 | `--mouse 0-3` | Port de manette d'une souris v32mouse (`mouse()`, `mouse.*`, `stat(32..34)` de PICO-8) ; 3 par défaut. Demande un périphérique v32io (voir plus bas). |
 | `--version`, `--help` | Version, utilisation. |
@@ -97,40 +101,70 @@ Les noms des ressources sont définis avant l'exécution de `init()` ou de
 
 ## 3. Le XML de la cartouche
 
-Pour l'exemple ci-dessus, `obj/game.xml` est :
+`packrom` lit tous les chemins du XML **relativement au fichier XML
+lui-même**. `v32lua` écrit donc le XML à côté du fichier de `-o` et n'y
+place que des noms de fichiers. Pour l'exemple ci-dessus, `obj/game.xml`
+est :
 
 ```xml
 <?xml version="1.0" encoding="UTF-8" standalone="no" ?>
 <rom-definition version="1.0">
     <rom type="cartridge" title="Space Invaders Vircon32" version="1.2" />
-<binary path="obj/game.vbin" />
+<binary path="game.vbin" />
 <textures>
-    <texture path="assets/textures/background.vtex" /> <!-- bg_space -->
-    <texture path="assets/textures/ship.vtex" /> <!-- spr_player -->
+    <texture path="background.vtex" /> <!-- bg_space -->
+    <texture path="ship.vtex" /> <!-- spr_player -->
 </textures>
 <sounds>
-    <sound path="assets/sounds/laser.vsnd" /> <!-- sfx_laser -->
-    <sound path="assets/music/stage1.vsnd" /> <!-- bgm_stage1 -->
+    <sound path="laser.vsnd" /> <!-- sfx_laser -->
+    <sound path="stage1.vsnd" /> <!-- bgm_stage1 -->
 </sounds>
 </rom-definition>
 ```
 
 Le XML nomme les fichiers convertis : `.vtex` pour chaque texture et
-`.vsnd` pour chaque son, dans le même dossier et sous le même nom que le
-fichier de l'indication. L'ordre des entrées est celui des indications,
-ce qui fait de `bg_space` la texture 0, et ainsi de suite. Les chemins
-sont utilisés tels qu'ils sont écrits : écrivez-les donc par rapport au
-dossier depuis lequel vous lancez `packrom`.
+`.vsnd` pour chaque son, avec le nom du fichier de l'indication et sans son
+dossier. L'ordre des entrées est celui des indications, ce qui fait de
+`bg_space` la texture 0, et ainsi de suite. Les fichiers `.vbin`, `.vtex`
+et `.vsnd` sont attendus **à côté du XML**, ici dans `obj/` (la section
+suivante les y convertit). Tout étant relatif au XML, le projet peut être
+construit depuis n'importe quel dossier, sans rien déplacer ni modifier à
+la main.
+
+**Mêmes noms dans des dossiers différents.** Si deux ressources se
+réduisent au même nom, la première le garde et chaque suivante ne garde que
+les dossiers nécessaires pour être unique : `textures/ship.png` suivi de
+`textures/extra/ship.png` donne `ship.vtex` et `extra/ship.vtex`, le second
+étant attendu dans `obj/extra/`. Seules deux ressources dont les chemins
+complets se réduisent au même nom (ne différant que par l'extension, par
+exemple) provoquent encore un avertissement.
+
+**Le jumeau de l'optimiseur.** À côté de `obj/game.xml`, le compilateur
+écrit aussi `obj/gameOpt.xml`, identique sauf `<binary path="gameOpt.vbin" />`,
+pour la compilation optimisée de la [section 5](#5-facultatif--loptimiseur).
+Il est écrit que vous utilisiez l'optimiseur ou non.
+
+**`--xml-preserve-paths`** rétablit les chemins tels qu'écrits dans les
+indications (`assets/textures/ship.vtex`), écrit le XML dans le répertoire du
+fichier *source* au lieu de le placer à côté de la sortie (le point de
+référence des indications elles-mêmes : `src/game.xml` pour
+`-o obj/game.asm src/game.lua`, avec `src/gameOpt.xml` à côté) et fait de
+`<binary>` le chemin du `.vbin` relatif à ce répertoire
+(`../obj/game.vbin`). Les ressources que le compilateur génère lui-même
+(cartouches PICO-8 et TIC-80, ci-dessous) restent à côté de la sortie ; elles
+sont donc elles aussi nommées par rapport à ce répertoire
+(`../obj/game_pico8.vtex`). Utilisez-le quand vos ressources vivent déjà
+à côté du source et que vous voulez le XML là.
 
 ## 4. Convertir les ressources, assembler et empaqueter
 
 Avec les [Vircon32 DevTools](https://github.com/vircon32/ComputerSoftware/releases) :
 
 ```bash
-png2vircon assets/textures/background.png -o assets/textures/background.vtex
-png2vircon assets/textures/ship.png       -o assets/textures/ship.vtex
-wav2vircon assets/sounds/laser.wav        -o assets/sounds/laser.vsnd
-wav2vircon assets/music/stage1.wav        -o assets/music/stage1.vsnd
+png2vircon assets/textures/background.png -o obj/background.vtex
+png2vircon assets/textures/ship.png       -o obj/ship.vtex
+wav2vircon assets/sounds/laser.wav        -o obj/laser.vsnd
+wav2vircon assets/music/stage1.wav        -o obj/stage1.vsnd
 
 assemble -o obj/game.vbin obj/game.asm
 packrom obj/game.xml -o bin/game.v32
@@ -141,7 +175,8 @@ packrom obj/game.xml -o bin/game.v32
 doivent être des fichiers WAV stéréo 16 bits à 44100 Hz.
 
 Les cartouches PICO-8 et TIC-80 n'ont pas besoin de ressources propres :
-le compilateur écrit lui-même leurs textures et leurs sons et les nomme
+le compilateur écrit lui-même leurs textures et leurs sons, à côté de la
+sortie (`obj/game_pico8.vtex`, `obj/game_sfx00.vsnd`, ...), et les nomme
 dans le XML.
 
 ## 5. Facultatif : l'optimiseur
@@ -153,12 +188,12 @@ l'assemblage :
 ```bash
 v32opt -O3 -o obj/gameOpt.asm obj/game.asm
 assemble -o obj/gameOpt.vbin obj/gameOpt.asm
-sed 's/\.vbin/Opt.vbin/g' obj/game.xml > obj/gameOpt.xml
 packrom obj/gameOpt.xml -o bin/gameOpt.v32
 ```
 
-Les Makefiles des démos (`demos/pico8/*/Makefile`,
-`demos/tic80/*/Makefile`) font tout cela, et construisent aussi la
+`obj/gameOpt.xml` est le jumeau que le compilateur a déjà écrit (section 3),
+donc rien n'est à modifier à la main. Les Makefiles des démos
+(`demos/*/Makefile`, `demos/pico8/*/Makefile`, `demos/tic80/*/Makefile`) font tout cela, et construisent aussi la
 cartouche optimisée quand `v32opt` est installé ; un échec dans les
 étapes optimisées n'empêche pas de construire la cartouche normale.
 Copiez-en un comme point de départ pour votre propre projet.
