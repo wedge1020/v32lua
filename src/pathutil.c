@@ -138,7 +138,12 @@ char *path_absolute (const char *path)
     char   *parts[MAXP];
     int     n       = split_normalized (path, parts, MAXP);
     size_t  cap     = 2;
-    int     drive   = (path[0] != '\0' && path[1] == ':');
+    // A Windows drive ("C:") may come from the path itself or from the
+    // current directory prepended to a relative path, so test the first
+    // normalized component rather than the input.
+    int     drive   = (n > 0 && strlen (parts[0]) == 2 && parts[0][1] == ':' &&
+                       ((parts[0][0] >= 'A' && parts[0][0] <= 'Z') ||
+                        (parts[0][0] >= 'a' && parts[0][0] <= 'z')));
 
     for (int i = 0; i < n; i++) cap += strlen (parts[i]) + 1;
 

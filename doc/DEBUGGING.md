@@ -428,4 +428,4 @@ AND  R6, TABLE_ARRAYSIZE
 
 ---
 
-*Document version: 1.0 | Last updated: October 17, 2026 | Compiler: 20261017-dev*
+*Document version: 1.0 | Last updated: October 18, 2026 | Compiler: 20261018-dev*
