@@ -17,7 +17,7 @@ typedef struct
 // obj/ side by side) -- in their parent, the project folder. An existing
 // script that v32lua did not write is left alone.
 void emit_build_scripts (const char *output_filename, const char *source_filename,
-                         int preserve_paths, int debug_map,
+                         int preserve_paths, int debug_map, int bios,
                          const BuildOpt *opts, int nopts, int verbose);
 
 #endif

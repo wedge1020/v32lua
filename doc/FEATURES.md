@@ -48,7 +48,8 @@ Limits that follow from it:
 
 * **22-bit payloads.** RAM is exactly 4M words, so every RAM address fits.
   ROM strings and functions must lie in the first 4M words (16 MB) of the
-  cartridge's program ROM; textures and sounds don't count toward this.
+  cartridge's program ROM (a BIOS built with `-b`, likewise); textures and sounds
+  don't count toward this.
 * **Numbers are float32**: 24 significant bits. Integers above 2^24 are
   not exact, and there is no separate integer type.
 * **A raw 32-bit word can look like a tagged value.** Packed colors from

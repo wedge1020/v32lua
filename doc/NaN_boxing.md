@@ -137,7 +137,9 @@ offset** inside  the NaN payload. When  the runtime unboxes a  ROM string
 literal (tag  `0x7FC00000`), it strips  the upper tag  (`AND 0x003FFFFF`)
 and then bitwise-ORs the result with  the ROM page base (`OR 0x20000000`)
 to reconstruct the ROM hardware address  on the fly (letting us work with
-the first 4MW/16MB of CART ROM data).
+the first 4MW/16MB of CART ROM data). A BIOS built with `-b` lives in the
+BIOS program ROM page instead (`0x10000000`), and the compiler defines
+`V32_CART_PAGE` accordingly; the offsets inside the NaN boxes are the same.
 
 ## Supported Tags & Type Representations
 

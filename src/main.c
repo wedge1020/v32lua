@@ -54,7 +54,10 @@ static void  print_usage (const char *prog_name)
     fprintf (stdout, "  --version    Displays compiler version\n");
     //fprintf (stdout, "  --debugmode  Creates files with results of internal stages\n");
     fprintf (stdout, "  -o <file>    Output file, default name is the same as input\n");
-    //fprintf (stdout, "  -b           Compiles the program as a BIOS\n");
+    fprintf (stdout, "  -b           Compiles the program as a Vircon32 BIOS, not a cartridge: needs a\n");
+    fprintf (stdout, "               'function error_handler()' (run on a CPU hardware error), exactly\n");
+    fprintf (stdout, "               one --#texture and at most one --#sound; the XML <rom> gets\n");
+    fprintf (stdout, "               type=\"bios\" and the build scripts assemble with -b\n");
     fprintf (stdout, "  -v           Displays additional information (verbose)\n");
     fprintf (stdout, "  -g           Outputs an additional file with debug info\n");
     fprintf (stdout, "  -d           Displays operational debug information\n");
@@ -289,6 +292,8 @@ int  main (int  argc, char** argv)
             RECORD_OPT ("--mouse", val, 0);
         } else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
             strncpy(output_filename, argv[++i], sizeof(output_filename) - 1);
+        } else if (strcmp(argv[i], "-b") == 0) {
+            g_bios_mode = true;     // repeated in the build scripts by their own -b handling
         } else if (strcmp(argv[i], "-g") == 0) {
             g_debug_mode = true;
         } else if (strcmp(argv[i], "-w") == 0) {
@@ -473,6 +478,34 @@ int  main (int  argc, char** argv)
         compiler_error(ERR_SYNTAX, -1, "Parsing failed due to syntax errors.");
     }
     fclose(yyin);
+
+    // --- BIOS (-b) constraints ---
+    // Same three as the Vircon32 toolchain's: a BIOS has exactly one texture,
+    // at most one sound, and an error_handler() (checked by the generator).
+    // Every violation is reported at once. A BIOS is always native Vircon32:
+    // the PICO-8 / TIC-80 layers need their own generated textures.
+    if (g_bios_mode)
+    {
+        int ntex = 0, nsnd = 0, bad = 0;
+        for (CARTresource *r = textures_head; r != NULL; r = r -> next) ntex++;
+        for (CARTresource *r = sounds_head;   r != NULL; r = r -> next) nsnd++;
+        if (runtime_req.needs_pico8 || runtime_req.needs_tic80)
+        {
+            fprintf (stderr, "Compiler Error: -b (BIOS) only works with the native vircon32 API, not pico8 or tic80\n");
+            bad = 1;
+        }
+        if (ntex != 1)
+        {
+            fprintf (stderr, "Compiler Error: -b (BIOS) requires exactly one --#texture (found %d)\n", ntex);
+            bad = 1;
+        }
+        if (nsnd > 1)
+        {
+            fprintf (stderr, "Compiler Error: -b (BIOS) allows at most one --#sound (found %d)\n", nsnd);
+            bad = 1;
+        }
+        if (bad) return 1;
+    }
 
     // --- Cartridge title ---
     // --title > --#title > the cart's own title > the file name; the last
@@ -694,7 +727,7 @@ int  main (int  argc, char** argv)
     emit_cart_xml (output_filename, input_filename, xml_preserve_paths, verbose);
     if (build_scripts) {
         emit_build_scripts (output_filename, input_filename, xml_preserve_paths,
-                            g_debug_mode ? 1 : 0, build_opts, n_build_opts, verbose);
+                            g_debug_mode ? 1 : 0, g_bios_mode ? 1 : 0, build_opts, n_build_opts, verbose);
     }
 
     if (verbose)

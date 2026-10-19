@@ -1,10 +1,11 @@
-.TH V32LUA 1 "octobre 2026" "v32lua 20261018-dev" "Commandes utilisateur"
+.TH V32LUA 1 "octobre 2026" "v32lua 20261019-dev" "Commandes utilisateur"
 .SH NOM
 v32lua \- compile un sous-ensemble de Lua en assembleur Vircon32 et en XML de cartouche
 .SH SYNOPSIS
 .B v32lua
 .RB [ \-o
 .IR sortie.asm ]
+.RB [ \-b ]
 .RB [ \-g ]
 .RB [ \-v ]
 .RB [ \-d ]
@@ -107,6 +108,29 @@ et non d'apr\(`es le nom de l'entr\('ee ; ainsi
 .B \-o
 d\('etermine aussi o\(`u se trouve le XML (sauf avec
 .BR \-\-xml\-preserve\-paths ).
+.TP
+.B \-b
+Construit une BIOS Vircon32 au lieu d'une cartouche. Le programme doit d\('efinir
+.B "function error_handler()"
+(que la console ex\('ecute quand le processeur l\(`eve une erreur mat\('erielle) en plus de
+.BR main ,
+d\('eclarer exactement une
+.B \-\-#texture
+et au plus un
+.BR \-\-#sound ,
+et utiliser l'API native vircon32. L'assembleur g\('en\('er\('e commence par le
+vecteur d'erreur mat\('erielle et utilise la page de ROM de programme de la BIOS
+.RB ( 0x10000000 ),
+l'\('el\('ement
+.B <rom>
+du XML re\(,coit
+.BR type=\(dqbios\(dq ,
+et les scripts de compilation g\('en\('er\('es passent
+.B \-b
+\(`a
+.B v32lua
+et \(`a
+.BR assemble .
 .TP
 .B \-g
 G\('en\(`ere un fichier compagnon
@@ -361,6 +385,19 @@ v32lua celeste.p8 \-\-title "celeste" \-\-rate 11025
 v32lua jeu.tic
 .fi
 .RE
+.PP
+Construire une BIOS Vircon32 (elle exige une
+.BR error_handler() ,
+une
+.B \-\-#texture
+et au plus un
+.BR \-\-#sound ) :
+.PP
+.RS
+.nf
+v32lua \-b \-o bios.asm bios.lua
+.fi
+.RE
 .SH POINTS D'ENTR\('EE
 Un programme doit d\('eclarer au moins l'une des fonctions
 .B main()
@@ -392,6 +429,14 @@ compilation s'il ne trouve aucun
 .B WAIT
 \('emis dans
 .BR main() .
+.TP
+.B error_handler()
+Obligatoire, et sans param\(`etre, pour construire une BIOS avec
+.BR \-b  :
+la console l'appelle quand le processeur l\(`eve une erreur mat\('erielle, et
+l'assembleur g\('en\('er\('e commence par un vecteur qui le fait. Sans
+.B \-b
+c'est une fonction ordinaire.
 .TP
 .B init()
 Si elle existe, en plus de l'une des deux pr\('ec\('edentes, elle s'ex\('ecute
@@ -735,6 +780,17 @@ ou
 .BR \-\-titleopt ,
 ou on garde les deux identiques avec
 .BR \-\-no\-diff\-opt\-title .
+.PP
+Avec
+.B \-b
+(une compilation de BIOS) l'\('el\('ement
+.B <rom>
+indique
+.B type=\(dqbios\(dq
+au lieu de
+.BR type=\(dqcartridge\(dq  ;
+le reste du XML est identique. Une BIOS n\('ecessite exactement une texture et au
+plus un son.
 .SH SCRIPTS DE COMPILATION
 Avec le XML, \fBv32lua\fR \('ecrit les scripts de compilation traditionnels de
 Vircon32,
@@ -778,6 +834,21 @@ source est dans un dossier nomm\('e \fIsrc\fR et la sortie dans un dossier voisi
 n'est jamais \('ecras\('e. La valeur par d\('efaut se change avec
 .B V32LUA_DEFAULT_BUILD_SCRIPTS
 dans \fIinc/config.h\fR.
+.PP
+En plus des options qui changent ce qui est produit
+.RB ( \-\-api ,
+.BR \-\-title ,
+.BR \-\-rate ,
+etc.), les scripts r\('ep\(`etent
+.B \-b
+sur leur ligne
+.B v32lua
+et le transmettent \(`a
+.BR assemble  ;
+avec
+.B \-g
+l'assembleur re\(,coit
+.BR "\-b \-g program" .
 .SH FICHIERS
 .TP
 .I *.lua

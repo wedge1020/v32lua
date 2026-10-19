@@ -1,10 +1,11 @@
-.TH V32LUA 1 "October 2026" "v32lua 20261018-dev" "User Commands"
+.TH V32LUA 1 "October 2026" "v32lua 20261019-dev" "User Commands"
 .SH NAME
 v32lua \- compile a subset of Lua to Vircon32 assembly and cartridge XML
 .SH SYNOPSIS
 .B v32lua
 .RB [ \-o
 .IR output.asm ]
+.RB [ \-b ]
 .RB [ \-g ]
 .RB [ \-v ]
 .RB [ \-d ]
@@ -106,6 +107,29 @@ not from the input filename, so
 also controls where the XML lands (unless
 .B \-\-xml\-preserve\-paths
 is given).
+.TP
+.B \-b
+Build a Vircon32 BIOS instead of a cartridge. The program must define
+.B "function error_handler()"
+(run by the console when the CPU raises a hardware error) in addition to
+.BR main ,
+declare exactly one
+.B \-\-#texture
+and at most one
+.BR \-\-#sound ,
+and use the native vircon32 API. The generated assembly begins with the
+hardware error vector and uses the BIOS program ROM page
+.RB ( 0x10000000 ),
+the XML
+.B <rom>
+element gets
+.BR type=\(dqbios\(dq ,
+and the generated build scripts pass
+.B \-b
+to
+.B v32lua
+and
+.BR assemble .
 .TP
 .B \-g
 Generate a companion
@@ -359,6 +383,19 @@ v32lua celeste.p8 \-\-title "celeste" \-\-rate 11025
 v32lua game.tic
 .fi
 .RE
+.PP
+Build a Vircon32 BIOS (it needs an
+.BR error_handler() ,
+one
+.B \-\-#texture
+and at most one
+.BR \-\-#sound ):
+.PP
+.RS
+.nf
+v32lua \-b \-o bios.asm bios.lua
+.fi
+.RE
 .SH ENTRY POINTS
 A program must declare at least one of
 .B main()
@@ -389,6 +426,14 @@ warns at compile time if it does not find a
 .B WAIT
 emitted inside
 .BR main() .
+.TP
+.B error_handler()
+Required, and without parameters, when building a BIOS with
+.BR \-b :
+the console calls it when the CPU raises a hardware error, and the
+generated assembly begins with a vector that does so. Without
+.B \-b
+it is an ordinary function.
 .TP
 .B init()
 If present, alongside either of the above, it runs exactly once,
@@ -721,6 +766,17 @@ or
 .BR \-\-titleopt ,
 or keep the two identical with
 .BR \-\-no\-diff\-opt\-title .
+.PP
+With
+.B \-b
+(a BIOS build) the
+.B <rom>
+element says
+.B type=\(dqbios\(dq
+instead of
+.BR type=\(dqcartridge\(dq ;
+the rest of the XML is the same. A BIOS needs exactly one texture and at
+most one sound.
 .SH BUILD SCRIPTS
 Along with the XML, \fBv32lua\fR writes the traditional Vircon32 build scripts,
 .I Make.sh
@@ -762,6 +818,21 @@ in a folder named \fIsrc\fR and the output in a sibling folder (such as
 is never overwritten. The default can be changed with
 .B V32LUA_DEFAULT_BUILD_SCRIPTS
 in \fIinc/config.h\fR.
+.PP
+Besides the options that change what is produced
+.RB ( \-\-api ,
+.BR \-\-title ,
+.BR \-\-rate ,
+and so on), the scripts repeat
+.B \-b
+on their
+.B v32lua
+line and pass it to
+.BR assemble ;
+together with
+.B \-g
+the assembler gets
+.BR "\-b \-g program" .
 .SH FILES
 .TP
 .I *.lua

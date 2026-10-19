@@ -655,7 +655,8 @@ static void write_cart_xml (const char *output_filename, const char *source_file
         }
         *w = '\0';
     }
-    fprintf (xml, "    <rom type=\"cartridge\" title=\"%s\" version=\"%s\" />\n", xml_title, cart_version);
+    fprintf (xml, "    <rom type=\"%s\" title=\"%s\" version=\"%s\" />\n",
+             g_bios_mode ? "bios" : "cartridge", xml_title, cart_version);
     fprintf (xml, "<binary path=\"%s\" />\n", vbin_path);
     xml_emit_resources (xml, textures_head, "texture", ".vtex", preserve_paths, xml_dir);
     xml_emit_resources (xml, sounds_head,   "sound",   ".vsnd", preserve_paths, xml_dir);
@@ -718,7 +719,9 @@ void  emit_falsy_jump (int  reg, const char *target_label)
 int   emit_variable_map (void)
 {
     int  lines_printed       = 2;
-    fprintf (out(), "%%define  V32_CART_PAGE            0x20000000\n");
+    // Program ROM page: a cartridge's code and data sit at 0x20000000, a
+    // BIOS's (-b) at 0x10000000.
+    fprintf (out(), "%%define  V32_CART_PAGE            %s\n", g_bios_mode ? "0x10000000" : "0x20000000");
     fprintf (out(), "%%define  NAN_VALUE                0x7F800000\n");
     fprintf (out(), "%%define  BOXED_CATEGORY           0x80000000 ; RAM(1), ROM(0)\n");
     fprintf (out(), "%%define  BOXED_TYPE               0x00400000 ; TABLE/FUNCTION (0), STRING (1)\n");

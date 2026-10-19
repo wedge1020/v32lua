@@ -7,7 +7,7 @@
 ;; ===========================================================================
 ;; SECTION: DEFINES
 ;; ===========================================================================
-;;  V32_CART_PAGE   0x20000000
+;;  V32_CART_PAGE   0x20000000 (0x10000000 when built with -b)
 ;;  NAN_VALUE       0x7F800000
 ;;  BOXED_CATEGORY  0x80000000 // sign bit used for RAM (1) vs ROM (0)
 ;;  BOXED_TYPE      0x00400000 // TABLE/FUNCTION (0) vs STRING (1)

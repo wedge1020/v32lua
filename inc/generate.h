@@ -7,6 +7,7 @@ extern char  last_emitted_src[128];
 
 // Debug flags set by your main argument parser (e.g., main.c)
 extern bool        g_debug_mode;    // Set to 1 if -g is passed
+extern bool        g_bios_mode;     // Set to 1 if -b is passed (build a BIOS, not a cartridge)
 extern const char *g_asm_filename; // Pointer to output filename (e.g., "main.asm")
 extern const char *g_lua_filename; // Pointer to input filename (e.g., "main.lua")
 

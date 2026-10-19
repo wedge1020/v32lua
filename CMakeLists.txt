@@ -582,6 +582,11 @@ if(BUILD_TESTING)
     add_test(NAME xml/build_scripts
              COMMAND sh "${CMAKE_CURRENT_SOURCE_DIR}/tests/xml/build_scripts.sh" "$<TARGET_FILE:v32lua>")
 
+    # -b (BIOS): the hardware error vector, the BIOS ROM page, <rom type="bios">,
+    # the scripts' -b, and the texture / sound / error_handler() constraints.
+    add_test(NAME xml/bios
+             COMMAND sh "${CMAKE_CURRENT_SOURCE_DIR}/tests/xml/bios.sh" "$<TARGET_FILE:v32lua>")
+
     file(GLOB programs "${CMAKE_CURRENT_SOURCE_DIR}/testing/fail/*.lua")
     file(MAKE_DIRECTORY "${V32LUA_TEST_OUT}/fail")
     foreach(program IN LISTS programs)

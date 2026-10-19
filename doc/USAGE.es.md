@@ -30,6 +30,7 @@ Ejecuta `v32lua --help` para ver todas las opciones; las más comunes:
 | Opción | Efecto |
 |---|---|
 | `-o ARCHIVO` | Archivo de ensamblador de salida. |
+| `-b` | Construye una **BIOS** de Vircon32 en lugar de un cartucho: necesita `function error_handler()` (la consola la ejecuta ante un error de hardware de la CPU), exactamente una `--#texture` y como máximo un `--#sound`; el XML recibe `<rom type="bios">` y los scripts de compilación usan `v32lua -b` / `assemble -b`. Solo con la API nativa de vircon32. |
 | `-g` | Escribe además `ARCHIVO.debug`, que relaciona las líneas de ensamblador con las de Lua (para v32sim). |
 | `-w` | Sin advertencias. |
 | `-v` | Muestra las etapas del compilador mientras trabaja. |
@@ -174,6 +175,10 @@ va al directorio del propio fuente y las rutas quedan tal como se escribieron
 (`../obj/game.vbin`). Úsalo cuando tus recursos ya viven junto al código
 fuente y quieres el XML allí.
 
+Con `-b` (una compilación de BIOS) el elemento `<rom>` dice `type="bios"` en
+lugar de `type="cartridge"`; el resto del XML es igual. Una BIOS necesita
+exactamente una `--#texture` y como máximo un `--#sound`.
+
 ## 4. Convertir los recursos, ensamblar y empaquetar
 
 Con las [Vircon32 DevTools](https://github.com/vircon32/ComputerSoftware/releases):
@@ -255,7 +260,8 @@ las opciones que diste, convierten cada `--#texture` / `--#sound` con
   `--no-diff-opt-title`, `--rate`, `--bezel`, `--no-bezel`, `--fast-circles`,
   `--allow-float-as-clearcolor`, `--keyboard`, `--mouse`,
   `--xml-preserve-paths` y `-w` se repiten en la línea de `v32lua` del
-  script, y `-g` añade además `assemble -g program`.
+  script; `-g` añade además `assemble -g program`, y `-b` (compilación de BIOS)
+  también se repite y añade `assemble -b` (con ambos: `assemble -b -g program`).
 * **Los mapas de Tiled** (`tiled2vircon`) no se incluyen; usa `--#tilemap`
   o añade esas líneas a tu copia.
 

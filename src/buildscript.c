@@ -45,6 +45,7 @@ typedef struct
     int            nopts;
     char          *script_dir;              // absolute
     int            debug_map;
+    int            bios;                    // -b: assemble (and compile) as a BIOS
 } Plan;
 
 // ---- small helpers ---------------------------------------------------------
@@ -294,7 +295,9 @@ static void write_script (FILE *f, int bat, const Plan *plan)
 {
     char     line[4096];
     int      have_tex = 0, have_snd = 0;
-    const char *dbg   = plan->debug_map ? " -g program" : "";
+    // assemble's options: -b (BIOS) and -g (debug map)
+    const char *dbg   = plan->bios ? (plan->debug_map ? " -b -g program" : " -b")
+                                   : (plan->debug_map ? " -g program" : "");
 
     for (int i = 0; i < plan->nassets; i++)
     {
@@ -358,7 +361,7 @@ static void write_script (FILE *f, int bat, const Plan *plan)
     put (f, bat, "echo --------------------------\n");
     {
         // --no-build-scripts: building must not rewrite (and so undo edits to) this script
-        int n = snprintf (line, sizeof (line), "v32lua --no-build-scripts%s", plan->debug_map ? " -g" : "");
+        int n = snprintf (line, sizeof (line), "v32lua --no-build-scripts%s%s", plan->bios ? " -b" : "", plan->debug_map ? " -g" : "");
         for (int i = 0; i < plan->nopts && n < (int) sizeof (line) - 1; i++)
         {
             const BuildOpt *o = &plan->opts[i];
@@ -514,7 +517,7 @@ static void write_one (const Plan *plan, const char *name, int bat, int verbose)
 }
 
 void emit_build_scripts (const char *output_filename, const char *source_filename,
-                         int preserve_paths, int debug_map,
+                         int preserve_paths, int debug_map, int bios,
                          const BuildOpt *opts, int nopts, int verbose)
 {
     Plan   plan;
@@ -534,6 +537,7 @@ void emit_build_scripts (const char *output_filename, const char *source_filenam
     plan.opts       = opts;
     plan.nopts      = nopts;
     plan.debug_map  = debug_map;
+    plan.bios       = bios;
 
     // Paths of the build, relative to the script folder.
     char *vbin_full  = replace_extension (output_filename, ".vbin");

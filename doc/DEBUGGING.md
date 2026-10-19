@@ -409,7 +409,7 @@ AND  R6, TABLE_ARRAYSIZE
 ## Appendix: Key Constants
 
 ```c
-#define V32_CART_PAGE   0x20000000
+#define V32_CART_PAGE   0x20000000   // 0x10000000 when built with -b (BIOS)
 #define NAN_VALUE       0x7F800000
 #define BOXED_CATEGORY  0x80000000
 #define BOXED_TYPE      0x00400000
@@ -428,4 +428,4 @@ AND  R6, TABLE_ARRAYSIZE
 
 ---
 
-*Document version: 1.0 | Last updated: October 18, 2026 | Compiler: 20261018-dev*
+*Document version: 1.0 | Last updated: October 19, 2026 | Compiler: 20261019-dev*

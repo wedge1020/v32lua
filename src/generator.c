@@ -3,6 +3,7 @@
 // Allocate storage for the global variables exactly once
 int  o_optflag  = 0; // by default, no compiler optimizations take place
 bool g_debug_mode = false;
+bool g_bios_mode  = false;
 const char *g_asm_filename = NULL;
 const char *g_lua_filename = NULL;
 int g_temp_asm_line        = 0;      // Adjust buffer size to match your project's original size
@@ -952,6 +953,22 @@ void generate_program (ASTNode *head)
             "Compilation failed: Your program must declare either a 'main()' or a 'game_loop()' function.");
     }
 
+    if (g_bios_mode)
+    {
+        SymbolNode *eh = resolve_symbol ("error_handler");
+        if (eh == NULL || eh -> is_function != 1)
+        {
+            compiler_error (ERR_SEMANTIC, -1,
+                "Compilation failed: -b (BIOS) requires a 'function error_handler()' "
+                "(run by the console on a CPU hardware error)");
+        }
+        else if (eh -> arity != 0)
+        {
+            compiler_error (ERR_SEMANTIC, -1,
+                "Compilation failed: -b (BIOS) 'error_handler()' cannot have any parameters");
+        }
+    }
+
     // =========================================================================
     // 2. CODE GENERATION SETUP
     // =========================================================================
@@ -968,6 +985,18 @@ void generate_program (ASTNode *head)
     // =========================================================================
     // 3. EMIT COMPILED CODE ENTRY VECTOR
     // =========================================================================
+    if (g_bios_mode)
+    {
+        // A BIOS starts with the hardware error vector: the console jumps
+        // here when the CPU raises a hardware error (and the normal start
+        // follows it). The exact same three instructions the Vircon32 C
+        // compiler emits for `compile -b`, so the layout matches.
+        emit_asm (";; --- Hardware Error Vector (BIOS) ---\n");
+        emit_asm ("CALL __function_error_handler\n");
+        emit_asm ("WAIT\n");
+        emit_asm ("HLT\n");
+        emit_asm ("\n");
+    }
     emit_asm (";; --- Compiled Code Entry Vector ---\n");
     emit_asm ("CALL __global_scope_initialization  ; Run top-level setups first\n");
     

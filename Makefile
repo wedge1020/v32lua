@@ -259,4 +259,4 @@ put: context
 	done
 
 archive: clean
-	zip -r v32lua-project.zip CMakeLists.txt cmake demos doc inc lib Makefile man README.* scripts src tests v32 testing tools .github
+	zip -r ../v32lua-project.zip CMakeLists.txt cmake demos doc inc lib Makefile man README.* scripts src tests v32 testing tools .github

@@ -1360,7 +1360,7 @@ __builtin_table_len:
     JT   R1, __table_len_invalid
 
     MOV  R2, R0          ; Copy for ROM check (R0 still intact!)
-    IGE  R2, 0x20000000
+    IGE  R2, V32_CART_PAGE   ; ROM starts here (0x20000000 cart, 0x10000000 BIOS)
     JT   R2, __table_len_invalid
 
     MOV  R0, [R0+1]     ; Read array length from header word 1

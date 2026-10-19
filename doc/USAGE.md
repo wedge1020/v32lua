@@ -29,6 +29,7 @@ Run `v32lua --help` for every option; the common ones:
 | Option | Effect |
 |---|---|
 | `-o FILE` | Output assembly file. |
+| `-b` | Build a Vircon32 **BIOS** instead of a cartridge: needs `function error_handler()` (run by the console on a CPU hardware error), exactly one `--#texture` and at most one `--#sound`; the XML gets `<rom type="bios">` and the build scripts get `v32lua -b` / `assemble -b`. Native vircon32 API only. |
 | `-g` | Also write `FILE.debug`, mapping assembly lines to Lua lines (for v32sim). |
 | `-w` | No warnings. |
 | `-v` | Show the compiler's stages as it runs. |
@@ -169,6 +170,10 @@ source's own directory, and the paths stay exactly as written
 (`../obj/game.vbin`). Use it when your assets already live next to the
 source and you want the XML there.
 
+With `-b` (a BIOS build) the `<rom>` element says `type="bios"` instead of
+`type="cartridge"`; the rest of the XML is the same. A BIOS needs exactly one
+`--#texture` and at most one `--#sound`.
+
 ## 4. Convert the assets, assemble and pack
 
 With the [Vircon32 DevTools](https://github.com/vircon32/ComputerSoftware/releases):
@@ -247,7 +252,9 @@ into the place the XML expects it, `assemble`, and `packrom` into
   `--no-diff-opt-title`, `--rate`, `--bezel`, `--no-bezel`, `--fast-circles`,
   `--allow-float-as-clearcolor`, `--keyboard`, `--mouse`,
   `--xml-preserve-paths` and `-w` are repeated in the script's `v32lua`
-  line, and `-g` also gives `assemble -g program`.
+  line; `-g` also gives `assemble -g program`, and `-b`
+  (a BIOS build) is repeated too and gives `assemble -b` (with both:
+  `assemble -b -g program`).
 * **Tiled maps** (`tiled2vircon`) aren't covered; use `--#tilemap`, or add
   those lines to your own copy.
 
