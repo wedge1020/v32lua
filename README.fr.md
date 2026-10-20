@@ -1253,9 +1253,8 @@ l'environnement autonome (freestanding) de Vircon32 :
 * `print()` requiert, comme ses deux premiers paramètres, la position `x`
   et `y` à l'écran.
 
-* Les instructions `return` isolées ne fonctionnent pas (elles génèrent
-  une erreur de syntaxe). Donnez-leur quelque chose (`nil`, `0`, etc.)
-  pour qu'elles fonctionnent.
+* Un `return` sans valeur est accepté, dans `main()` et dans les autres
+  fonctions, y compris dans un `if` ou une boucle ; la fonction renvoie `nil`.
 
 * L'exécution du programme DOIT résider à l'intérieur d'une fonction.
   Bien que vous puissiez déclarer des fonctions, vous devez utiliser

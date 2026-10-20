@@ -1235,8 +1235,8 @@ autónomo (freestanding) de Vircon32:
 * `print()` requiere, como sus primeros dos parámetros, la posición `x`
   e `y` en pantalla.
 
-* Las sentencias `return` independientes no funcionan (generarán un
-  error de sintaxis). Dale algo (`nil`, `0`, etc.) para que funcione.
+* Un `return` sin valor se acepta, en `main()` y en otras funciones,
+  también dentro de un `if` o un bucle; la función devuelve `nil`.
 
 * La ejecución del programa DEBE residir dentro de una función. Aunque
   puedes declarar funciones, debes usar uno de los puntos de inicio

@@ -9,6 +9,20 @@ or speakers.
 
 ### New
 
+- **`-b` builds a Vircon32 BIOS** instead of a cartridge, under the same
+  rules as the Vircon32 toolchain's `compile -b`: a `function error_handler()`
+  (run by the console on a CPU hardware error), exactly one `--#texture`
+  and at most one `--#sound`, native vircon32 API only (every violation is
+  reported at once). The assembly begins with the hardware error vector
+  (`CALL __function_error_handler`, `WAIT`, `HLT`), ROM addresses use the
+  BIOS page (`0x10000000`, `V32_CART_PAGE`), the XML `<rom>` gets
+  `type="bios"`, and the build scripts pass `-b` to `v32lua` and `assemble`.
+  Checked by `tests/xml/bios.sh` (`ctest` entry `xml/bios`). See the README.
+- **Releases can publish themselves.** The `release` run of the
+  "Generate Global Binaries" workflow can publish the GitHub release at once
+  (`publish_release`) instead of leaving a draft, attaches a `SHA256SUMS.txt`,
+  and takes its text from `.github/release-notes.md` (`@VERSION@` is the
+  version). Only the release job has write access.
 - **Tables have a real array part and real hashing.** Keys 1..n live in a
   plain array (O(1) reads and writes, doubling growth); every other key
   lives in an open-addressing hash table. String keys hash by content, and

@@ -11,9 +11,16 @@ on:
         options:
           - 'test'
           - 'release'
+      publish_release:
+        description: 'Release runs only: publish the GitHub release at once, instead of leaving it as a draft to review'
+        type: boolean
+        required: false
+        default: false
 
+# Read-only by default; only the release job below can write (create the
+# release and attach the zips).
 permissions:
-  contents: write
+  contents: read
 
 # =========================================================================
 # CHANGE THIS SINGLE VARIABLE TO DEPLOY THIS WORKFLOW TO ANOTHER REPOSITORY
@@ -71,6 +78,14 @@ jobs:
             STALE=1
           fi
           if [ "$STALE" = 1 ] && [ "$LEVEL" = error ]; then exit 1; fi
+
+      # A release run needs the release text; stop here, before the build
+      # matrix starts, rather than when the release job looks for it.
+      - name: Check the Release Text
+        if: inputs.build_type == 'release'
+        shell: bash
+        run: |
+          [ -f .github/release-notes.md ] || { echo "::error file=.github/release-notes.md::the release text is missing (is it committed?)"; exit 1; }
 
   build:
     name: Build (${{ matrix.os }}-${{ matrix.arch }})
@@ -332,12 +347,40 @@ jobs:
           path: ${{ env.FINAL_ZIP_NAME }}
           retention-days: ${{ fromJson(env.RETENTION_DAYS) }}
 
+  # The release page. For a `release` run this attaches every platform's zip
+  # to a GitHub release "v<VERSION>", together with a SHA256SUMS.txt and the
+  # text of .github/release-notes.md (its @VERSION@ becomes the version).
+  #
+  #   - The release is created as a DRAFT, visible only to people who can
+  #     write to the repository, so the text and the zips can be reviewed
+  #     before anyone sees them: press "Publish release" on the Releases
+  #     page. Start the run with `publish_release` ticked to publish at once.
+  #   - It is created for the commit that was built (target_commitish), not
+  #     for whatever the default branch holds when the draft is published:
+  #     the tag v<VERSION> is made at that commit.
+  #   - A -dev version is marked a pre-release (never "Latest").
+  #   - Running it again for the same version updates that release and
+  #     replaces the zips of the same names.
+  #   - This is the only job that can write to the repository (the other
+  #     jobs get the read-only default above). A release made with the
+  #     built-in GITHUB_TOKEN does not itself start other workflows (an
+  #     `on: release` workflow would not fire); GitHub does this on purpose.
   release:
-    name: Create Draft Release
+    name: ${{ inputs.publish_release && 'Publish Release' || 'Create Draft Release' }}
     needs: [version, build]
     if: inputs.build_type == 'release'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
     steps:
+      # Only .github/ (the release text) is needed from the repository.
+      - name: Checkout the release text
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github
+
       - name: Download all zip packages from build jobs
         uses: actions/download-artifact@v4
         with:
@@ -345,11 +388,38 @@ jobs:
           pattern: ${{ env.PROJECT_NAME }}-package-*
           merge-multiple: true
 
-      - name: Generate Draft Release on GitHub
+      # The OpenBSD and Haiku packages are optional (their job may fail
+      # without failing the run); every other target must be here, or the
+      # release would silently go out missing a platform.
+      - name: Check the Packages
+        shell: bash
+        run: |
+          MISSING=0
+          for target in windows-x86_64 windows-arm64 macos-x86_64 macos-arm64 \
+                        linux-x86_64 linux-arm64 linux-armv7-rpi linux-armv8-rpi; do
+            zip="artifacts/${{ env.PROJECT_NAME }}-${VERSION}-${target}.zip"
+            [ -f "$zip" ] || { echo "::error::$zip is missing"; MISSING=1; }
+          done
+          [ "$MISSING" = 0 ]
+          ls -l artifacts
+
+      - name: Write the Checksums and the Release Text
+        shell: bash
+        run: |
+          [ -f .github/release-notes.md ] || { echo "::error file=.github/release-notes.md::the release text is missing"; exit 1; }
+          (cd artifacts && sha256sum -- *.zip > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          sed "s|@VERSION@|${VERSION}|g" .github/release-notes.md > release-notes.md
+
+      - name: Create the GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.version.outputs.version }}
+          target_commitish: ${{ github.sha }}
           name: "${{ env.PROJECT_NAME }} Release v${{ needs.version.outputs.version }}"
-          draft: true
-          prerelease: false
-          files: artifacts/*.zip
+          body_path: release-notes.md
+          draft: ${{ !inputs.publish_release }}
+          prerelease: ${{ contains(needs.version.outputs.version, '-dev') }}
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/*.zip
+            artifacts/SHA256SUMS.txt

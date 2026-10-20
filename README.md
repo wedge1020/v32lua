@@ -1155,8 +1155,8 @@ of the language to better suit the freestanding environment of Vircon32:
 * `print()` requires, as its first two parameters, the `x` and `y`
   position on the screen.
 
-* Standalone `return` statements do not work (will generate a syntax
-  error). Give it something (`nil`, `0`, etc.) to make it happy.
+* A bare `return` (no value) is accepted, in `main()` and in other
+  functions, including inside an `if` or a loop; the function returns `nil`.
 
 * Program execution MUST reside within a function. While you can declare
   functions, you must use one of the designated starting points to begin
