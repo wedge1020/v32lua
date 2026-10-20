@@ -22,38 +22,118 @@ env:
   PROJECT_NAME: v32lua
 
 jobs:
+  # Reads the version once, for every build job and the release. The
+  # '#define VERSION "..."' line itself is parsed (anchored, as the base
+  # Makefile and CMakeLists.txt do): a plain `grep -i VERSION | head -1`
+  # takes the first line that merely mentions the word -- a comment, say
+  # -- and names every zip and the release tag after its garbage. It also
+  # checks that `make version` has stamped that version into the man pages
+  # and doc/DEBUGGING.md: a mismatch is a warning on test builds and an
+  # error on release builds.
+  version:
+    name: Read Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.parse.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Parse and Check Version
+        id: parse
+        shell: bash
+        run: |
+          HEADER_FILE="inc/${{ env.PROJECT_NAME }}.h"
+          VERSION=$(sed -n 's/^#define[[:space:]]*VERSION[[:space:]]*"\(.*\)".*/\1/p' "$HEADER_FILE" | head -n 1)
+          if [ -z "$VERSION" ]; then
+            echo "::error file=$HEADER_FILE::could not read VERSION from $HEADER_FILE"
+            exit 1
+          fi
+          case "$VERSION" in
+            *[!A-Za-z0-9._+-]*)
+              echo "::error file=$HEADER_FILE::VERSION '$VERSION' has characters unsafe for file names and tags"
+              exit 1 ;;
+          esac
+          echo "Version: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ inputs.build_type }}" = "release" ]; then LEVEL=error; else LEVEL=warning; fi
+          STALE=0
+          for page in man/${{ env.PROJECT_NAME }}*.1; do
+            [ -f "$page" ] || continue
+            if ! grep -q "^\.TH .*\"${{ env.PROJECT_NAME }} $VERSION\"" "$page"; then
+              echo "::$LEVEL file=$page::$page is not stamped with $VERSION (run 'make version')"
+              STALE=1
+            fi
+          done
+          if [ -f doc/DEBUGGING.md ] && ! grep -q "Compiler: $VERSION\*" doc/DEBUGGING.md; then
+            echo "::$LEVEL file=doc/DEBUGGING.md::doc/DEBUGGING.md is not stamped with $VERSION (run 'make version')"
+            STALE=1
+          fi
+          if [ "$STALE" = 1 ] && [ "$LEVEL" = error ]; then exit 1; fi
+
   build:
     name: Build (${{ matrix.os }}-${{ matrix.arch }})
+    needs: version
     runs-on: ${{ matrix.os-runner }}
-    
+
+    # The OpenBSD and Haiku targets are a nice extra, not a requirement:
+    # if one of them fails, the job still counts as passed, so the release
+    # job below goes ahead with every package that did build.
+    continue-on-error: ${{ matrix.optional == true }}
+
     defaults:
       run:
         shell: ${{ matrix.os == 'windows' && 'msys2 {0}' || 'bash' }}
 
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+
     strategy:
       fail-fast: false
       matrix:
+        # smoke: the binary runs on the runner itself (not cross-compiled),
+        # so scripts/smoke_test.sh can check it finds its --#include
+        # library from the package layout. (The OpenBSD and Haiku builds
+        # are tested inside their virtual machines instead.)
         include:
           # Windows Targets
+          #   x86_64: MSYS2 UCRT64 (gcc) on the regular x64 runner.
+          #   arm64:  MSYS2 CLANGARM64 (clang) on GitHub's native Windows
+          #           ARM64 runner. Cross-compiling from the x64 runner
+          #           can't work: UCRT64 ships no aarch64 C runtime or
+          #           import libraries to link against, which is why the
+          #           old "clang -target aarch64-w64-windows-gnu" build
+          #           failed. (windows-11-arm is free for public
+          #           repositories.)
           - os: windows
             arch: x86_64
             os-runner: windows-latest
+            msystem: UCRT64
+            msys-packages: mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-make zip unzip
+            smoke: true
           - os: windows
             arch: arm64
-            os-runner: windows-latest
-          
-          # macOS Targets
+            os-runner: windows-11-arm
+            msystem: CLANGARM64
+            msys-packages: mingw-w64-clang-aarch64-clang make zip unzip
+            smoke: true
+
+          # macOS Targets (macos-latest is an Apple Silicon runner; the
+          # x86_64 binary is cross-compiled there)
           - os: macos
             arch: x86_64
             os-runner: macos-latest
           - os: macos
             arch: arm64
             os-runner: macos-latest
+            smoke: true
 
           # Linux Core Targets
           - os: linux
             arch: x86_64
             os-runner: ubuntu-latest
+            smoke: true
           - os: linux
             arch: arm64
             os-runner: ubuntu-latest
@@ -66,23 +146,54 @@ jobs:
             arch: armv8-rpi
             os-runner: ubuntu-latest
 
+          # OpenBSD and Haiku Targets (optional): built inside a QEMU
+          # virtual machine on a Linux runner by cross-platform-actions.
+          # The arm64 OpenBSD guest is emulated, so it is the slowest job.
+          - os: openbsd
+            arch: x86_64
+            os-runner: ubuntu-latest
+            vm-arch: x86-64
+            vm-version: '7.9'
+            optional: true
+          - os: openbsd
+            arch: arm64
+            os-runner: ubuntu-latest
+            vm-arch: arm64
+            vm-version: '7.9'
+            optional: true
+          - os: haiku
+            arch: x86_64
+            os-runner: ubuntu-latest
+            vm-arch: x86-64
+            vm-version: 'r1beta5'
+            optional: true
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # The parser and lexer are generated from src/parser.y and src/lexer.l
+      # and committed (src/parser.c, inc/parser.h, src/lexer.c). A fresh
+      # checkout gives every file the same arbitrary timestamp, so make
+      # could decide they're out of date and run bison and flex -- which
+      # the Windows and VM environments don't have, and macOS's bison 2.3
+      # is too old for. Mark the generated files newer than their sources,
+      # in dependency order, so the committed ones are always used.
+      - name: Use the Committed Parser and Lexer
+        shell: bash
+        run: |
+          touch src/parser.c inc/parser.h
+          sleep 1
+          touch src/lexer.c
 
       # --- ENVIRONMENT TOOLCHAIN SETUP ---
       - name: Setup MSYS2 Toolchain (Windows)
         if: matrix.os == 'windows'
         uses: msys2/setup-msys2@v2
         with:
-          msystem: UCRT64
+          msystem: ${{ matrix.msystem }}
           update: true
-          install: >-
-            mingw-w64-ucrt-x86_64-gcc
-            mingw-w64-ucrt-x86_64-clang
-            mingw-w64-ucrt-x86_64-lld
-            mingw-w64-ucrt-x86_64-make
-            zip
+          install: ${{ matrix.msys-packages }}
       - name: Setup Linux ARM Cross-Compilers
         if: matrix.os == 'linux'
         shell: bash
@@ -92,13 +203,15 @@ jobs:
           elif [ "${{ matrix.arch }}" = "armv7-rpi" ]; then
             sudo apt-get update && sudo apt-get install -y gcc-arm-linux-gnueabihf
           fi
+
       # --- BUILD EXECUTABLES & STRIP SYMBOLS ---
+      # (src/Makefile names the Windows binary bin/v32lua.exe.)
       - name: Compile and Strip (Windows)
         if: matrix.os == 'windows'
         run: |
           if [ "${{ matrix.arch }}" = "arm64" ]; then
-            mingw32-make CC="clang -target aarch64-w64-windows-gnu -fuse-ld=lld"
-            strip bin/*
+            make CC="clang"
+            llvm-strip bin/*
           else
             mingw32-make CC="gcc"
             strip bin/*
@@ -123,34 +236,93 @@ jobs:
             make CC="gcc"
             strip bin/*
           fi
-      # --- MODULAR PACKAGING BLOCK (ALL OS RUNNERS) ---
-      - name: Parse Version and Create Zip Archive
+
+      # The VM is only started for these two targets; the next step runs
+      # inside it (the checkout is synced in, and bin/ back out).
+      - name: Start Virtual Machine (OpenBSD / Haiku)
+        if: matrix.os == 'openbsd' || matrix.os == 'haiku'
+        uses: cross-platform-actions/action@v1.4.0
+        with:
+          operating_system: ${{ matrix.os }}
+          architecture: ${{ matrix.vm-arch }}
+          version: ${{ matrix.vm-version }}
+
+      # The project Makefiles need GNU make, which OpenBSD doesn't ship (its
+      # make is BSD make; gmake is a package), so the sources are compiled
+      # directly, with the same flags and files src/Makefile uses: the
+      # committed parser.c/lexer.c, src/node/ and src/intrinsics/ (not the
+      # unused vsnd_generator.c, which src/Makefile leaves out too), and
+      # runtime_embed.S, assembled from inside src/ because its .incbin
+      # paths are relative to it. Haiku keeps libm in libroot (no -lm).
+      # The smoke test runs here, where the binary can run.
+      - name: Compile, Strip and Test (OpenBSD / Haiku)
+        if: matrix.os == 'openbsd' || matrix.os == 'haiku'
+        shell: cpa.sh {0}
         run: |
-          # Dynamically builds path: inc/${PROJECT_NAME}.h
-          HEADER_FILE="inc/${{ env.PROJECT_NAME }}.h"
-          
-          VERSION=$(grep -i "VERSION" "$HEADER_FILE" | head -n 1 | awk -F'"' '{print $2}')
-          if [ -z "$VERSION" ]; then
-             VERSION=$(grep -i "VERSION" "$HEADER_FILE" | head -n 1 | awk '{print $3}')
-          fi
-          
-          if [ "${{ github.event.inputs.build_type }}" = "test" ]; then
+          uname -a
+          if command -v cc >/dev/null 2>&1; then CC=cc; else CC=gcc; fi
+          if [ "$(uname -s)" = Haiku ]; then LIBM=; else LIBM=-lm; fi
+          mkdir -p bin
+          cd src
+          SRCS=$(ls *.c | grep -v '^vsnd_generator\.c$')
+          $CC -Wall -Wextra -O2 -I../inc -DYYDEBUG=1 \
+              $SRCS node/*.c intrinsics/*.c runtime_embed.S \
+              -o ../bin/${{ env.PROJECT_NAME }} $LIBM
+          cd ..
+          strip bin/${{ env.PROJECT_NAME }}
+          sh scripts/smoke_test.sh bin/${{ env.PROJECT_NAME }} lib "${{ env.VERSION }}"
+
+      # --- SMOKE TEST (NATIVE BUILDS) ---
+      - name: Smoke Test (--version and --#include from the package layout)
+        if: matrix.smoke == true
+        run: |
+          BIN=$(ls bin/${{ env.PROJECT_NAME }}* | head -n 1)
+          sh scripts/smoke_test.sh "$BIN" lib "${{ env.VERSION }}"
+
+      # --- MODULAR PACKAGING BLOCK (ALL OS RUNNERS) ---
+      # The zip mirrors the Windows install layout under v32tools/, so it
+      # can be unpacked straight into <Program Files>/Vircon32/v32tools
+      # (beside v32opt and v32c++) or anywhere else:
+      #     v32lua[.exe]
+      #     include/v32lua/*.lua     the --#include library: v32lua finds
+      #                              it here, next to itself
+      #     docs/v32lua/README*.md   every language, with doc/ beside
+      #     docs/v32lua/doc/*.md     them so their links work, and the
+      #     docs/v32lua/v32lua*.1    manual pages
+      # (Default shell: MSYS2's bash on Windows, which has the zip package
+      # installed above; Git Bash, the runner's own "bash", has no zip.)
+      - name: Create Zip Archive
+        run: |
+          if [ "${{ inputs.build_type }}" = "test" ]; then
             ZIP_NAME="${{ env.PROJECT_NAME }}-${VERSION}-test-${{ matrix.os }}-${{ matrix.arch }}.zip"
             echo "RETENTION_DAYS=2" >> $GITHUB_ENV
           else
             ZIP_NAME="${{ env.PROJECT_NAME }}-${VERSION}-${{ matrix.os }}-${{ matrix.arch }}.zip"
             echo "RETENTION_DAYS=0" >> $GITHUB_ENV
           fi
-          
-          echo "VERSION_TAG=v$VERSION" >> $GITHUB_ENV
           echo "Packaging: $ZIP_NAME"
-          
-          cp README.md bin/
-          cd bin
+
+          PKG=package
+          DOCS="$PKG/docs/${{ env.PROJECT_NAME }}"
+          rm -rf "$PKG"
+          mkdir -p "$PKG/include/${{ env.PROJECT_NAME }}" "$DOCS/doc"
+          cp bin/* "$PKG/"
+          cp lib/*.lua "$PKG/include/${{ env.PROJECT_NAME }}/"
+          cp README*.md "$DOCS/"
+          cp doc/*.md "$DOCS/doc/"
+          cp man/*.1 "$DOCS/"
+          if [ -f LICENSE ]; then cp LICENSE "$PKG/"; fi
+
+          ls "$PKG/include/${{ env.PROJECT_NAME }}"/*.lua >/dev/null 2>&1 || {
+            echo "::error::no --#include library files were packaged"; exit 1; }
+
+          cd "$PKG"
           zip -r "../$ZIP_NAME" ./*
           cd ..
-          
+          unzip -l "$ZIP_NAME"
+
           echo "FINAL_ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+
       # --- STAGE ZIP INTERNALLY ---
       - name: Upload Compressed Target Release Artifact
         uses: actions/upload-artifact@v4
@@ -159,39 +331,25 @@ jobs:
           name: ${{ env.PROJECT_NAME }}-package-${{ matrix.os }}-${{ matrix.arch }}
           path: ${{ env.FINAL_ZIP_NAME }}
           retention-days: ${{ fromJson(env.RETENTION_DAYS) }}
-          
-      - name: Save Version Tag for Release Job
-        run: echo "${{ env.VERSION_TAG }}" > version_tag.txt
-
-      - name: Upload Version Tag
-        uses: actions/upload-artifact@v4
-        with:
-          name: version-tag-${{ matrix.os }}-${{ matrix.arch }}
-          path: version_tag.txt
-          retention-days: ${{ fromJson(env.RETENTION_DAYS) }}
 
   release:
     name: Create Draft Release
-    needs: build
-    if: github.event.inputs.build_type == 'release'
+    needs: [version, build]
+    if: inputs.build_type == 'release'
     runs-on: ubuntu-latest
     steps:
       - name: Download all zip packages from build jobs
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: ${{ env.PROJECT_NAME }}-package-*
           merge-multiple: true
 
-      - name: Determine Version Tag
-        run: |
-          VERSION_TAG=$(cat artifacts/version_tag.txt | head -n 1)
-          echo "VERSION_TAG=$VERSION_TAG" >> $GITHUB_ENV
-          rm artifacts/version_tag.txt
       - name: Generate Draft Release on GitHub
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.VERSION_TAG }}
-          name: "${{ env.PROJECT_NAME }} Release ${{ env.VERSION_TAG }}"
+          tag_name: v${{ needs.version.outputs.version }}
+          name: "${{ env.PROJECT_NAME }} Release v${{ needs.version.outputs.version }}"
           draft: true
           prerelease: false
           files: artifacts/*.zip

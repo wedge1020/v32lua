@@ -6,15 +6,26 @@ YACC = bison
 
 # --- Flags ---
 CFLAGS = -Wall -Wextra -g -I ../inc -DYYDEBUG=1
+# -MMD -MP: record each object's header dependencies (*.d, included at the
+# end), so editing a header such as context.h rebuilds every object that
+# uses it. Without this, changing a struct left stale objects with the old
+# layout linked in -- a silent miscompile until the next `make clean`.
+DEPFLAGS = -MMD -MP
 CLIBS = -lm
 
 # --- Output Executable ---
-TARGET = ../bin/v32lua
+# Written to bin/ at the project root. On Windows (MSYS2/MinGW, where make
+# sees OS=Windows_NT) the compiler names the file v32lua.exe; naming the
+# target the same way keeps make from relinking it on every run.
+ifeq ($(OS),Windows_NT)
+EXE = .exe
+endif
+TARGET = ../bin/v32lua$(EXE)
 
 # --- Object Files ---
 
 # Core sources
-CORE_SRCS = parser.tab.o lex.yy.o main.o context.o ffi.o closures.o generator.o ast.o emit.o internals.o register.o table.o tilemap.o tic80_assets.o vtex_generator.o vsnd_generator.o runtime_embed.o
+CORE_SRCS = parser.o lexer.o main.o context.o ffi.o closures.o generator.o ast.o emit.o internals.o register.o table.o tilemap.o pico8_assets.o pico8_shorthand.o pico8_audio.o pico8_prelude.o pico8_bezel.o png.o tic80_assets.o tic80_cart.o tic80_audio.o vtex_generator.o pathutil.o buildscript.o shapes.o v32kbd.o v32mouse.o runtime_embed.o
 
 # generate cases - automatically include all .c files in generate/
 NODE_DIR = node
@@ -34,22 +45,27 @@ OBJS = $(SRCS:.c=.o)
 all: $(TARGET)
 
 $(TARGET): $(OBJS)
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -o $@ $^ $(CLIBS)
 
-parser.tab.c parser.tab.h: parser.y
-	$(YACC) -v -d parser.y -t
+parser.c ../inc/parser.h: parser.y
+	$(YACC) -v --output=parser.c --defines=../inc/parser.h parser.y -t
 
-lex.yy.c: lexer.l parser.tab.h
-	$(LEX) lexer.l
+lexer.c: lexer.l ../inc/parser.h
+	$(LEX) --outfile=lexer.c lexer.l
 
 # Rule for standard C files
 %.o: %.c
+	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
+
+# Rule for Assembly files (the non-executable-stack note is in runtime_embed.S itself)
+%.o: %.S
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# Rule for Assembly files (instructs assembler to disable executable stack requirement)
-%.o: %.S
-	#$(CC) $(CFLAGS) -Wa,--noexecstack -c $< -o $@
-	$(CC) $(CFLAGS) -c $< -o $@
+# runtime_embed.S .incbin's every runtime unit, so those sources are real
+# prerequisites -- without this, editing runtime/*.s alone leaves a stale
+# runtime_embed.o in place and the change silently never reaches the build.
+runtime_embed.o: runtime_embed.S $(wildcard runtime/*.s)
 
 context:
 	@cp -v runtime/memory.s   runtime/memory.s.txt
@@ -63,6 +79,9 @@ context:
 	@cp -v runtime/pico8.s    runtime/pico8.s.txt
 	@cp -v runtime/tic80.s    runtime/tic80.s.txt
 	@cp -v runtime/vircon32.s runtime/vircon32.s.txt
+	@cp -v runtime/v32io.s    runtime/v32io.s.txt
+	@cp -v runtime/v32kbd.s   runtime/v32kbd.s.txt
+	@cp -v runtime/v32mouse.s runtime/v32mouse.s.txt
 	@cp -v runtime/constant.s runtime/constant.s.txt
 	@cp -v Makefile           Makefile.txt
 	@cp -v lexer.l            lexer.l.txt
@@ -70,6 +89,8 @@ context:
 	@cp -v runtime_embed.S    runtime_embed.S.txt
 
 clean:
-	rm -f $(TARGET) $(OBJS) parser.tab.c parser.tab.h lex.yy.c ../monolithic_source.c *.txt runtime/*.txt intrinsics/*.txt node/*.txt *.output
+	rm -f $(TARGET) $(OBJS) $(OBJS:.o=.d) ../monolithic_source.c *.txt runtime/*.txt intrinsics/*.txt node/*.txt *.output
 
 .PHONY: all clean monorule
+
+-include $(wildcard *.d node/*.d intrinsics/*.d)

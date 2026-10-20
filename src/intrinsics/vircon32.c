@@ -38,9 +38,18 @@ static const char *vircon32_button_ports[11] = {
 #define VIRCON32_BLEND_SUBTRACT 0x22
 
 int  vircon32_sfx_cursor_base          = -1;
+// One word: the gamepad selected by the last write of INP_SelectedGamepad
+// (v32io.s __v32io_select). Always allocated, like the above.
+int  v32io_gamepad_base                = -1;
 int  vircon32_btn_prev_state_base      = -1;
 int  vircon32_music_channel_mask_base  = -1;
 int  vircon32_sfx_channel_mask_base    = -1;
+// One word: how many values the last compiled Lua function returned (see
+// node_return() and __builtin_exec). Always allocated, like the above.
+int  ret_count_base                    = -1;
+int  mv_buf_base                       = -1;
+// __call trampolines (exec.s): pending return addresses, a small stack.
+int  meta_call_base                    = -1;
 
 // ============================================================================
 // spr(region_id, x, y[, scale_x][, scale_y][, angle_deg][, color_mult][, blend_mode])
@@ -131,7 +140,29 @@ bool emit_vircon32_spr_intrinsic(ASTNode *node, int dest_reg)
     // =========================================================================
 
     // Arg 8: blend_mode (default: VIRCON32_BLEND_ALPHA)
-    if (has_blend_mode) {
+    //
+    // A STRING LITERAL names the mode and is folded at compile time:
+    //   "alpha" / "default" -> 0x20, "add" -> 0x21, "subtract" -> 0x22
+    // Pushed as a float like every other spr() argument; the runtime CFIs it.
+    // Only literals are recognized -- a string held in a variable would reach
+    // the runtime as a NaN-boxed pointer, and there is no runtime string
+    // dispatch here.
+    if (has_blend_mode && args[7]->type == NODE_STRING) {
+        const char *mode = args[7]->as.string_val.value;
+        int blend;
+        if      (strcmp(mode, "alpha")    == 0 ||
+                 strcmp(mode, "default")  == 0) blend = VIRCON32_BLEND_ALPHA;
+        else if (strcmp(mode, "add")      == 0) blend = VIRCON32_BLEND_ADD;
+        else if (strcmp(mode, "subtract") == 0) blend = VIRCON32_BLEND_SUBTRACT;
+        else {
+            compiler_error(ERR_SEMANTIC, node->line_number,
+                "spr(): invalid blend_mode '%s' (expected \"alpha\", \"default\", "
+                "\"add\" or \"subtract\", or a number 0x20..0x22)", mode);
+            return false;
+        }
+        emit_asm("MOV R0, %d.000000 ; blend_mode \"%s\" (0x%02X)\n", blend, mode, blend);
+        emit_asm("PUSH R0\n");
+    } else if (has_blend_mode) {
         int reg = allocate_register();
         generate_asm(args[7], reg);
         emit_asm("PUSH R%d ; Arg 8: blend_mode\n", reg);
@@ -142,40 +173,37 @@ bool emit_vircon32_spr_intrinsic(ASTNode *node, int dest_reg)
     }
 
     // Arg 7: color_mult (default: 0xFFFFFFFF)
-    // Arg 7: color_mult (default: 0xFFFFFFFF)
+    //
+    // Passed to the runtime as the RAW packed 0xAABBGGRR word, which it
+    // writes to GPU_MultiplyColor without a CFI (same model as
+    // ioports.gpu.clear(color)):
+    //   - absent / nil         -> 0xFFFFFFFF
+    //   - numeric literal      -> folded here to that word (0xFFFFFFFF,
+    //                             -1 and 4294967295 all give 0xFFFFFFFF)
+    //   - anything else        -> passed through as-is, so it must already
+    //                             be a packed word: hex("0x...") directly,
+    //                             or a variable that holds a hex() value.
     {
         double color_value;
         bool is_static_color = has_color_mult && spu_static_number(args[6], &color_value);
 
         if (!has_color_mult) {
-            // -1.0, not 4294967295.0 -- see the CFI-overflow note in runtime.s.
-            emit_asm("MOV R0, -1.000000 ; Default color_mult (0xFFFFFFFF via CFI(-1.0))\n");
+            emit_asm("MOV R0, 0xFFFFFFFF ; Default color_mult (opaque white)\n");
             emit_asm("PUSH R0\n");
-        } else if (is_static_color && color_value >= 2147483648.0 && color_value <= 4294967295.0) {
-            // A literal whose top bit is set (alpha byte >= 0x80 in this GPU's
-            // 0xAABBGGRR layout) -- e.g. spr(..., 0xFFFFFFFF) written directly --
-            // hits the identical CFI-overflow hazard as the old default: its
-            // positive magnitude is out of signed-int32 range. Re-emit as the
-            // NEGATIVE two's-complement double instead, so CFI's input is always
-            // in-range and its result is architecture-independent.
-            double signed_value = color_value - 4294967296.0;
-            if (signed_value < -16777216.0) {
-                // Non-0x00/0xFF alpha byte AND beyond float32's exact 24-bit
-                // integer range -- the RGB low bits may round. That's the
-                // pre-existing float-only numeric model limit, not the CFI
-                // overflow bug, but worth telling the caller about explicitly.
-                compiler_warning(ERR_SEMANTIC, node->line_number,
-                    "color_mult 0x%08X has a non-0x00/0xFF alpha byte and exceeds "
-                    "float32's exact 24-bit integer range; low bits may round",
-                    (unsigned int) color_value);
+        } else if (is_static_color) {
+            if (color_value < -2147483648.0 || color_value > 4294967295.0 ||
+                color_value != (double)(long long) color_value) {
+                compiler_error(ERR_SEMANTIC, node->line_number,
+                    "spr(): color_mult %g is not a packed 0xAABBGGRR value", color_value);
+                return false;
             }
-            emit_asm("MOV R0, %f ; Literal color_mult 0x%08X (signed for CFI)\n",
-                      signed_value, (unsigned int) color_value);
+            unsigned int word = (unsigned int)(long long) color_value;
+            emit_asm("MOV R0, 0x%08X ; Literal color_mult (raw packed RGBA)\n", word);
             emit_asm("PUSH R0\n");
         } else {
             int reg = allocate_register();
-            generate_asm(args[6], reg);
-            emit_asm("PUSH R%d ; Arg 7: color_mult\n", reg);
+            emit_color_word_arg(args[6], reg, "spr", node->line_number, false);
+            emit_asm("PUSH R%d ; Arg 7: color_mult (raw packed RGBA)\n", reg);
             unlock_register(reg);
         }
     }
@@ -267,6 +295,19 @@ bool emit_vircon32_btn_intrinsic(ASTNode *node, int dest_reg)
     }
 
     bool has_player = (arg_count >= 2);
+
+    // Literal id, current gamepad: read the port inline (the common
+    // `btn(5)` in a game loop) instead of CALLing the runtime's 11-way
+    // dispatch. Same test as __builtin_vircon32_btn: pressed = port >= 1.
+    double lit_id;
+    if (!has_player && spu_static_number(args[0], &lit_id) &&
+        lit_id >= 0 && lit_id <= 10 && lit_id == (int) lit_id) {
+        int r = (dest_reg != 0) ? dest_reg : 0;
+        emit_asm("IN   R%d, %s\n", r, vircon32_button_ports[(int) lit_id]);
+        emit_asm("IGE  R%d, 1 ; 1 while pressed\n", r);
+        emit_asm("IADD R%d, BOXED_FALSE ; 0/1 -> false/true\n", r);
+        return true;
+    }
 
     // Push player or nil (to indicate "use current gamepad")
     if (has_player) {
@@ -435,6 +476,97 @@ bool emit_vircon32_tilemap_render_intrinsic (ASTNode *node, int dest_reg)
 
     if (dest_reg != 0) {
         emit_asm ("MOV R%d, BOXED_NIL ; tilemap.render() returns nothing\n", dest_reg);
+    }
+    return true;
+}
+
+// ============================================================================
+// rect(x1, y1, x2, y2 [, color])     -- 1-pixel rectangle outline
+// rectfill(x1, y1, x2, y2 [, color]) -- filled rectangle
+//
+// (x1, y1) and (x2, y2) are opposite corners, both INCLUSIVE, in any order:
+// rectfill(10, 10, 19, 14) covers 10 x 5 pixels. Coordinates are floored.
+// color is a packed 0xAABBGGRR word, handled exactly like spr()'s
+// color_mult: a numeric literal is folded to its word here, anything else
+// (rgba(), color(), hex(), a variable holding one of those) is passed
+// through as is; absent / nil -> 0xFFFFFFFF (opaque white).
+//
+// Runtime: __builtin_vircon32_rect (vircon32.s), one zoomed draw of BIOS
+// texture (-1) region 256 -- a single white pixel the BIOS defines -- for
+// rectfill(), up to 4 for rect(). Nothing is added to the cartridge. The GPU state it touches (texture, region, multiply color,
+// scale) is restored afterwards; the active blending mode is used as is.
+//
+// Stack: [BP+2]=x1 [BP+3]=y1 [BP+4]=x2 [BP+5]=y2 [BP+6]=color (raw word)
+//        [BP+7]=filled (raw 0 / 1)
+// ============================================================================
+bool emit_vircon32_rect_intrinsic (ASTNode *node, int dest_reg, bool filled)
+{
+    const char *name = filled ? "rectfill" : "rect";
+    emit_asm ("    ;; --- Vircon32 %s() Intrinsic ---\n", name);
+
+    ASTNode *args[5] = { NULL };
+    int arg_count = 0;
+    ASTNode *curr = node->as.call.args_head;
+    while (curr != NULL && arg_count < 5) {
+        args[arg_count++] = curr;
+        curr = curr->next;
+    }
+
+    if (arg_count < 4) {
+        compiler_error (ERR_SEMANTIC, node->line_number,
+            "%s() requires at least 4 arguments: %s(x1, y1, x2, y2 [, color])", name, name);
+        return false;
+    }
+    if (curr != NULL) {
+        compiler_warning (ERR_SEMANTIC, node->line_number,
+            "%s() takes at most 5 arguments; extra arguments ignored", name);
+    }
+
+    // Arg 6: filled flag (raw int)
+    emit_asm ("MOV R0, %d\n", filled ? 1 : 0);
+    emit_asm ("PUSH R0 ; %s: filled = %d\n", name, filled ? 1 : 0);
+
+    // Arg 5: color -- same rules as spr()'s color_mult
+    bool has_color = (arg_count >= 5 && args[4] != NULL && args[4]->type != NODE_NIL);
+    double color_value;
+    if (!has_color) {
+        emit_asm ("MOV R0, 0xFFFFFFFF ; default color (opaque white)\n");
+        emit_asm ("PUSH R0\n");
+    } else if (spu_static_number (args[4], &color_value)) {
+        if (color_value < -2147483648.0 || color_value > 4294967295.0 ||
+            color_value != (double) (long long) color_value) {
+            compiler_error (ERR_SEMANTIC, node->line_number,
+                "%s(): color %g is not a packed 0xAABBGGRR value", name, color_value);
+            return false;
+        }
+        unsigned int word = (unsigned int) (long long) color_value;
+        emit_asm ("MOV R0, 0x%08X ; literal color (raw packed RGBA)\n", word);
+        emit_asm ("PUSH R0\n");
+    } else {
+        int reg = allocate_register ();
+        register_pinned[reg] = 1;
+        emit_color_word_arg (args[4], reg, name, node->line_number, false);
+        emit_asm ("PUSH R%d ; color (raw packed RGBA)\n", reg);
+        register_pinned[reg] = 0;
+        unlock_register (reg);
+    }
+
+    // Args 1-4: y2, x2, y1, x1 (pushed right to left)
+    static const char *coord[4] = { "x1", "y1", "x2", "y2" };
+    for (int i = 3; i >= 0; i--) {
+        int reg = allocate_register ();
+        register_pinned[reg] = 1;
+        generate_asm (args[i], reg);
+        emit_asm ("PUSH R%d ; %s\n", reg, coord[i]);
+        register_pinned[reg] = 0;
+        unlock_register (reg);
+    }
+
+    emit_asm ("CALL __builtin_vircon32_rect\n");
+    emit_asm ("IADD SP, 6 ; clean up %s() arguments\n", name);
+
+    if (dest_reg != 0) {
+        emit_asm ("MOV R%d, BOXED_NIL ; %s() returns nothing\n", dest_reg, name);
     }
     return true;
 }

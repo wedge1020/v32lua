@@ -1,0 +1,3 @@
+# screenshot_v32.py needs it; test_v32.py -blank and make_site_v32.py's covers use it.
+# Everything else is standard library.
+Pillow>=9.1

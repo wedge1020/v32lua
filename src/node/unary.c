@@ -2,6 +2,15 @@
 
 void  node_unary (ASTNode *node, int  dest_reg)
 {
+    if (node->as.unary.operator == OP_NOT) {
+        generate_bool_value (node, dest_reg);   // see node/cond.c
+        return;
+    }
+    if (node->as.unary.operator == OP_BNOT) {
+        node_bnot (node, dest_reg);             // see node/bitops.c
+        return;
+    }
+
     // Evaluate the operand into dest_reg
     generate_asm(node->as.unary.operand, dest_reg);
     
@@ -51,6 +60,7 @@ void  node_unary (ASTNode *node, int  dest_reg)
         unlock_register (scratch_reg);
     }
     else if (node -> as.unary.operator == OP_UNM) {
+        emit_arith_coerce (dest_reg, node->as.unary.operand);   // -"3" is -3
         emit_asm ("PUSH R%d\n", dest_reg);
         emit_asm ("CALL __builtin_unm\n");
         emit_asm ("IADD SP, 1\n");

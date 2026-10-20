@@ -23,9 +23,7 @@ struct TIC80AssetData {
 
 // In the TIC80 assets section
 extern bool  tic80_has_map;
-extern bool  tic80_has_waves;
-extern bool  tic80_has_sfx;
-extern bool  tic80_has_tracks;
+extern uint8_t tic80_sprite_flags[512];
 extern int   tic80_map_width;
 extern int   tic80_map_height;
 extern uint8_t tic80_tile_pixels[TIC80_SHEET_WIDTH * TIC80_SHEET_HEIGHT];
@@ -46,8 +44,18 @@ void      parse_tic80_map_row        (int, const char *);
 // ============================================================================
 // Sound Function Declarations
 // ============================================================================
-void parse_tic80_wave(int wave_index, const char *hex_data);
-void parse_tic80_sfx(int sfx_index, const char *hex_data);
-void parse_tic80_track(int track_index, const char *hex_data);
+
+// tic80_cart.c -- binary .tic cartridges
+bool        tic80_is_binary_cart_path (const char *path);
+char       *tic80_cart_to_text (const char *path);     // malloc'd .lua-project text
+const char *tic80_metatag (const char *code, const char *tag);
+
+// tic80_audio.c -- TIC-80 sound synthesized at compile time
+void tic80_audio_store_row (const char *section, int row, const char *hex);
+void register_tic80_audio (const char *source);
+void emit_tic80_audio_tables (FILE *out);
+int  tic80_audio_rate (void);
+extern bool tic80_audio_rendered;
+extern long tic80_audio_bytes;
 
 #endif

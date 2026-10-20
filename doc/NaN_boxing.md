@@ -137,7 +137,9 @@ offset** inside  the NaN payload. When  the runtime unboxes a  ROM string
 literal (tag  `0x7FC00000`), it strips  the upper tag  (`AND 0x003FFFFF`)
 and then bitwise-ORs the result with  the ROM page base (`OR 0x20000000`)
 to reconstruct the ROM hardware address  on the fly (letting us work with
-the first 4MW/16MB of CART ROM data).
+the first 4MW/16MB of CART ROM data). A BIOS built with `-b` lives in the
+BIOS program ROM page instead (`0x10000000`), and the compiler defines
+`V32_CART_PAGE` accordingly; the offsets inside the NaN boxes are the same.
 
 ## Supported Tags & Type Representations
 
@@ -233,3 +235,27 @@ hash bucket scans entirely.
 It converts the 1-based Lua index to a 0-based memory offset and performs
 an O(1) contiguous  array memory read or write directly  against the heap
 buffer.
+
+## Arithmetic with no boxable answer
+
+Where standard Lua answers with infinity or NaN, the Vircon32 CPU mostly
+raises a hardware error (the red system-fault screen) instead, and where
+it doesn't, an infinity or NaN bit pattern would land in the tag space
+above and read back as a boxed value. So each such case gets a finite
+answer:
+
+| Expression | Lua 5.4 | Here | CPU error avoided |
+|---|---|---|---|
+| `x / 0`, `x // 0` | ±inf (NaN for 0/0) | ±`math.huge` (0/0: +`math.huge`) | DivisionError |
+| `x % 0`, `math.fmod(x, 0)` | NaN (error for integers) | 0 (PICO-8's answer) | DivisionError |
+| `math.atan2(0, 0)` | 0 | 0 | ArcTangent2Error |
+| `math.acos(x)`, \|x\| > 1 | NaN | `acos` of x clamped to [-1, 1] | ArcCosineError |
+| `math.log(x)`, `math.log10(x)`, x ≤ 0 | -inf / NaN | -`math.huge` | LogarithmError |
+| `(-8) ^ 0.5`, `math.pow`, `math.sqrt(-4)` | NaN | 0 | PowerError |
+
+A negative base with an *integer* exponent (`(-2) ^ 3`) is computed
+normally; a literal integer exponent (`x ^ 2`) skips the check entirely.
+PICO-8's `atan2(0, 0)` is 0.25 (its own convention), and a zero-length
+`line()` on either fantasy-console layer draws one pixel rather than
+asking the GPU for the angle of a zero vector.
+

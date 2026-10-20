@@ -10,6 +10,11 @@
 #define _REGISTER_H
 
 #define NUM_GPRS 14
+
+// Variadic ABI: argument count register, loaded by every call site that may
+// reach a variadic function immediately before CALL __builtin_exec (which
+// only uses R0-R5). Runtime .s callers of Lua functions hard-code R13 too.
+#define VARARG_COUNT_REG 13
 #define MAX_SPILL_SLOTS 64  // Arbitrary limit for spilled values
 
 // Maximum number of "extra" (beyond the 3 register-passed) return values
@@ -18,7 +23,14 @@
 // up travel through a small bank of dedicated global words instead (see
 // get_extra_return_slot_access() in v32lua.c). Total max return values
 // per function is therefore 3 + MAX_EXTRA_RETURN_SLOTS.
-#define MAX_EXTRA_RETURN_SLOTS 16
+#define MAX_EXTRA_RETURN_SLOTS 29
+
+// The multi-value buffer (MV_BUF, MV_MAX words of RAM, always allocated):
+// value k of the current multi-value list -- a function's return values, a
+// spread `...`, unpack() -- with [RET_COUNT] saying how many. A compiled
+// function returns values 0-2 in R0/R2/R3 and the rest in MV_BUF[3..], so
+// the "extra return slots" ARE MV_BUF[3..]. See node/multivalue.c.
+#define MV_MAX (3 + MAX_EXTRA_RETURN_SLOTS)
 
 // Track which registers should NOT be spilled
 extern int  register_pinned[NUM_GPRS];
@@ -28,7 +40,7 @@ extern int  spill_slot_for_reg[NUM_GPRS];
 
 // Track next available stack slot (negative offset from BP)
 extern int  next_spill_slot;
-extern int  register_inventory[];
+extern int  register_inventory[NUM_GPRS];
 extern int  register_use_distance[NUM_GPRS];
 extern int  base_spill_frame_offset;
 

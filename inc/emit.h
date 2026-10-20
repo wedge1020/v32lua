@@ -11,11 +11,18 @@ extern const char  runtime_string_start[];
 extern const char  runtime_print_start[];
 extern const char  runtime_iters_start[];
 extern const char  runtime_vircon32_start[];
+extern const char  runtime_v32io_start[];
+extern const char  runtime_v32kbd_start[];
+extern const char  runtime_v32mouse_start[];
 extern const char  runtime_pico8_start[];
 extern const char  runtime_tic80_start[];
 extern const char  runtime_constant_start[];
 
-void  emit_cart_xml (const char *, int);
+struct cart_resource;
+void  emit_cart_xml (const char *, const char *, int, int);
+char *cart_xml_filename (const char *, const char *, int);
+char **cart_xml_resolve_names (struct cart_resource *, int, const char *, const char *, int, const char *);
+void  cart_xml_set_quiet (int);
 void  emit_interpolated_asm (const char *);
 void  emit_string_data_section (void);
 int   emit_variable_map (void);
@@ -26,5 +33,8 @@ void  emit_falsy_jump (int, const char *);
 void  emit_get_gamepad_inputs_intrinsic (int);
 void  emit_tic80_map_data (FILE *);
 void  emit_cart_title_label (const char *);
+
+void emit_env_table (FILE *);
+extern bool g_uses_env;
 
 #endif

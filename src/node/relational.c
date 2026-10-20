@@ -2,72 +2,9 @@
 
 void  node_relational (ASTNode *node, int  dest_reg)
 {
-    generate_asm (node -> as.binary.left, dest_reg);
-
-    // See node_add() for the full rationale -- e.g. `x > compute()`
-    // is just as vulnerable as arithmetic operators are.
-    emit_asm ("PUSH R%d ; spill left operand (protect across possible nested CALL in right operand)\n", dest_reg);
-
-    int  right_reg  = allocate_register ();
-    generate_asm (node -> as.binary.right, right_reg);
-    ensure_in_register (right_reg);
-
-    emit_asm ("POP R%d ; reload spilled left operand\n", dest_reg);
-
-    if (node->as.binary.operator == OP_EQ || node->as.binary.operator == OP_NEQ) {
-        emit_asm("PUSH R%d\n", dest_reg);
-        emit_asm("PUSH R%d\n", right_reg);
-        emit_asm("CALL __builtin_eq\n");
-        emit_asm("IADD SP, 2\n");
-
-        if (node->as.binary.operator == OP_NEQ) {
-            emit_asm("MOV R%d, R0\n", dest_reg);
-            emit_asm("XOR R%d, 3 ; Flip BOXED_FALSE (0xFFC00001) <-> BOXED_TRUE (0xFFC00002)\n", dest_reg);
-        } else {
-            emit_asm("MOV R%d, R0\n", dest_reg);
-        }
-    }
-    else
-    {
-        emit_asm("PUSH R%d\n", dest_reg);
-        emit_asm("PUSH R%d\n", right_reg);
-        emit_asm("CALL __builtin_relcmp\n");
-        emit_asm("IADD SP, 2\n");
-
-		switch (node -> as.binary.operator)
-		{
-			case OP_LT:
-				emit_asm ("IEQ R0, -1 ; true only if Left < Right\n");
-				break;
-
-			case OP_GT:
-				emit_asm ("IEQ R0, 1 ; true only if Left > Right\n");
-				break;
-
-			case OP_LE:
-				emit_asm ("MOV R%d, R0 ; save raw relcmp result\n", right_reg);
-				emit_asm ("IEQ R0, -1 ; is it Less?\n");
-				emit_asm ("MOV R%d, R%d ; recover raw result\n", dest_reg, right_reg);
-				emit_asm ("IEQ R%d, 0 ; is it Equal?\n", dest_reg);
-				emit_asm ("OR R0, R%d ; Less OR Equal\n", dest_reg);
-				break;
-
-			case OP_GE:
-				emit_asm ("MOV R%d, R0 ; save raw relcmp result\n", right_reg);
-				emit_asm ("IEQ R0, 1 ; is it Greater?\n");
-				emit_asm ("MOV R%d, R%d ; recover raw result\n", dest_reg, right_reg);
-				emit_asm ("IEQ R%d, 0 ; is it Equal?\n", dest_reg);
-				emit_asm ("OR R0, R%d ; Greater OR Equal\n", dest_reg);
-				break;
-
-			default:
-				break;
-		}
-
-		emit_asm ("MOV R%d, R0\n", dest_reg);
-		emit_asm ("IADD R%d, BOXED_BOOLEAN ; Box as Lua Boolean (False/True)\n", dest_reg);
-    }
-    unlock_register (right_reg);
+    // Comparisons are compiled as jumps (node/cond.c); as a value the
+    // boolean is materialized once at the end.
+    generate_bool_value (node, dest_reg);
 }
 
 void  node_and (ASTNode *node, int  dest_reg)

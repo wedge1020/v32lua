@@ -230,21 +230,12 @@ __builtin_vircon32_spr:
     OUT   GPU_DrawingPointY, R1
 
     ;; --- 3. Set color multiply / blending (applies to every draw variant) ---
-    ;; color_mult travels across the calling convention as a Lua float, like
-    ;; every other spr() argument. GPU_MultiplyColor is a packed RGBA INTEGER
-    ;; port, so the compiler-side default push is "MOV R0, -1.000000", NOT
-    ;; the numeric value 4294967295.0 -- that magnitude isn't exactly
-    ;; representable in a float32 (rounds up to 2^32) and is out of INT32
-    ;; range, so CFI's result on it is host-CPU-dependent: saturates to
-    ;; 0x7FFFFFFF on ARM64, returns the "integer indefinite" 0x80000000 on
-    ;; x86_64. Neither is 0xFFFFFFFF -- there is no wraparound semantics
-    ;; here, just two different (and both spec-valid) overflow behaviors,
-    ;; found the hard way by getting a mostly-plausible result on ARM64 and
-    ;; a broken one on x86_64. -1.0 sidesteps the overflow question
-    ;; entirely: it's exact and in-range, so CFI(-1.0) = -1, which in two's
-    ;; complement is bit-for-bit 0xFFFFFFFF, on every architecture.
-    MOV   R1, [BP+8]        ; color_mult (RGBA, packed as an int)
-    CFI   R1
+    ;; color_mult arrives as the RAW packed 0xAABBGGRR word, not as a Lua
+    ;; number: the compiler folds numeric literals to that word, and hex()
+    ;; or a variable holding a hex() value already is one. It goes straight
+    ;; to the port. (It used to be CFI'd, which turned hex("0xFFFFFFFF") --
+    ;; a NaN bit pattern -- into 0 on ARM64 hosts and 0x80000000 on x86_64.)
+    MOV   R1, [BP+8]        ; color_mult (raw packed RGBA word)
     OUT   GPU_MultiplyColor, R1
 
     MOV   R1, [BP+9]        ; blend_mode
@@ -365,9 +356,13 @@ __builtin_vircon32_btn:
     IEQ   R3, BOXED_NIL
     JT    R3, _vircon32_btn_use_current_gamepad
 
-    ;; Player specified - convert to int and set it
+    ;; Player specified - convert to int and set it (through v32io, which
+    ;; remembers it: the port can't be read back)
     CFI   R2
-    OUT   INP_SelectedGamepad, R2
+    PUSH  R1
+    MOV   R1, R2
+    CALL  __v32io_select
+    POP   R1
     JMP   _vircon32_btn_check_button
 
 _vircon32_btn_use_current_gamepad:
@@ -516,12 +511,18 @@ __builtin_vircon32_btnp:
     ;; Player specified - convert to int, save in R4, and set gamepad
     CFI   R2
     MOV   R4, R2            ; Save player index in R4
-    OUT   INP_SelectedGamepad, R2
+    PUSH  R1
+    MOV   R1, R2
+    CALL  __v32io_select
+    POP   R1
     JMP   _vircon32_btnp_clamp_player
 
 _vircon32_btnp_use_current_gamepad:
-    ;; Use current gamepad - read which one is selected
-    IN    R4, INP_SelectedGamepad  ; Get current gamepad index
+    ;; Use current gamepad - which one is selected. Not read from
+    ;; INP_SelectedGamepad: the emulator returns garbage for that port
+    ;; (V32GamepadController::ReadPort falls through to the per-gamepad
+    ;; ports), so v32io.s keeps the last selection in V32IO_GAMEPAD.
+    MOV   R4, [V32IO_GAMEPAD]
 
 _vircon32_btnp_clamp_player:
     ;; Clamp R4 to 0-3 so the prev-state index below can never run off
@@ -874,78 +875,104 @@ _vircon32_play_done:
     RET
 
 ;; ============================================================================
-;; __builtin_vircon32_chancmd: issue an SPU command at a channel, or globally
+;; __builtin_vircon32_chanselect: resolve stop()/pause()/resume()'s CHANNEL
 ;; ============================================================================
 ;; Stack layout relative to BP:
-;; [BP+2]: channel      (Lua float 0-15, or BOXED_NIL -> apply to all channels)
-;; [BP+3]: selected_cmd (raw SPU command integer, used when a channel is given)
-;; [BP+4]: all_cmd      (raw SPU command integer, used when channel is nil)
+;; [BP+2]: channel (Lua float 0-15, or BOXED_NIL -> apply to all channels)
 ;;
-;; Returns: R0 = BOXED_NIL
+;; Returns:
+;;   R0 = 1   a channel was named: it has been nil-checked, CFI-ed, clamped
+;;            to 0-15 and written to SPU_SelectedChannel. The caller
+;;            follows up with its per-channel command.
+;;   R0 = 0   the channel was nil: nothing was written. The caller follows
+;;            up with its all-channels command.
 ;;
-;; This one routine backs stop(), pause() and resume(): the three differ only
-;; in which command pair the compiler pushes.
+;; This routine resolves only the CHANNEL half of stop()/pause()/resume();
+;; the emitter's dynamic path calls it and then branches on R0. The command
+;; half is a compile-time constant of the call site, and SPUCommand_*
+;; labels are valid ONLY as operands of OUT -- they cannot be moved into a
+;; register or pushed on the stack. (The old __builtin_vircon32_chancmd
+;; received the two commands as pushed stack words, which forced the
+;; compiler to emit "MOV R0, SPUCommand_..." -- not a real instruction --
+;; so that routine was removed and the commands moved to the call site:)
 ;;
+;;   CALL __builtin_vircon32_chanselect
+;;   JT   R0, <selected>
+;;   OUT  SPU_Command, SPUCommand_<AllChannels>       ; nil case
+;;   JMP  <done>
+;; <selected>:
+;;   OUT  SPU_Command, SPUCommand_<SelectedChannel>
+;; <done>:
+;;
+;; The command pairs, chosen by the emitter's table:
 ;;   stop(ch)    StopSelectedChannel     stop()    StopAllChannels
 ;;   pause(ch)   PauseSelectedChannel    pause()   PauseAllChannels
 ;;   resume(ch)  PlaySelectedChannel     resume()  ResumeAllChannels
 ;;
 ;; resume(ch) uses Play rather than a "resume selected channel" command
 ;; because the console has no such command. PlayChannel() leaves a PAUSED
-;; channel's position and loop flag untouched and simply sets it Playing, so
-;; Play IS the per-channel resume. (ResumeAllChannels is literally a loop
-;; calling PlayChannel on every paused channel.)
+;; channel's position and loop flag untouched and simply sets it Playing,
+;; so on a paused channel Play IS the per-channel resume. (ResumeAllChannels
+;; is literally a loop calling PlayChannel on every PAUSED channel and
+;; skipping the rest.)
 ;;
-;; Note that Play only resumes a channel that is genuinely PAUSED. On a
-;; STOPPED channel it rewinds to 0 and restarts -- so a "resume" that
-;; restarts from the beginning means the channel had stopped, not paused.
-;; The usual cause is a sound that ran to its end because its loop flag was
-;; lost; see note B on __builtin_vircon32_play above.
+;; But Play is only a resume for a PAUSED channel: on a STOPPED channel it
+;; rewinds to 0 and restarts, and on a PLAYING one it retriggers from 0.
+;; So the emitter (spu_emit_selected_channel_cmd in intrinsics/spu.c)
+;; guards resume(ch)'s per-channel command with IN SPU_ChannelState == 0x41
+;; (Paused) and skips it otherwise; stop(ch) and pause(ch) are unguarded.
+;; The guard is emitted inline at the <selected> label above, not here.
+;; A "resume" that restarts from the beginning therefore no longer happens
+;; on a stopped channel; if a sound restarts when you did not expect it,
+;; the usual cause is a loop flag lost on a sound that ran to its end; see
+;; note B on __builtin_vircon32_play above.
 ;;
-;; The two command arguments are pushed by the compiler as raw hardware
-;; integers (MOV R0, SPUCommand_...), not as Lua floats, so they are OUT-ed
-;; directly with no CFI.
+;; The BOXED_NIL test happens on the raw boxed value, BEFORE the CFI --
+;; once converted, the tag bits are gone and nil is indistinguishable
+;; from 0.0.
+;;
+;; Register use follows the other __builtin_vircon32_* routines: R1-R2
+;; are used freely without saving, since the emitter frees its registers
+;; before the CALL. The channel lives in R1 and is only ever compared
+;; via a throwaway copy in R2, because IEQ/ILT/IGT are destructive.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-__builtin_vircon32_chancmd:
+;; ============================================================================
+;; __builtin_vircon32_chanselect
+;; [BP+2]: channel (Lua float 0-15, or BOXED_NIL -> all channels)
+;; Returns: R0 = 1 with SPU_SelectedChannel already written (clamped 0-15),
+;;          R0 = 0 when the channel was nil (caller issues its
+;;          all-channels command itself -- SPUCommand_* labels are only
+;;          valid in OUT operands, so the command cannot travel through
+;;          a register or the stack).
+;; ============================================================================
+__builtin_vircon32_chanselect:
     PUSH  BP
     MOV   BP, SP
-
     MOV   R1, [BP+2]
     MOV   R2, R1
     IEQ   R2, BOXED_NIL
-    JT    R2, _vircon32_chancmd_all
-
-    ;; --- A channel was named: select it, clamping to 0-15 first ---
+    JT    R2, _vircon32_chanselect_nil
     CFI   R1
     MOV   R2, R1
     ILT   R2, 0
-    JT    R2, _vircon32_chancmd_low
+    JT    R2, _vircon32_chanselect_low
     MOV   R2, R1
     IGT   R2, 15
-    JT    R2, _vircon32_chancmd_high
-    JMP   _vircon32_chancmd_selected
-
-_vircon32_chancmd_low:
+    JT    R2, _vircon32_chanselect_high
+    JMP   _vircon32_chanselect_out
+_vircon32_chanselect_low:
     MOV   R1, 0
-    JMP   _vircon32_chancmd_selected
-
-_vircon32_chancmd_high:
+    JMP   _vircon32_chanselect_out
+_vircon32_chanselect_high:
     MOV   R1, 15
-
-_vircon32_chancmd_selected:
+_vircon32_chanselect_out:
     OUT   SPU_SelectedChannel, R1
-    MOV   R2, [BP+3]
-    OUT   SPU_Command, R2
-    JMP   _vircon32_chancmd_done
-
-_vircon32_chancmd_all:
-    MOV   R2, [BP+4]
-    OUT   SPU_Command, R2
-
-_vircon32_chancmd_done:
-    MOV   R0, BOXED_NIL
-
+    MOV   R0, 1
+    JMP   _vircon32_chanselect_done
+_vircon32_chanselect_nil:
+    MOV   R0, 0
+_vircon32_chanselect_done:
     MOV   SP, BP
     POP   BP
     RET
@@ -1282,40 +1309,257 @@ _vircon32_volmask_done:
     POP   BP
     RET
 
-;; ============================================================================
-;; __builtin_vircon32_memcard_title: set the memcard's title, one word per
-;; character, into the full VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS (20) title
-;; block. Metadata (VIRCON32_MEMCARD_METADATA_WORDS, including the cursor at
-;; VIRCON32_MEMCARD_CURSOR_ADDR) now lives in its own separate region right
-;; after the title -- see the header comment block near the top of this
-;; file -- so it's never touched here regardless of title length.
-;; ============================================================================
-;;
-;; NOTE: 20 is a LITERAL here, not the symbolic VIRCON32_MEMCARD_TITLE_
-;; DISPLAY_WORDS constant -- emit_variable_map() in emit.c only exports
-;; BASE/DATA_BASE/CURSOR_ADDR/END as %defines for the assembler, not word-
-;; count constants. If a future change adds an export for this one, this
-;; is a good spot to switch it over.
-;;
-;; Stack layout relative to BP:
-;; [BP+2]: title string (boxed, ROM or RAM)
-;;
-;; Returns: R0 = BOXED_NIL
-;;
-;; Truncates to 20 characters if the string is longer; zero-pads the
-;; remainder of the 20 if shorter. One word per character, matching this
-;; VM's own internal string representation (see __builtin_string_len) --
-;; NOT a packed byte string.
-;;
-;; Register use: R1 = source pointer (from __unbox_string). R2 = dest
-;; pointer, starts at VIRCON32_MEMCARD_BASE. R3 = characters written so
-;; far (0-20). R4/R5 are per-iteration scratch.
+; ============================================================================
+; __builtin_vircon32_memcard_get_title: read the memcard's title block back
+; as a Lua TABLE -- the no-argument memcard.title() form
+; ============================================================================
+; Takes NO arguments.
+;
+; Returns: R0 = a fresh table whose elements 1..20 are ALL
+; VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS (20) title words, in order --
+; element i is the word at VIRCON32_MEMCARD_BASE + (i-1), i.e. memcard
+; position -24 + (i-1).
+;
+; THE TITLE BLOCK IS AN ID FIELD, NOT DISPLAY TEXT: this is a FIXED-WIDTH
+; transaction. All 20 words are read, verbatim, every call -- no early
+; exit at a zero word, no conversion loss. Each element is its word CIF'd:
+; CIF reads the register's content as an INTEGER and yields that value as
+; a Lua number, so 'M' (raw bits 0x0000004D) becomes the number 77, and a
+; zero pad word becomes 0. A plain number every time, whatever the bits
+; resemble -- CIF never consults the NaN-box tags, so a word whose bits
+; happen to look like a string/boolean/nil encoding still comes back as a
+; number. (Words >= 0x80000000 come back negative: 32-bit signed.)
+;
+; WHY A TABLE AND NOT A STRING: this VM's strings are NUL-terminated and
+; every string operation (string.len, ==, .., print, string.sub) scans to
+; the first zero word -- a string return made all words after the first
+; zero invisible, so two IDs differing only there were indistinguishable.
+; A table has no such blind spot: zero words are visible element 0s, and
+; words past them are ordinary comparable elements. It also restores the
+; readable-char-code property the raw-words writer change took away from
+; memcard.load(-24): element 1 for a title starting 'M' is 77.
+;
+; == ON TABLES IS IDENTITY in this VM (only strings compare by content):
+; two reads of the same title are different table objects and never ==
+; each other. ID checks are an element-wise loop in Lua -- see the
+; title/ID unit test for the pattern.
+;
+; NO NIL-OOM PATH: __builtin_table_new and __builtin_table_set both halt
+; through __oom_handler on heap exhaustion and never return 0 -- the same
+; contract __builtin_vircon32_memcard_load_table already has. This
+; routine returns a valid table or never returns at all.
+;
+; Register/stack discipline: __builtin_table_set is called 20 times, so
+; per this file's standing rule nothing the loop needs is trusted to
+; survive a CALL in a plain register -- the table ([BP-1]), the card read
+; pointer ([BP-2]), and the 1-based element index ([BP-3]) all live in
+; stack slots, reloaded/rewritten around every iteration, the same shape
+; as load_table's restore loop. (table_set's own header says it preserves
+; R1-R8; that is deliberately NOT relied on here.) The KEY is pushed as a
+; real Lua number -- CIF of the index -- because table_set treats its key
+; as a boxed value; a raw integer pushed bare would CFI (float-read) to
+; 0. Same reason node_table.c's constructor CIFs its array keys.
+;
+; NOTE: 20 is a LITERAL here for the same reason as in
+; __builtin_vircon32_memcard_title below -- emit_variable_map() in
+; emit.c only exports BASE/DATA_BASE/CURSOR_ADDR/END as %defines for the
+; assembler, not word-count constants. If a future change adds an export
+; for this one, both routines should switch over together.
+;
+; Verified (20261014-dev) on the real CPU core via the headless harness:
+; strings, oversize/empty/sparse/fractional input, and the round trip with
+; the table form of memcard.title().
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_vircon32_memcard_get_title:
+    PUSH  BP
+    MOV   BP, SP
+
+    ;; --- 1. Fresh table (fatal on OOM via __oom_handler -- no branch here)
+    CALL  __builtin_table_new
+    PUSH  R0                            ; [BP-1] = the new table
+
+    ;; --- 2. Loop state in stack slots, not registers ---
+    MOV   R1, VIRCON32_MEMCARD_BASE
+    PUSH  R1                            ; [BP-2] = card read pointer
+    MOV   R1, 1
+    PUSH  R1                            ; [BP-3] = element index (1-based)
+
+_memcard_get_title_loop:
+    MOV   R1, [BP-3]
+    IGT   R1, 20
+    JT    R1, _memcard_get_title_done
+
+    ;; --- 3. One __builtin_table_set per word: [BP+4]=table,
+    ;; [BP+3]=key, [BP+2]=value -- same stack shape as load_table's
+    ;; restore loop.
+    MOV   R1, [BP-1]
+    PUSH  R1                            ; table
+    MOV   R1, [BP-3]
+    CIF   R1                            ; key as a real Lua number
+    PUSH  R1
+    MOV   R1, [BP-2]
+    MOV   R1, [R1]                      ; the raw title word
+    CIF   R1                            ; ... its integer value, as a number
+    PUSH  R1
+    CALL  __builtin_table_set
+    IADD  SP, 3
+
+    MOV   R1, [BP-2]
+    IADD  R1, 1
+    MOV   [BP-2], R1
+    MOV   R1, [BP-3]
+    IADD  R1, 1
+    MOV   [BP-3], R1
+    JMP   _memcard_get_title_loop
+
+_memcard_get_title_done:
+    MOV   R0, [BP-1]                    ; return the table
+
+    MOV   SP, BP
+    POP   BP
+    RET
+
+
+; ============================================================================
+; __builtin_vircon32_memcard_title: set the memcard's title into the full
+; VIRCON32_MEMCARD_TITLE_DISPLAY_WORDS (20) title block -- from a STRING
+; or, new, from a TABLE. Metadata (VIRCON32_MEMCARD_METADATA_WORDS,
+; including the cursor at VIRCON32_MEMCARD_CURSOR_ADDR) lives in its own
+; separate region right after the title -- see the header comment block
+; near the top of this file -- so it's never touched here regardless of
+; title length or form.
+; ============================================================================
+;
+; NOW ACCEPTS A STRING OR A TABLE: the write form is memcard.title(str|t),
+; and the runtime DISPATCHES ON THE ARGUMENT'S NaN-BOX TAG at entry --
+; the two forms deliberately share one entry point (Lua call syntax can't
+; distinguish them any other way), and a non-literal argument's type is a
+; runtime property the compiler can't know at compile time, so the
+; dispatch lives here, not in the emitter.
+;
+;   STRING (ROM or RAM): behavior unchanged -- one raw word per
+;   character, NUL-stop against STR itself, truncate at 20 characters,
+;   zero-pad the remainder (details in the CIF-DROPPED note below).
+;
+;   TABLE: the write-side mirror of the read form -- a FIXED-WIDTH
+;   20-word transaction built from elements 1..20. For each i the
+;   routine evaluates t[i] via __builtin_table_get (so a metatable's
+;   __index answers misses exactly as a Lua t[i] would):
+;     - a NUMBER element is CFI'd and its integer bits become the word
+;       (77.0 -> 0x0000004D, -1.0 -> 0xFFFFFFFF) -- the exact inverse
+;       of the read form's per-element CIF, so a value read back from
+;       memcard.title() ROUND-TRIPS BIT-EXACTLY, signed words included
+;       (the read form reports words >= 0x80000000 as negative 32-bit
+;       values, and writing that negative number reproduces the same
+;       bits);
+;     - an ABSENT element (nil) writes a zero word -- the table form's
+;       zero-pad;
+;     - elements past 20 are ignored;
+;     - any other element value (string/boolean/table/function) is a
+;       RUNTIME ERROR -- no silent fallback: the routine traps through
+;       __runtime_error_bad_memcard_title (below), the same family as
+;       table.s's __runtime_error_not_table. The offending value is
+;       printed before the halt.
+;   This closes the write-side blind spot: a Lua string in this VM
+;   cannot carry a zero word past its terminator, so an ID with an
+;   interior zero word could previously only be written raw via
+;   memcard.save(value, position) at positions -5..-24. The table form
+;   writes all 20 words verbatim -- and memcard.title(memcard.title())
+;   is a bit-exact no-op round trip, the ID update pattern.
+;
+;   ANYTHING ELSE (number, boolean, nil, function): the same runtime
+;   error. This is new coverage, not a regression: the old body fed the
+;   argument to __unbox_string unvalidated, so a wrong-type write was
+;   undefined behavior; the dispatch turns that into a loud trap.
+;
+; CIF DROPPED -- CHARACTERS ARE STORED RAW NOW: the string path's copy
+; loop used to CIF each character into a float before its store, so the
+; card words held float encodings of char codes. The title block is an
+; ID field, so both directions are bit-exact word copies now: characters
+; go in as the same raw words this VM's own internal string
+; representation uses (one word per character -- see
+; __builtin_string_len; NOT a packed byte string, and no longer a float
+; encoding either), and __builtin_vircon32_memcard_get_title above
+; reads them back verbatim (each word CIF'd into its integer value as a
+; table element). The table path's per-element CFI is the same word
+; convention arriving from numbers instead of characters.
+;
+; COMPATIBILITY NOTE: cards written by the pre-drop writer carry float
+; bit patterns in their title words. memcard.title() now reports those
+; words' integer values (e.g. 0x42820000 for a CIF'd 'A' reads back as
+; the large number 1111636864, not 65), and memcard.load(-5..-24) reads
+; them as the floats they are. A card still carrying an old-format title
+; should be re-titled once before its title is used as an ID.
+;
+; STRING-PATH WRITE SHAPE UNCHANGED: the copy still stops at STR's OWN
+; NUL terminator -- a short Lua string's buffer must not be read past
+; its end -- and zero-pads the remainder of the 20. An ID containing a
+; zero word mid-stream cannot be written through the STRING form (a Lua
+; string in this VM cannot carry one past its terminator); use the table
+; form -- or raw memcard.save(value, position) at positions -5..-24,
+; which memcard.title() then reads back verbatim.
+;
+; NOTE: 20 is a LITERAL here, not the symbolic VIRCON32_MEMCARD_TITLE_
+; DISPLAY_WORDS constant -- emit_variable_map() in emit.c only exports
+; BASE/DATA_BASE/CURSOR_ADDR/END as %defines for the assembler, not word-
+; count constants. If a future change adds an export for this one, this
+; is a good spot to switch it over (and the table path's two 20s and the
+; getter's two should follow).
+;
+; Stack layout relative to BP:
+; [BP+2]: title -- a boxed string (ROM or RAM) or a boxed table
+;
+; Returns: R0 = BOXED_NIL
+;
+; STRING path: truncates to 20 characters if the string is longer;
+; zero-pads the remainder of the 20 if shorter. TABLE path: elements
+; 1..20 only, nil/absent = zero pad.
+;
+; Register use: STRING path -- R1 = source pointer (from __unbox_string),
+; R2 = dest pointer (starts at VIRCON32_MEMCARD_BASE), R3 = characters
+; written so far (0-20), R4/R5 per-iteration scratch; no CALLs on that
+; path, so plain registers are safe. TABLE path -- __builtin_table_get
+; callee-saves only R1-R5 and clobbers R6-R8, so per this file's standing
+; rule nothing the loop needs is trusted to survive a CALL in a plain
+; register: the 1..20 element index lives in stack slot [BP-1], the table
+; itself is the caller's [BP+2] (stable across CALLs), and the
+; destination address is recomputed from the index each iteration.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 __builtin_vircon32_memcard_title:
     PUSH  BP
     MOV   BP, SP
 
+    ;; --- 0. Tag dispatch: string or table? A non-literal argument's ---
+    ;; --- type is a runtime property, so this is decided here, not in ---
+    ;; --- the emitter. The dispatch doubles as the write form's first  ---
+    ;; --- ever argument validation -- a wrong type used to reach       ---
+    ;; --- __unbox_string unvalidated.                                   ---
+    MOV   R1, [BP+2]
+    AND   R1, BOXED_DATA
+    IEQ   R1, BOXED_TABLE
+    JT    R1, _memcard_title_table_init
+
+    MOV   R1, [BP+2]
+    AND   R1, BOXED_DATA
+    IEQ   R1, BOXED_ROMSTRING
+    JT    R1, _memcard_title_string_path
+
+    MOV   R1, [BP+2]
+    AND   R1, BOXED_DATA
+    IEQ   R1, BOXED_RAMSTRING
+    JF    R1, _memcard_title_arg_error   ; number/function/... -> error
+
+    ;; nil/false/true share the RAM-string tag with payload < 4 -- only
+    ;; payload >= 4 is a real RAM string (same check as __builtin_eq in
+    ;; string.s and __table_get_non_table in table.s).
+    MOV   R1, [BP+2]
+    AND   R1, BOXED_PAYLOAD
+    ILT   R1, 4
+    JT    R1, _memcard_title_arg_error
+
+_memcard_title_string_path:
     MOV   R0, [BP+2]
     CALL  __unbox_string           ; R0 = raw char-array address
     MOV   R1, R0                   ; R1 = source pointer
@@ -1332,8 +1576,7 @@ _memcard_title_copy_loop:
     JT    R4, _memcard_title_pad_loop ; hit NUL -> pad the remainder with 0
     MOV   R4, [R1]                    ; IEQ above clobbered R4 with its 0/1
                                        ; result -- reload the real character
-    CIF   R4
-    MOV   [R2], R4
+    MOV   [R2], R4                    ; raw character word (CIF dropped)
     IADD  R1, 1
     IADD  R2, 1
     IADD  R3, 1
@@ -1355,6 +1598,129 @@ _memcard_title_done:
     MOV   SP, BP
     POP   BP
     RET
+
+;; ---------------------------------------------------------------------------
+;; TABLE path: elements 1..20 of the caller's table become the 20 title
+;; words, one __builtin_table_get per word -- the mirror of the read
+;; form's one __builtin_table_set per word. The table is the caller's
+;; [BP+2] (stable across CALLs); the 1-based element index lives in
+;; stack slot [BP-1] because table_get callee-saves only R1-R5 and
+;; clobbers R6-R8 -- nothing the loop needs is trusted to survive a
+;; CALL in a plain register, this file's standing rule.
+;; ---------------------------------------------------------------------------
+_memcard_title_table_init:
+    MOV   R1, 1
+    PUSH  R1                            ; [BP-1] = element index (1-based)
+
+_memcard_title_table_loop:
+    MOV   R1, [BP-1]
+    IGT   R1, 20
+    JT    R1, _memcard_title_done       ; SP reset below BP happens via
+                                       ; MOV SP,BP at _memcard_title_done
+                                       ; -- the [BP-1] slot is reclaimed
+    ;; t[i] via __builtin_table_get: [BP+3] = table, [BP+2] = key. The
+    ;; key is pushed as a real Lua number (CIF of the index) -- a raw
+    ;; integer pushed bare would CFI (float-read) to 0, same reason as
+    ;; the getter's keys.
+    MOV   R1, [BP+2]
+    PUSH  R1                            ; table (boxed)
+    MOV   R1, [BP-1]
+    CIF   R1                            ; key as a real Lua number
+    PUSH  R1
+    CALL  __builtin_table_get
+    IADD  SP, 2                         ; R0 = t[i] (BOXED_NIL if absent)
+
+    ;; absent element -> zero word, the table form's zero-pad
+    MOV   R1, R0
+    IEQ   R1, BOXED_NIL
+    JT    R1, _memcard_title_store_zero
+
+    ;; numbers are raw float bits; every other type is NaN-boxed. The
+    ;; same "is it a number" test table.s's array path uses.
+    MOV   R1, R0
+    AND   R1, NAN_VALUE
+    IEQ   R1, NAN_VALUE
+    JT    R1, _memcard_title_elem_error
+
+    ;; number -> its integer bits: the inverse of the read form's
+    ;; per-element CIF, so a value read from memcard.title() round-trips
+    ;; bit-exactly, signed words included.
+    CFI   R0
+    JMP   _memcard_title_store_word
+
+_memcard_title_store_zero:
+    MOV   R0, 0
+
+_memcard_title_store_word:
+    MOV   R1, VIRCON32_MEMCARD_BASE     ; dest = BASE + (i-1), recomputed
+    MOV   R2, [BP-1]                    ; from the index each iteration
+    IADD  R1, R2
+    ISUB  R1, 1
+    MOV   [R1], R0
+
+    MOV   R1, [BP-1]
+    IADD  R1, 1
+    MOV   [BP-1], R1
+    JMP   _memcard_title_table_loop
+
+;; --- runtime error: the argument is neither a string nor a table ---
+;; --- (R0 = the offending argument for the panic below)             ---
+_memcard_title_arg_error:
+    MOV   R0, [BP+2]
+    JMP   __runtime_error_bad_memcard_title
+
+;; --- runtime error: t[i] holds a non-number, non-nil value ---
+;; --- (R0 = the offending element, still untouched above)  ---
+_memcard_title_elem_error:
+    JMP   __runtime_error_bad_memcard_title
+
+
+; ============================================================================
+; __runtime_error_bad_memcard_title: panic for a memcard.title(...) write
+; whose argument is neither a string nor a table, or whose table argument
+; holds a non-number element. Same family as table.s's
+; __runtime_error_not_table and exec.s's __runtime_error_not_callable: red
+; screen, PANIC banner, message, the offending value, then __panic_halt.
+; Never returns -- no frame unwinding needed.
+; Incoming: R0 = the offending value.
+; ============================================================================
+__runtime_error_bad_memcard_title:
+    PUSH  BP
+    MOV   BP, SP
+    ISUB  SP, 1
+    MOV   [BP-1], R0                ; the value that couldn't be a title
+
+    MOV   R0, 0xFF000080            ; A=FF, B=00, G=00, R=80 (see hex_to_v32_color)
+    OUT   GPU_ClearColor, R0
+    OUT   GPU_Command, GPUCommand_ClearScreen
+
+    MOV   R0, 20
+    PUSH  R0
+    MOV   R0, 0
+    PUSH  R0
+    MOV   R0, __const_str_panic_banner
+    OR    R0, BOXED_ROMSTRING
+    PUSH  R0
+    CALL  __builtin_print
+
+    MOV   R0, 20
+    PUSH  R0
+    MOV   R0, 20
+    PUSH  R0
+    MOV   R0, __const_str_err_bad_memcard_title
+    OR    R0, BOXED_ROMSTRING
+    PUSH  R0
+    CALL  __builtin_print
+
+    MOV   R0, 20
+    PUSH  R0
+    MOV   R0, 40
+    PUSH  R0
+    MOV   R0, [BP-1]
+    PUSH  R0
+    CALL  __builtin_print
+
+    JMP   __panic_halt
 
 ;; ============================================================================
 ;; __builtin_vircon32_memcard_append: memcard.save(value) with NO position
@@ -1544,69 +1910,53 @@ _memcard_append_is_table:
     ;; string/table/function key or value is copied as its raw RAM
     ;; pointer, valid only within this run, same as the scalar path above.
     ;; Restored by __builtin_vircon32_memcard_load_table below.
-    MOV   R1, [BP+2]
-    AND   R1, BOXED_PAYLOAD             ; R1 = raw table header address
+    ;; Pairs are enumerated with __builtin_next (array part, then hash
+    ;; part; nil-valued entries skipped). __builtin_next preserves R1 and
+    ;; R3-R8, returning the key in R0 and the value in R2.
 
-    ;; --- Pass 1: count total pairs across every bucket in the chain ---
-    MOV   R2, [R1+3]                    ; R2 = first bucket (hash ptr), or 0
+    ;; --- Pass 1: count live pairs ---
     MOV   R3, 0                         ; R3 = running pair count
-
+    MOV   R0, BOXED_NIL
 _memcard_append_table_count_loop:
-    MOV   R4, R2
-    IEQ   R4, 0
+    PUSH  R0                            ; key
+    MOV   R1, [BP+2]
+    PUSH  R1                            ; table
+    CALL  __builtin_next
+    IADD  SP, 2
+    MOV   R4, R0
+    IEQ   R4, BOXED_NIL
     JT    R4, _memcard_append_table_count_done
-    MOV   R4, [R2]                      ; PairCount of this bucket
-    IADD  R3, R4
-    MOV   R2, [R2+1]                    ; step to NextBucketPtr
+    IADD  R3, 1
     JMP   _memcard_append_table_count_loop
 
 _memcard_append_table_count_done:
-    ;; R3 = total pair count (raw int) -- kept live through Pass 2 below,
-    ;; never clobbered (no CALLs happen in this routine's table path).
-
     ;; --- Write the header: [TAG_TABLE][pair_count] ---
     MOV   R5, [BP-2]                    ; base_addr
     MOV   R7, 2                         ; TAG_TABLE
     CIF   R7
     MOV   [R5], R7
     IADD  R5, 1
-
-    MOV   R7, R3                        ; a COPY of the pair count for
-    CIF   R7                            ; storage -- R3 itself stays a raw
-    MOV   [R5], R7                      ; int, needed below for the cursor
-    IADD  R5, 1                         ; math and isn't touched again here
-
-    ;; --- Pass 2: walk the chain again, writing each Key/Value pair ---
-    MOV   R1, [BP+2]
-    AND   R1, BOXED_PAYLOAD
-    MOV   R2, [R1+3]                    ; R2 = first bucket again
-
-_memcard_append_table_write_bucket:
-    MOV   R4, R2
-    IEQ   R4, 0
-    JT    R4, _memcard_append_table_write_done
-    MOV   R6, [R2]                      ; R6 = PairCount in this bucket
-    MOV   R8, R2
-    IADD  R8, 2                         ; R8 = pointer to Key0 in this bucket
-
-_memcard_append_table_write_pair:
-    MOV   R4, R6
-    IEQ   R4, 0
-    JT    R4, _memcard_append_table_write_next_bucket
-    MOV   R7, [R8]                      ; Key -- already a properly boxed
-    MOV   [R5], R7                      ; Lua value (or raw pointer); no CIF
-    IADD  R5, 1
-    IADD  R8, 1
-    MOV   R7, [R8]                      ; Value
+    MOV   R7, R3
+    CIF   R7
     MOV   [R5], R7
     IADD  R5, 1
-    IADD  R8, 1
-    ISUB  R6, 1
-    JMP   _memcard_append_table_write_pair
 
-_memcard_append_table_write_next_bucket:
-    MOV   R2, [R2+1]                    ; NextBucketPtr
-    JMP   _memcard_append_table_write_bucket
+    ;; --- Pass 2: write each Key/Value pair ---
+    MOV   R0, BOXED_NIL
+_memcard_append_table_write_pair:
+    PUSH  R0
+    MOV   R1, [BP+2]
+    PUSH  R1
+    CALL  __builtin_next
+    IADD  SP, 2
+    MOV   R4, R0
+    IEQ   R4, BOXED_NIL
+    JT    R4, _memcard_append_table_write_done
+    MOV   [R5], R0                      ; key (boxed, verbatim)
+    IADD  R5, 1
+    MOV   [R5], R2                      ; value
+    IADD  R5, 1
+    JMP   _memcard_append_table_write_pair
 
 _memcard_append_table_write_done:
     MOV   R1, [BP-1]                    ; old_cursor
@@ -2127,11 +2477,7 @@ _v32_tmrender_draw:
     ;; spr(tile_value, screen_x, screen_y, 1.0, 1.0, 0, 0xFFFFFFFF, ALPHA)
     MOV  R2, 32.000000      ; VIRCON32_BLEND_ALPHA
     PUSH R2
-    MOV  R2, -1.000000      ; 0xFFFFFFFF via CFI(-1.0) -- see the CFI-overflow
-                            ; note on __builtin_vircon32_spr above; the same
-                            ; hazard applies here since this is a hand-built
-                            ; spr() call, not one that goes through the
-                            ; compiler's color_mult emitter
+    MOV  R2, 0xFFFFFFFF     ; color_mult: raw packed RGBA word (no CFI)
     PUSH R2
     MOV  R2, 0.000000
     PUSH R2
@@ -2162,5 +2508,330 @@ _v32_tmrender_row_next:
 _v32_tmrender_done:
     MOV  SP, BP
     POP  BP
+    RET
+
+;; ============================================================================
+;; __builtin_tonebank_sfx: tone-bank sfx(n [, channel]) with a DYNAMIC n
+;; Shared by PICO-8 sfx() and TIC-80 sfx() (moved here from pico8.s so the
+;; TIC-80 layer can use it too).
+;; ============================================================================
+;; Stack layout relative to BP:
+;; [BP+2]: n         (Lua float -- raw PICO-8 sfx index; <0 means "stop")
+;; [BP+3]: channel   (Lua float 0-15, or BOXED_NIL -> auto/all)
+;; [BP+4]: base_id   (RAW HARDWARE INTEGER, NOT a Lua float -- this is
+;;                    pico8_tone_base_id, the resource id the compiler
+;;                    assigned placeholder tone 0. Tones 1-7 are
+;;                    base_id+1 .. base_id+7, contiguous, since the whole
+;;                    bank is registered in one shot -- see
+;;                    register_pico8_tone_bank() in pico8.c. Pushed bare,
+;;                    never boxed: nothing but this one routine ever reads
+;;                    it, same convention as VIRCON32_SFX_CURSOR below.)
+;; [BP+5]: mask      (RAW INTEGER: bank size - 1. 7 for the 8 placeholder
+;;                    tones; 63 for a .p8 cart's 64 synthesized SFX.)
+;;
+;; Only reached for a compile-time-UNKNOWN n -- emit_tonebank_sfx_intrinsic()
+;; in pico8.c folds every literal n straight into a static
+;; emit_vircon32_sfx_play_intrinsic() call, no CALL at all. This routine
+;; exists purely so celeste.lua's `psfx` wrapper (sfx(num), where num is a
+;; parameter, not a literal) has somewhere to resolve the PICO-8 index ->
+;; placeholder-tone mapping at runtime. Its channel handling and channel-
+;; ownership bookkeeping mirror __builtin_vircon32_sfx_play exactly (see
+;; that routine's own comments for the rationale); only the sound-id
+;; resolution step is different.
+;;
+;; n < 0 is PICO-8's "stop" form (sfx(-1 [, channel])). PICO-8 requires an
+;; explicit channel to stop just one; a bare sfx(-1) with no channel here
+;; is a deliberate no-op -- the all-sfx-channels form is sfx.stop() itself,
+;; reachable directly and not through this dynamic path.
+;; ============================================================================
+__builtin_tonebank_sfx:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+
+    MOV   R1, [BP+2]
+    CFI   R1                      ; raw PICO-8 index as a hardware integer
+
+    MOV   R2, R1
+    ILT   R2, 0
+    JT    R2, _tonebank_sfx_stop_form
+
+    ;; --- Non-negative index: map into the placeholder tone bank ---
+    MOV   R2, [BP+5]              ; bank size - 1 (raw integer: 7 or 63)
+    AND   R1, R2                  ; wrap into the bank
+    MOV   R2, [BP+4]              ; base_id (raw integer, see header note)
+    IADD  R1, R2                  ; R1 = resolved placeholder tone id
+
+    ;; --- Resolve the channel (identical to __builtin_vircon32_sfx_play) ---
+    MOV   R2, [BP+3]
+    MOV   R3, R2
+    IEQ   R3, BOXED_NIL
+    JT    R3, _tonebank_sfx_auto_channel
+
+    CFI   R2
+    MOV   R3, R2
+    ILT   R3, 0
+    JT    R3, _tonebank_sfx_clamp_low
+    MOV   R3, R2
+    IGT   R3, 15
+    JF    R3, _tonebank_sfx_channel_ready
+    MOV   R2, 15
+    JMP   _tonebank_sfx_channel_ready
+
+_tonebank_sfx_clamp_low:
+    MOV   R2, 0
+    JMP   _tonebank_sfx_channel_ready
+
+_tonebank_sfx_auto_channel:
+    MOV   R2, [VIRCON32_SFX_CURSOR]
+    MOV   R3, R2
+    IADD  R3, 1
+    MOV   R4, R3
+    IGT   R4, 15
+    JF    R4, _tonebank_sfx_store_cursor
+    MOV   R3, 1
+
+_tonebank_sfx_store_cursor:
+    MOV   [VIRCON32_SFX_CURSOR], R3
+
+_tonebank_sfx_channel_ready:
+    OUT   SPU_SelectedChannel, R2
+
+    ;; --- Stop, THEN assign (a sound only assigns to a stopped channel) ---
+    OUT   SPU_Command, SPUCommand_StopSelectedChannel
+    OUT   SPU_ChannelAssignedSound, R1
+
+    ;; --- Track channel ownership: claim for sfx, release from music ---
+    MOV   R3, 1
+    SHL   R3, R2                        ; R3 = 1 << channel
+    MOV   R4, [VIRCON32_SFX_CHANNEL_MASK]
+    OR    R4, R3
+    MOV   [VIRCON32_SFX_CHANNEL_MASK], R4
+
+    MOV   R4, R3
+    NOT   R4                            ; R4 = ~(1 << channel)
+    MOV   R3, [VIRCON32_MUSIC_CHANNEL_MASK]
+    AND   R3, R4
+    MOV   [VIRCON32_MUSIC_CHANNEL_MASK], R3
+
+    ;; --- Volume/speed: no arguments to carry them on this call shape ---
+    OUT   SPU_ChannelVolume, 1.0
+    OUT   SPU_ChannelSpeed, 1.0
+
+    ;; --- Start, then clear the loop flag the command just set ---
+    OUT   SPU_Command, SPUCommand_PlaySelectedChannel
+    OUT   SPU_ChannelLoopEnabled, 0
+
+    MOV   R0, R2
+    CIF   R0
+    JMP   _tonebank_sfx_done
+
+_tonebank_sfx_stop_form:
+    MOV   R2, [BP+3]
+    MOV   R3, R2
+    IEQ   R3, BOXED_NIL
+    JT    R3, _tonebank_sfx_stop_done
+
+    CFI   R2
+    MOV   R3, R2
+    ILT   R3, 0
+    JT    R3, _tonebank_sfx_stop_clamp_low
+    MOV   R3, R2
+    IGT   R3, 15
+    JF    R3, _tonebank_sfx_stop_channel_ready
+    MOV   R2, 15
+    JMP   _tonebank_sfx_stop_channel_ready
+
+_tonebank_sfx_stop_clamp_low:
+    MOV   R2, 0
+
+_tonebank_sfx_stop_channel_ready:
+    OUT   SPU_SelectedChannel, R2
+    OUT   SPU_Command, SPUCommand_StopSelectedChannel
+
+_tonebank_sfx_stop_done:
+    MOV   R0, BOXED_NIL
+
+_tonebank_sfx_done:
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+
+;; ============================================================================
+;; __builtin_vircon32_rect: native rect() / rectfill()
+;; ============================================================================
+;; Stack layout relative to BP:
+;; [BP+2]: x1         [BP+3]: y1        (Lua numbers)
+;; [BP+4]: x2         [BP+5]: y2        (Lua numbers)
+;; [BP+6]: color      (RAW packed 0xAABBGGRR word, like spr()'s color_mult)
+;; [BP+7]: filled     (raw int: 1 rectfill(), 0 rect())
+;; Returns BOXED_NIL in R0. Preserves R1-R13.
+;;
+;; The corners are opposite and INCLUSIVE, in any order; each coordinate is
+;; floored (nil / non-numbers count as 0). rectfill() is ONE zoomed draw of
+;; the BIOS texture's (-1) region 256 -- one white pixel, (469, 29), hotspot
+;; on it, defined by the BIOS -- at scale (w, h): exact for integer sizes,
+;; since the region is 1x1, and the GPU's zoom correction keeps sampling
+;; inside that pixel. rect() is up to 4 non-overlapping edges -- top and
+;; bottom full width, left and right between them -- so a translucent color
+;; is not drawn twice at the corners.
+;;
+;; The GPU state used is put back afterwards (selected texture and region,
+;; multiply color, drawing scale), so rect() can sit in the middle of
+;; ioports.gpu.* drawing code; the blending mode is left as the program set
+;; it.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+__builtin_vircon32_rect:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
+
+    ;; --- GPU state to restore ---
+    IN    R0, GPU_SelectedTexture
+    PUSH  R0
+    IN    R0, GPU_SelectedRegion
+    PUSH  R0
+    IN    R0, GPU_MultiplyColor
+    PUSH  R0
+    IN    R0, GPU_DrawingScaleX
+    PUSH  R0
+    IN    R0, GPU_DrawingScaleY
+    PUSH  R0
+
+    ;; --- corners -> R1 = left, R2 = top, R3 = width, R4 = height ---
+    MOV   R1, [BP+4]
+    CALL  __vircon32_coord
+    MOV   R3, R1                  ; x2
+    MOV   R1, [BP+5]
+    CALL  __vircon32_coord
+    MOV   R4, R1                  ; y2
+    MOV   R1, [BP+3]
+    CALL  __vircon32_coord
+    MOV   R2, R1                  ; y1
+    MOV   R1, [BP+2]
+    CALL  __vircon32_coord        ; x1
+    MOV   R0, R1
+    IMIN  R1, R3                  ; left
+    IMAX  R3, R0                  ; right
+    ISUB  R3, R1
+    IADD  R3, 1                   ; width  (>= 1)
+    MOV   R0, R2
+    IMIN  R2, R4                  ; top
+    IMAX  R4, R0                  ; bottom
+    ISUB  R4, R2
+    IADD  R4, 1                   ; height (>= 1)
+
+    OUT   GPU_SelectedTexture, -1    ; BIOS texture
+    OUT   GPU_SelectedRegion, 256    ; its white pixel
+    MOV   R0, [BP+6]
+    OUT   GPU_MultiplyColor, R0   ; raw word, no CFI (see spr())
+
+    MOV   R0, [BP+7]
+    JF    R0, _vircon32_rect_outline
+    CALL  __vircon32_fill         ; (left, top, w, h)
+    JMP   _vircon32_rect_done
+
+_vircon32_rect_outline:
+    MOV   R5, R4                  ; h
+    MOV   R6, R3                  ; w
+    MOV   R4, 1
+    CALL  __vircon32_fill         ; top    (x, y, w, 1)
+    MOV   R0, R5
+    IGT   R0, 1
+    JF    R0, _vircon32_rect_done
+    PUSH  R2
+    IADD  R2, R5
+    ISUB  R2, 1
+    CALL  __vircon32_fill         ; bottom (x, y + h - 1, w, 1)
+    POP   R2
+    MOV   R0, R5
+    IGT   R0, 2
+    JF    R0, _vircon32_rect_done
+    IADD  R2, 1
+    MOV   R4, R5
+    ISUB  R4, 2
+    MOV   R3, 1
+    CALL  __vircon32_fill         ; left   (x, y + 1, 1, h - 2)
+    MOV   R0, R6
+    IGT   R0, 1
+    JF    R0, _vircon32_rect_done
+    IADD  R1, R6
+    ISUB  R1, 1
+    CALL  __vircon32_fill         ; right  (x + w - 1, y + 1, 1, h - 2)
+
+_vircon32_rect_done:
+    POP   R0
+    OUT   GPU_DrawingScaleY, R0
+    POP   R0
+    OUT   GPU_DrawingScaleX, R0
+    POP   R0
+    OUT   GPU_MultiplyColor, R0
+    POP   R0
+    OUT   GPU_SelectedRegion, R0
+    POP   R0
+    OUT   GPU_SelectedTexture, R0
+    MOV   R0, BOXED_NIL
+    POP   R6
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; __vircon32_fill (internal): draws the selected 1x1 region zoomed to
+;; R3 x R4 pixels at (R1, R2) -- all raw ints. Clobbers R0 only.
+__vircon32_fill:
+    MOV   R0, R3
+    CIF   R0
+    OUT   GPU_DrawingScaleX, R0
+    MOV   R0, R4
+    CIF   R0
+    OUT   GPU_DrawingScaleY, R0
+    OUT   GPU_DrawingPointX, R1
+    OUT   GPU_DrawingPointY, R2
+    OUT   GPU_Command, GPUCommand_DrawRegionZoomed
+    RET
+
+;; __vircon32_coord (internal): R1 = Lua number -> R1 = raw int, floored and
+;; clamped to +-65536 (far past the 640x360 screen, and CFI is undefined out
+;; of range -- see learnings on x86 vs ARM). nil / non-numbers -> 0.
+;; Clobbers R0 only.
+__vircon32_coord:
+    MOV   R0, R1
+    AND   R0, NAN_VALUE
+    IEQ   R0, NAN_VALUE
+    JT    R0, _vircon32_coord_zero
+    MOV   R0, R1
+    FLT   R0, -65536.0
+    JF    R0, _vircon32_coord_lo
+    MOV   R1, -65536.0
+_vircon32_coord_lo:
+    MOV   R0, R1
+    FGT   R0, 65536.0
+    JF    R0, _vircon32_coord_hi
+    MOV   R1, 65536.0
+_vircon32_coord_hi:
+    FLR   R1
+    CFI   R1
+    RET
+_vircon32_coord_zero:
+    MOV   R1, 0
     RET
 

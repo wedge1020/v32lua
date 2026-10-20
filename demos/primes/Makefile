@@ -31,7 +31,7 @@ asm: $(TEST).asm
 
 $(TEST).asm: $(TEST).lua
 	@echo -n "Compiling  $(TEST).lua    -> $(TEST).asm     ... "
-	@$(COMPILER) $(COMPILER_FLAGS) $(DEBUG_FLAGS) -o $(TEST).asm $(TEST).lua && echo "OK" || echo "FAIL"
+	@$(COMPILER) --no-build-scripts $(COMPILER_FLAGS) $(DEBUG_FLAGS) -o $(TEST).asm $(TEST).lua && echo "OK" || echo "FAIL"
 
 opt: $(TEST)Opt.asm
 

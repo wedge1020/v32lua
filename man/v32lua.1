@@ -1,0 +1,963 @@
+.TH V32LUA 1 "October 2026" "v32lua 20261019-dev" "User Commands"
+.SH NAME
+v32lua \- compile a subset of Lua to Vircon32 assembly and cartridge XML
+.SH SYNOPSIS
+.B v32lua
+.RB [ \-o
+.IR output.asm ]
+.RB [ \-b ]
+.RB [ \-g ]
+.RB [ \-v ]
+.RB [ \-d ]
+.RB [ \-w ]
+.RB [ \-\-api
+.IR api ]
+.RB [ \-\-title
+.IR title ]
+.RB [ \-\-titleopt
+.IR title ]
+.RB [ \-\-no\-diff\-opt\-title ]
+.RB [ \-\-no\-build\-scripts ]
+.RB [ \-\-rate
+.IR hz ]
+.RB [ \-\-fast\-circles ]
+.RB [ \-\-allow\-float\-as\-clearcolor ]
+.RB [ \-\-xml\-preserve\-paths ]
+.RB [ \-\-keyboard
+.IR port ]
+.RB [ \-\-mouse
+.IR port ]
+.RB [ \-\-bezel
+.IR art.png " | "
+.BR \-\-no\-bezel ]
+.IR input.lua " | " cart.p8 " | " cart.tic
+.br
+.B v32lua
+.B \-\-version
+.br
+.B v32lua
+.B \-\-help
+.SH DESCRIPTION
+.B v32lua
+compiles a purpose-built subset of Lua \(em global and local variables,
+functions as first-class values, multiple assignment, the usual
+statement/expression language, and a set of Vircon32-specific hardware
+intrinsics \(em directly to
+.B Vircon32
+assembly. There is no bytecode virtual machine and no interpreter
+involved at any point: Lua source is lowered straight to native
+instructions for the target console's CPU, in the same spirit as
+.BR v32c++ (1)
+lowering a C++ subset to plain Vircon32 C.
+.PP
+A compile produces three files: an assembly file
+(see
+.BR \-o ,
+below) and, alongside it, a cartridge XML definition (the same base
+name with a
+.I .xml
+extension) and its twin for an optimized build
+.RI ( Opt.xml ,
+see
+.BR "CARTRIDGE XML" ),
+which record the cart's title, version, and any texture,
+sound, and tilemap resources declared with
+.B \-\-#
+hints in the source (see
+.B CARTRIDGE HINTS
+below). Both are inputs to the ordinary Vircon32 build chain \(em
+assembler, then
+.BR packrom (1)
+\(em which
+.B v32lua
+does not itself invoke.
+.PP
+.B v32lua
+produces no output at all on success unless a verbosity flag is given
+(see
+.BR \-v ,
+below) \(em this matches the Vircon32 C compiler's and
+.BR v32c++ (1)'s
+own behavior. A non-zero exit status, and a message on standard
+error, indicate a genuine problem: a lexical, syntax, semantic, or
+internal compiler error. Lexical, syntax, semantic, and internal
+errors are reported with the offending source line reproduced
+inline, pointing at the failure.
+.SH OPTIONS
+.TP
+.BI \-o " output.asm"
+Write the generated assembly to
+.IR output.asm ,
+instead of the default. If
+.B \-o
+is not given at all, the output filename is derived from the input's
+own name: its extension is replaced with
+.IR .asm ,
+so
+.I game/main.lua
+becomes
+.IR game/main.asm .
+The companion
+.I .xml
+cartridge file is always named from this same output path (its own
+extension replaced with
+.IR .xml ),
+not from the input filename, so
+.B \-o
+also controls where the XML lands (unless
+.B \-\-xml\-preserve\-paths
+is given).
+.TP
+.B \-b
+Build a Vircon32 BIOS instead of a cartridge. The program must define
+.B "function error_handler()"
+(run by the console when the CPU raises a hardware error) in addition to
+.BR main ,
+declare exactly one
+.B \-\-#texture
+and at most one
+.BR \-\-#sound ,
+and use the native vircon32 API. The generated assembly begins with the
+hardware error vector and uses the BIOS program ROM page
+.RB ( 0x10000000 ),
+the XML
+.B <rom>
+element gets
+.BR type=\(dqbios\(dq ,
+and the generated build scripts pass
+.B \-b
+to
+.B v32lua
+and
+.BR assemble .
+.TP
+.B \-g
+Generate a companion
+.I output.asm.debug
+file mapping relative assembly line offsets back to the original Lua
+source line and enclosing function name for each line of generated
+code. Intended for step-through debugging of a compiled cart under
+.BR v32sim (1),
+not for anything read by the assembler or
+.BR packrom (1)
+itself.
+.TP
+.BR \-v ", " \-\-verbose
+Report progress through the compiler's internal pipeline stages
+(lexer, preprocessor, parser, semantic analysis, code generation) as
+each one begins. No
+.B \-v
+at all (the default) produces no output on success.
+.TP
+.BR \-d ", " \-\-debug
+Print additional internal/operational debug information as the
+compiler runs. Unrelated to
+.BR \-g ;
+this is compiler-development output, not a source-to-assembly map for
+the resulting cart.
+.TP
+.B \-w
+Suppress all compiler warnings (for example, a missing
+.B WAIT
+inside a
+.B main()
+entry point, or a mismatched cart-resource ordering). Errors are
+unaffected and still halt compilation.
+.TP
+.BI \-\-api " api"
+Select the API layer:
+.BR pico8 ,
+.BR tic80 ,
+or
+.B vircon32
+(native). Overrides a
+.B \-\-#api
+hint in the source. Without this option the API is detected: a
+.I .p8
+file is PICO-8, a
+.I .tic
+file is TIC-80, and a
+.I .lua
+file uses its own
+.BR \-\-#api / \-\-#p8
+hint or, with none, its entry points
+.RB ( TIC()
+selects tic80;
+.BR _draw() ,
+.BR _update() ,
+.B _update60()
+select pico8; otherwise native).
+.TP
+.BI \-\-title " title"
+Cartridge title, used verbatim; overrides a
+.B \-\-#title
+hint. Without either, the title is the cart's own (TIC-80
+.B \-\- title:
+metadata, or PICO-8's first comment line) or the input file name, prefixed with
+.B [PICO8]
+or
+.B [TIC80]
+in those API modes.
+.TP
+.BI \-\-titleopt " title"
+Title of the optimized cartridge (the \fIOpt.xml\fR twin); overrides a
+.B \-\-#titleopt
+hint. Without either, it is the cartridge title followed by
+.IR " [optimized]" .
+.TP
+.B \-\-no\-diff\-opt\-title
+Give the optimized cartridge the very same title as the regular one (also
+the hint
+.BR \-\-#no\-diff\-opt\-title ).
+An explicit
+.B \-\-titleopt
+or
+.B \-\-#titleopt
+still wins.
+.TP
+.B \-\-no\-build\-scripts
+Do not write the
+.I Make.sh
+and
+.I Make.bat
+build scripts (see
+.BR "BUILD SCRIPTS" ).
+.TP
+.BI \-\-rate " hz"
+Sample rate of the sound synthesized from a PICO-8 or TIC-80 cart:
+.BR 11025 ,
+.B 22050
+(default) or
+.BR 44100 .
+Overrides a
+.B \-\-#rate
+hint.
+.B \-\-p8rate
+and
+.B \-\-#p8rate
+are the old names and still work.
+.TP
+.B \-\-fast\-circles
+TIC-80 and PICO-8: draw filled circles larger than radius 31 as the
+pre-rendered radius-31 disc, scaled (one GPU draw instead of about 1.2
+per unit of radius; roughly 1.5% of the edge pixels differ from the
+console's). Outlines are always exact. Same as a
+.B \-\-#fast\-circles
+hint.
+.TP
+.B \-\-allow\-float\-as\-clearcolor
+A Lua number given to
+.B ioports.gpu.clear
+or TIC-80
+.B cls()
+keeps its float32 bits as the clear color, as in older versions (a translucent
+clear that smears moving objects). Off by default: numbers are converted to an
+integer color word. Same as a
+.B \-\-#allow\-float\-as\-clearcolor
+hint.
+.TP
+.B \-\-xml\-preserve\-paths
+Keep each
+.B \-\-#texture
+/
+.B \-\-#sound
+path in the XML as written in the hint (only the extension changes), write the
+XML into the project folder instead of beside the output (the source file's
+directory, or its parent when the source is in a folder named \fIsrc\fR and the
+output in a sibling such as \fIobj\fR), and make
+.B <binary>
+the
+.I .vbin
+path relative to it. By default the XML sits beside the output and
+holds bare file names only (\fIship.vtex\fR, not \fItextures/ship.vtex\fR),
+because
+.BR packrom (1)
+resolves every path in it relative to the XML itself. See
+.BR "CARTRIDGE XML" .
+.TP
+.BI \-\-keyboard " port"
+Gamepad port (0\(en3) where a v32kbd keyboard is plugged in, for
+.BR key() ", " keyp()
+and
+.B kbd.*
+in native and TIC-80 mode. Default 2, the third port (the emulator's
+"Gamepad 3"), leaving ports 0 and 1 for regular gamepads. Keyboard input
+needs a v32io device (see
+.BR "KEYBOARD AND MOUSE" ).
+Same as a
+.B \-\-#keyboard
+hint; a program can also change it with
+.BR kbd.port(n) .
+.TP
+.BI \-\-mouse " port"
+Gamepad port (0\(en3) where a v32mouse mouse is plugged in, for
+.B mouse()
+and
+.B mouse.*
+in every API mode (and PICO-8's
+.BR stat(32) \(en stat(34) ).
+Default 3, the fourth port (the emulator's "Gamepad 4"). Mouse input
+needs a v32io device (see
+.BR "KEYBOARD AND MOUSE" ).
+Same as a
+.B \-\-#mouse
+hint; a program can also change it with
+.BR mouse.port(n) .
+.TP
+.BI \-\-bezel " art.png"
+PICO-8: draw the side panels from your own art instead of the built-in
+panels: a PNG (or
+.IR .vtex )
+with both panels side by side, 4:5 (for example 288\(mu360, or
+96\(mu120 scaled 3\(mu). Overrides a
+.B \-\-#bezel
+hint.
+.TP
+.B \-\-no\-bezel
+PICO-8: leave the screen margins beside the canvas black instead of
+drawing the side panels. Overrides a
+.B \-\-#bezel
+hint
+.RB ( off
+or
+.BR on ).
+.TP
+.B \-\-version
+Print version, author, and project URL information, and exit
+immediately without processing any input.
+.TP
+.BR \-\-help ", " \-h
+Print a brief usage summary and exit.
+.SH EXIT STATUS
+.TP
+.B 0
+The input was compiled successfully.
+.TP
+.B 1
+No input file was given; an unrecognized or duplicate argument was
+given; or a lexical, syntax, semantic, or internal compiler error
+occurred while compiling. Details are printed to standard error, and,
+for a source-position error, the offending line is reproduced inline.
+.SH EXAMPLES
+Compile a single file, writing
+.I program.asm
+and
+.IR program.xml :
+.PP
+.RS
+.nf
+v32lua \-o program.asm program.lua
+.fi
+.RE
+.PP
+(also writing
+.I programOpt.xml ,
+for an optimized build.)
+.PP
+Compile with the default output name (extension swapped for
+.IR .asm ),
+watching each pipeline stage run:
+.PP
+.RS
+.nf
+v32lua \-v game.lua
+.fi
+.RE
+.PP
+Compile with a source-to-assembly debug map, for stepping through the
+cart in
+.BR v32sim (1):
+.PP
+.RS
+.nf
+v32lua \-g \-o build/game.asm src/game.lua
+.fi
+.RE
+.PP
+Compile an unmodified PICO-8 cart (API detected from the extension) with a
+chosen title and lo-fi sound, and a TIC-80 binary cart:
+.PP
+.RS
+.nf
+v32lua celeste.p8 \-\-title "celeste" \-\-rate 11025
+v32lua game.tic
+.fi
+.RE
+.PP
+Build a Vircon32 BIOS (it needs an
+.BR error_handler() ,
+one
+.B \-\-#texture
+and at most one
+.BR \-\-#sound ):
+.PP
+.RS
+.nf
+v32lua \-b \-o bios.asm bios.lua
+.fi
+.RE
+.SH ENTRY POINTS
+A program must declare at least one of
+.B main()
+or
+.BR game_loop() ;
+its absence is a compile error.
+.TP
+.B game_loop()
+If present, the compiler generates a continuous runtime harness: the
+console calls
+.BR game_loop() ,
+issues a
+.B WAIT
+for the current frame, and repeats indefinitely. This is the usual
+entry point for arcade-style games, analogous to
+.B TIC()
+in TIC-80.
+.TP
+.B main()
+If present instead, the console halts once
+.B main()
+returns, mimicking a hosted C
+.BR main() .
+Continuous execution and frame pacing (including any
+.B WAIT
+instructions) are then the program's own responsibility; the compiler
+warns at compile time if it does not find a
+.B WAIT
+emitted inside
+.BR main() .
+.TP
+.B error_handler()
+Required, and without parameters, when building a BIOS with
+.BR \-b :
+the console calls it when the CPU raises a hardware error, and the
+generated assembly begins with a vector that does so. Without
+.B \-b
+it is an ordinary function.
+.TP
+.B init()
+If present, alongside either of the above, it runs exactly once,
+after top-level global RAM allocation and before the main loop
+begins.
+.SH LANGUAGE NOTES
+This section is a brief summary, not a complete reference \(em see the
+project's own README, and
+.I doc/API.md
+for the full hardware intrinsic surface, for the current, authoritative
+picture, including known gaps under active development.
+.PP
+Supported: global and local variables, with a top-level
+.B local
+promoted to a global slot rather than a doomed stack local (its
+storage would otherwise live in a frame that returns before any game
+code runs \(em this applies equally to top-level locals pulled in via
+.BR \-\-#include );
+functions as first-class NaN-boxed values; multiple assignment and
+variable swapping without user temporaries;
+.B __asm__
+(register/stack-preserving) and
+.B __rawasm__
+(unprotected) inline assembly, both supporting
+.I {var_name}
+string interpolation of Lua variables; a native, zero-cost hardware
+intrinsic surface
+.RI ( ioports.gpu.* ", " ioports.spu.* ", " ioports.inp.* ", "
+.IR music.*/sfx.* ", " tilemap.* ", " system.* );
+TIC-80- and PICO-8-compatible API layers, selected
+per-cartridge with a
+.B \-\-#api
+hint; and a
+.B \-\-#include
+textual preprocessor for multi-file projects, resolved before parsing
+begins.
+.PP
+Graphics conveniences in the native API:
+.B ioports.gpu.clear()
+takes no argument (reuse the current clear color), a preset name
+.RB ( \(dqblack\(dq ", " \(dqwhite\(dq ", " \(dqblue\(dq ,
+.BR \(dqred\(dq ", " \(dqgreen\(dq ),
+a packed
+.I 0xAABBGGRR
+color (a literal, or a
+.B hex()
+value when it comes from a variable), or separate components as
+.BI clear( r ", " g ", " b " [, " a ])\fR,\fP
+each 0\(en255 with alpha defaulting to 255 (opaque) \(em folded to a
+constant when all are literals, packed at runtime otherwise.
+.BR spr() 's
+eighth argument,
+.IR blend_mode ,
+accepts either a number
+.RB ( 0x20 ", " 0x21 ", " 0x22 )
+or one of the string literals
+.BR \(dqalpha\(dq " (or " \(dqdefault\(dq "), " \(dqadd\(dq ", or " \(dqsubtract\(dq ,
+resolved at compile time; for example
+.BR "spr(id, x, y, nil, nil, nil, nil, \(dqadd\(dq)" .
+.BI rgba( r ", " g ", " b " [, " a ])
+returns the packed color word (components clamped to 0\(en255, alpha
+255 by default), and
+.BI color( n )
+turns a number holding a packed color into the word; both are what
+.BR spr() 's
+color, the color form of
+.BR clear() ,
+and
+.BR ioports.gpu.multiply / bgcolor
+expect. A numeric literal written to an integer port is stored as its
+exact 32-bit word.
+.BI rect( x1 ", " y1 ", " x2 ", " y2 " [, " color ])
+and
+.B rectfill()
+draw a rectangle outline / filled rectangle between two inclusive
+corners, in that packed color (default white), drawn with the BIOS
+texture's white pixel (texture \-1, region 256).
+.BR key() ", " keyp()
+and
+.B kbd.*
+read a full keyboard through a v32kbd device on a gamepad port (see
+.BR \-\-keyboard ),
+and
+.B mouse()
+(TIC-80's seven values, in every API mode) and
+.B mouse.*
+a mouse through a v32mouse device (see
+.BR \-\-mouse ).
+.PP
+Explicit, permanent deviations from standard Lua, made to suit
+Vircon32's freestanding environment: IEEE-754 float32 only, with no
+Lua 5.3+ integer/float dual-number type \(em integers above 2^24 are
+not exactly representable;
+.B print()
+requires screen
+.B x
+and
+.B y
+as its first two arguments; a bare
+.B return
+statement is a syntax error (give it a value); and all program
+execution must occur inside a function reachable from
+.BR main() / game_loop() .
+.PP
+Also supported: single-quoted and long
+.RB ( [[...]] )
+string literals, exponent number literals
+.RB ( 1e\-3 ),
+.B goto
+with block-scoped
+.B ::labels::
+(forward references included), and string-library calls as methods on
+string values
+.RB ( s:sub(2,\ #s) ", " (\(dqx\(dq):upper() ).
+Strings used as table keys compare by content.
+.PP
+A PICO-8 cartridge compiles directly: given a
+.I .p8
+file, only its
+.B __lua__
+section is compiled (line numbers still refer to the
+.I .p8
+file) and its
+.BR __gfx__ ", " __gff__ " and " __map__
+sections become the sprite sheet, sprite flags and map. A
+.I .lua
+program can take those assets from a cart with
+.BR \-\-#p8\ \(dqcart.p8\(dq .
+.PP
+Also supported: numeric and generic
+.B for
+(with
+.BR pairs / ipairs ),
+.BR repeat ... until ,
+closures with upvalues, variadic functions
+.RB ( ... ),
+multiple return values (a trailing call or
+.B ...
+expands in argument lists, table constructors and
+.BR return ,
+up to 32 values), metatables
+.RB ( __index ", " __newindex ", " __call ", " __tostring ", " __len ,
+.BR __metatable ),
+the bitwise operators on 32-bit words, arithmetic on numeric strings,
+.BI tonumber( s ", " base ),
+and most of the
+.BR math ", " string " and " table
+libraries.
+.PP
+Not yet implemented:
+.BR pcall / error / assert ;
+.BR string.match / gmatch ;
+.BR select() ,
+and
+.B next()
+as a callable function;
+the arithmetic, comparison and concatenation metatable events;
+garbage collection (the heap only grows);
+and a diagnostic for reading, from inside a function, a
+.B local
+declared in a block lexically outside any function at chunk level
+(for example inside a bare
+.B do...end
+at chunk level) \(em such a read currently compiles silently to an
+uninitialized global rather than the value the block appeared to
+scope.
+.SH KEYBOARD AND MOUSE
+The Vircon32 console has no keyboard and no mouse, only four gamepads.
+.BR key() ", " keyp() ", " kbd.* ", " mouse() ", " mouse.*
+and PICO-8's
+.B stat(32..34)
+read a keyboard or mouse disguised as a gamepad, and get input
+.B only
+with one of:
+.IP \(bu 2
+the v32io hardware adapter (a Waveshare RP2350-USB-A board, R13 removed,
+running the v32io firmware), which makes a USB keyboard or mouse appear as
+a gamepad named
+.B v32io:kbd
+or
+.BR v32io:mouse ;
+it works with any Vircon32 emulator once a joystick profile is set up for
+it;
+.IP \(bu 2
+a modified Vircon32 emulator that reads the computer's own keyboard and
+mouse as v32io devices: the
+.B v32io
+branch of the fork at
+.UR https://github.com/wedge1020/ComputerSoftware
+.UE
+(both the
+.B v32kbd
+and the
+.B v32mouse
+device), or the stock DesktopEmulator with the v32io project's
+.IR emulator/v32io/v32kbd.patch ,
+.IR emulator/v32io/v32kbd-text.patch
+and
+.I emulator/v32io/v32mouse.patch
+applied.
+.PP
+By default the keyboard is read from gamepad port 2 and the mouse from
+port 3; see
+.B \-\-keyboard
+and
+.BR \-\-mouse .
+.PP
+Without one of these, no keyboard or mouse input is possible: programs
+compile and run, but no key is ever down and the mouse never moves. A
+regular gamepad left in the keyboard's or mouse's port is read as one.
+See
+.I doc/API.md
+for the protocols and setup.
+.SH CARTRIDGE HINTS
+Cartridge metadata and resources are declared with
+.B \-\-#
+line comments, parsed by the preprocessor stage and used to generate
+the companion XML file:
+.BR \-\-#version ", " \-\-#title ", " \-\-#titleopt ", " \-\-#no\-diff\-opt\-title ", " \-\-#api ", " \-\-#texture ,
+.BR \-\-#sound ", " \-\-#tilemap ", " \-\-#p8 ", " \-\-#rate ,
+.BR \-\-#bezel ", " \-\-#fast\-circles ", " \-\-#keyboard ,
+.BR \-\-#mouse ", and " \-\-#include .
+The XML names the
+.I .vtex
+and
+.I .vsnd
+files made from each hint's
+.I .png
+or
+.I .wav
+file (same name; see
+.B CARTRIDGE XML
+for the folder).
+A
+.B \-\-#texture
+or
+.B \-\-#sound
+hint both registers the resource in the XML and binds its name to a
+compile-time constant usable directly from Lua; resource IDs are
+assigned in source order and are guaranteed to match their position
+in the generated XML.
+.B \-\-#include \(dqfile.lua\(dq
+textually splices another file in before parsing, with include-once
+deduplication and cycle detection. The file is looked for next to the
+including file, then in the current directory, then in each directory of
+.B V32LUA_INCLUDE
+(see
+.BR ENVIRONMENT ),
+then in the installed library directory, and finally in the library
+directories next to the compiler itself (see
+.BR FILES ); it performs no scoping transformation of any kind; a
+.B local
+at the included file's own top level is promoted to a global exactly
+as in a monolithic file.
+.SH CARTRIDGE XML
+.BR packrom (1)
+reads every path in the XML relative to the XML file itself. By default,
+therefore,
+.B v32lua
+writes the XML beside the
+.B \-o
+file and puts only file names in it. With
+.B "\-o obj/game.asm"
+and
+.B "\-\-#texture SHIP \(dqtextures/ship.png\(dq"
+the file
+.I obj/game.xml
+contains
+.RS
+.PP
+.nf
+<binary path="game.vbin" />
+    <texture path="ship.vtex" /> <!-- SHIP -->
+.fi
+.RE
+.PP
+so the
+.IR .vbin ", " .vtex " and " .vsnd
+files are expected beside the XML, in
+.IR obj/ .
+Textures and sounds that
+.B v32lua
+generates itself (PICO-8 and TIC-80 carts) are written there already.
+When two assets collapse to the same name, the first keeps it and each later
+one keeps just enough of its directories to be unique:
+.I textures/ship.png
+followed by
+.I textures/extra/ship.png
+gives
+.I ship.vtex
+and
+.I extra/ship.vtex
+(the latter expected in
+.IR obj/extra/ ).
+Only two assets whose whole paths collapse to one name (differing just by
+extension, say) draw a warning.
+.PP
+Beside every XML a twin for the optimized build is written:
+.I obj/gameOpt.xml
+is identical except that
+.B <binary>
+names
+.IR gameOpt.vbin ,
+ready for the output of an assembly optimizer such as
+.BR v32opt ;
+no editing step is needed.
+.PP
+With
+.B \-\-xml\-preserve\-paths
+the hint paths are kept as written
+.RI ( textures/ship.vtex ),
+the XML goes into the project folder: the source file's directory, or its parent when the source is in a
+folder named \fIsrc\fR and the output in a sibling such as \fIobj\fR (so
+.B "\-o obj/game.asm src/game.lua"
+gives \fIgame.xml\fR beside \fIsrc\fR and \fIobj\fR, where the build scripts go), and
+.B <binary>
+becomes the
+.I .vbin
+path relative to it
+.RI ( obj/game.vbin ).
+Hint paths are then relative to the XML too
+.RI ( src/textures/ship.vtex ),
+and generated assets are named relative to its directory.
+.PP
+The twin's title is the regular title followed by
+.IR " [optimized]" ,
+so the two cartridges can be told apart; set it with
+.B \-\-#titleopt
+or
+.BR \-\-titleopt ,
+or keep the two identical with
+.BR \-\-no\-diff\-opt\-title .
+.PP
+With
+.B \-b
+(a BIOS build) the
+.B <rom>
+element says
+.B type=\(dqbios\(dq
+instead of
+.BR type=\(dqcartridge\(dq ;
+the rest of the XML is the same. A BIOS needs exactly one texture and at
+most one sound.
+.SH BUILD SCRIPTS
+Along with the XML, \fBv32lua\fR writes the traditional Vircon32 build scripts,
+.I Make.sh
+(shell) and
+.I Make.bat
+(Windows batch; CR LF line ends), unless
+.B \-\-no\-build\-scripts
+is given. Run from any directory, a script changes into its own folder,
+creates the output folders, runs
+.B v32lua
+again with the options that were given, converts each
+.B \-\-#texture
+and
+.B \-\-#sound
+file with
+.BR png2vircon (1)
+and
+.BR wav2vircon (1)
+into the place the XML expects it, then runs
+.B assemble
+and
+.BR packrom ,
+stopping with BUILD FAILED at the first error and ending with BUILD
+SUCCESSFUL. It first checks that
+.B v32lua
+is in the \fBPATH\fR and says it is needed if not. The optimized build
+.RB ( v32opt ,
+.BR assemble ,
+.B packrom
+of
+.IR gameOpt.xml )
+runs only when
+.B v32opt
+is found; otherwise it is skipped.
+.PP
+The scripts go beside the source file, or in its parent when the source is
+in a folder named \fIsrc\fR and the output in a sibling folder (such as
+\fIobj\fR). A script that does not carry the \fIGenerated by v32lua\fR mark
+is never overwritten. The default can be changed with
+.B V32LUA_DEFAULT_BUILD_SCRIPTS
+in \fIinc/config.h\fR.
+.PP
+Besides the options that change what is produced
+.RB ( \-\-api ,
+.BR \-\-title ,
+.BR \-\-rate ,
+and so on), the scripts repeat
+.B \-b
+on their
+.B v32lua
+line and pass it to
+.BR assemble ;
+together with
+.B \-g
+the assembler gets
+.BR "\-b \-g program" .
+.SH FILES
+.TP
+.I *.lua
+Input source, in the Lua subset this tool accepts.
+.TP
+.I *.tic
+A TIC-80 cartridge (Lua carts only), compiled directly: its code and
+bank 0's tiles, sprites, map, flags, palette, waveforms and SFX are read.
+.TP
+.I *.p8
+A PICO-8 cartridge, compiled directly (see
+.BR "LANGUAGE NOTES" ).
+.TP
+.IR *_pico8.vtex ", " *_sfxNN.vsnd
+Generated next to the output for PICO-8 carts: the sprite sheet (plus
+color swatches), and the cart's 64
+.B __sfx__
+entries synthesized into sounds (22050 Hz by default, see
+.BR \-\-rate ).
+.BR music()
+is sequenced from them at run time.
+.TP
+.IR *_trackN.vsnd ", " *_sfxNN_nMM.vsnd
+Generated next to the output for TIC-80 carts with sound data: each music
+track the program can play, pre-mixed and looping, and each SFX rendered at
+the notes the program plays it at.
+.TP
+.IR pico8_tone0.vsnd " .. " pico8_tone7.vsnd
+Placeholder tones for PICO-8 and TIC-80 programs without sound data that use
+.BR sfx() / music()
+(an existing file of the same name is kept).
+.TP
+.I *.asm
+Generated Vircon32 assembly, ready to be handed to the Vircon32
+assembler directly.
+.TP
+.IR *.xml ", " *Opt.xml
+Generated cartridge definition and its optimized-build twin, named from the
+assembly output path (not the input path), referencing any
+.I .vtex
+and
+.I .vsnd
+assets registered via cartridge hints. Required by
+.BR packrom (1)
+alongside the assembled ROM.
+.TP
+.I *.asm.debug
+Optional, with
+.BR \-g :
+a line-oriented map from generated assembly line offsets back to
+original Lua source lines and enclosing function names, for use by a
+debugger such as
+.BR v32sim (1).
+.PP
+Texture and sound assets named by cartridge hints are not read by
+.BR v32lua ;
+convert them with
+.BR png2vircon (1)
+and
+.BR wav2vircon (1)
+before running
+.BR packrom (1).
+.TP
+.I /usr/local/Vircon32/v32tools/include/v32lua/
+The
+.B \-\-#include
+library: the standard-library ports from the source tree's
+.I lib/
+.RI ( string.lua ", " math.lua ", ...),"
+installed there by
+.B make sysinstall
+or
+.BR "cmake \-\-install" .
+The directory is compiled into
+.BR v32lua ;
+a CMake build installed under another prefix uses
+.IR <prefix>/Vircon32/v32tools/include/v32lua ,
+or
+.I <prefix>\ev32tools\einclude\ev32lua
+on Windows.
+.TP
+.IR <dir>/include/v32lua/ ", " <dir>/../Vircon32/v32tools/include/v32lua/
+Where
+.B \-\-#include
+files not found anywhere else are finally looked for,
+.I <dir>
+being the directory the
+.B v32lua
+executable is in: the layout of a release zip and of a Windows install
+.RI ( v32lua.exe
+beside
+.IR include\ev32lua ),
+and of an install under any
+.I <prefix>
+.RI ( <prefix>/bin/v32lua ).
+So an unpacked release zip finds its own library wherever it is put.
+.TP
+.I inc/config.h
+(in the source tree) Build-time defaults of the sample rates, side panels,
+fast circles, keyboard and mouse ports, and warnings.
+.TP
+.IR Make.sh ", " Make.bat
+Generated build scripts (see
+.BR "BUILD SCRIPTS" ).
+.SH ENVIRONMENT
+.TP
+.B V32LUA_INCLUDE
+Directories searched for
+.B \-\-#include
+files after the including file's own directory and the current
+directory, and before the installed library directory: a colon-separated
+list (semicolon-separated on Windows).
+.SH SEE ALSO
+.BR v32c++ (1),
+the Vircon32 C compiler and assembler documentation,
+.BR v32opt (1)
+(a separate, general-purpose Vircon32 assembly optimizer meant to sit
+between this tool and the assembler).
+.PP
+Project repository:
+.I https://github.com/wedge1020/v32lua
+.SH BUGS
+Report issues, including anything this tool compiles incorrectly or
+any Lua feature you'd like to see prioritized, via the project
+repository above. This is genuinely early, actively developed
+software.
+.SH AUTHOR
+Matthew Haas

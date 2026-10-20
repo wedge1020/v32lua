@@ -6,65 +6,247 @@ Under those modes, `spr()`/`btn()`/etc. are that console's own API instead
 (see the PICO-8 / TIC-80 compatibility docs), and the calls below are not
 available.
 
-Files: `v32lua_sound_intrinsics.c`, `v32lua_sound_namespaces.c`,
-`v32lua_spu_cmd_intrinsic.c`, `v32lua_ioport_boolean.c`,
-`intrinsics_vircon32.c`, `intrinsics_vircon32_memcard.c`,
-`runtime_vircon32_sound.s`, `runtime_vircon32_sfx.s`, `runtime_vircon32_spr.s`,
-`runtime_vircon32_input.s`, `runtime_vircon32_memcard.s`.
+The [Quick reference](#quick-reference) below lists every intrinsic and
+every `ioports.*` port on one page; the sections after it cover each part
+in detail.
 
-See also `vircon32-spu-port-ordering.md` — the SPU port write order is
-important and every sound emitter here depends on it.
+The SPU port write order matters for sound; see
+[Sound: music.\* / sfx.\*](#sound-music--sfx).
+
+Keyboard and mouse input (`key()`, `kbd.*`, `mouse()`, `mouse.*`) only works
+with a **v32io** hardware adapter or the modified emulator — the console
+itself has neither; see
+[Keyboard and mouse: what you need](#keyboard-and-mouse-what-you-need-v32io).
 
 ---
 
 ## Table of Contents
 
+- [Quick reference](#quick-reference)
+  - [Intrinsic functions](#intrinsic-functions)
+  - [ioports.\* — every hardware port](#ioports--every-hardware-port)
+  - [Standard library](#standard-library)
 - [Sound: music.\* / sfx.\*](#sound-music--sfx)
-  - [SPU port ordering](#spu-port-ordering)
-  - [music.volume() / sfx.volume()](#musicvolumevol--channel--sfxvolumevol--channel)
-  - [Why the bare names went away](#why-the-bare-names-went-away)
-  - [Compile-time aliases](#compile-time-aliases)
-  - [music.playing()](#musicplaying-and-why-a-lua-flag-is-the-wrong-toggle)
-  - [Codegen: hybrid fold](#codegen-hybrid-fold)
 - [ioports.spu.cmd() — the raw escape hatch](#ioportsspucmd--the-raw-escape-hatch)
 - [Boolean IO ports](#boolean-io-ports)
 - [System: system.\*](#system-system)
-  - [system.wait() / system.halt()](#systemwait--systemhalt)
-  - [system.date() / system.time()](#systemdate--systemtime)
-  - [system.frames / system.cycles](#systemframes--systemcycles)
 - [Graphics: spr()](#graphics-spr)
-  - [Runtime dispatch](#runtime-dispatch-not-compile-time-fold)
-  - [ioports.gpu.clear()](#ioportsgpuclearcolor)
-  - [Defining texture regions](#defining-texture-regions)
+- [Graphics: rect() / rectfill()](#graphics-rect--rectfill)
 - [Input: btn() / btnp()](#input-btn--btnp)
-  - [Button IDs](#button-ids)
-  - [btn(): direct polling](#btn-direct-polling)
-  - [btnp(): edge detection](#btnp-edge-detection)
-  - [ioports.inp.inputs](#ioportsinpinputs----one-word-bitmask)
-  - [What's intentionally not here](#whats-intentionally-not-here)
+- [Keyboard and mouse: what you need (v32io)](#keyboard-and-mouse-what-you-need-v32io)
+- [Keyboard: key() / keyp() / kbd.\*](#keyboard-key--keyp--kbd)
+- [Mouse: mouse() / mouse.\*](#mouse-mouse--mouse)
 - [Tilemap: tilemap.\*](#tilemap-tilemap)
-  - [--#tilemap and the CSV format](#tilemap-name-file-and-the-csv-format)
-  - [tilemap.get() / tilemap.set()](#tilemapget--tilemapset)
-  - [Lazy ROM-to-RAM promotion](#lazy-rom-to-ram-promotion)
-  - [tilemap.render()](#tilemaprender)
-  - [What's intentionally not here](#whats-intentionally-not-here-2)
-- [Other raw IO ports](#other-raw-io-ports)
-  - [ioports.tim.\* — raw timer](#ioportstim--raw-timer)
-  - [ioports.rng.\* — hardware RNG](#ioportsrng--hardware-rng)
-  - [ioports.car.\* — cartridge info](#ioportscar--cartridge-info)
-  - [ioports.mem.connected — memory card presence](#ioportsmemconnected--memory-card-presence)
 - [Memory card: memcard.\*](#memory-card-memcard)
-  - [memcard.save() / memcard.load()](#memcardsave--memcardload)
-  - [memcard[position]](#memcardposition)
-  - [memcard.title()](#memcardtitlestr---nil)
-  - [Tables: memcard.save() / memcard.load_table()](#tables-memcardsave--memcardload_table)
-  - [Address layout](#address-layout)
-  - [Type tags (auto-append form only)](#type-tags-auto-append-form-only)
-  - [What's intentionally not here](#whats-intentionally-not-here-1)
+- [Other raw IO ports](#other-raw-io-ports)
 
 ---
 
-# Sound: music.\* / sfx.\*
+## Quick reference
+
+An **intrinsic** is a name the compiler recognizes and turns into inline
+instructions or a call to a runtime routine: there is no Lua table or
+function behind it. A function of your own with the same name (`spr`,
+`rgba`, `color`, …) replaces the intrinsic.
+
+### Intrinsic functions
+
+*Graphics*
+
+| Call | Returns | What it does |
+|---|---|---|
+| `spr(region, x, y [, sx [, sy [, angle [, color [, blend]]]]])` | nil | Draws a texture region; picks the plain, zoomed, rotated or rotozoomed draw from the arguments. [Details](#graphics-spr) |
+| `rect(x1, y1, x2, y2 [, color])` | nil | 1-pixel rectangle outline between two inclusive corners. Color: packed word, default white. [Details](#graphics-rect--rectfill) |
+| `rectfill(x1, y1, x2, y2 [, color])` | nil | Filled rectangle, one GPU draw. |
+| `print(x, y, value)` | nil | Draws `value` (converted with `tostring`) at pixel `x, y` with the BIOS font. |
+| `ioports.gpu.clear([color])` / `clear(r, g, b [, a])` | nil | Sets the clear color (optional) and clears the screen. [Details](#gpu-clear) |
+| `ioports.gpu.draw([mode])` | nil | Draws the selected region at `gpu.x, gpu.y`. `mode`: `"draw"` (default), `"zoom"`, `"rotate"`, `"rotozoom"`, or `0`–`3`. |
+| `ioports.gpu.blending(mode)` | nil | Sets the blending mode: `"alpha"`/`"default"`, `"add"`, `"subtract"` (string literal). |
+| `ioports.gpu.sync()` | nil | Waits for the next frame (`WAIT`); same as `system.wait()`. |
+| `rgba(r, g, b [, a])` | packed word | Packs a color into the GPU's `0xAABBGGRR` word. Components clamped to 0–255, alpha defaults to 255. [Details](#colors-rgba) |
+| `color(n)` | packed word | Turns a number holding a packed color into the word (for colors you computed or loaded). [Details](#colors-color) |
+| `hex("0x…")` | packed word | A string literal of hex digits as the exact 32-bit word. |
+
+*Input*
+
+| Call | Returns | What it does |
+|---|---|---|
+| `btn(id [, pad])` | boolean | Button `id` (0–10, hardware order) is held. [Details](#input-btn--btnp) |
+| `btnp(id [, pad])` | boolean | Button `id` was pressed this frame. |
+
+*Keyboard* (v32kbd device) — [details](#keyboard-key--keyp--kbd). **Needs a v32io hardware adapter or the modified emulator: without one, no key is ever down** ([what you need](#keyboard-and-mouse-what-you-need-v32io)).
+
+| Call | Returns | What it does |
+|---|---|---|
+| `key([k])` | boolean | Key `k` (code or literal name: `"a"`, `"enter"`, `"shift"`) is held; no `k`: any key. |
+| `keyp([k [, hold, period]])` | boolean | Key `k` went down this frame (autorepeat with `hold`/`period`, as TIC-80). |
+| `kbd.read()` | number / nil | Next key press as the character it types (Shift, Caps Lock applied). |
+| `kbd.event()` | number / nil | Next event: `+code` pressed, `-code` released. |
+| `kbd.glyph(v)` | number / nil | The BIOS-font character a `kbd.read()` value stands for (accents, box drawing), or nil for a key code. |
+| `kbd.port([n])` | number | Gamepad port of the keyboard (default 2); setting it starts over. |
+| `kbd.capslock()`, `kbd.connected()` | boolean | Caps Lock state; device plugged in. |
+| `kbd.clear()` | nil | Drops unread events. |
+
+*Mouse* (v32mouse device) — [details](#mouse-mouse--mouse). **Needs a v32io hardware adapter or the modified emulator: without one, the pointer never moves** ([what you need](#keyboard-and-mouse-what-you-need-v32io)).
+
+| Call | Returns | What it does |
+|---|---|---|
+| `mouse()` | x, y, left, middle, right, scrollx, scrolly | Pointer (screen pixels) and buttons (booleans), as TIC-80's; scroll is always 0. |
+| `mouse.pressed([b])`, `mouse.released([b])` | boolean | A button in `b` (1 left, 2 right, 4 middle; sums; none: any) went down / up this frame. |
+| `mouse.buttons()` | number | Buttons held, 1 + 2 + 4. |
+| `mouse.delta()` | dx, dy | This frame's movement, in pixels. |
+| `mouse.position([x, y])` | x, y | Pointer; moves it when given. |
+| `mouse.bounds(x1, y1, x2, y2)` | nil | Area the pointer stays in (default the screen). |
+| `mouse.scale([n])`, `mouse.port([n])` | number | Pixels per step (default 2); gamepad port (default 3). |
+| `mouse.connected()` | boolean | Device plugged in. |
+
+*Sound* — [details](#sound-music--sfx)
+
+| Call | Returns | What it does |
+|---|---|---|
+| `music.play(snd [, ch [, loop [, vol [, start]]]])` | channel | Plays a sound, on channel 0 by default. |
+| `music.pause([ch])`, `music.resume([ch])`, `music.stop([ch])` | nil | Channel control. `resume(ch)` only acts on a *paused* channel (a playing or stopped one is left alone); no argument resumes every paused channel. |
+| `music.playing([ch])` | boolean | Is the channel playing. |
+| `music.volume(vol [, ch])` | nil | Channel volume. |
+| `sfx.play(snd [, ch [, vol [, speed]]])` | channel | Plays an effect on the next of channels 1–15. |
+| `sfx.stop([ch])`, `sfx.volume(vol [, ch])` | nil | Stops effects (channels 1–15), sets volume. |
+| `ioports.spu.cmd(mode)` (or `.command`) | nil | Raw SPU command on the selected channel. [Details](#ioportsspucmd--the-raw-escape-hatch) |
+
+*Tilemaps, memory card, system*
+
+| Call | Returns | What it does |
+|---|---|---|
+| `tilemap.get(MAP, x, y)` | number / nil | Tile at `x, y` of a `--#tilemap`. [Details](#tilemap-tilemap) |
+| `tilemap.set(MAP, x, y, v)` | v | Changes a tile (the map is copied to RAM on the first write). |
+| `tilemap.render(MAP, sx, sy, w, h, x, y, tw, th [, skip])` | nil | Draws a block of tiles. |
+| `memcard.save(v [, pos])`, `memcard.load([pos])` | v | Reads/writes one word on the memory card. [Details](#memory-card-memcard) |
+| `memcard.load_table(pos)` | table / nil | Loads a table saved with `memcard.save(t)`. |
+| `memcard.title(str\|table)` | nil | Sets the card's title/id (a string, or a table of 20 numbers) |
+| `memcard.title()` | table | Gets the card's title/id (a table of the 20 words, indices 1–20) |
+| `memcard[pos]`, `memcard[pos] = v` | | Same as `load` / `save`. |
+| `system.wait()` / `system.halt()` | nil | `WAIT` for the next frame / `HLT`. [Details](#system-system) |
+| `system.date()` / `system.time()` | string, 3 numbers | `"YYYY-MM-DD", y, m, d` / `"HH:MM:SS", h, m, s`. |
+| `system.frames()` / `system.cycles()` | number | Frames since power-on / CPU cycles in the current frame (also without `()`). |
+
+*Language and inline assembly*
+
+| Call | What it does |
+|---|---|
+| `tostring(v)`, `tonumber(s [, base])`, `type(v)` | As in Lua. |
+| `pairs(t)`, `ipairs(t)` | Iterators for `for k, v in …`. |
+| `setmetatable`, `getmetatable`, `rawget`, `rawset`, `rawlen`, `rawequal` | Metatables: `__index`, `__newindex`, `__call`, `__tostring`, `__len`, `__metatable`. |
+| `__asm__("…")` | Inline assembly with `{var}` substitution; registers and stack are saved around it. |
+| `__rawasm__("…")` | Assembly copied into the output as is. |
+
+`print` and `ioports.*` are native-mode names; under `--#api pico8` or
+`--#api tic80`, `print`, `spr`, `btn` and so on are that console's
+functions instead (see [PICO8.md](PICO8.md) and [TIC80.md](TIC80.md)).
+Not available: `printf`, `pcall`/`error`/`assert`, `select`, `next`,
+`string.match`/`gmatch`, `os.*`, `io.*`, `coroutine.*`.
+
+### ioports.\* — every hardware port
+
+Each property reads or writes one Vircon32 I/O port directly (`IN`/`OUT`),
+with no table lookup. Types:
+
+* **int** — a whole number. Reading gives a Lua number; writing a number
+  truncates it toward zero (`CFI`). A numeric literal is written as the
+  exact 32-bit word instead, so `ioports.gpu.bgcolor = 0xFF003366` and
+  `ioports.gpu.x = -5` both store what you wrote (see
+  [Integer ports and literals](#integer-ports-and-literals)).
+* **float** — a Lua number, stored as is.
+* **bool** — a Lua boolean: reads give `true`/`false`, writes test Lua
+  truthiness. See [Boolean IO ports](#boolean-io-ports).
+* **color** — an int port that holds a packed `0xAABBGGRR` word. Write a
+  literal, `rgba()`, `color()` or `hex()`; a runtime number is converted to
+  an integer, which is not the same bits.
+
+R = read, W = write.
+
+**ioports.gpu.\* — graphics**
+
+| Property | Port | Access | Type | Meaning |
+|---|---|---|---|---|
+| `ioports.gpu.texture` | `GPU_SelectedTexture` | R/W | int | Texture used by region settings and draws (`--#texture` names, or -1 for the BIOS texture). |
+| `ioports.gpu.region` | `GPU_SelectedRegion` | R/W | int | Region (0–4095) of the selected texture to define or draw. |
+| `ioports.gpu.minX`, `minY` | `GPU_RegionMinX/Y` | R/W | int | Region top-left corner, in texture pixels. Writing one also sets `hotX`/`hotY` to the same value. |
+| `ioports.gpu.maxX`, `maxY` | `GPU_RegionMaxX/Y` | R/W | int | Region bottom-right corner (inclusive). |
+| `ioports.gpu.hotX`, `hotY` | `GPU_RegionHotSpotX/Y` | R/W | int | Region hotspot: the point placed at `gpu.x, gpu.y`. Set after `minX/minY`. |
+| `ioports.gpu.x`, `y` | `GPU_DrawingPointX/Y` | R/W | int | Screen position of the next draw. |
+| `ioports.gpu.scaleX`, `scaleY` | `GPU_DrawingScaleX/Y` | R/W | float | Scale for zoomed draws. |
+| `ioports.gpu.angle` | `GPU_DrawingAngle` | R/W | float | Angle for rotated draws, in radians. |
+| `ioports.gpu.bgcolor` | `GPU_ClearColor` | R/W | color | Color used by `clear()`. |
+| `ioports.gpu.multiply` | `GPU_MultiplyColor` | R/W | color | Color every draw is multiplied by (`0xFFFFFFFF` = unchanged). |
+| `ioports.gpu.blending` | `GPU_ActiveBlending` | R/W | int | Blending mode number (alpha `0x20`, add `0x21`, subtract `0x22`); or call `ioports.gpu.blending("add")`. |
+| `ioports.gpu.pixels` | `GPU_RemainingPixels` | R | int | Pixels the GPU can still draw this frame. |
+
+Methods: `ioports.gpu.clear()`, `ioports.gpu.draw()`,
+`ioports.gpu.blending()`, `ioports.gpu.sync()` (see the table above).
+
+**ioports.inp.\* — gamepads**
+
+| Property | Port | Access | Type | Meaning |
+|---|---|---|---|---|
+| `ioports.inp.gamepad` | `INP_SelectedGamepad` | R/W | int | Gamepad (0–3) the other properties read. Reads give the last value set (the emulators can't read this port back; see [The gamepad port](#keyboard-key--keyp--kbd)). |
+| `ioports.inp.status` | `INP_GamepadConnected` | R | bool | Is the selected gamepad connected. |
+| `ioports.inp.left`, `right`, `up`, `down` | `INP_GamepadLeft/…` | R | int | D-pad: frames held (> 0) or frames since release (< 0). |
+| `ioports.inp.A`, `B`, `X`, `Y`, `L`, `R`, `START` | `INP_GamepadButton*` | R | int | Buttons, same encoding. |
+| `ioports.inp.inputs` | (all of the above) | R | int | Every button of the selected gamepad as one bitmask, held = 1: bit 10 left, 9 right, 8 up, 7 down, 6 START, 5 A, 4 B, 3 X, 2 Y, 1 L, 0 R. |
+
+**ioports.spu.\* — sound**
+
+| Property | Port | Access | Type | Meaning |
+|---|---|---|---|---|
+| `ioports.spu.volume` | `SPU_GlobalVolume` | R/W | float | Master volume. |
+| `ioports.spu.channel` | `SPU_SelectedChannel` | R/W | int | Channel (0–15) the `chan*` properties and `cmd()` act on. |
+| `ioports.spu.sound` | `SPU_SelectedSound` | R/W | int | Sound (`--#sound` name) the sound properties act on. |
+| `ioports.spu.length` | `SPU_SoundLength` | R | int | Length of the selected sound, in samples. |
+| `ioports.spu.soundloop` | `SPU_SoundPlayWithLoop` | R/W | bool | Selected sound loops by default. |
+| `ioports.spu.loopstart`, `loopend` | `SPU_SoundLoopStart/End` | R/W | int | Loop points of the selected sound, in samples. |
+| `ioports.spu.state` | `SPU_ChannelState` | R | int | Selected channel: 0x40 stopped, 0x41 paused, 0x42 playing. |
+| `ioports.spu.chansound` | `SPU_ChannelAssignedSound` | R/W | int | Sound assigned to the selected channel. |
+| `ioports.spu.chanvolume` | `SPU_ChannelVolume` | R/W | float | Channel volume. |
+| `ioports.spu.chanspeed` | `SPU_ChannelSpeed` | R/W | float | Channel playback speed (1.0 = normal). |
+| `ioports.spu.chanloop` | `SPU_ChannelLoopEnabled` | R/W | bool | Channel loops. Set **after** `cmd("play")`. |
+| `ioports.spu.chanpos` | `SPU_ChannelPosition` | R/W | int | Channel playback position, in samples. |
+
+Method: `ioports.spu.cmd(mode)` / `ioports.spu.command(mode)` —
+`"play"`, `"pause"`, `"stop"`, `"resume"`, `"pauseall"`, `"stopall"`,
+`"resumeall"`.
+
+**ioports.tim.\*, rng, car, mem — timer, random numbers, cartridge, memory card**
+
+| Property | Port | Access | Type | Meaning |
+|---|---|---|---|---|
+| `ioports.tim.date` | `TIM_CurrentDate` | R | int | Year × 65536 + day of the year (`system.date()` decodes it). |
+| `ioports.tim.time` | `TIM_CurrentTime` | R | int | Seconds since midnight (`system.time()` decodes it). |
+| `ioports.tim.frames` | `TIM_FrameCounter` | R | int | Frames since power-on (= `system.frames`). |
+| `ioports.tim.cycles` | `TIM_CycleCounter` | R | int | CPU cycles this frame (= `system.cycles`). |
+| `ioports.rng.value` | `RNG_CurrentValue` | R | int | Next hardware random number. |
+| `ioports.rng.seed` | `RNG_CurrentValue` | W | int | Seeds the hardware generator. |
+| `ioports.car.connected` | `CAR_Connected` | R | bool | A cartridge is inserted. |
+| `ioports.car.romsize` | `CAR_ProgramROMSize` | R | int | Program ROM size, in words. |
+| `ioports.car.numvtex`, `numvsnd` | `CAR_NumberOfTextures/Sounds` | R | int | Textures / sounds in the cartridge. |
+| `ioports.mem.connected` | `MEM_Connected` | R | bool | A memory card is inserted. |
+
+Writing a read-only port, reading a write-only one, or an unknown name
+(`ioports.gpu.colour`) is a compile error that lists the valid names.
+
+### Standard library
+
+| Library | Functions |
+|---|---|
+| `math` | `abs acos asin atan atan2 ceil cos cosh deg exp floor fmod frexp ldexp log log10 max min modf pow rad random randomseed sin sinh sqrt tan tanh`, constants `pi huge e` |
+| `string` | `byte char find format gsub len lower rep reverse sub upper` (also as methods: `s:sub(1, 3)`) |
+| `table` | `concat insert move pack remove sort unpack` |
+| operators | `+ - * / % ^ //`, `..`, `#`, `== ~= < > <= >=`, `and or not`, `& | ~ << >>` (see the README) |
+
+Numbers are float32 (24 significant bits); strings that look like numbers
+are converted in arithmetic (`"5" + 1` is 6), as in Lua.
+
+---
+
+## Sound: music.\* / sfx.\*
 
 ```
 music.play(SOUND [, CHANNEL [, LOOP [, VOL [, START]]]])  -> channel used
@@ -96,9 +278,9 @@ channel: searching would cost up to 15 `IN` + compare on the hot path
 that only arises when 15 effects overlap, where the oldest is the right one
 to lose anyway.
 
-## Vircon32 SPU: the port write order
+**Vircon32 SPU: the port write order**
 
-### The rule
+*The rule*
 
 ```asm
 OUT SPU_SelectedChannel, ch
@@ -123,17 +305,34 @@ looping only works if written after the command. Write it even when it is 0,
 since the command has just replaced it with the sound's flag.
 
 For a **Paused** channel `PlayChannel()` takes neither branch — it only sets
-`State = Playing`. That is what makes Play the correct per-channel resume,
-and why resume never disturbs position or loop.
+`State = Playing`, so on a paused channel Play resumes without disturbing
+position or loop. On any *other* state it is not a resume: a **Stopped**
+channel is restarted, and a channel that is already **Playing** is
+retriggered from position 0 (verified against the emulator's
+`PlayChannel()`).
 
-### Channel states and what resume actually means
+*Channel states and what resume actually means*
 
 `channel_stopped 0x40`, `channel_paused 0x41`, `channel_playing 0x42`.
 `SPU_ChannelState` is **read-only** (`WriteSPUChannelState` returns false).
 
 There is no `ResumeSelectedChannel` command. `ResumeAllChannels` is literally
-a loop calling `PlayChannel()` on every paused channel, so `resume(ch)` =
-`PlaySelectedChannel` is the right per-channel equivalent.
+a loop calling `PlayChannel()` on every **paused** channel (it leaves the
+others alone), so `music.resume(ch)` is `PlaySelectedChannel` **guarded by a
+state check**: the compiler reads `SPU_ChannelState` and issues the command
+only when the channel is Paused (`0x41`). Resuming a channel that is playing
+or stopped is therefore a no-op, as `resume()` with no argument already was;
+an unguarded Play would have rewound a playing channel to the start. (This
+guard was added in `20261014-dev`; earlier versions emitted the bare Play.)
+
+**Assembler constants.** The Vircon32 assembler accepts port names
+(`SPU_Command`, ...) and value names (`SPUCommand_PlaySelectedChannel`,
+`SPUChannelState_*`, `GPUCommand_*`, `GPUBlendingMode_*`) **only as `IN` /
+`OUT` operands**; in `MOV`, `PUSH` and `IEQ` they are rejected. The
+compiler therefore always emits the numeric value there (the command table in
+`src/intrinsics/spu.c` and the `0x41` above); anything you write in
+`__asm__` / `__rawasm__` has to do the same, e.g. `OUT SPU_Command, 0x31`
+is fine and `MOV R0, SPUCommand_PauseSelectedChannel` is an assembler error.
 
 **A "resume" that restarts from the beginning means the channel was STOPPED,
 not paused.** That is the diagnostic signature of a lost loop flag: the sound
@@ -142,10 +341,11 @@ ran to its end, the channel went Stopped, and Play rewound it.
 `PauseChannel()` sets `State = Paused` unconditionally — it does *not* check
 for an already-stopped channel, despite the C API docs saying pause has "no
 effect if already stopped". So pausing a finished channel leaves it Paused at
-position 0, and a later resume plays from the start. Guard with a
-`SPU_ChannelState == 0x42` check if that matters.
+position 0, and a later resume plays it from the start (a real "resume" of a
+Paused channel, from position 0). Guard with a `SPU_ChannelState == 0x42`
+check if that matters.
 
-### Port types
+*Port types*
 
 `SPU_ChannelPosition` is an **INTEGER** port — a sample index, clamped by the
 console to `0 .. SoundLength-1`. `audio.h` declares
@@ -158,7 +358,7 @@ Genuine float ports: `SPU_ChannelVolume` (clamped 0–8), `SPU_ChannelSpeed`
 (0–128, changes pitch), `SPU_GlobalVolume` (clamped 0–2). NaN/inf writes to
 any of these are ignored rather than rejected.
 
-## music.volume(VOL [, CHANNEL]) / sfx.volume(VOL [, CHANNEL])
+**music.volume(VOL [, CHANNEL]) / sfx.volume(VOL [, CHANNEL])**
 
 Sets playback volume. `VOL` is required. `CHANNEL` has **three** distinct
 meanings depending on what the call site writes:
@@ -187,7 +387,7 @@ Explicit channel numbers (`N` or `-1`) never change ownership — only
 no-argument "tracked channels" mode; only playing a *different* channel
 under the other namespace releases it.
 
-### Channel-ownership tracking
+*Channel-ownership tracking*
 
 Two compiler-reserved RAM words, `VIRCON32_MUSIC_CHANNEL_MASK` and
 `VIRCON32_SFX_CHANNEL_MASK`, each a bitmask over channels 0–15: bit *N* set
@@ -205,7 +405,7 @@ Only `.play()` touches the masks. `.pause()`, `.resume()`, `.stop()`, and
 stopped is still "owned" by whoever last played on it, and still gets
 picked up by the no-argument volume mode.
 
-### Codegen
+*Codegen*
 
 An all-literal call (`music.volume(0.5, 0)`, `sfx.volume(0.0, -1)`) folds
 to a straight-line `OUT` sequence at compile time, same as the rest of this
@@ -216,7 +416,7 @@ namespace's mask and writes `SPU_ChannelVolume` for each set one. Any other
 runtime-valued call goes to `__builtin_vircon32_volume`, which checks the
 channel value against `-1` (global) at runtime and clamps otherwise.
 
-## Why the bare names went away
+**Why the bare names went away**
 
 `play` / `pause` / `resume` / `stop` were the four most collision-prone
 identifiers a game could want for itself, which is what the old
@@ -224,7 +424,7 @@ identifiers a game could want for itself, which is what the old
 They are gone; the namespaces replace them, and the alias mechanism restores
 them by choice rather than by default.
 
-## Compile-time aliases
+**Compile-time aliases**
 
 `play = music.play` records an alias and emits nothing. Later `play(...)`
 calls compile to the identical inline OUT sequence — no runtime value, no
@@ -257,7 +457,7 @@ If first-class sound-function values are ever wanted, the precedent is
 `math.sin`-as-a-value already is. That would be additive; the alias table
 stays as the zero-cost path.
 
-## music.playing() and why a Lua flag is the wrong toggle
+**music.playing() and why a Lua flag is the wrong toggle**
 
 `SPU_ChannelState` is a read-only integer port returning `channel_stopped`
 0x40, `channel_paused` 0x41, `channel_playing` 0x42. `music.playing(ch)`
@@ -268,7 +468,7 @@ its own: the program still believes it is playing, so the next press pauses
 an already-stopped channel instead of resuming it. Asking the hardware
 cannot drift.
 
-## Codegen: hybrid fold
+**Codegen: hybrid fold**
 
 All arguments compile-time-known → straight-line `OUT` sequence, no CALL.
 Anything dynamic → push and CALL the runtime routine, which does
@@ -289,7 +489,7 @@ anywhere in the AST.
 
 ---
 
-# ioports.spu.cmd() — the raw escape hatch
+## ioports.spu.cmd() — the raw escape hatch
 
 Issues one raw SPU command against whatever `SPU_SelectedChannel` currently
 names. No channel selection, no sound assignment, no defaulting — pair it
@@ -305,7 +505,7 @@ Modes: `"play"` 0, `"pause"` 1, `"stop"` 2, `"pauseall"` 3, `"resume"` 4,
 
 ---
 
-# Boolean IO ports
+## Boolean IO ports
 
 A Lua boolean is not a float. `true`/`false`/`nil` are NaN-boxed bit
 patterns; the hardware ports trade in integers 0 and 1. Writes decode Lua
@@ -320,7 +520,7 @@ needs rewriting as `if p then 1 else 0`.
 
 ---
 
-# System: system.\*
+## System: system.\*
 
 ```
 system.wait()   -> nil   (WAIT for the next new-cycle signal)
@@ -329,7 +529,7 @@ system.date()   -> string, year, month, day
 system.time()   -> string, hour, minute, second
 ```
 
-## system.wait() / system.halt()
+**system.wait() / system.halt()**
 
 `system.wait()` compiles straight to `WAIT` — the same instruction
 `ioports.gpu.sync()` uses, and interchangeable with it; both just wait for
@@ -337,7 +537,7 @@ the timer's next new-cycle signal. `system.halt()` compiles to `HLT`,
 stopping the CPU outright — for a program that's completed its work and
 has nothing left to render.
 
-## system.date() / system.time()
+**system.date() / system.time()**
 
 Both decode the timer chip's real-time clock (see Vircon32 System
 Specification Part 7, section 1.2 — this is an actual wall-clock/RTC, not
@@ -362,19 +562,21 @@ universal reading of it. There is no `os.time()`/`os.date()` format-string
 or table-construction support — this is a fixed-shape decode of the
 hardware register, not a general date library.
 
-## system.frames / system.cycles
+**system.frames / system.cycles**
 
 ```lua
 local f = system.frames()   -- TIM_FrameCounter -- frames since power-on
-local c = system.cycles()   -- TIM_CycleCounter -- CPU cycles since power-on
+local c = system.cycles()   -- TIM_CycleCounter -- CPU cycles since this frame began
 ```
 
-Both are read-only hardware counters, monotonic since boot — unlike
-`system.date()`/`system.time()`, these are **not** wall-clock: they measure
-the console's own running time, not the real-time clock. `system.frames()`
-is the natural fit for "every N frames, do X" timing (this is exactly what
-the tilemap scroll demo uses to pace its scroll speed) since it free-runs
-regardless of what the program does, unlike a hand-rolled counter variable
+Both are read-only hardware counters, and neither is wall-clock time.
+`system.frames()` counts frames since power-on; `system.cycles()` counts
+CPU cycles since the current frame began and restarts at 0 every frame,
+so reading it just before `system.wait()` shows how much of the frame's
+CPU budget the frame used. `system.frames()` is the natural fit for "every
+N frames, do X" timing (this is exactly what the tilemap scroll demo uses
+to pace its scroll speed) since it free-runs regardless of what the
+program does, unlike a hand-rolled counter variable
 that has to be remembered and incremented every frame. Both are also
 reachable as raw ports (`ioports.tim.frames`, `ioports.tim.cycles`) — see
 [Other raw IO ports](#other-raw-io-ports) — the `system.*` names are
@@ -382,7 +584,7 @@ identical, just under the more discoverable namespace.
 
 ---
 
-# Graphics: spr()
+## Graphics: spr()
 
 ```
 spr(region_id, x, y [, scale_x [, scale_y [, angle_deg [, color_mult [, blend_mode]]]]])
@@ -398,26 +600,39 @@ or a raw region index) at pixel position `(x, y)`.
 | `scale_x`, `scale_y` | `1.0` | independent X/Y scale factors |
 | `angle_deg` | `0` | rotation, **degrees**, counter-clockwise; converted to radians internally (console's `GPU_DrawingAngle` is radians) |
 | `color_mult` | `0xFFFFFFFF` | packed RGBA multiply color — `0xFFFFFFFF` is "no change" |
-| `blend_mode` | `VIRCON32_BLEND_ALPHA` (`0x20`) | see blend modes below |
+| `blend_mode` | `"alpha"` (`0x20`) | a mode name string or its numeric value — see blend modes below |
 
 An argument can be **omitted** (just stop supplying trailing arguments) or
 passed as an **explicit `nil`** to skip it and reach a later one —
 `spr(id, x, y, nil, nil, 45)` to rotate without touching scale — both mean
 "use the default."
 
-Blend modes:
+Blend modes — pass either the name string or the number:
 
-| Constant | Value |
-|---|---|
-| `VIRCON32_BLEND_ALPHA` | `0x20` |
-| `VIRCON32_BLEND_ADD` | `0x21` |
-| `VIRCON32_BLEND_SUBTRACT` | `0x22` |
+| String | Number | Effect |
+|---|---|---|
+| `"alpha"` or `"default"` | `0x20` | normal alpha blending (the default) |
+| `"add"` | `0x21` | additive — brightens what's underneath |
+| `"subtract"` | `0x22` | subtractive — darkens what's underneath |
+
+```lua
+spr(7, 100, 80, nil, nil, nil, nil, "add")       -- glow / light effect
+spr(7, 100, 80, nil, nil, nil, nil, 0x21)        -- same thing, numeric
+spr(7, 100, 80, nil, nil, nil, 0x80FFFFFF, "alpha")
+```
+
+A mode string must be a **string literal**; it's resolved to its number at
+compile time, and any other string (`"multiply"`, a typo) is a compile
+error. A string held in a variable is not recognized (there's no runtime
+string dispatch — it would reach the GPU as a pointer, not a mode); keep
+the mode in a variable as a number instead (`local mode = 0x21`). Numbers
+are passed through as-is, as before.
 
 `spr()` returns nothing (Lua `nil`), matching the console having no
 meaningful value to hand back from a draw call. More than 8 arguments is a
 compile-time warning; the extras are ignored.
 
-## Runtime dispatch, not compile-time fold
+**Runtime dispatch, not compile-time fold**
 
 Unlike the sound API, `spr()` always calls `__builtin_vircon32_spr` — there
 is no straight-line-`OUT` fast path for a fully-literal call. The routine
@@ -439,11 +654,20 @@ persistent GPU state every draw variant consults, unlike
 branches that actually use them (harmless to leave stale, since e.g.
 `DrawRegionRotated` is defined to ignore scale entirely).
 
-`color_mult`'s default of `0xFFFFFFFF` is passed through the calling
-convention as a Lua float, and `4294967295.0` is not exactly representable
-in a 32-bit float — it rounds up to `4294967296.0`. The runtime converts it
-through `CFI` (float → integer bit pattern) rather than using it directly,
-which recovers the correct `0xFFFFFFFF` regardless.
+`color_mult` is a packed `0xAABBGGRR` word and is written to
+`GPU_MultiplyColor` as-is, without a float → integer conversion (the same
+model as `ioports.gpu.clear(color)`). A numeric literal (`0xFFFFFFFF`,
+`0x80FFFFFF`, `-1`) is folded to that word at compile time. Any other
+expression must already hold the packed word: `rgba(r, g, b [, a])`
+(see [Colors: rgba()](#colors-rgba)), `hex("0xFF8080FF")`, or a variable
+assigned from one of them. A plain number computed at runtime is *not*
+converted — float32 can't hold a 32-bit color exactly anyway. For a color
+that changes at runtime (a fade), keep the components as numbers and pack
+them at the draw:
+
+```lua
+spr(REGION_SOLID, x, y, w, h, 0, rgba(0, 0, 0, frame * 8))   -- fade to black
+```
 
 An explicitly-passed `nil` for an optional argument (e.g.
 `spr(id, x, y, nil, nil, 45)`) is treated identically to that argument
@@ -451,22 +675,140 @@ being omitted entirely — both fall back to the default. A call sitting in
 an expression context (`local unused = spr(1, 10, 10)`) correctly gets
 `nil` assigned, matching every other intrinsic in this file.
 
-## ioports.gpu.clear([color])
+<a id="gpu-clear"></a>
+**ioports.gpu.clear([color]) / ioports.gpu.clear(r, g, b [, a])**
 
-Clears the screen: writes `GPU_ClearColor` (if a color argument is given)
-then issues `GPUCommand_ClearScreen`. `color` accepts either a packed RGBA
-integer or one of five preset name strings — `"black"`, `"white"`,
-`"blue"`, `"red"`, `"green"` — resolved at compile time when it's a string
-literal. Omit the argument to clear with whatever `GPU_ClearColor`
-currently holds.
+Clears the screen: writes `GPU_ClearColor` (if a color is given) then
+issues `GPUCommand_ClearScreen`. Omit the arguments to clear with whatever
+`GPU_ClearColor` currently holds. The color can be given four ways:
+
+| Form | Example | Notes |
+|---|---|---|
+| preset name | `clear("black")` | `"black"`, `"white"`, `"blue"`, `"red"`, `"green"` — string literal, resolved at compile time; any other name is a compile error |
+| packed literal | `clear(0xFF202020)` | `0xAABBGGRR`; folded at compile time to the raw 32-bit word |
+| packed word | `clear(rgba(32, 32, 32))`, `clear(hex("0xFF202020"))`, `clear(c)` | a non-literal value is written to the port untouched, so it must already hold the raw word — i.e. come from `rgba()` or `hex()` |
+| components | `clear(32, 32, 32)`, `clear(r, g, b, 128)` | red, green, blue, alpha, each `0`–`255`; alpha is optional and defaults to `255` (opaque) |
 
 ```lua
 ioports.gpu.clear("black")
-ioports.gpu.clear(0xFF202020)   -- packed RGBA, not a preset name
-ioports.gpu.clear()             -- reuses the last ClearColor set
+ioports.gpu.clear(0xFF202020)       -- packed 0xAABBGGRR, dark grey
+ioports.gpu.clear(32, 32, 32)       -- the same dark grey, as components
+ioports.gpu.clear(r, g, b)          -- variables work too; alpha = 255
+ioports.gpu.clear(0, 0, 64, 128)    -- half-transparent dark blue
+ioports.gpu.clear()                 -- reuses the last ClearColor set
 ```
 
-## Defining texture regions
+Note the GPU's byte order is `0xAABBGGRR` — red is the *low* byte — which
+is the main reason the component form exists: `clear(r, g, b)` packs it in
+the right order for you.
+
+The component form accepts 3 or 4 arguments (2, or more than 4, is a
+compile error). When every component is a literal it folds to a single
+packed constant at compile time — out-of-range literals are clamped to
+`0`–`255` with a warning. Otherwise each component is evaluated as an
+ordinary expression, clamped to `0`–`255`, truncated to an integer, and
+packed at runtime. An explicit `nil` for `a` means opaque, like leaving it
+out, and so does an alpha that is `nil` at runtime; there is no runtime
+nil check on red, green and blue, so a variable that is `nil` there gives
+an undefined color.
+
+*Why a packed variable needs `rgba()` or `hex()`:* v32lua numbers are
+float32, so a number like `0xFF202020` stored in a variable holds a float,
+not the color bits, and `clear()` can't tell the two apart at runtime.
+Literals written directly in the call are fine, because they're folded at
+compile time.
+
+<a id="colors-rgba"></a>
+**Colors: rgba(r, g, b [, a])**
+
+Returns the GPU's packed `0xAABBGGRR` word for a color — the raw 32-bit
+word, *not* a Lua number — for anything that takes one: `spr()`'s
+`color_mult`, `ioports.gpu.clear(color)`, `ioports.gpu.multiply`,
+`ioports.gpu.bgcolor`.
+
+```lua
+spr(id, x, y, 1, 1, 0, rgba(255, 255, 255, alpha))   -- fade in/out
+ioports.gpu.multiply = rgba(r, g, b)                 -- no float conversion
+ioports.gpu.clear(rgba(16, 16, 48))
+```
+
+* 3 or 4 arguments (any other count is a compile error). Alpha defaults
+  to 255; `nil` alpha (literal or at runtime) is 255 too.
+* Each component is clamped to `0`–`255` and truncated (`127.9` → 127),
+  exactly like `clear(r, g, b [, a])`, whose packing code it shares.
+* All-literal arguments fold at compile time to one constant
+  (`rgba(1, 2, 3, 4)` is `0x04030201`); out-of-range literals are clamped
+  with a warning. Otherwise it packs at runtime; components that call
+  functions are safe.
+* Native Vircon32 mode only. A function of your own named `rgba` takes
+  precedence.
+
+**Caveat — keep the components, not the word.** A raw word whose top bits
+match one of the language's value tags *is* that value to the rest of the
+program: `rgba(0, 0, 192, 255)` is `0xFFC00000`, which is `nil`, and
+`0xFF8xxxxx` reads as a table. Passing the result straight to a call or a
+port is always safe (it is only copied). Storing it in a table (a `nil`
+value deletes the key), testing it (`if c then`), or comparing it with
+`nil` is not. `hex()` has the same issue. The safe idiom is to keep the
+components as numbers and call `rgba()` where the color is used, as in
+the examples above.
+
+<a id="colors-color"></a>
+**Colors: color(n)**
+
+Turns a number that holds a packed `0xAABBGGRR` color into the raw word,
+for colors you have as a number rather than as components: one computed
+with arithmetic, read from a table of colors, or loaded from the memory
+card.
+
+```lua
+local palette = { 0xFF1D2B53, 0xFF7E2553, 0xFF008751 }
+ioports.gpu.multiply = color(palette[i])
+spr(id, x, y, 1, 1, 0, color(base + fade * 0x01000000))
+```
+
+* One argument (any other count is a compile error; a string, `nil` or
+  boolean literal is too).
+* The number is floored and wrapped into 32 bits, so negative numbers
+  give their two's-complement word (`color(-1)` is `0xFFFFFFFF`). Values
+  outside `[-2^31, 2^32)` saturate.
+* A literal folds at compile time and is exact: `color(0x802040FF)` is
+  `0x802040FF`.
+* At runtime the number is a float32, which holds only 24 significant
+  bits, so a color whose bits span more than 24 is rounded before
+  `color()` sees it: a variable holding `0x802040FF` gives `0x80204100`.
+  Colors with alpha `0xFF` and many other common values are exact
+  (`0xFF003366`, `0x80FFFFFF`), but when the exact bits matter, keep
+  the components and use `rgba()`.
+* Same caveat as `rgba()` about words that look like `nil` or a table.
+* Native Vircon32 mode only. A function of your own named `color` takes
+  precedence (PICO-8's `color()` is PICO-8's own function).
+
+<a id="integer-ports-and-literals"></a>
+**Integer ports and literals**
+
+A number written to an integer port (`ioports.gpu.x`, `bgcolor`,
+`multiply`, …) is converted with `CFI`, truncating toward zero. A
+**numeric literal** is instead written as its exact 32-bit word, computed
+at compile time: `ioports.gpu.bgcolor = 0xFF003366` stores `0xFF003366`
+(a float conversion would saturate it), `ioports.gpu.x = -5` stores `-5`,
+and `ioports.gpu.y = 12.7` stores `12`. Literals outside `[-2^31, 2^32)`
+saturate with a warning.
+
+**Numbers given to color ports.** A Lua number is a float, so its bits are
+not a color. When a *color* port (`ioports.gpu.clear`, `multiply`,
+`bgcolor`...), `spr`'s `color_mult`, or a `rect`/`rectfill` color receives
+a number that isn't a literal word, the compiler now rounds it down to an
+integer and uses that as the `0xAABBGGRR` word (wrapping modulo 2^32), with
+a warning that a float32 only keeps 24 bits (alpha ≥ 0x80 needs
+`rgba()`/`hex()`). Before, the float's own bits were sent: `ioports.gpu.clear
+= 8` cleared to black at 25 % alpha, which the emulator blends over the old
+frame. `--allow-float-as-clearcolor` (or the `--#allow-float-as-clearcolor`
+hint) brings that old behavior back for the clear color only, on purpose,
+for a motion-blur streak. Use `rgba()`, `hex()` or a literal for exact
+colors.
+
+**Defining texture regions**
 
 `spr()`'s `region_id` doesn't refer to anything until a region has actually
 been carved out of a loaded texture. There is no compiler-side region
@@ -485,17 +827,25 @@ ioports.gpu.hotX = 6            -- see below -- NOT 0
 ioports.gpu.hotY = 156          -- see below -- NOT 0
 ```
 
-**`hotX`/`hotY` must be set to the same values as `minX`/`minY`, not to
-`0`.** This was found the hard way while building `tilemap.render()`: a
-region whose hotspot is left unset (or explicitly zeroed) draws offset
-downward and rightward by roughly its own `minX`/`minY` — a region cut from
-near the top-left of the sheet looks fine, which is exactly what made this
-easy to miss at first, but a region cut from further into the sheet drifts
-by however far in it was cut from. Setting `hotX`/`hotY` to match `minX`/
-`minY` anchors the draw point at the region's own top-left corner, which is
-what every example in this document assumes `spr(id, x, y, ...)` means.
-This needs doing for **every** region a cart defines — it is not a
-one-time global setting.
+*Region HotSpot considerations and compiler behaviours*
+
+While Region HotSpots give us the ability to render regions relative to a
+set of hotspot coordinates, forgetting to set them can result in rendering
+issues, as unset hotspot coordinates may default to 0, 0. If far enough
+away from your region's defined X and Y extrema, your region may not end
+up rendering where you want it, or on the screen at all.
+
+For this reason, `v32lua` adopts an auto-setting of `ioports.gpu.hotX` and 
+`ioports.gpu.hotY`, so any neglected hot spot coordinates on region
+definition would still result in a visible region rendering:
+
+When setting a regions's minimum X and Y, the corresponding hotspot X and
+Y will be set to the exact same values. This way, a default of a "top-left"
+hotspot coordinates will occur.
+
+Should you wish to set your hotspot coordinates to something other than 
+the regions top-left, simply set them AFTER you establish the minimum X 
+and Y.
 
 `GPU_RegionMinX/MinY/MaxX/MaxY/HotSpotX/HotSpotY` are the raw ports behind
 `ioports.gpu.minX` etc. — see the full port table in
@@ -505,7 +855,59 @@ read-only `ioports.gpu.pixels` GPU-busy counter).
 
 ---
 
-# Input: btn() / btnp()
+## Graphics: rect() / rectfill()
+
+```
+rect(x1, y1, x2, y2 [, color])       -- 1-pixel outline
+rectfill(x1, y1, x2, y2 [, color])   -- filled
+```
+
+`(x1, y1)` and `(x2, y2)` are opposite corners, both **inclusive**, in any
+order: `rectfill(10, 20, 19, 24)` covers 10 × 5 pixels, columns 10–19 and
+rows 20–24, and `rectfill(19, 24, 10, 20)` is the same rectangle.
+Coordinates are floored (`rectfill(9.8, ...)` starts at column 9); `nil` or
+a non-number counts as 0. One corner equal to the other draws one pixel.
+
+`color` is a packed `0xAABBGGRR` word, exactly like `spr()`'s
+`color_mult`: a literal (`0xFF0000FF`), `rgba()`, `color()`, `hex()`, or a
+variable holding one of those. Absent or `nil`: opaque white. A color with
+alpha below 255 blends with the current blending mode
+(`ioports.gpu.blending`), which `rect()` leaves as it is.
+
+```lua
+rectfill(0, 0, 639, 359, rgba(0, 0, 64))      -- whole screen, dark blue
+rect(100, 50, 199, 99, 0xFF00FFFF)           -- yellow frame, 100 x 50
+rectfill(px, py, px + 15, py + 15, rgba(255, 0, 0, 128))   -- translucent red
+```
+
+**How it draws**
+
+Both draw with the BIOS texture (`-1`), region 256: one white pixel the
+BIOS defines, at (469, 29), with its hotspot on it. Nothing is added to
+the cartridge. `rectfill()` is **one** zoomed draw of that region at scale
+(width, height), tinted with the multiply color — exact to the pixel for
+any size (the GPU's zoom correction keeps the sampling inside that one
+pixel). `rect()` is up to 4 draws
+that don't overlap (top and bottom edges full width, the sides between
+them), so a translucent outline isn't darker at the corners.
+
+The GPU state the call uses is put back afterwards: selected texture and
+region, multiply color, drawing scale. A `rect()` can sit in the middle of
+`ioports.gpu.*` drawing code without disturbing it.
+
+Each draw costs GPU pixels like any other (`ioports.gpu.pixels`), plus the
+GPU's scaling penalty; a full-screen `rectfill()` is a full screen of
+pixels.
+
+A function of your own named `rect` or `rectfill` replaces the built-in,
+as with every intrinsic. Under `--#api pico8` the two names are PICO-8's
+palette-color versions (see [PICO8.md](PICO8.md)); under `--#api tic80`,
+`rect(x, y, w, h, color)` / `rectb(...)` are TIC-80's (see
+[TIC80.md](TIC80.md)).
+
+---
+
+## Input: btn() / btnp()
 
 ```
 btn(id [, player])   -> boolean, currently held down
@@ -515,7 +917,7 @@ btnp(id [, player])  -> boolean, true only on the frame it was first pressed
 `player` selects a gamepad 0–3 (`INP_SelectedGamepad`); omitted or `nil`
 uses whichever gamepad is already selected without writing the port.
 
-## Button IDs
+**Button IDs**
 
 Vircon32 hardware order, not PICO-8's or TIC-80's:
 
@@ -537,13 +939,13 @@ An `id` outside 0–10, or an unmapped combination, returns `false` rather
 than erroring — there's no OS-level error path available on this target
 (see `pcall`/`error`/`assert` in the compiler's deferred-features list).
 
-## btn(): direct polling
+**btn(): direct polling**
 
 `__builtin_vircon32_btn` reads the mapped `INP_Gamepad*` port for the
 selected gamepad and returns `true` when the hardware reports it pressed
 (`>= 1`).
 
-## btnp(): edge detection
+**btnp(): edge detection**
 
 `btnp()` needs state the hardware doesn't track on its own: "was this
 button not pressed last frame, and is it pressed now." That state lives in
@@ -558,7 +960,7 @@ An out-of-range `player` (an explicit value outside 0–3) is clamped to
 0–3 before being used as an index into that 44-word table, rather than
 being allowed to compute an address outside it.
 
-## ioports.inp.inputs — one-word bitmask
+**ioports.inp.inputs — one-word bitmask**
 
 ```lua
 local mask = ioports.inp.inputs   -- current gamepad, all 11 buttons in one read
@@ -579,7 +981,7 @@ passing a whole frame's input as one value (e.g. into a replay/input log)
 rather than for everyday per-button game logic, where `btn()`/`btnp()` read
 more clearly.
 
-## What's intentionally NOT here
+**What's intentionally NOT here**
 
 - No bitfield/"any button" form (`btn()` with no arguments) the way
   PICO-8's does — every call names a specific button.
@@ -593,7 +995,382 @@ compatibility layers, not here.
 
 ---
 
-# Tilemap: tilemap.\*
+## Keyboard and mouse: what you need (v32io)
+
+> **⚠ Requires extra hardware or a modified emulator.** The Vircon32
+> console has **no keyboard and no mouse**: its only input devices are
+> four gamepads. `key()`, `keyp()`, `kbd.*`, `mouse()`, `mouse.*` and
+> PICO-8's `stat(32..34)` read a keyboard or a mouse that reaches the
+> console **disguised as a gamepad**, through one of the two **v32io**
+> setups below. **Without one of them, no keyboard or mouse input is
+> possible**: the functions compile and run, but no key is ever down, no
+> character is ever typed, and the mouse pointer never moves. This applies
+> to the stock Vircon32 emulators and to every other environment.
+
+**1. The v32io hardware adapter (works with any Vircon32 emulator).** A
+Waveshare **RP2350-USB-A** board (with its resistor **R13 removed**, so its
+USB-A port can host low-speed devices) running the v32io firmware. A USB
+keyboard or mouse plugs into the adapter; the adapter plugs into the
+computer and appears there as an ordinary USB gamepad named
+**`v32io:kbd`** or **`v32io:mouse`**, depending on what is plugged into it.
+Because it is just a gamepad, it works with the stock emulator as well as
+the modified one. Setup, once per mode: create a joystick profile for it
+with the emulator's controls editor (EditControls), mapping its buttons 0
+to 10 to Left, Right, Up, Down, Start, A, B, X, Y, L, R in that order — the
+adapter has a **setup mode** for this (keyboard: Scroll Lock, then F1–F11
+for the 11 controls; mouse: hold the three buttons for 2 seconds, then
+each left click presses the next control) — and select that profile for
+the gamepad port your program expects. The firmware, its build notes and
+the full setup steps are in the **v32io** project (`firmware/`).
+
+**2. A modified Vircon32 emulator (no hardware needed).** The v32io
+devices built into the DesktopEmulator itself, reading the computer's own
+keyboard and mouse. Either:
+
+- the fork [wedge1020/ComputerSoftware](https://github.com/wedge1020/ComputerSoftware),
+  [`v32io` branch](https://github.com/wedge1020/ComputerSoftware/tree/v32io),
+  which has both the `v32kbd` and the `v32mouse` device; or
+- the stock DesktopEmulator sources with the two patches from the v32io
+  project applied (`emulator/v32io/v32kbd.patch`, `emulator/v32io/v32kbd-text.patch`, `emulator/v32io/v32mouse.patch`).
+
+In its *Gamepads* menu, pick the gamepad your program expects and select
+**`v32kbd`** or **`v32mouse`**. `v32kbd` can't be selected while any
+gamepad uses the stock *Keyboard* device (both need the computer's
+keyboard). With `v32mouse`, focusing the emulator window captures the
+pointer; **left Ctrl + left Alt** releases it. The stock emulator's own
+*Keyboard* gamepad device is **not** a v32io keyboard: it only maps a few
+keys onto gamepad buttons, which a program reading it sees as random keys.
+
+**Which gamepad port.** The program reads the keyboard from **gamepad port
+2** (the third) and the mouse from **gamepad port 3** (the fourth) by
+default, leaving ports 0 and 1 for the players' gamepads. Port numbers
+count from 0, the emulator's menus from 1: port 2 is *Gamepad 3*, port 3
+is *Gamepad 4*. Put the device in that port, or tell the program where it
+is: `--keyboard N` / `--mouse N` on the command line, `--#keyboard N` /
+`--#mouse N` in the source, or `kbd.port(n)` / `mouse.port(n)` at run
+time.
+
+**Checking for the device.** `kbd.connected()` and `mouse.connected()`
+say whether *a gamepad* is plugged into that port — the console can't
+tell a v32io device from a real gamepad. With the hardware adapter, its
+gamepad only exists while a keyboard or mouse is plugged into it. A
+**regular gamepad** left in the keyboard's or mouse's port is read as one:
+its buttons turn into random keys, clicks and movement. A program that
+must also work without these devices should offer another way to play
+(gamepad controls, an on-screen keyboard) and, ideally, let the player
+choose the port.
+
+### How it works
+
+The design follows the v32io project's C libraries (`v32io.h`,
+`keyboard.h`, `mouse.h`), whose protocol reference is `PROTOCOLS.md`:
+
+- **One packed word.** A v32io device uses its gamepad's 11 controls as
+  11 bits of data, not as game buttons. The runtime reads all 11 at once
+  into one word, bit *n* = INP port `0x402 + n` (Left, Right, Up, Down,
+  Start, A, B, X, Y, L, R) — `__v32io_read` in `v32io.s`, the shared layer
+  both devices decode, mirroring `v32io.h`. The console never shows two
+  opposite directions pressed at once, so each direction pair is a
+  3-state "trit"; both protocols are built around that.
+- **Keyboard (v32kbd).** One key event per frame at most: Left/Right
+  alternate as a *strobe* (a new event is a strobe side different from the
+  last one seen, so the same key can arrive twice in a row), Up = pressed,
+  Down = released, Start…R = the 7-bit key code. The adapter sends the code
+  first and switches the strobe 8 ms later, holding each event for 2
+  frames (about 23 events per second; faster typing is queued in the
+  adapter); the emulator fork delivers exactly one event per frame. The
+  runtime keeps the held keys, Caps Lock, a 64-event queue for
+  `kbd.read()`/`kbd.event()`, and applies Shift/Caps Lock itself (US
+  layout). See [Keyboard](#keyboard-key--keyp--kbd).
+- **Mouse (v32mouse).** Start/A/B = middle/left/right, held as they are
+  (each change lasts at least 25 ms). Movement travels as two 12-position
+  counters, one per axis, each a 2-bit Gray code plus a trit, changing one
+  control per step; the runtime turns the change since the last frame into
+  −5…+5 steps (6 is ambiguous: no movement) and moves its own pointer by
+  steps × scale. The adapter sends at most one step per axis every 5 ms.
+  There is no room left for the wheel. See [Mouse](#mouse-mouse--mouse).
+- **Every frame.** Both devices must be read on every frame — a keyboard
+  event or a mouse step not seen in time is lost or misread. When a
+  program uses them, the compiler reads them in every keyboard/mouse call
+  (once per frame), at the top of each `game_loop()`/`TIC()`/PICO-8 tick,
+  and just before the `WAIT` of `system.wait()`, `ioports.gpu.sync()` and
+  PICO-8's `flip()`. A bare `__rawasm__("WAIT")` loop skips that.
+- **Only when used.** The compiler looks through the source (outside
+  comments and strings) for keyboard/mouse calls; a program without any
+  gets none of this code, RAM or per-frame reading.
+- **The gamepad selection is kept.** Reading the device's port means
+  selecting it, and the program's own selection must be put back — but
+  the Vircon32 emulators return a wrong value when `INP_SelectedGamepad`
+  is read. So the runtime remembers the selected gamepad itself
+  (`V32IO_GAMEPAD`, updated by every `btn()`, `btnp()` and
+  `ioports.inp.gamepad` write), and `ioports.inp.gamepad` reads give that
+  remembered value. `btn()` and `ioports.inp.*` keep reading the gamepad
+  they read before.
+
+---
+
+## Keyboard: key() / keyp() / kbd.\*
+
+```
+key([k])                      -> boolean, k held (no k: any key held)
+keyp([k [, hold, period]])    -> boolean, k went down this frame (+ autorepeat)
+kbd.read()                    -> next typed character (a number), or nil
+kbd.event()                   -> next event: +code pressed, -code released, or nil
+kbd.glyph(v)                 -> BIOS-font character of a kbd.read() value, or nil for a key code
+kbd.port([n])                 -> gamepad port of the keyboard (and sets it)
+kbd.capslock()                -> boolean, caps lock on
+kbd.connected()               -> boolean, something is plugged into that port
+kbd.clear()                   -- forget the events not read yet
+```
+
+> **⚠ Only with a v32io device.** These need the v32io hardware adapter
+> with a USB keyboard, or the modified emulator's `v32kbd` device — see
+> [Keyboard and mouse: what you need](#keyboard-and-mouse-what-you-need-v32io).
+> Without one, `key()` is always false and `kbd.read()` always nil.
+
+These read a full keyboard through a **v32kbd** device: a USB keyboard
+the console sees as an ordinary gamepad, whose 11 controls carry key
+events instead of buttons (see the v32io project). It plugs into a gamepad
+port — **port 2 (the third) by default**, leaving ports 0 and 1 for
+regular gamepads. Change it with `--keyboard N` on the command line, a `--#keyboard N`
+hint in the source, or `kbd.port(n)` at run time.
+
+`key()`/`keyp()` follow TIC-80's: same names, same rules, with v32kbd key
+codes. Under `--#api tic80` the same two calls take TIC-80's own key codes
+(see [TIC80.md](TIC80.md#input)); `kbd.*` works under every API. A global
+of your own named `kbd` (a table you assign) replaces the `kbd.*` built-ins.
+
+**Key codes**
+
+A code names a **key**, not a character: the keys that type a character
+use it unshifted, US layout — `'a'`–`'z'` (97–122), `'0'`–`'9'` (48–57),
+space (32) and `` ` - = [ ] \ ; ' , . / `` — and the others:
+
+| Code | Key | Code | Key |
+|---|---|---|---|
+| 1 | Up | 11 | Right Ctrl |
+| 2 | Down | 12 | Left Alt (Option) |
+| 3 | Left | 13 | Enter |
+| 4 | Right | 14–25 | F1–F12 |
+| 5 | Caps Lock | 26 | Right Alt (Option) |
+| 6 | Left Shift | 27 | Escape |
+| 7 | Right Shift | 28 | Left GUI (Command, Windows) |
+| 8 | Backspace | 29 | Right GUI |
+| 9 | Tab | 127 | Delete |
+| 10 | Left Ctrl | | |
+
+Numeric keypad keys report the same codes as their main-keyboard
+equivalents.
+
+`k` can also be a **string literal**, turned into the code at compile
+time: one character (`"a"`, `"/"`, `" "`; a shifted character names its
+key, so `"A"` is the a key and `"!"` the 1 key), or a name — `up` `down`
+`left` `right` `enter` (`return`) `tab` `space` `backspace` `delete`
+(`del`) `escape` (`esc`) `capslock` `lshift` `rshift` `lctrl` `rctrl`
+`lalt` `ralt` `lgui` `rgui` `f1`–`f12`, case-insensitive. Four names mean
+either side: `shift`, `ctrl`, `alt`, `gui` (`key("shift")` is true while
+either Shift is held). An unknown name is a compile error. Only literals
+are folded: a string held in a variable is not a key (`false`).
+
+```lua
+function game_loop()
+    if key("left")  then x = x - 2 end
+    if key("right") then x = x + 2 end
+    if keyp("space") then fire() end
+    if key("ctrl") and keyp("s") then save() end
+    if keyp("down", 20, 4) then menu_next() end   -- repeats while held
+end
+```
+
+**key([k]), keyp([k [, hold, period]])**
+
+`key(k)` is true while the key is held. `keyp(k)` is true on the frame it
+goes down; with `hold` and `period` both given and ≥ 0, it is also true
+while the key stays held, from `hold` frames on, every `period` frames
+(`period` 0: every frame) — counting the frames after the first, as
+TIC-80's `keyp` and `btnp` do. There is no default autorepeat. Without `k`,
+`key()` is "any key held" and `keyp()` "any key went down this frame". A
+code with no key behind it is `false`.
+
+**Typed text: kbd.read()**
+
+```lua
+local text = ""
+function game_loop()
+    local c = kbd.read()
+    while c do
+        if c == 8 then                          -- Backspace
+            text = string.sub(text, 1, -2)
+        else
+            local g = kbd.glyph(c)              -- nil for a key with no character
+            if g then text = text .. string.char(g) end
+        end
+        c = kbd.read()
+    end
+    print(0, 0, text .. "_")
+end
+```
+
+`kbd.read()` returns the next key **press** as the character it types,
+with Shift and Caps Lock applied as they were when the key went down
+(`"A"`, `"!"`, `"{"` ... as numbers, matching the BIOS font), and keys
+with no character as their code (Enter 13, Backspace 8, arrows 1–4...).
+Releases are skipped. `nil` when nothing is left.
+
+Characters outside US ASCII (accented letters, `€`, box-drawing symbols) are
+typed through the v32io *text* extension: the device sends the character
+as a pair of events, and the compiler's keyboard code puts them back
+together (a lone first half is dropped after 30 frames, and a device
+plugged in again starts clean). `kbd.read()` returns such a character as
+its BIOS font code (Windows-1252, 128–255); the box-drawing symbols 14–31
+come back as **256 + code**, so they can't be mistaken for key codes
+(Enter 13, arrows 1–4...). `kbd.glyph(v)` undoes that: it gives the
+character to `print` or `string.char()`, and `nil` for a key code.
+`kbd.event()` skips typed characters and only reports keys.
+
+`kbd.event()` returns every event instead, presses and releases, as the
+key code with no Shift applied: positive for a press, negative for a
+release (`-97`: the a key went up). Both read the same queue — use one or
+the other. The queue holds 64 events; past that, new ones are dropped
+until it is read (`kbd.clear()` empties it — the held keys `key()` sees
+are not affected).
+
+**kbd.port([n]), kbd.capslock(), kbd.connected()**
+
+`kbd.port(n)` moves the keyboard to gamepad port `n` (0–3, clamped) and
+starts over: held keys, queued events and Caps Lock are forgotten, and the
+device's current state is taken as the starting point. It returns the port;
+`kbd.port()` only returns it. `kbd.capslock()` is the Caps Lock state, kept
+by counting its presses (it starts off). `kbd.connected()` is true when
+something is plugged into the keyboard's port.
+
+**Reading every frame**
+
+The device reports at most one key event per frame and holds it until the
+next one, so it has to be read **on every frame** or events are lost. The
+compiler arranges that when the program uses the keyboard:
+
+- every `key`/`keyp`/`kbd.*` call reads the device (once per frame);
+- the `game_loop()` and TIC-80 `TIC()` drivers read it before each frame;
+- `system.wait()` and `ioports.gpu.sync()` read it before their `WAIT`
+  (what arrives then counts for the next frame, so `keyp()` still sees it).
+
+So a `main()` loop that waits with `system.wait()` loses nothing, even if
+it only looks at the keyboard now and then. A bare `__rawasm__("WAIT")`
+skips that read. Nothing of this is in a program that doesn't use the
+keyboard.
+
+**The gamepad port**
+
+The keyboard's port is read without disturbing the gamepad the program has
+selected: `btn()`, `btnp()` and `ioports.inp.*` keep reading the gamepad
+they read before. Don't read the keyboard's port with `btn()` — its
+"buttons" are key-code bits.
+
+The selected gamepad is remembered by the runtime (`V32IO_GAMEPAD`) rather
+than read back from `INP_SelectedGamepad`: the Vircon32 emulators return a
+wrong value when that port is read. `ioports.inp.gamepad` reads give the
+remembered value too. A `__rawasm__` write to the port bypasses it.
+
+---
+
+## Mouse: mouse() / mouse.\*
+
+```
+mouse()                       -> x, y, left, middle, right, scrollx, scrolly
+mouse.pressed([b])            -> boolean, a button in b went down this frame
+mouse.released([b])           -> boolean, a button in b went up this frame
+mouse.buttons()               -> buttons held: 1 left + 2 right + 4 middle
+mouse.delta()                 -> dx, dy: this frame's movement
+mouse.position([x, y])        -> x, y (and moves the pointer there)
+mouse.bounds(x1, y1, x2, y2)  -- the area the pointer stays in
+mouse.scale([n])              -> pixels the pointer moves per step (and sets it)
+mouse.port([n])               -> gamepad port of the mouse (and sets it)
+mouse.connected()             -> boolean, something is plugged into that port
+```
+
+> **⚠ Only with a v32io device.** These need the v32io hardware adapter
+> with a USB mouse, or the modified emulator's `v32mouse` device — see
+> [Keyboard and mouse: what you need](#keyboard-and-mouse-what-you-need-v32io).
+> Without one, the pointer stays where it starts and no button is ever down.
+
+These read a mouse through a **v32mouse** device: a USB mouse the
+console sees as an ordinary gamepad (see the v32io project). It plugs into a
+gamepad port — **port 3 (the fourth) by default**, as in the v32io mouse
+demo, so a keyboard (port 2) and two players' gamepads (ports 0 and 1)
+fit beside it. Change it with `--mouse N` on the command line, a `--#mouse N` hint in
+the source, or `mouse.port(n)` at run time.
+
+`mouse()` is TIC-80's: the pointer's `x, y`, then `left, middle, right` as
+booleans, then `scrollx, scrolly`, which are always 0 — the device has no
+room left for the wheel. The same call, with the same 7 values, works under
+`--#api tic80` and `--#api pico8` too, in that console's screen units (see
+[TIC80.md](TIC80.md#input) and [PICO8.md](PICO8.md#api)); `mouse.*` works
+under every API. A function or global of your own named `mouse` replaces
+all of them.
+
+```lua
+function game_loop()
+    local x, y, left = mouse()
+    if mouse.pressed(1) then          -- left button went down
+        click_at(x, y)
+    end
+    if left then
+        draw_at(x, y)                 -- held
+    end
+    rectfill(x - 1, y - 1, x + 1, y + 1)
+end
+```
+
+**The pointer**
+
+The device reports movement, not a position, so the runtime keeps a pointer:
+it starts at the screen's center (320, 180), moves by **steps × scale**
+(scale 2 by default: 2 pixels per step) and stays inside its bounds (the
+whole 640 × 360 screen by default, both edges inclusive). `mouse.bounds()`
+limits it to an area (a `nil` keeps that edge as it is) and moves it inside;
+`mouse.position(x, y)` places it (each coordinate given is floored and kept
+within the bounds; `nil` keeps it); `mouse.scale(n)` sets the speed (n ≥ 1).
+All three return their current values, so `mouse.position()` and
+`mouse.scale()` only read. `mouse.delta()` is this frame's movement in
+pixels (after the scale, before the bounds), 0, 0 when it didn't move.
+
+**Buttons**
+
+`left`, `middle` and `right` are held as long as the buttons are. For
+`mouse.pressed(b)`, `mouse.released(b)` and `mouse.buttons()`, buttons are
+numbers: **1 left, 2 right, 4 middle**, added together for "any of these"
+(`mouse.pressed(3)`: left or right). Without `b`, any button. `pressed` /
+`released` are true only on the frame the button changed. The adapter
+keeps every button change for at least 25 ms, so even a quick click lasts
+more than a frame.
+
+**How it is read**
+
+The device keeps two counters, one per axis, that go around 12 positions,
+one gamepad control changing per step; each read compares them with the
+previous read, giving −5 to +5 steps per axis (6 can't be told from −6, and
+counts as no movement). So, like the keyboard, the mouse has to be read on
+**every frame** — and the compiler arranges that when the program uses it:
+every `mouse`/`mouse.*` call reads it (once per frame), the `game_loop()`,
+TIC-80 and PICO-8 drivers read it each frame, and `system.wait()`,
+`ioports.gpu.sync()` and PICO-8's `flip()` read it before their `WAIT` (what
+arrives then counts for the next frame). A `main()` loop that waits with
+`system.wait()` loses no movement even if it only looks at the mouse now
+and then. Movement is only measured between two reads of a connected
+device at most 2 frames apart; anything else — a device just plugged in,
+frames spent in a pause screen, a bare `__rawasm__("WAIT")` loop — only
+takes the counters as the new starting point, so the pointer never jumps.
+
+`mouse.port(n)` moves the mouse to gamepad port `n` (0–3, clamped) and
+starts over from the device's current state (the pointer stays where it
+is). `mouse.connected()` is true when something is plugged into the
+mouse's port. As with the keyboard, reading the mouse's port doesn't
+disturb the gamepad the program has selected.
+
+---
+
+## Tilemap: tilemap.\*
 
 ```
 tilemap.get(NAME, x, y)        -> number or nil (out of bounds)
@@ -612,7 +1389,7 @@ Unlike `--#texture`/`--#sound`, a tilemap is **not** a cart-XML resource —
 no `<textures>`/`<sounds>` entry, no resource id baked into generated code.
 Its data is embedded as literal values directly in the assembled program.
 
-## --#tilemap NAME "file" and the CSV format
+**--#tilemap NAME "file" and the CSV format**
 
 ```lua
 --#tilemap LEVEL1 "level1.csv"
@@ -630,7 +1407,7 @@ This format is deliberately plain enough that Tiled's **Export As... CSV**
 (per-layer) output can be used directly with no conversion step — no TMX/
 TSX parsing anywhere in this compiler.
 
-## tilemap.get() / tilemap.set()
+**tilemap.get() / tilemap.set()**
 
 ```lua
 local id = tilemap.get(LEVEL1, 4, 2)   -- tile at column 4, row 2
@@ -650,7 +1427,7 @@ sprite ids are byte-sized. A tile value here is just whatever the calling
 code wants it to mean, typically a GPU region id, which can run well past
 255.
 
-## Lazy ROM-to-RAM promotion
+**Lazy ROM-to-RAM promotion**
 
 A tilemap starts life read-only, sitting wherever the compiler placed its
 data in the program image — `tilemap.get()` before any write reads directly
@@ -662,7 +1439,7 @@ promotion is tracked per tilemap, not globally. A second and later
 `tilemap.set()` on an already-promoted tilemap writes straight through,
 without re-copying or disturbing earlier writes.
 
-## tilemap.render()
+**tilemap.render()**
 
 ```lua
 tilemap.render(LEVEL1, sx, sy, w, h, x, y, tile_w, tile_h)
@@ -701,7 +1478,7 @@ need drawing one extra row/column beyond `w`/`h` and shifting the whole
 block's screen origin by a sub-tile pixel remainder; that's a real,
 separate extension, not implemented here.
 
-## What's intentionally NOT here
+**What's intentionally NOT here**
 
 - No sub-pixel/smooth scrolling — see above.
 - No `mget()`/`mset()`/`map()` naming — those names belong to the TIC-80
@@ -714,7 +1491,7 @@ separate extension, not implemented here.
 
 ---
 
-# Memory card: memcard.\*
+## Memory card: memcard.\*
 
 ```
 memcard.save(value, position)   -> value   (raw write, exactly 1 word)
@@ -722,7 +1499,8 @@ memcard.save(value)             -> value   (auto-append; see below)
 memcard.load(position)          -> value   (raw read, exactly 1 word)
 memcard.load()                  -> value   (position 0)
 memcard.load_table(position)    -> table or nil   (see Tables, below)
-memcard.title(str)              -> nil     (sets the 20-word title)
+memcard.title(str|table)        -> nil     (sets the 20-word title/id)
+memcard.title()                 -> table   (gets the 20-word title/id, indices 1-20)
 
 memcard[position]                  == memcard.load(position)
 memcard[position] = value          == memcard.save(value, position)
@@ -739,14 +1517,14 @@ words, not individual bytes. This matches how this VM already stores Lua
 strings internally — one word per character (see `string.len()`) — rather
 than a byte-packed representation.
 
-## memcard.save() / memcard.load()
+**memcard.save() / memcard.load()**
 
 There are two distinct forms, chosen by whether a `position` is given:
 
 **With an explicit `position`** — the low-level primitive. Writes (or
 reads) exactly one raw word at `position`, with no bookkeeping of any
 kind. `position 0` is the first word of the data region; see
-[Address layout](#address-layout) below for the full range, including how
+**Address layout** below for the full range, including how
 negative positions reach into the title. You are fully responsible for
 knowing what you put where — writing the same position twice simply
 overwrites it.
@@ -762,7 +1540,7 @@ a persistent cursor stored *on the card itself* (not in RAM), so repeated
 no-position saves keep extending a log across many play sessions instead
 of overwriting word 0 every run. This form is type-aware: saving a real
 Lua string writes its full contents (tagged and length-prefixed, see
-[Type tags](#type-tags-auto-append-form-only)), not just a raw pointer.
+**Type tags**), not just a raw pointer.
 
 ```lua
 memcard.save("high score run")   -- appended at the current cursor
@@ -776,10 +1554,10 @@ separate counting function.
 `memcard.load()` with no `position` always reads word 0 — it does **not**
 follow the auto-append cursor the way `memcard.save()` does. Reading back
 an entry written by the auto-append form means reading its tag word
-yourself at a known position (see [Type tags](#type-tags-auto-append-form-only)),
+yourself at a known position (see **Type tags**),
 or simply knowing what you wrote there.
 
-## memcard[position]
+**memcard[position]**
 
 `memcard[position]` and `memcard[position] = value` are shorthand for the
 explicit-position form of `load`/`save` above — never the auto-append
@@ -788,26 +1566,70 @@ form, since Lua's bracket syntax has no "no index" spelling.
 ```lua
 memcard[0] = 1234
 local hi = memcard[0]        -- 1234
-memcard[-1]                  -- reads the auto-append cursor
+local cursor = memcard[-1]    -- reads the auto-append cursor
 ```
 
-## memcard.title(str) -> nil
+**memcard.title(str|table) -> nil**
 
-Sets the memory card's title — up to 20 characters, one word per
-character, matching this VM's internal string representation. Longer
-strings are truncated; shorter strings are zero-padded. This is
-independent of any `--#title` cart hint, which names the *cartridge*, not
-the *save data* — a single cart can have many memory cards in circulation,
-each with its own title.
+Sets the memory card's title/id: 20 words at the start of the card's
+title area. This is independent of any `--#title` cart hint, which names the
+*cartridge*, not the *save data* — a single cart can have many memory cards
+in circulation, each with its own title.
+
+Two argument forms:
+
+- **A string.** One character per word (matching this VM's internal string
+  representation). A string longer than 20 characters is truncated; a
+  shorter one is zero-padded.
+- **An indexed table**, for a title that is more of an ID than text. Elements
+  `1..20` are the 20 words, each a number stored as its 32-bit integer
+  value. A missing (`nil`) element is stored as 0; elements past 20 are
+  ignored. Because a word read back by `memcard.title()` is the exact
+  inverse conversion, `memcard.title(memcard.title())` round-trips every
+  word bit for bit.
+
+Anything else (a number, a function, `true`/`false`/`nil`, or a table whose
+elements `1..20` include a non-number such as a string) is a **runtime
+panic**: the red `PANIC` screen with the message *RUNTIME ERROR:
+memcard.title() MUST BE STRING OR INDEXED TABLE* and the offending value,
+then the console halts. Two details
+follow from the table form being written word by word:
+
+- the words before the offending element have already been stored when the
+  panic happens (the write is not transactional); validate first if that
+  matters;
+- each number goes through the console's float-to-integer conversion, which
+  is only defined for values in the signed 32-bit range (and a float holds
+  integers exactly only up to 2^24). To store the word `0xFFFFFFFF`, pass
+  `-1`; a value of 2^31 or more converts differently on different emulator
+  hosts, so do not rely on it.
 
 ```lua
 memcard.title("My Save File")
+
+local id = {}
+for i = 1, 20 do id[i] = i * 100 end
+memcard.title(id)               -- 20 numeric words
 ```
 
-## Tables: memcard.save() / memcard.load_table()
+**memcard.title() -> table**
+
+Gets the memory card's title/id as a **new table** of 20 numbers, indices
+`1` to `20` (this version's tables are 1-based), one word each. For a title
+set from a string, element `n` is the character code of character `n`
+(0 past the end of the string). The table is freshly allocated on every
+call; the heap does not collect garbage, so read the title once, not every
+frame. Like the setter it is independent of any `--#title` cart hint.
+
+```lua
+local title = memcard.title()
+-- title[1] .. title[20]; for "My Save File": 77, 121, 32, 83, ... 0, 0
+```
+
+**Tables: memcard.save() / memcard.load_table()**
 
 `memcard.save(a_table)` — the no-position auto-append form **only** —
-writes a **raw dump** of the table's contents: a straight walk of its
+writes a  **raw dump** of  the table's contents:  a straight walk  of its
 internal hash-bucket storage, the same way you'd `fwrite()` a struct to a
 file in C. It is not a general recursive serializer.
 
@@ -816,7 +1638,7 @@ local highscores = { alice = 500, bob = 350, carol = 900 }
 memcard.save(highscores)
 
 local restored = memcard.load_table(0)
-print(restored.alice)   -- 500
+print(10, 10, restored.alice)   -- 500
 ```
 
 `memcard.save(a_table, position)` (the **explicit-position** form) is
@@ -839,7 +1661,7 @@ function is written as its raw pointer — **not** recursively unpacked —
 so it's only meaningful within the same run that wrote it; reloading it in
 a future session (or after the pointer's target has moved/been collected)
 is undefined. This is the same safety boundary the rest of `memcard.*`
-already draws (see [Safety note](#safety-note)) — a table dump doesn't
+already draws (see *Safety note*) — a table dump doesn't
 cross it, it just applies it per-entry instead of once.
 
 **`memcard.load_table(position)`** rebuilds a fresh table from a dump
@@ -850,11 +1672,11 @@ word before trusting anything after it; reading at a position that
 doesn't hold a table dump returns `nil` rather than misreading unrelated
 words as a pair count and garbage keys/values.
 
-## Address layout
+**Address layout**
 
 ```
 0x30000000  +-------------------------------------+  position -24
-            |  title: 20 characters               |
+            |  title/id: 20 words                 |
             |  (memcard.title() writes here)      |  position -5
             +-------------------------------------+
             |  reserved (3 words, unused)          |  position -4 .. -2
@@ -871,9 +1693,7 @@ words as a pair count and garbage keys/values.
 (`0x30000018`). Negative positions reach backward into the title/metadata
 block — reachable, but only by consciously going negative. Note the
 metadata region (4 words, positions -4..-1) is separate from the title
-block (20 words, positions -24..-5) — previously the metadata was carved
-out of the *last 4 words of the title itself*, capping the usable title
-at 16 characters; the full 20 is available now.
+block (20 words, positions -24..-5).
 
 | Constant | Value | Meaning |
 |---|---|---|
@@ -882,7 +1702,7 @@ at 16 characters; the full 20 is available now.
 | `VIRCON32_MEMCARD_CURSOR_ADDR` | `0x30000017` | the auto-append cursor; position `-1` |
 | `VIRCON32_MEMCARD_END` | `0x3003FFFF` | last valid word, inclusive |
 
-## Type tags (auto-append form only)
+**Type tags (auto-append form only)**
 
 `memcard.save(value)` with no position writes one of three shapes at the
 cursor, then advances the cursor by however many words that shape used:
@@ -901,9 +1721,9 @@ The explicit-`position` form (`memcard.save(value, position)` /
 `memcard[position] = value`) never writes a tag — it is always exactly one
 raw word, regardless of value type. This includes tables: a table saved
 with an explicit position is a single raw pointer word, not a dump — see
-[Tables](#tables-memcardsave--memcardload_table) above.
+**Tables** above.
 
-### Safety note
+*Safety note*
 
 A number, boolean, or nil round-trips correctly forever — that bit pattern
 means the same thing on any run. A real Lua string or table saved through
@@ -920,7 +1740,7 @@ layout is not guaranteed to match between runs. Stick to numbers/booleans/
 nil (or real strings/tables of such, via the auto-append form) for
 anything meant to survive an actual save/reload cycle.
 
-## What's intentionally NOT here
+**What's intentionally NOT here**
 
 - No *recursive* table serialization — a table dump copies its direct
   key/value pairs only; a nested table inside one is a raw pointer, one
@@ -938,28 +1758,28 @@ whichever one it isn't currently addressing.
 
 ---
 
-# Other raw IO ports
+## Other raw IO ports
 
 Every `ioports.*` port lives in one table (`core.c`'s `IOPortMap`),
-organized under six categories: `tim`, `rng`, `gpu`, `spu`, `inp`, `car`,
+organized under seven categories: `tim`, `rng`, `gpu`, `spu`, `inp`, `car`,
 `mem`. The sound (`spu`), graphics (`gpu`, partially — see
-[Defining texture regions](#defining-texture-regions)), and input (`inp`,
+**Defining texture regions**), and input (`inp`,
 partially — see [btn()/btnp()](#input-btn--btnp)) categories are covered
 above where they have a higher-level wrapper. What's left is either raw
 hardware with no wrapper at all, or a wrapper that only covers part of a
-category.
+category. The complete table of ports is in the [Quick reference](#ioports--every-hardware-port).
 
 An unknown category or property name is a compile error listing the valid
 categories, not a silent no-op or an undeclared-global read — see
 `validate_ioports_path()`.
 
-## ioports.tim.\* — raw timer
+**ioports.tim.\* — raw timer**
 
 ```lua
-ioports.tim.date     -- TIM_CurrentDate,   read-only, packed integer
-ioports.tim.time     -- TIM_CurrentTime,   read-only, packed integer
-ioports.tim.frames    -- TIM_FrameCounter, read-only -- same as system.frames()
-ioports.tim.cycles    -- TIM_CycleCounter, read-only -- same as system.cycles()
+local d = ioports.tim.date    -- TIM_CurrentDate:  year * 65536 + day of the year
+local t = ioports.tim.time    -- TIM_CurrentTime:  seconds since midnight
+local f = ioports.tim.frames  -- TIM_FrameCounter: same as system.frames()
+local c = ioports.tim.cycles  -- TIM_CycleCounter: same as system.cycles()
 ```
 
 `ioports.tim.date`/`ioports.tim.time` are the packed raw registers
@@ -968,10 +1788,10 @@ separate numbers — reach for `system.date()`/`system.time()` unless the
 packed representation itself is what's needed (e.g. storing one word to a
 memory card instead of three separate fields).
 
-## ioports.rng.\* — hardware RNG
+**ioports.rng.\* — hardware RNG**
 
 ```lua
-ioports.rng.value            -- RNG_CurrentValue, read: the current random value
+local r = ioports.rng.value   -- RNG_CurrentValue, read: the next random value
 ioports.rng.seed = 12345      -- RNG_CurrentValue, write: reseed the generator
 ```
 
@@ -981,13 +1801,13 @@ This is the console's own hardware RNG, independent of `math.random()`
 (which is a software PRNG in the runtime, seeded separately) — the two do
 not share state and will not produce the same sequence from the same seed.
 
-## ioports.car.\* — cartridge info
+**ioports.car.\* — cartridge info**
 
 ```lua
-ioports.car.connected  -- CAR_Connected,          boolean, read-only
-ioports.car.romsize    -- CAR_ProgramROMSize,     integer, read-only
-ioports.car.numvtex    -- CAR_NumberOfTextures,   integer, read-only
-ioports.car.numvsnd    -- CAR_NumberOfSounds,     integer, read-only
+local ok   = ioports.car.connected  -- CAR_Connected,        boolean
+local size = ioports.car.romsize    -- CAR_ProgramROMSize,   integer
+local ntex = ioports.car.numvtex    -- CAR_NumberOfTextures, integer
+local nsnd = ioports.car.numvsnd    -- CAR_NumberOfSounds,   integer
 ```
 
 Read-only introspection of the currently-inserted cartridge itself — its
@@ -997,7 +1817,7 @@ declared. Since a running program's own cart is always connected,
 to handle; it exists for completeness of the port table rather than a
 practical branch condition; really only something transacted in the BIOS.
 
-## ioports.mem.connected — memory card presence
+**ioports.mem.connected — memory card presence**
 
 ```lua
 if ioports.mem.connected then

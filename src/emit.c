@@ -3,6 +3,21 @@
 // In emit.c, replace all 1024-byte buffers with 8192:
 #define EMIT_BUFFER_SIZE 8192
 
+// A colon inside a quoted string literal (e.g. the "string \"...: ...\""
+// directive) does not make the line an assembly label. Only count a colon
+// that appears before the first '"' on the line -- real labels never
+// contain a quote at all, so this is exact for both cases without needing
+// a full quote-state scanner.
+static bool line_is_asm_label (const char *code_start)
+{
+    const char *first_colon = strchr (code_start, ':');
+    if (first_colon == NULL) {
+        return false;
+    }
+    const char *first_quote = strchr (code_start, '"');
+    return (first_quote == NULL || first_colon < first_quote);
+}
+
 /**
  * Emits a line of Vircon32 assembly code.
  *
@@ -90,7 +105,7 @@ void  emit_asm (const char *format, ...) {
     // CASE B: Assembly Label (contains colon)
     // Colon immunity: we only scan the isolated code string code_start!
     // =========================================================================
-    else if (strchr(code_start, ':') != NULL) {
+    else if (line_is_asm_label (code_start)) {
         record_instruction = true;
         if (comment_ptr != NULL) {
             fprintf(out(), "%-16s %s\n", code_start, comment_ptr);
@@ -124,9 +139,9 @@ void  emit_asm (const char *format, ...) {
         // =====================================================================
         char *dest = NULL;  // First operand (destination), or NULL
         char *src = NULL;   // Second operand (source), or NULL
+        char op_copy[EMIT_BUFFER_SIZE];  // dest/src point into this: keep it in scope
 
         if (operands != NULL && *operands != '\0') {
-            char op_copy[EMIT_BUFFER_SIZE];
             strncpy(op_copy, operands, sizeof(op_copy) - 1);
             op_copy[sizeof(op_copy) - 1] = '\0'; // Ensure null-termination
 
@@ -219,9 +234,9 @@ void  emit_asm (const char *format, ...) {
             last_emitted_dest[0] = '\0';
             last_emitted_src[0] = '\0';
         } else {
-            strncpy (last_emitted_inst, opcode, sizeof (last_emitted_inst) - 1);
-            strncpy (last_emitted_dest, dest ? dest : "", sizeof (last_emitted_dest) - 1);
-            strncpy (last_emitted_src,  src  ? src  : "", sizeof (last_emitted_src) - 1);
+            snprintf (last_emitted_inst, sizeof (last_emitted_inst), "%.*s", (int) sizeof (last_emitted_inst) - 1, opcode);
+            snprintf (last_emitted_dest, sizeof (last_emitted_dest), "%.*s", (int) sizeof (last_emitted_dest) - 1, dest ? dest : "");
+            snprintf (last_emitted_src,  sizeof (last_emitted_src),  "%.*s", (int) sizeof (last_emitted_src) - 1,  src  ? src  : "");
         }
 
         // Immediate stderr output in verbose debug mode
@@ -270,8 +285,12 @@ void  emit_interpolated_asm (const char *raw_code)
             if (*p == '}') p++; 
             
             // Format the variable and append it to our buffer
+            // {name} is the variable's memory operand: [BP - n] for a
+            // local or parameter in scope, [var_name] for a global (it
+            // used to be [var_name] always, so a local silently read and
+            // wrote a global of the same name instead).
             char formatted_var[EMIT_BUFFER_SIZE+8];
-            sprintf(formatted_var, "[var_%s]", var_name);
+            get_variable_access_string(var_name, formatted_var);
             for (int j = 0; formatted_var[j] != '\0' && buf_idx < 2047; j++) {
                 buffer[buf_idx++] = formatted_var[j];
             }
@@ -314,61 +333,301 @@ void emit_runtime_init(FILE *out) {
     fprintf(out, "    MOV [HEAP_POINTER], %d\n", heap_start_addr);
 }
 
-void  emit_cart_xml (const char *input_filename, int  verbose)
-{
-    // 1. Allocate enough memory for the filename plus ".xml" and the null terminator
-    size_t  len           = strlen (input_filename);
-    char   *xml_filename  = (char *) malloc (len + 5); 
-    char   *vbin_path     = (char *) malloc (len + 6); 
-    char   *resource      = NULL;
-    char   *last_dot      = NULL;
+// ----------------------------------------------------------------------------
+// Cartridge XML
+//
+// packrom resolves every path in the XML relative to the XML file itself. So,
+// by default (preserve_paths == 0):
+//
+//   * the XML is written beside the output file (-o obj/game.asm gives
+//     obj/game.xml) and holds BARE file names: <binary path="game.vbin" />,
+//     <texture path="spaceship.vtex" /> for --#texture S "textures/spaceship.png".
+//     The produced .vbin/.vtex/.vsnd files are expected beside the XML.
+//   * two assets that collapse to the same file name keep as much of their
+//     directories as it takes to tell them apart: textures/ship.png followed
+//     by textures/extra/ship.png gives ship.vtex and extra/ship.vtex (the
+//     latter expected in <xml dir>/extra/). The first one to claim a name
+//     keeps the short form; only two assets whose whole paths collapse to the
+//     same name still draw a warning.
+//
+// With preserve_paths (--xml-preserve-paths):
+//
+//   * each --#texture/--#sound path is kept as written in the hint (only the
+//     extension changes), the XML goes in the PROJECT folder under the
+//     output's base name -- the source file's directory (the hints' own point
+//     of reference), or its parent when the source is in src/ and the output
+//     in a sibling such as obj/ -- and <binary> is the .vbin path relative to
+//     it. Hint paths are re-based onto that folder when it is the parent
+//     (textures/ship.png becomes src/textures/ship.vtex).
+//   * assets the compiler itself generates (PICO-8/TIC-80 sprite sheets and
+//     sounds) live beside the output file, so they are written relative to
+//     the XML's directory too.
+//
+// A twin for the optimized build (v32opt) is written next to every XML:
+// game.xml -> game.vbin, gameOpt.xml -> gameOpt.vbin, identical otherwise.
+// ----------------------------------------------------------------------------
 
-    if (xml_filename     == NULL)
+static int   g_xml_warn_collisions = 1;     // once per run, not once per XML
+static char *g_xml_src_dir         = NULL;  // the source file's directory (for --xml-preserve-paths)
+
+// Components of `buf` ('/' or '\' separated) with empty, "." and ".." parts
+// dropped; `parts` points into `buf`. Returns the count.
+static int xml_split_components (char *buf, const char **parts, int max_parts)
+{
+    int n = 0;
+
+    for (char *tok = buf; *tok != '\0'; )
     {
-        fprintf (stderr, "Compiler Error: Memory allocation failed for XML filename.\n");
+        char *end = tok;
+        while (*end != '\0' && *end != '/' && *end != '\\') end++;
+        char saved = *end;
+        *end = '\0';
+        if (tok[0] != '\0' && strcmp (tok, ".") != 0 && strcmp (tok, "..") != 0 && n < max_parts)
+        {
+            parts[n++] = tok;
+        }
+        if (saved == '\0') break;
+        tok = end + 1;
+    }
+    return n;
+}
+
+// The file `r` names once converted: the hint's extension swapped for `ext`
+// (".vtex"/".vsnd"). A compiler-generated resource is registered without its
+// extension (or already with it), so `ext` is appended only when missing --
+// swapping would eat the tail of a name such as "obj/my.game_pico8".
+static char *xml_full_name (const CARTresource *r, const char *ext)
+{
+    if (r->generated)
+    {
+        size_t len = strlen (r->filename), elen = strlen (ext);
+        char  *out = malloc (len + elen + 1);
+
+        if (out == NULL) { fprintf (stderr, "Compiler Error: Memory allocation failed for XML path.\n"); exit (2); }
+        strcpy (out, r->filename);
+        if (len < elen || strcmp (out + len - elen, ext) != 0) strcat (out, ext);
+        return out;
+    }
+    return replace_extension (r->filename, ext);
+}
+
+// `full` reduced to its last `depth` components, joined with '/'.
+// *total receives how many components `full` has.
+static char *xml_name_with_depth (const char *full, int depth, int *total)
+{
+    char        *buf   = strdup (full);
+    const char  *parts[64];
+    int          n     = xml_split_components (buf, parts, 64);
+    char        *joined;
+
+    if (n == 0) { parts[0] = path_basename (full); n = 1; }
+    if (depth > n) depth = n;
+
+    joined = malloc (strlen (full) + 2);
+    if (buf == NULL || joined == NULL) { fprintf (stderr, "Compiler Error: Memory allocation failed for XML path.\n"); exit (2); }
+    joined[0] = '\0';
+    for (int k = n - depth; k < n; k++)
+    {
+        if (k > n - depth) strcat (joined, "/");
+        strcat (joined, parts[k]);
+    }
+    *total = n;
+    free (buf);
+    return joined;
+}
+
+// The XML path of every resource in the list, in order (malloc'd array of
+// malloc'd strings, `count` long; the caller frees). See the notes above.
+char **cart_xml_resolve_names (CARTresource *head, int count, const char *tag,
+                                 const char *ext, int preserve_paths, const char *xml_dir)
+{
+    char          **names = calloc ((size_t) count + 1, sizeof (char *));
+    char          **full  = calloc ((size_t) count + 1, sizeof (char *));
+    CARTresource  **res   = calloc ((size_t) count + 1, sizeof (CARTresource *));
+    int             i     = 0;
+
+    if (names == NULL || full == NULL || res == NULL)
+    {
+        fprintf (stderr, "Compiler Error: Memory allocation failed for XML paths.\n");
         exit (2);
     }
-
-    if (vbin_path        == NULL)
+    for (CARTresource *r = head; r != NULL && i < count; r = r->next, i++)
     {
-        fprintf (stderr, "Compiler Error: Memory allocation failed for VBIN filename.\n");
-        exit (3);
+        res[i]  = r;
+        full[i] = xml_full_name (r, ext);
     }
 
-    // 2. Copy the input filename (e.g., "example.lua")
-    strcpy (vbin_path,    input_filename);
-    last_dot              = strrchr (vbin_path, '.');
-    if (last_dot         != NULL)
+    for (i = 0; i < count; i++)
     {
-        // Overwrite from the dot onward: "example.lua" -> "example.xml"
-        strcpy (last_dot, ".vbin");
+        if (preserve_paths)
+        {
+            // Hints as written; compiler-made files (beside the output) from the XML's directory.
+            if (res[i]->generated || g_xml_src_dir == NULL)
+            {
+                names[i] = res[i]->generated ? path_relative_to (xml_dir, full[i]) : strdup (full[i]);
+            }
+            else
+            {
+                // A hint path is relative to the source file; the XML may sit one level up.
+                char *from_src = malloc (strlen (g_xml_src_dir) + strlen (full[i]) + 2);
+                if (from_src == NULL) { fprintf (stderr, "Compiler Error: Memory allocation failed for XML paths.\n"); exit (2); }
+                sprintf (from_src, "%s/%s", g_xml_src_dir, full[i]);
+                names[i] = path_relative_to (xml_dir, from_src);
+                free (from_src);
+            }
+            continue;
+        }
+
+        int depth = 1, total = 1, clash;
+        for (;;)
+        {
+            free (names[i]);
+            names[i] = xml_name_with_depth (full[i], depth, &total);
+            clash    = 0;
+            for (int j = 0; j < i; j++)
+            {
+                if (strcmp (names[j], names[i]) != 0) continue;
+                if (strcmp (res[j]->filename, res[i]->filename) == 0) continue;   // the very same file listed twice
+                clash = 1;
+                if (depth >= total && g_xml_warn_collisions)
+                {
+                    fprintf (stderr, "---- warning: %s '%s' and '%s' both become '%s' in the XML ----\n",
+                             tag, res[j]->var_name ? res[j]->var_name : "<unnamed>",
+                             res[i]->var_name ? res[i]->var_name : "<unnamed>", names[i]);
+                }
+                break;
+            }
+            if (!clash || depth >= total) break;
+            depth++;
+        }
+    }
+
+    for (i = 0; i < count; i++) free (full[i]);
+    free (full);
+    free (res);
+    return names;
+}
+
+// One <textures>...</textures> or <sounds>...</sounds> block.
+static void xml_emit_resources (FILE *xml, CARTresource *head, const char *tag,
+                                const char *ext, int preserve_paths, const char *xml_dir)
+{
+    int count = 0;
+
+    for (CARTresource *r = head; r != NULL; r = r->next) count++;
+    if (count == 0)
+    {
+        fprintf (xml, "<%ss />\n", tag);
+        return;
+    }
+
+    char **names = cart_xml_resolve_names (head, count, tag, ext, preserve_paths, xml_dir);
+    int    index = 0;
+
+    fprintf (xml, "<%ss>\n", tag);
+    for (CARTresource *curr = head; curr != NULL; curr = curr->next, index++)
+    {
+        // Vircon32 numbers resources by their position here. If that ever
+        // stops matching the id the compiler baked into the generated
+        // code, every reference silently targets the wrong resource --
+        // so say so loudly instead.
+        if (curr->id != index && g_xml_warn_collisions)
+        {
+            compiler_warning (ERR_INTERNAL, -1,
+                "cart XML: %s '%s' has resource id %d but is emitted at "
+                "position %d; generated code will reference the wrong %s",
+                tag, (curr->var_name != NULL) ? curr->var_name : "<unnamed>",
+                curr->id, index, tag);
+        }
+        fprintf (xml, "    <%s path=\"%s\" /> <!-- %s -->\n", tag, names[index], curr->var_name);
+        free (names[index]);
+    }
+    free (names);
+    fprintf (xml, "</%ss>\n", tag);
+}
+
+// Where the XML for `output_filename` goes (malloc'd): beside the output, or
+// (preserve_paths) under the same name in the project folder -- the source
+// file's directory, or its parent when the source is in src/ and the output
+// in a sibling such as obj/ (path_project_dir).
+char *cart_xml_filename (const char *output_filename, const char *source_filename,
+                         int preserve_paths)
+{
+    char *xml_name = replace_extension (output_filename, ".xml");
+
+    if (!preserve_paths) return xml_name;
+
+    char   *dir    = path_project_dir (source_filename, output_filename);
+    size_t  cap    = strlen (dir) + strlen (xml_name) + 2;
+    char   *result = malloc (cap);
+
+    if (result == NULL) { fprintf (stderr, "Compiler Error: Memory allocation failed for XML filename.\n"); exit (2); }
+    snprintf (result, cap, "%s/%s", dir, path_basename (xml_name));
+    free (dir);
+    free (xml_name);
+    return result;
+}
+
+// The cart title the XML of `variant` shows ("" = the regular build, "Opt"
+// = the optimized one). The optimized cart uses --titleopt / --#titleopt
+// when given, else the title with " [optimized]" added -- unless
+// --no-diff-opt-title / --#no-diff-opt-title keeps it the same.
+static void cart_title_for_variant (const char *variant, char *out, size_t size)
+{
+    static const char suffix[] = " [optimized]";
+    size_t            slen     = sizeof (suffix) - 1;
+    size_t            tlen     = strlen (cart_title);
+
+    if (variant[0] == '\0' || (!cart_title_opt_set && g_no_diff_opt_title))
+    {
+        snprintf (out, size, "%s", cart_title);
+    }
+    else if (cart_title_opt_set)
+    {
+        snprintf (out, size, "%s", cart_title_opt);
+    }
+    else if (tlen >= slen && strcmp (cart_title + tlen - slen, suffix) == 0)
+    {
+        snprintf (out, size, "%s", cart_title);      // already says so
     }
     else
     {
-        // If no extension was found (e.g., "example"), just append ".xml"
-        strcat (vbin_path, ".vbin");
+        // A long title is cut so the whole fits (cart_title's size).
+        int room = (int) (sizeof (cart_title) - 1 - slen);
+        snprintf (out, size, "%.*s%s", room, cart_title, suffix);
     }
+}
 
-    // 3. Find the last dot to locate the file extension
-    strcpy (xml_filename, input_filename);
-    last_dot              = strrchr (xml_filename, '.');
-    if (last_dot         != NULL)
-    {
-        // Overwrite from the dot onward: "example.lua" -> "example.xml"
-        strcpy (last_dot, ".xml");
-    }
-    else
-    {
-        // If no extension was found (e.g., "example"), just append ".xml"
-        strcat (xml_filename, ".xml");
-    }
+// Writes one XML. `variant` is "" for the plain build and "Opt" for the
+// optimized one: it goes before the extension of both the XML's name and
+// the <binary> it references.
+static void write_cart_xml (const char *output_filename, const char *source_filename,
+                            int preserve_paths, const char *variant, int verbose)
+{
+    char *plain_xml    = cart_xml_filename (output_filename, source_filename, preserve_paths);
+    char *variant_ext  = malloc (strlen (variant) + 8);
+    char *xml_filename;
+    char *xml_dir;
+    char *vbin_full;
+    char *vbin_path;
 
-    // 4. Open the newly named XML file for writing
-    FILE *xml          = fopen (xml_filename, "w");
-    if (xml           == NULL)
+    if (variant_ext == NULL) { fprintf (stderr, "Compiler Error: Memory allocation failed for XML filename.\n"); exit (2); }
+    sprintf (variant_ext, "%s.xml", variant);
+    xml_filename = replace_extension (plain_xml, variant_ext);
+    free (plain_xml);
+
+    sprintf (variant_ext, "%s.vbin", variant);
+    xml_dir   = path_dirname (xml_filename);
+    vbin_full = replace_extension (output_filename, variant_ext);
+    vbin_path = preserve_paths ? path_relative_to (xml_dir, vbin_full)
+                               : strdup (path_basename (vbin_full));
+    free (variant_ext);
+    free (vbin_full);
+
+    FILE *xml = fopen (xml_filename, "w");
+    if (xml  == NULL)
     {
         fprintf (stderr, "Compiler Error: Could not create XML cart file '%s'.\n", xml_filename);
-        free (xml_filename);
         exit (4);
     }
 
@@ -380,176 +639,89 @@ void  emit_cart_xml (const char *input_filename, int  verbose)
         }
     }
 
-    // 5. Emit the Vircon32 XML configuration
     fprintf (xml, "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\" ?>\n");
     fprintf (xml, "<rom-definition version=\"1.0\">\n");
-    fprintf (xml, "    <rom type=\"cartridge\" title=\"%s\" version=\"%s\" />\n", cart_title, cart_version);
+    // XML-escape the title: it can come from a file name or a cart's own
+    // metadata ("Tom & Jerry", "\"quoted\""), not only from --#title.
+    char xml_title[sizeof (cart_title) * 6];
+    {
+        char shown[sizeof (cart_title)];
+        cart_title_for_variant (variant, shown, sizeof (shown));
+        char *w = xml_title;
+        for (const char *r = shown; *r; r++) {
+            const char *e = (*r == '&') ? "&amp;" : (*r == '<') ? "&lt;" : (*r == '>') ? "&gt;"
+                          : (*r == '"') ? "&quot;" : NULL;
+            if (e) { strcpy (w, e); w += strlen (e); } else { *w++ = *r; }
+        }
+        *w = '\0';
+    }
+    fprintf (xml, "    <rom type=\"%s\" title=\"%s\" version=\"%s\" />\n",
+             g_bios_mode ? "bios" : "cartridge", xml_title, cart_version);
     fprintf (xml, "<binary path=\"%s\" />\n", vbin_path);
-    
-    if (textures_head != NULL) {
-        fprintf(xml, "<textures>\n");
-        CARTresource* curr = textures_head;
-        int           index = 0;
-
-        while (curr        != NULL)
-        {
-            // Vircon32 numbers textures by their position here. If that ever
-            // stops matching the id the compiler baked into the generated
-            // code, every texture reference silently targets the
-            // wrong texture -- so say so loudly instead.
-            if (curr->id != index) {                   // <-- ADD
-                compiler_warning (ERR_INTERNAL, -1,
-                    "cart XML: texture '%s' has resource id %d but is emitted at "
-                    "position %d; generated code will reference the wrong texture",
-                    (curr->var_name != NULL) ? curr->var_name : "<unnamed>",
-                    curr->id, index);
-            }
-
-            len           = strlen (curr -> filename);
-            resource      = (char *) malloc (sizeof (char) * (len + 6));
-            last_dot      = NULL;
-
-            strcpy (resource,    curr -> filename);
-            last_dot              = strrchr (resource, '.');
-            if (last_dot         != NULL)
-            {
-                // Overwrite from the dot onward: "example.lua" -> "example.xml"
-                strcpy (last_dot, ".vtex");
-            }
-            else
-            {
-                // If no extension was found (e.g., "example"), just append ".xml"
-                strcat (resource, ".vtex");
-            }
-            fprintf(xml, "    <texture path=\"%s\" /> <!-- %s -->\n", 
-                    resource, curr -> var_name);
-            curr = curr->next;
-            index++;
-            free (resource);
-            resource      = NULL;
-        }
-        fprintf(xml, "</textures>\n");
-    }
-    else
-    {
-        fprintf (xml, "<textures />\n");
-    }
-    
-    if (sounds_head        != NULL)
-    {
-        fprintf (xml, "<sounds>\n");
-        CARTresource *curr  = sounds_head;
-        int           index = 0;                       // <-- ADD
-
-        while (curr        != NULL)
-        {
-            // Vircon32 numbers sounds by their position here. If that ever
-            // stops matching the id the compiler baked into the generated
-            // code, every play()/chansound reference silently targets the
-            // wrong sound -- so say so loudly instead.
-            if (curr->id != index) {                   // <-- ADD
-                compiler_warning (ERR_INTERNAL, -1,
-                    "cart XML: sound '%s' has resource id %d but is emitted at "
-                    "position %d; generated code will reference the wrong sound",
-                    (curr->var_name != NULL) ? curr->var_name : "<unnamed>",
-                    curr->id, index);
-            }
-
-            len           = strlen (curr -> filename);
-            resource      = (char *) malloc (sizeof (char) * (len + 6));
-            last_dot      = NULL;
-
-            strcpy (resource,    curr -> filename);
-            last_dot              = strrchr (resource, '.');
-            if (last_dot         != NULL)
-            {
-                strcpy (last_dot, ".vsnd");
-            }
-            else
-            {
-                strcat (resource, ".vsnd");
-            }
-            fprintf (xml, "    <sound path=\"%s\" /> <!-- %s -->\n",
-                     resource, curr -> var_name);
-            curr            = curr -> next;
-            index++;
-            free (resource);
-            resource      = NULL;
-        }
-        fprintf (xml, "</sounds>\n");
-    }
-    else
-    {
-        fprintf (xml, "<sounds />\n");
-    }
-
-    fprintf(xml, "</rom-definition>\n");
-
+    xml_emit_resources (xml, textures_head, "texture", ".vtex", preserve_paths, xml_dir);
+    xml_emit_resources (xml, sounds_head,   "sound",   ".vsnd", preserve_paths, xml_dir);
+    fprintf (xml, "</rom-definition>\n");
     fclose (xml);
 
-    // Remove direct stdout printing; rely on main.c stage reporting
     if (verbose)
     {
-        ;
-        // Optional debug detail if desired:
-        // printf("; Generated Vircon32 cart config: %s\n", xml_filename);
-        //printf("; Successfully generated Vircon32 cart config: %s\n", xml_filename);
+        fprintf (stdout, "saving cart config file %s\n", xml_filename);
     }
 
     free (xml_filename);
+    free (xml_dir);
     free (vbin_path);
 }
 
-// Emits Vircon32 assembly to jump to target_label if reg is TRUTHY!
-// (i.e., NOT Nil and NOT False). Uses scratch register.
-void emit_truthy_jump(int reg, const char *target_label)
+// Collision warnings (and the resource-id check) are printed once per run;
+// the build-script generator turns them off while it asks for the names again.
+void  cart_xml_set_quiet (int quiet)
 {
-    int check_id = get_next_label();
-    const char *ctx = get_current_function_name(); // Fetch context
-    char eval_right_label[EMIT_BUFFER_SIZE];
-    snprintf(eval_right_label, sizeof(eval_right_label), "__%s_truthy_fail_%d", ctx, check_id); // Prefix added
-    int  scratch_reg  = allocate_register ();
-
-    // 1. If it IS Nil, it's not truthy -> jump to evaluate right operand
-    emit_asm("MOV R%d, R%d ; Copy to scratch register\n", scratch_reg, reg);
-    emit_asm("IEQ R%d, BOXED_NIL ; Is it Nil?\n", scratch_reg);
-    emit_asm("JT R%d, %s ; If Nil, do not short-circuit\n", scratch_reg, eval_right_label);
-
-    // 2. If it IS False, it's not truthy -> jump to evaluate right operand
-    emit_asm("MOV R%d, R%d ; Copy to scratch register\n", scratch_reg, reg);
-    emit_asm("IEQ R%d, BOXED_FALSE ; Is it False?\n", scratch_reg);
-    emit_asm("JT R%d, %s ; If False, do not short-circuit\n", scratch_reg, eval_right_label);
-
-    // 3. If we survived both checks, the value is TRUTHY! Short-circuit!
-    emit_asm("JMP %s ; Value is truthy -> short-circuit!\n", target_label);
-
-    emit_asm("%s:\n", eval_right_label);
-
-    unlock_register (scratch_reg);
+    g_xml_warn_collisions = !quiet;
 }
 
-// Emits Vircon32 assembly to jump to target_label if reg holds Nil or False.
-// Uses scratch register to prevent destructive comparison bugs!
+void  emit_cart_xml (const char *output_filename, const char *source_filename,
+                     int preserve_paths, int verbose)
+{
+    free (g_xml_src_dir);
+    g_xml_src_dir = path_dirname (source_filename);
+    g_xml_warn_collisions = 1;
+    write_cart_xml (output_filename, source_filename, preserve_paths, "", verbose);
+    g_xml_warn_collisions = 0;          // the Opt twin would only repeat the warnings
+    write_cart_xml (output_filename, source_filename, preserve_paths, "Opt", verbose);
+    g_xml_warn_collisions = 1;
+}
+
+// Jump to target_label if reg is truthy (not nil, not false) / falsy.
+// nil = 0xFFC00000 and false = 0xFFC00001, so falsy <=> (v & ~1) == nil:
+// one test instead of two. (The scratch is a real allocated register:
+// callers such as the for-in loop still need R0 after this.)
+static void emit_truthiness_jump (int reg, bool when_true, const char *target_label)
+{
+    int scratch = allocate_register ();
+    emit_asm("MOV  R%d, R%d\n", scratch, reg);
+    emit_asm("AND  R%d, 0xFFFFFFFE\n", scratch);
+    emit_asm("IEQ  R%d, BOXED_NIL ; 1 if nil or false\n", scratch);
+    emit_asm("%s   R%d, %s\n", when_true ? "JF" : "JT", scratch, target_label);
+    unlock_register (scratch);
+}
+
+void emit_truthy_jump (int reg, const char *target_label)
+{
+    emit_truthiness_jump (reg, true, target_label);
+}
+
 void  emit_falsy_jump (int  reg, const char *target_label)
 {
-    int  scratch_reg  = allocate_register ();
-    // 1. Test against canonical Nil (BOXED_NIL)
-    emit_asm("MOV R%d, R%d ; Copy condition to scratch register\n", scratch_reg, reg);
-    emit_asm("IEQ R%d, BOXED_NIL ; Destructive test: Is it Nil?\n", scratch_reg);
-    emit_asm("JT R%d, %s ; If Nil (falsy), jump to target\n", scratch_reg, target_label);
-
-    // 2. Test against Boolean False (BOXED_FALSE)
-    emit_asm("MOV R%d, R%d ; Copy condition to scratch register\n", scratch_reg, reg);
-    emit_asm("IEQ R%d, BOXED_FALSE ; Destructive test: Is it False?\n", scratch_reg);
-    emit_asm("JT R%d, %s ; If False (falsy), jump to target\n", scratch_reg, target_label);
-
-    unlock_register (scratch_reg);
+    emit_truthiness_jump (reg, false, target_label);
 }
 
 int   emit_variable_map (void)
 {
     int  lines_printed       = 2;
-    fprintf (out(), "%%define  V32_CART_PAGE            0x20000000\n");
+    // Program ROM page: a cartridge's code and data sit at 0x20000000, a
+    // BIOS's (-b) at 0x10000000.
+    fprintf (out(), "%%define  V32_CART_PAGE            %s\n", g_bios_mode ? "0x10000000" : "0x20000000");
     fprintf (out(), "%%define  NAN_VALUE                0x7F800000\n");
     fprintf (out(), "%%define  BOXED_CATEGORY           0x80000000 ; RAM(1), ROM(0)\n");
     fprintf (out(), "%%define  BOXED_TYPE               0x00400000 ; TABLE/FUNCTION (0), STRING (1)\n");
@@ -576,14 +748,96 @@ int   emit_variable_map (void)
         fprintf (out(), "%%define  TIC80_SPRITE_COUNT       0x00000200\n");
         fprintf (out(), "%%define  TIC80_FLAGS_PER_SPRITE   0x00000008\n");
         fprintf (out(), "%%define  TIC80_FLAG_BUFFER_WORDS  0x00000080\n");
+        // synthesized sound (tic80_audio.c): rate, base SPU speed, and the
+        // remaining duration (frames, -1 = none) of each sfx() channel 0-3
+        fprintf (out(), "%%define  TIC80_AUDIO_RATE         %d\n", tic80_audio_rate ());
+        fprintf (out(), "%%define  TIC80_AUDIO_SPEED        %.6f\n", tic80_audio_rate () / 44100.0);
+        fprintf (out(), "%%define  TIC80_SFX_DURATION       0x%.8X\n", next_ram_address);
+        next_ram_address = next_ram_address + 4;
+        lines_printed += 3;
     }
 
-    if (runtime_req.needs_vircon32)
+    if (runtime_req.needs_pico8)
+    {
+        // Fixed RAM (not heap): must exist before any top-level cart code,
+        // which runs inside __global_scope_initialization. See pico8.s.
+        fprintf (out(), "%%define  PICO8_CAMERA_X           0x%.8X\n", next_ram_address);
+        fprintf (out(), "%%define  PICO8_CAMERA_Y           0x%.8X\n", (next_ram_address + 1));
+        fprintf (out(), "%%define  PICO8_PEN                0x%.8X\n", (next_ram_address + 2));
+        fprintf (out(), "%%define  PICO8_TICK_FRAME         0x%.8X\n", (next_ram_address + 3));
+        fprintf (out(), "%%define  PICO8_DRAW_FRAME         0x%.8X\n", (next_ram_address + 4));
+        fprintf (out(), "%%define  PICO8_DRAW_CYCLE         0x%.8X\n", (next_ram_address + 5));
+        fprintf (out(), "%%define  PICO8_DRAW_COST          0x%.8X\n", (next_ram_address + 6));
+        fprintf (out(), "%%define  PICO8_MUSIC_PATTERN      0x%.8X\n", (next_ram_address + 7));
+        fprintf (out(), "%%define  PICO8_MUSIC_END          0x%.8X\n", (next_ram_address + 8));
+        fprintf (out(), "%%define  PICO8_SFX_NEXT           0x%.8X\n", (next_ram_address + 9));
+        fprintf (out(), "%%define  PICO8_START_PREV         0x%.8X\n", (next_ram_address + 10));
+        fprintf (out(), "%%define  PICO8_TICKS              0x%.8X\n", (next_ram_address + 11));
+        fprintf (out(), "%%define  PICO8_RAM_PTR            0x%.8X\n", (next_ram_address + 12));
+        fprintf (out(), "%%define  PICO8_CARTDATA           0x%.8X\n", (next_ram_address + 13));
+        fprintf (out(), "%%define  PICO8_MENU_HOOK          0x%.8X\n", (next_ram_address + 14));
+        // line(): end point of the last line (boxed numbers, as passed) and
+        // the "line() was called: the next line(x, y) only sets it" flag
+        fprintf (out(), "%%define  PICO8_LINE_X             0x%.8X\n", (next_ram_address + 15));
+        fprintf (out(), "%%define  PICO8_LINE_Y             0x%.8X\n", (next_ram_address + 16));
+        fprintf (out(), "%%define  PICO8_LINE_BREAK         0x%.8X\n", (next_ram_address + 17));
+        // text cursor (cursor(), print() without coordinates): PICO-8 pixels, ints
+        fprintf (out(), "%%define  PICO8_CURSOR_X           0x%.8X\n", (next_ram_address + 18));
+        fprintf (out(), "%%define  PICO8_CURSOR_Y           0x%.8X\n", (next_ram_address + 19));
+        // SFX sound ids start here (-1: the cart plays no synthesized sound)
+        fprintf (out(), "%%define  PICO8_SFX_BASE           %d\n", pico8_sfx_base_id);
+        fprintf (out(), "%%define  PICO8_AUDIO_RATE         %d\n", synth_audio_rate);
+        fprintf (out(), "%%define  PICO8_AUDIO_SPEED        %.4f\n", synth_audio_rate / 44100.0);
+        // camera x, y (floats), pen (int), tick frame, draw start frame /
+        // cycle, last draw's cost in cycles, music sequencer state (current
+        // pattern, frame it ends on), next auto sfx channel, Start held at
+        // the last pause check, PICO-8 frames since start (time()), the
+        // emulated 64 KB RAM (0 until first used), cartdata() state, the
+        // pause menu (menuitem(): a boxed Lua function, 0 = none), line()'s
+        // end point x, y and break flag, the text cursor x, y
+        next_ram_address    = next_ram_address + 20;
+        fprintf (out(), "%%define  PICO8_FLAGS_RAM          0x%.8X\n", next_ram_address);
+        next_ram_address    = next_ram_address + 256;
+        fprintf (out(), "%%define  PICO8_MAP_RAM            0x%.8X\n", next_ram_address);
+        next_ram_address    = next_ram_address + (PICO8_MAP_WIDTH * PICO8_MAP_HEIGHT) / 4;
+        fprintf (out(), "%%define  PICO8_FRAME_STEP         %d\n", pico8_frame_step);
+        fprintf (out(), "%%define  PICO8_BEZEL              %d\n",
+                 !pico8_bezel_enabled ? 0 : pico8_bezel_texture_id >= 0 ? 2 : 1);
+        // custom art (pico8_bezel.c): its texture, panel size, scale to 144x360
+        fprintf (out(), "%%define  PICO8_BEZEL_TEXTURE      %d\n", pico8_bezel_texture_id >= 0 ? pico8_bezel_texture_id : 0);
+        fprintf (out(), "%%define  PICO8_BEZEL_PW           %d\n", pico8_bezel_panel_w);
+        fprintf (out(), "%%define  PICO8_BEZEL_PH           %d\n", pico8_bezel_panel_h);
+        fprintf (out(), "%%define  PICO8_BEZEL_SCALE        %.7f\n", 360.0 / pico8_bezel_panel_h);
+        fprintf (out(), "%%define  PICO8_BEZEL_ALPHA        %d\n", pico8_bezel_has_alpha ? 1 : 0);
+        lines_printed      += 6;
+    }
+
+    // Circle shape atlas (shapes.c): texture index, -1 when there is none
+    if (runtime_req.needs_pico8 || runtime_req.needs_tic80)
+    {
+        fprintf (out(), "%%define  SHAPES_TEXTURE           %d\n", shapes_texture_id);
+        fprintf (out(), "%%define  SHAPES_MAX_R             %d\n", SHAPES_MAX_R);
+        fprintf (out(), "%%define  SHAPES_FAST              %d\n", shapes_fast ? 1 : 0);
+    }
+
+    // v32kbd keyboard state (v32kbd.c): fixed RAM, only when the program
+    // uses the keyboard
+    lines_printed += v32kbd_emit_defines (out());
+    lines_printed += v32mouse_emit_defines (out());
+
+    // Unconditional -- see the allocation comment in main.c.
     {
         fprintf (out(), "%%define  VIRCON32_BTN_PREV_STATE  0x%.8X\n", vircon32_btn_prev_state_base);
         fprintf (out(), "%%define  VIRCON32_SFX_CURSOR      0x%.8X\n", vircon32_sfx_cursor_base);
+        fprintf (out(), "%%define  V32IO_GAMEPAD            0x%.8X\n", v32io_gamepad_base);
         fprintf (out(), "%%define  VIRCON32_MUSIC_CHANNEL_MASK 0x%.8X\n", vircon32_music_channel_mask_base);
         fprintf (out(), "%%define  VIRCON32_SFX_CHANNEL_MASK   0x%.8X\n", vircon32_sfx_channel_mask_base);
+        fprintf (out(), "%%define  RET_COUNT                0x%.8X\n", ret_count_base);
+        fprintf (out(), "%%define  MV_BUF                   0x%.8X\n", mv_buf_base);
+        fprintf (out(), "%%define  MV_MAX                   %d\n", MV_MAX);
+        fprintf (out(), "%%define  META_CALL_DEPTH          0x%.8X\n", meta_call_base);
+        fprintf (out(), "%%define  META_CALL_STACK          0x%.8X\n", meta_call_base + 1);
+        fprintf (out(), "%%define  META_CALL_STACK_SIZE     %d\n", META_CALL_STACK_SIZE);
 
         // Fixed hardware address range for the memory card -- word-addressed
         // like the rest of this VM's memory, entirely outside the compiler-
@@ -683,12 +937,24 @@ void  emit_string_data_section (void)
     // rather than living at a separate location in the file.
     emit_cart_title_label (g_lua_filename);
 
+    // Every literal is preceded by its FNV-1a content hash, and the whole
+    // pool is bracketed by __string_pool_start/_end: table lookups with a
+    // literal key read the hash instead of hashing the characters (see
+    // __table_hash in table.s). The runtime computes the identical hash
+    // for strings built at run time.
+    fprintf (out(), "\n__string_pool_start:\n");
     if (strings_head               != NULL)
     {
         fprintf (out(), "\n; --- String Literal Allocations ---\n");
         StringLiteralNode *current  = strings_head;
         while (current             != NULL)
         {
+            uint32_t h = 0x811C9DC5u;
+            for (const unsigned char *c = (const unsigned char *) current -> value; *c; c++) {
+                h ^= (uint32_t)(*c & 0xFF);
+                h *= 16777619u;
+            }
+            fprintf (out(), "    integer 0x%08X\n", h);
             fprintf (out(), "__string_%d:\n", current -> id);
             fprintf (out(), "    string \"");
             emit_escaped_asm_string (out(), current -> value);
@@ -696,6 +962,7 @@ void  emit_string_data_section (void)
             current                 = current -> next;
         }
     }
+    fprintf (out(), "__string_pool_end:\n    integer 0\n");
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -754,7 +1021,15 @@ void  emit_runtime_library (void)
     // API bundles (all-or-nothing)
     //
     if (runtime_req.needs_pico8)
+    {
         emit_embedded_asm (runtime_pico8_start);
+        emit_pico8_cart_data (out());
+        emit_shapes_runtime (out());
+    }
+    if (g_uses_env)
+    {
+        emit_env_table (out());
+    }
     if (runtime_req.needs_tic80)
     {
         emit_embedded_asm (runtime_tic80_start);
@@ -777,12 +1052,51 @@ void  emit_runtime_library (void)
         }
         fprintf (out(), "\n");
 
+        // Sprite flags from the cart's -- <FLAGS> section (zeros if none),
+        // packed 4 sprites per word (sprite n at bits 8*(n%4)) -- the layout
+        // __builtin_tic80_fget/fset use. Copied to RAM by init_flags.
+        fprintf (out(), "\n__tic80_flags_rom:\n");
+        for (int w = 0; w < 128; w++) {
+            uint32_t word = (uint32_t) tic80_sprite_flags[w * 4]
+                          | ((uint32_t) tic80_sprite_flags[w * 4 + 1] << 8)
+                          | ((uint32_t) tic80_sprite_flags[w * 4 + 2] << 16)
+                          | ((uint32_t) tic80_sprite_flags[w * 4 + 3] << 24);
+            fprintf (out(), "%s0x%08X%s", (w % 8 == 0) ? "    integer " : "",
+                     word, (w % 8 == 7) ? "\n" : ", ");
+        }
+
+        // Is tile 0 fully transparent in colorkey texture k (0-15; 16 is
+        // opaque)? map() skips drawing such cells -- usually most of a map.
+        fprintf (out(), "\n__tic80_tile0_empty:\n    integer ");
+        for (int k = 0; k <= 16; k++) {
+            int empty = (k < 16);
+            for (int y = 0; y < 8 && empty; y++)
+                for (int x = 0; x < 8 && empty; x++)
+                    if ((get_tic80_tile_pixel (x, y) & 15) != k) empty = 0;
+            fprintf (out(), "%d%s", empty, k < 16 ? ", " : "\n");
+        }
+        emit_tic80_ram_rom (out());
+        emit_shapes_runtime (out());
+
         emit_tic80_map_data (out());
+        emit_tic80_audio_tables (out());
     }
 
     if (runtime_req.needs_vircon32)
     {
         emit_embedded_asm (runtime_vircon32_start);
+    }
+
+    // v32io: gamepad selection (always -- every API's btn() selects
+    // through it) and the group read the v32kbd decoder uses
+    emit_embedded_asm (runtime_v32io_start);
+    if (v32kbd_wanted)
+    {
+        emit_embedded_asm (runtime_v32kbd_start);
+    }
+    if (v32mouse_wanted)
+    {
+        emit_embedded_asm (runtime_v32mouse_start);
     }
 
     emit_tilemap_rom_data (out());
@@ -1040,13 +1354,19 @@ void emit_load_function_value (ASTNode *func_def_node, const char *mangled_name,
     // -------------------------------------------------------------------
     emit_asm("PUSH R0 ; preserve caller's R0 across this closure's own malloc scratch");
 
-    emit_asm("MOV R0, %d", 2 + upvalue_count);
+    // One spare word: the record starts at an even address, so the box
+    // can hold address / 2 -- the payload has 21 bits next to the closure
+    // flag, and a record above 2M words (a cart that has used half of RAM,
+    // nanoman after its level decoding) used to lose its top bit.
+    emit_asm("MOV R0, %d", 3 + upvalue_count);
     emit_asm("PUSH R0");
     emit_asm("CALL __malloc");
     emit_asm("IADD SP, 1 ; clean up malloc argument");
 
     int rec_reg = allocate_pinned_register();
     emit_asm("MOV R%d, R0 ; closure record base", rec_reg);
+    emit_asm("IADD R%d, 1", rec_reg);
+    emit_asm("AND R%d, 0xFFFFFFFE ; even address", rec_reg);
 
     emit_asm("MOV R0, __function_%s", mangled_name);
     emit_asm("MOV [R%d], R0 ; word 0: code address", rec_reg);
@@ -1070,6 +1390,7 @@ void emit_load_function_value (ASTNode *func_def_node, const char *mangled_name,
     }
 
     emit_asm("MOV R%d, R%d ; box the closure record", dest_reg, rec_reg);
+    emit_asm("SHL R%d, -1 ; address / 2 (see above)", dest_reg);
     emit_asm("OR R%d, BOXED_FUNCTION", dest_reg);
     emit_asm("OR R%d, BOXED_CLOSURE_FLAG ; mark payload as a closure record, not raw code", dest_reg);
     unlock_pinned_register(rec_reg);
@@ -1099,13 +1420,144 @@ void emit_cart_title_label(const char *input_filename)
         title_source = derive_cart_title_from_filename(input_filename);
     }
 
-    char truncated[21] = {0};
-    strncpy(truncated, title_source, 20);
-    truncated[20] = '\0';
+    char truncated[21];
+    snprintf(truncated, sizeof(truncated), "%.20s", title_source);
 
     fprintf(out(), ";; --- Cart Title (Vircon32 memory card formatting, max 20 chars) ---\n");
     fprintf(out(), "__cart_title:\n");
     fprintf(out(), "    string \"");
     emit_escaped_asm_string(out(), truncated);
     fprintf(out(), "\"\n\n");
+}
+
+// ----------------------------------------------------------------------
+// _ENV support: a (name, address) table of every global, plus the two
+// lookup routines node_table_get()/node_table_set() call for _ENV[k].
+// ----------------------------------------------------------------------
+void emit_env_table (FILE *f)
+{
+    int count = 0;
+    for (SymbolNode *c = global_scope ? global_scope->symbols : NULL; c; c = c->next)
+        if (c->type == SYM_GLOBAL && c->location > 0) count++;
+
+    fprintf (f, "\n;; --- _ENV: global name table (%d globals) ---\n", count);
+    fprintf (f, "__env_table:\n    integer %d\n", count);
+    int i = 0;
+    for (SymbolNode *c = global_scope ? global_scope->symbols : NULL; c; c = c->next) {
+        if (c->type != SYM_GLOBAL || c->location <= 0) continue;
+        fprintf (f, "    pointer __env_name_%d\n    integer 0x%08X\n", i++, c->location);
+    }
+    i = 0;
+    for (SymbolNode *c = global_scope ? global_scope->symbols : NULL; c; c = c->next) {
+        if (c->type != SYM_GLOBAL || c->location <= 0) continue;
+        // PICO-8 builtin wrappers (pico8_prelude.c) answer to the builtin's
+        // own name -- unless the program has a global of that name itself
+        const char *name = c->name;
+        if (strncmp (name, "__p8env_", 8) == 0) {
+            bool shadowed = false;
+            for (SymbolNode *d = global_scope->symbols; d; d = d->next)
+                if (d->type == SYM_GLOBAL && d->location > 0 && strcmp (d->name, name + 8) == 0)
+                    shadowed = true;
+            if (!shadowed) name += 8;
+        }
+        fprintf (f, "__env_name_%d:\n    string \"%s\"\n", i++, name);
+    }
+    fputs (
+";; __env_find: R1 = boxed key -> R2 = global's RAM address, or -1\n"
+"__env_find:\n"
+"    PUSH  R3\n"
+"    PUSH  R4\n"
+"    PUSH  R5\n"
+"    MOV   R3, __env_table\n"
+"    MOV   R4, [R3]\n"
+"    IADD  R3, 1\n"
+"__env_find_loop:\n"
+"    MOV   R5, R4\n"
+"    ILE   R5, 0\n"
+"    JT    R5, __env_find_none\n"
+"    MOV   R5, [R3]\n"
+"    OR    R5, BOXED_ROMSTRING\n"
+"    PUSH  R3\n"
+"    PUSH  R4\n"
+"    PUSH  R1\n"
+"    PUSH  R1\n"
+"    PUSH  R5\n"
+"    CALL  __builtin_eq\n"
+"    IADD  SP, 2\n"
+"    POP   R1\n"
+"    POP   R4\n"
+"    POP   R3\n"
+"    IEQ   R0, BOXED_TRUE\n"
+"    JT    R0, __env_find_hit\n"
+"    IADD  R3, 2\n"
+"    ISUB  R4, 1\n"
+"    JMP   __env_find_loop\n"
+"__env_find_hit:\n"
+"    MOV   R2, [R3+1]\n"
+"    JMP   __env_find_done\n"
+"__env_find_none:\n"
+"    MOV   R2, -1\n"
+"__env_find_done:\n"
+"    POP   R5\n"
+"    POP   R4\n"
+"    POP   R3\n"
+"    RET\n"
+";; __builtin_env_get(key) -> R0 = value of the global named key, or nil\n"
+"__builtin_env_get:\n"
+"    PUSH  BP\n"
+"    MOV   BP, SP\n"
+"    PUSH  R1\n"
+"    PUSH  R2\n"
+"    MOV   R1, [BP+2]\n"
+"    CALL  __env_find\n"
+"    MOV   R0, BOXED_NIL\n"
+"    MOV   R1, R2\n"
+"    ILT   R1, 0\n"
+"    JT    R1, __env_get_done\n"
+"    MOV   R0, [R2]\n"
+"__env_get_done:\n"
+"    POP   R2\n"
+"    POP   R1\n"
+"    MOV   SP, BP\n"
+"    POP   BP\n"
+"    RET\n"
+";; __builtin_env_set(key, value): assigns an existing global by name\n"
+";; (a name the program never uses as a global has no slot: ignored)\n"
+"__builtin_env_set:\n"
+"    PUSH  BP\n"
+"    MOV   BP, SP\n"
+"    PUSH  R1\n"
+"    PUSH  R2\n"
+"    MOV   R1, [BP+2]\n"
+"    CALL  __env_find\n"
+"    MOV   R1, R2\n"
+"    ILT   R1, 0\n"
+"    JT    R1, __env_set_done\n"
+"    MOV   R1, [BP+3]\n"
+"    MOV   [R2], R1\n"
+"__env_set_done:\n"
+"    MOV   R0, BOXED_NIL\n"
+"    POP   R2\n"
+"    POP   R1\n"
+"    MOV   SP, BP\n"
+"    POP   BP\n"
+"    RET\n", f);
+}
+
+
+// __globals_to_nil: stores nil into every global variable's RAM word
+// (called from __global_scope_initialization before any top-level code).
+// Emitted after all code generation, so it covers every global.
+void  emit_globals_to_nil (void)
+{
+    fprintf (out(), "\n;; --- every global starts as nil ---\n");
+    fprintf (out(), "__globals_to_nil:\n");
+    fprintf (out(), "    MOV  R0, BOXED_NIL\n");
+    SymbolNode *curr = global_scope ? global_scope->symbols : NULL;
+    for (; curr != NULL; curr = curr->next)
+    {
+        if (curr->type != SYM_GLOBAL || curr->is_function) continue;
+        fprintf (out(), "    MOV  [var_%s], R0\n", curr->name);
+    }
+    fprintf (out(), "    RET\n");
 }

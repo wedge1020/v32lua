@@ -7,66 +7,255 @@ en su lugar la propia API de esa consola (ver la documentación de
 compatibilidad PICO-8 / TIC-80), y las llamadas de abajo no están
 disponibles.
 
-Archivos: `v32lua_sound_intrinsics.c`, `v32lua_sound_namespaces.c`,
-`v32lua_spu_cmd_intrinsic.c`, `v32lua_ioport_boolean.c`,
-`intrinsics_vircon32.c`, `intrinsics_vircon32_memcard.c`,
-`runtime_vircon32_sound.s`, `runtime_vircon32_sfx.s`, `runtime_vircon32_spr.s`,
-`runtime_vircon32_input.s`, `runtime_vircon32_memcard.s`.
+La [Referencia rápida](#quick-reference) de abajo reúne en una sola página
+todos los intrínsecos y todos los puertos `ioports.*`; las secciones que
+la siguen explican cada parte en detalle.
 
-Ver también `vircon32-spu-port-ordering.md` — el orden de escritura de los
-puertos SPU es importante y todos los emisores de sonido aquí dependen de
-él.
+El orden de escritura de los puertos SPU es importante para el sonido; ver
+[Sonido: music.\* / sfx.\*](#sonido-music--sfx).
+
+La entrada de teclado y ratón (`key()`, `kbd.*`, `mouse()`, `mouse.*`) solo
+funciona con un adaptador de hardware **v32io** o el emulador modificado —
+la consola no tiene ni lo uno ni lo otro; ver
+[Teclado y ratón: qué se necesita](#teclado-y-ratón-qué-se-necesita-v32io).
 
 ---
 
 ## Tabla de Contenidos
 
+- [Referencia rápida](#quick-reference)
+  - [Funciones intrínsecas](#intrinsic-functions)
+  - [ioports.\* — todos los puertos de hardware](#ioports--every-hardware-port)
+  - [Biblioteca estándar](#standard-library)
 - [Sonido: music.\* / sfx.\*](#sonido-music--sfx)
-  - [Orden de escritura de puertos SPU](#vircon32-spu-el-orden-de-escritura-de-puertos)
-  - [music.volume() / sfx.volume()](#musicvolumevol--channel--sfxvolumevol--channel)
-  - [Por qué desaparecieron los nombres simples](#por-qué-desaparecieron-los-nombres-simples)
-  - [Alias en tiempo de compilación](#alias-en-tiempo-de-compilación)
-  - [music.playing()](#musicplaying-y-por-qué-una-bandera-de-lua-es-el-interruptor-equivocado)
-  - [Generación de código: plegado híbrido](#generación-de-código-plegado-híbrido)
 - [ioports.spu.cmd() — la vía de escape en bruto](#ioportsspucmd--la-vía-de-escape-en-bruto)
 - [Puertos de E/S booleanos](#puertos-de-es-booleanos)
 - [Sistema: system.\*](#sistema-system)
-  - [system.wait() / system.halt()](#systemwait--systemhalt)
-  - [system.date() / system.time()](#systemdate--systemtime)
-  - [system.frames / system.cycles](#systemframes--systemcycles)
 - [Gráficos: spr()](#gráficos-spr)
-  - [Despacho en tiempo de ejecución](#despacho-en-tiempo-de-ejecución-no-plegado-en-tiempo-de-compilación)
-  - [ioports.gpu.clear()](#ioportsgpuclearcolor)
-  - [Definiendo regiones de textura](#definiendo-regiones-de-textura)
+- [Gráficos: rect() / rectfill()](#gráficos-rect--rectfill)
 - [Entrada: btn() / btnp()](#entrada-btn--btnp)
-  - [IDs de botones](#ids-de-botones)
-  - [btn(): sondeo directo](#btn-sondeo-directo)
-  - [btnp(): detección de flanco](#btnp-detección-de-flanco)
-  - [ioports.inp.inputs](#ioportsinpinputs--máscara-de-una-palabra)
-  - [Lo que deliberadamente no está aquí](#lo-que-deliberadamente-no-está-aquí)
+- [Teclado y ratón: qué se necesita (v32io)](#teclado-y-ratón-qué-se-necesita-v32io)
+- [Teclado: key() / keyp() / kbd.\*](#teclado-key--keyp--kbd)
+- [Ratón: mouse() / mouse.\*](#ratón-mouse--mouse)
 - [Mapa de mosaicos: tilemap.\*](#mapa-de-mosaicos-tilemap)
-  - [--#tilemap y el formato CSV](#tilemap-nombre-archivo-y-el-formato-csv)
-  - [tilemap.get() / tilemap.set()](#tilemapget--tilemapset)
-  - [Promoción perezosa de ROM a RAM](#promoción-perezosa-de-rom-a-ram)
-  - [tilemap.render()](#tilemaprender)
-  - [Lo que deliberadamente no está aquí](#lo-que-deliberadamente-no-está-aquí-1)
-- [Otros puertos de E/S en bruto](#otros-puertos-de-es-en-bruto)
-  - [ioports.tim.\* — temporizador en bruto](#ioportstim--temporizador-en-bruto)
-  - [ioports.rng.\* — RNG por hardware](#ioportsrng--rng-por-hardware)
-  - [ioports.car.\* — información del cartucho](#ioportscar--información-del-cartucho)
-  - [ioports.mem.connected — presencia de tarjeta de memoria](#ioportsmemconnected--presencia-de-tarjeta-de-memoria)
 - [Tarjeta de memoria: memcard.\*](#tarjeta-de-memoria-memcard)
-  - [memcard.save() / memcard.load()](#memcardsave--memcardload)
-  - [memcard[position]](#memcardposition)
-  - [memcard.title()](#memcardtitlestr---nil)
-  - [Tablas: memcard.save() / memcard.load_table()](#tablas-memcardsave--memcardload_table)
-  - [Diseño de direcciones](#diseño-de-direcciones)
-  - [Etiquetas de tipo (solo la forma de auto-anexado)](#etiquetas-de-tipo-solo-la-forma-de-auto-anexado)
-  - [Lo que deliberadamente no está aquí](#lo-que-deliberadamente-no-está-aquí-2)
+- [Otros puertos de E/S en bruto](#otros-puertos-de-es-en-bruto)
 
 ---
 
-# Sonido: music.\* / sfx.\*
+<a id="quick-reference"></a>
+## Referencia rápida
+
+Un **intrínseco** es un nombre que el compilador reconoce y convierte en
+instrucciones en línea o en una llamada a una rutina del runtime: no hay
+ninguna tabla ni función de Lua detrás. Una función tuya con el mismo
+nombre (`spr`, `rgba`, `color`, …) reemplaza al intrínseco.
+
+<a id="intrinsic-functions"></a>
+### Funciones intrínsecas
+
+*Gráficos*
+
+| Llamada | Devuelve | Qué hace |
+|---|---|---|
+| `spr(region, x, y [, sx [, sy [, angle [, color [, blend]]]]])` | nil | Dibuja una región de textura; elige el dibujo simple, escalado, rotado o rotado y escalado según los argumentos. [Detalles](#gráficos-spr) |
+| `rect(x1, y1, x2, y2 [, color])` | nil | Contorno de rectángulo de 1 píxel entre dos esquinas incluidas. Color: palabra empaquetada, blanco por defecto. [Detalles](#gráficos-rect--rectfill) |
+| `rectfill(x1, y1, x2, y2 [, color])` | nil | Rectángulo relleno, un solo dibujo de la GPU. |
+| `print(x, y, value)` | nil | Dibuja `value` (convertido con `tostring`) en el píxel `x, y` con la fuente de la BIOS. |
+| `ioports.gpu.clear([color])` / `clear(r, g, b [, a])` | nil | Establece el color de limpieza (opcional) y limpia la pantalla. [Detalles](#gpu-clear) |
+| `ioports.gpu.draw([mode])` | nil | Dibuja la región seleccionada en `gpu.x, gpu.y`. `mode`: `"draw"` (por defecto), `"zoom"`, `"rotate"`, `"rotozoom"`, o `0`–`3`. |
+| `ioports.gpu.blending(mode)` | nil | Establece el modo de mezcla: `"alpha"`/`"default"`, `"add"`, `"subtract"` (literal de cadena). |
+| `ioports.gpu.sync()` | nil | Espera al siguiente cuadro (`WAIT`); igual que `system.wait()`. |
+| `rgba(r, g, b [, a])` | palabra empaquetada | Empaqueta un color en la palabra `0xAABBGGRR` de la GPU. Componentes limitados a 0–255, alfa 255 por defecto. [Detalles](#colors-rgba) |
+| `color(n)` | palabra empaquetada | Convierte un número que contiene un color empaquetado en la palabra (para colores calculados o cargados). [Detalles](#colors-color) |
+| `hex("0x…")` | palabra empaquetada | Un literal de cadena con dígitos hexadecimales, como la palabra exacta de 32 bits. |
+
+*Entrada*
+
+| Llamada | Devuelve | Qué hace |
+|---|---|---|
+| `btn(id [, pad])` | booleano | El botón `id` (0–10, orden de hardware) está presionado. [Detalles](#entrada-btn--btnp) |
+| `btnp(id [, pad])` | booleano | El botón `id` se presionó en este cuadro. |
+
+*Teclado* (dispositivo v32kbd) — [detalles](#teclado-key--keyp--kbd). **Necesita un adaptador de hardware v32io o el emulador modificado: sin ellos, ninguna tecla está pulsada nunca** ([qué se necesita](#teclado-y-ratón-qué-se-necesita-v32io)).
+
+| Llamada | Devuelve | Qué hace |
+|---|---|---|
+| `key([k])` | booleano | La tecla `k` (código o nombre literal: `"a"`, `"enter"`, `"shift"`) está pulsada; sin `k`: cualquier tecla. |
+| `keyp([k [, hold, period]])` | booleano | La tecla `k` se pulsó en este cuadro (autorrepetición con `hold`/`period`, como TIC-80). |
+| `kbd.read()` | número / nil | Siguiente pulsación como el carácter que escribe (Mayús y Bloq Mayús aplicados). |
+| `kbd.event()` | número / nil | Siguiente evento: `+código` pulsada, `-código` soltada. |
+| `kbd.glyph(v)` | número / nil | El carácter de la fuente de la BIOS que representa un valor de `kbd.read()` (acentos, recuadros), o nil si es un código de tecla. |
+| `kbd.port([n])` | número | Puerto de mando del teclado (2 por defecto); cambiarlo empieza de nuevo. |
+| `kbd.capslock()`, `kbd.connected()` | booleano | Estado de Bloq Mayús; dispositivo conectado. |
+| `kbd.clear()` | nil | Descarta los eventos no leídos. |
+
+*Ratón* (dispositivo v32mouse) — [detalles](#ratón-mouse--mouse). **Necesita un adaptador de hardware v32io o el emulador modificado: sin uno de ellos, el puntero no se mueve** ([qué se necesita](#teclado-y-ratón-qué-se-necesita-v32io)).
+
+| Llamada | Devuelve | Qué hace |
+|---|---|---|
+| `mouse()` | x, y, left, middle, right, scrollx, scrolly | Puntero (píxeles de pantalla) y botones (booleanos), como el de TIC-80; el desplazamiento es siempre 0. |
+| `mouse.pressed([b])`, `mouse.released([b])` | booleano | Un botón de `b` (1 izquierdo, 2 derecho, 4 central; sumas; ninguno: cualquiera) se pulsó / soltó en este cuadro. |
+| `mouse.buttons()` | número | Botones pulsados, 1 + 2 + 4. |
+| `mouse.delta()` | dx, dy | El movimiento de este cuadro, en píxeles. |
+| `mouse.position([x, y])` | x, y | El puntero; lo mueve si se dan valores. |
+| `mouse.bounds(x1, y1, x2, y2)` | nil | Zona en la que se queda el puntero (por defecto, la pantalla). |
+| `mouse.scale([n])`, `mouse.port([n])` | número | Píxeles por paso (2 por defecto); puerto de mando (3 por defecto). |
+| `mouse.connected()` | booleano | Dispositivo conectado. |
+
+*Sonido* — [detalles](#sonido-music--sfx)
+
+| Llamada | Devuelve | Qué hace |
+|---|---|---|
+| `music.play(snd [, ch [, loop [, vol [, start]]]])` | canal | Reproduce un sonido, en el canal 0 por defecto. |
+| `music.pause([ch])`, `music.resume([ch])`, `music.stop([ch])` | nil | Control del canal. `resume(ch)` solo actúa sobre un canal *en pausa* (uno que suena o detenido se deja como está); sin argumento reanuda todos los canales en pausa. |
+| `music.playing([ch])` | booleano | Si el canal se está reproduciendo. |
+| `music.volume(vol [, ch])` | nil | Volumen del canal. |
+| `sfx.play(snd [, ch [, vol [, speed]]])` | canal | Reproduce un efecto en el siguiente de los canales 1–15. |
+| `sfx.stop([ch])`, `sfx.volume(vol [, ch])` | nil | Detiene los efectos (canales 1–15), establece el volumen. |
+| `ioports.spu.cmd(mode)` (o `.command`) | nil | Comando SPU en bruto sobre el canal seleccionado. [Detalles](#ioportsspucmd--la-vía-de-escape-en-bruto) |
+
+*Mapas de mosaicos, tarjeta de memoria, sistema*
+
+| Llamada | Devuelve | Qué hace |
+|---|---|---|
+| `tilemap.get(MAP, x, y)` | número / nil | Mosaico en `x, y` de un `--#tilemap`. [Detalles](#mapa-de-mosaicos-tilemap) |
+| `tilemap.set(MAP, x, y, v)` | v | Cambia un mosaico (el mapa se copia a RAM en la primera escritura). |
+| `tilemap.render(MAP, sx, sy, w, h, x, y, tw, th [, skip])` | nil | Dibuja un bloque de mosaicos. |
+| `memcard.save(v [, pos])`, `memcard.load([pos])` | v | Lee/escribe una palabra en la tarjeta de memoria. [Detalles](#tarjeta-de-memoria-memcard) |
+| `memcard.load_table(pos)` | tabla / nil | Carga una tabla guardada con `memcard.save(t)`. |
+| `memcard.title(str\|tabla)` | nil | Establece el título/id de la tarjeta (una cadena, o una tabla de 20 números). |
+| `memcard.title()` | tabla | Obtiene el título/id de la tarjeta (una tabla con las 20 palabras, índices 1–20). |
+| `memcard[pos]`, `memcard[pos] = v` | | Igual que `load` / `save`. |
+| `system.wait()` / `system.halt()` | nil | `WAIT` hasta el siguiente cuadro / `HLT`. [Detalles](#sistema-system) |
+| `system.date()` / `system.time()` | cadena, 3 números | `"YYYY-MM-DD", a, m, d` / `"HH:MM:SS", h, m, s`. |
+| `system.frames()` / `system.cycles()` | número | Cuadros desde el encendido / ciclos de CPU en el cuadro actual (también sin `()`). |
+
+*Lenguaje y ensamblador en línea*
+
+| Llamada | Qué hace |
+|---|---|
+| `tostring(v)`, `tonumber(s [, base])`, `type(v)` | Como en Lua. |
+| `pairs(t)`, `ipairs(t)` | Iteradores para `for k, v in …`. |
+| `setmetatable`, `getmetatable`, `rawget`, `rawset`, `rawlen`, `rawequal` | Metatablas: `__index`, `__newindex`, `__call`, `__tostring`, `__len`, `__metatable`. |
+| `__asm__("…")` | Ensamblador en línea con sustitución `{var}`; los registros y la pila se guardan a su alrededor. |
+| `__rawasm__("…")` | Ensamblador copiado tal cual en la salida. |
+
+`print` e `ioports.*` son nombres del modo nativo; bajo `--#api pico8` o
+`--#api tic80`, `print`, `spr`, `btn`, etc. son en su lugar las funciones
+de esa consola (ver [PICO8.md](PICO8.md) y [TIC80.md](TIC80.md)).
+No disponibles: `printf`, `pcall`/`error`/`assert`, `select`, `next`,
+`string.match`/`gmatch`, `os.*`, `io.*`, `coroutine.*`.
+
+<a id="ioports--every-hardware-port"></a>
+### ioports.\* — todos los puertos de hardware
+
+Cada propiedad lee o escribe directamente un puerto de E/S de Vircon32
+(`IN`/`OUT`), sin consultar ninguna tabla. Tipos:
+
+* **int** — un número entero. Leer da un número de Lua; escribir un
+  número lo trunca hacia cero (`CFI`). Un literal numérico se escribe en
+  cambio como la palabra exacta de 32 bits, así que
+  `ioports.gpu.bgcolor = 0xFF003366` e `ioports.gpu.x = -5` guardan
+  ambos lo que escribiste (ver
+  [Puertos enteros y literales](#integer-ports-and-literals)).
+* **float** — un número de Lua, guardado tal cual.
+* **bool** — un booleano de Lua: las lecturas dan `true`/`false`, las
+  escrituras evalúan la veracidad (truthiness) de Lua. Ver
+  [Puertos de E/S booleanos](#puertos-de-es-booleanos).
+* **color** — un puerto int que contiene una palabra empaquetada
+  `0xAABBGGRR`. Escribe un literal, `rgba()`, `color()` o `hex()`; un
+  número en tiempo de ejecución se convierte a entero, que no son los
+  mismos bits.
+
+L = lectura, E = escritura.
+
+**ioports.gpu.\* — gráficos**
+
+| Propiedad | Puerto | Acceso | Tipo | Significado |
+|---|---|---|---|---|
+| `ioports.gpu.texture` | `GPU_SelectedTexture` | L/E | int | Textura que usan la configuración de regiones y los dibujos (nombres de `--#texture`, o -1 para la textura de la BIOS). |
+| `ioports.gpu.region` | `GPU_SelectedRegion` | L/E | int | Región (0–4095) de la textura seleccionada que se define o dibuja. |
+| `ioports.gpu.minX`, `minY` | `GPU_RegionMinX/Y` | L/E | int | Esquina superior-izquierda de la región, en píxeles de textura. Escribir uno también pone `hotX`/`hotY` al mismo valor. |
+| `ioports.gpu.maxX`, `maxY` | `GPU_RegionMaxX/Y` | L/E | int | Esquina inferior-derecha de la región (inclusive). |
+| `ioports.gpu.hotX`, `hotY` | `GPU_RegionHotSpotX/Y` | L/E | int | Hotspot de la región: el punto que se coloca en `gpu.x, gpu.y`. Se establece después de `minX/minY`. |
+| `ioports.gpu.x`, `y` | `GPU_DrawingPointX/Y` | L/E | int | Posición en pantalla del siguiente dibujo. |
+| `ioports.gpu.scaleX`, `scaleY` | `GPU_DrawingScaleX/Y` | L/E | float | Escala de los dibujos escalados. |
+| `ioports.gpu.angle` | `GPU_DrawingAngle` | L/E | float | Ángulo de los dibujos rotados, en radianes. |
+| `ioports.gpu.bgcolor` | `GPU_ClearColor` | L/E | color | Color que usa `clear()`. |
+| `ioports.gpu.multiply` | `GPU_MultiplyColor` | L/E | color | Color por el que se multiplica cada dibujo (`0xFFFFFFFF` = sin cambio). |
+| `ioports.gpu.blending` | `GPU_ActiveBlending` | L/E | int | Número del modo de mezcla (alpha `0x20`, add `0x21`, subtract `0x22`); o llama a `ioports.gpu.blending("add")`. |
+| `ioports.gpu.pixels` | `GPU_RemainingPixels` | L | int | Píxeles que la GPU aún puede dibujar en este cuadro. |
+
+Métodos: `ioports.gpu.clear()`, `ioports.gpu.draw()`,
+`ioports.gpu.blending()`, `ioports.gpu.sync()` (ver la tabla de arriba).
+
+**ioports.inp.\* — mandos**
+
+| Propiedad | Puerto | Acceso | Tipo | Significado |
+|---|---|---|---|---|
+| `ioports.inp.gamepad` | `INP_SelectedGamepad` | L/E | int | Mando (0–3) que leen las demás propiedades. Al leerlo da el último valor asignado (los emuladores no pueden releer este puerto; ver [El puerto de mando](#teclado-key--keyp--kbd)). |
+| `ioports.inp.status` | `INP_GamepadConnected` | L | bool | Si el mando seleccionado está conectado. |
+| `ioports.inp.left`, `right`, `up`, `down` | `INP_GamepadLeft/…` | L | int | Cruceta: cuadros mantenido (> 0) o cuadros desde que se soltó (< 0). |
+| `ioports.inp.A`, `B`, `X`, `Y`, `L`, `R`, `START` | `INP_GamepadButton*` | L | int | Botones, misma codificación. |
+| `ioports.inp.inputs` | (todos los anteriores) | L | int | Todos los botones del mando seleccionado en una máscara de bits, presionado = 1: bit 10 izquierda, 9 derecha, 8 arriba, 7 abajo, 6 START, 5 A, 4 B, 3 X, 2 Y, 1 L, 0 R. |
+
+**ioports.spu.\* — sonido**
+
+| Propiedad | Puerto | Acceso | Tipo | Significado |
+|---|---|---|---|---|
+| `ioports.spu.volume` | `SPU_GlobalVolume` | L/E | float | Volumen general. |
+| `ioports.spu.channel` | `SPU_SelectedChannel` | L/E | int | Canal (0–15) sobre el que actúan las propiedades `chan*` y `cmd()`. |
+| `ioports.spu.sound` | `SPU_SelectedSound` | L/E | int | Sonido (nombre de `--#sound`) sobre el que actúan las propiedades de sonido. |
+| `ioports.spu.length` | `SPU_SoundLength` | L | int | Longitud del sonido seleccionado, en muestras. |
+| `ioports.spu.soundloop` | `SPU_SoundPlayWithLoop` | L/E | bool | El sonido seleccionado hace bucle por defecto. |
+| `ioports.spu.loopstart`, `loopend` | `SPU_SoundLoopStart/End` | L/E | int | Puntos de bucle del sonido seleccionado, en muestras. |
+| `ioports.spu.state` | `SPU_ChannelState` | L | int | Canal seleccionado: 0x40 detenido, 0x41 en pausa, 0x42 reproduciendo. |
+| `ioports.spu.chansound` | `SPU_ChannelAssignedSound` | L/E | int | Sonido asignado al canal seleccionado. |
+| `ioports.spu.chanvolume` | `SPU_ChannelVolume` | L/E | float | Volumen del canal. |
+| `ioports.spu.chanspeed` | `SPU_ChannelSpeed` | L/E | float | Velocidad de reproducción del canal (1.0 = normal). |
+| `ioports.spu.chanloop` | `SPU_ChannelLoopEnabled` | L/E | bool | El canal hace bucle. Se establece **después de** `cmd("play")`. |
+| `ioports.spu.chanpos` | `SPU_ChannelPosition` | L/E | int | Posición de reproducción del canal, en muestras. |
+
+Método: `ioports.spu.cmd(mode)` / `ioports.spu.command(mode)` —
+`"play"`, `"pause"`, `"stop"`, `"resume"`, `"pauseall"`, `"stopall"`,
+`"resumeall"`.
+
+**ioports.tim.\*, rng, car, mem — temporizador, números aleatorios, cartucho, tarjeta de memoria**
+
+| Propiedad | Puerto | Acceso | Tipo | Significado |
+|---|---|---|---|---|
+| `ioports.tim.date` | `TIM_CurrentDate` | L | int | Año × 65536 + día del año (`system.date()` lo decodifica). |
+| `ioports.tim.time` | `TIM_CurrentTime` | L | int | Segundos desde la medianoche (`system.time()` lo decodifica). |
+| `ioports.tim.frames` | `TIM_FrameCounter` | L | int | Cuadros desde el encendido (= `system.frames`). |
+| `ioports.tim.cycles` | `TIM_CycleCounter` | L | int | Ciclos de CPU en este cuadro (= `system.cycles`). |
+| `ioports.rng.value` | `RNG_CurrentValue` | L | int | Siguiente número aleatorio del hardware. |
+| `ioports.rng.seed` | `RNG_CurrentValue` | E | int | Siembra el generador del hardware. |
+| `ioports.car.connected` | `CAR_Connected` | L | bool | Hay un cartucho insertado. |
+| `ioports.car.romsize` | `CAR_ProgramROMSize` | L | int | Tamaño de la ROM de programa, en palabras. |
+| `ioports.car.numvtex`, `numvsnd` | `CAR_NumberOfTextures/Sounds` | L | int | Texturas / sonidos del cartucho. |
+| `ioports.mem.connected` | `MEM_Connected` | L | bool | Hay una tarjeta de memoria insertada. |
+
+Escribir en un puerto de solo lectura, leer uno de solo escritura, o un
+nombre desconocido (`ioports.gpu.colour`) es un error de compilación que
+lista los nombres válidos.
+
+<a id="standard-library"></a>
+### Biblioteca estándar
+
+| Biblioteca | Funciones |
+|---|---|
+| `math` | `abs acos asin atan atan2 ceil cos cosh deg exp floor fmod frexp ldexp log log10 max min modf pow rad random randomseed sin sinh sqrt tan tanh`, constantes `pi huge e` |
+| `string` | `byte char find format gsub len lower rep reverse sub upper` (también como métodos: `s:sub(1, 3)`) |
+| `table` | `concat insert move pack remove sort unpack` |
+| operadores | `+ - * / % ^ //`, `..`, `#`, `== ~= < > <= >=`, `and or not`, `& | ~ << >>` (ver el README) |
+
+Los números son float32 (24 bits significativos); las cadenas que parecen
+números se convierten en la aritmética (`"5" + 1` es 6), como en Lua.
+
+---
+
+## Sonido: music.\* / sfx.\*
 
 ```
 music.play(SOUND [, CHANNEL [, LOOP [, VOL [, START]]]])  -> canal usado
@@ -99,9 +288,9 @@ buscar costaría hasta 15 `IN` + comparaciones en la ruta caliente
 un caso que solo surge cuando se solapan 15 efectos, donde el más antiguo
 es de todos modos el correcto para perder.
 
-## Vircon32 SPU: el orden de escritura de puertos
+**Vircon32 SPU: el orden de escritura de puertos**
 
-### La regla
+*La regla*
 
 ```asm
 OUT SPU_SelectedChannel, ch
@@ -128,20 +317,38 @@ solo funciona si se escribe después del comando. Escríbelo incluso cuando
 sea 0, ya que el comando acaba de reemplazarlo con la bandera del sonido.
 
 Para un canal **En Pausa (Paused)**, `PlayChannel()` no toma ninguna de las
-dos ramas — solo establece `State = Playing`. Eso es lo que hace que Play
-sea el resume correcto por canal, y por qué resume nunca perturba la
-posición o el bucle.
+dos ramas — solo establece `State = Playing`, así que en un canal en pausa
+Play reanuda sin perturbar la posición ni el bucle. En cualquier *otro*
+estado no es un resume: un canal **Detenido** se reinicia, y un canal que
+ya está **Reproduciendo** se redispara desde la posición 0 (verificado
+contra el `PlayChannel()` del emulador).
 
-### Estados de canal y qué significa realmente resume
+*Estados de canal y qué significa realmente resume*
 
 `channel_stopped 0x40`, `channel_paused 0x41`, `channel_playing 0x42`.
 `SPU_ChannelState` es **de solo lectura** (`WriteSPUChannelState` devuelve
 falso).
 
 No existe un comando `ResumeSelectedChannel`. `ResumeAllChannels` es
-literalmente un bucle que llama a `PlayChannel()` en cada canal en pausa,
-así que `resume(ch)` = `PlaySelectedChannel` es el equivalente correcto por
-canal.
+literalmente un bucle que llama a `PlayChannel()` en cada canal **en
+pausa** (deja los demás en paz), así que `music.resume(ch)` es
+`PlaySelectedChannel` **protegido por una comprobación de estado**: el
+compilador lee `SPU_ChannelState` y emite el comando solo cuando el canal
+está En Pausa (`0x41`). Reanudar un canal que suena o está detenido es por
+tanto una no-operación, como ya lo era `resume()` sin argumento. Un Play sin
+protección habría rebobinado al inicio un canal que suena. (Esta protección
+se añadió en `20261014-dev`; las versiones anteriores emitían el Play
+a secas.)
+
+**Constantes del ensamblador.** El ensamblador de Vircon32 acepta nombres de
+puerto (`SPU_Command`, ...) y nombres de valor
+(`SPUCommand_PlaySelectedChannel`, `SPUChannelState_*`, `GPUCommand_*`,
+`GPUBlendingMode_*`) **solo como operandos de `IN` / `OUT`**; en `MOV`,
+`PUSH` e `IEQ` se rechazan. Por eso el compilador emite siempre el valor
+numérico ahí (la tabla de comandos de `src/intrinsics/spu.c` y el `0x41` de
+arriba); lo que escribas en `__asm__` / `__rawasm__` debe hacer lo mismo:
+`OUT SPU_Command, 0x31` es válido y `MOV R0, SPUCommand_PauseSelectedChannel`
+es un error del ensamblador.
 
 **Un "resume" que reinicia desde el principio significa que el canal
 estaba DETENIDO, no en pausa.** Esa es la firma diagnóstica de una bandera
@@ -152,10 +359,11 @@ Play lo rebobinó.
 comprueba si el canal ya está detenido, a pesar de que la documentación de
 la API en C dice que pausar "no tiene efecto si ya está detenido". Así que
 pausar un canal terminado lo deja En Pausa en la posición 0, y un resume
-posterior reproduce desde el inicio. Protégete con una comprobación
+posterior lo reproduce desde el inicio (un resume real de un canal En Pausa,
+desde la posición 0). Protégete con una comprobación
 `SPU_ChannelState == 0x42` si eso importa.
 
-### Tipos de puerto
+*Tipos de puerto*
 
 `SPU_ChannelPosition` es un puerto **ENTERO** — un índice de muestra,
 acotado por la consola a `0 .. SoundLength-1`. `audio.h` declara
@@ -169,7 +377,7 @@ Puertos genuinamente flotantes: `SPU_ChannelVolume` (acotado 0–8),
 0–2). Las escrituras de NaN/inf en cualquiera de estos se ignoran en lugar
 de rechazarse.
 
-## music.volume(VOL [, CHANNEL]) / sfx.volume(VOL [, CHANNEL])
+**music.volume(VOL [, CHANNEL]) / sfx.volume(VOL [, CHANNEL])**
 
 Establece el volumen de reproducción. `VOL` es obligatorio. `CHANNEL`
 tiene **tres** significados distintos según lo que escriba el sitio de
@@ -200,7 +408,7 @@ solo `.play()` hace eso. Un canal en pausa o detenido sigue siendo
 encontrado por el modo "canales rastreados" sin argumentos; solo reproducir
 un canal *diferente* bajo el otro espacio de nombres lo libera.
 
-### Seguimiento de propiedad de canal
+*Seguimiento de propiedad de canal*
 
 Dos palabras de RAM reservadas por el compilador, `VIRCON32_MUSIC_CHANNEL_MASK`
 y `VIRCON32_SFX_CHANNEL_MASK`, cada una una máscara de bits sobre los
@@ -220,7 +428,7 @@ Solo `.play()` toca las máscaras. `.pause()`, `.resume()`, `.stop()`, y
 en pausa o detenido sigue siendo "propiedad" de quien reprodujo por última
 vez en él, y sigue siendo captado por el modo de volumen sin argumentos.
 
-### Generación de código
+*Generación de código*
 
 Una llamada totalmente literal (`music.volume(0.5, 0)`, `sfx.volume(0.0, -1)`)
 se pliega en una secuencia lineal de `OUT` en tiempo de compilación, igual
@@ -233,7 +441,7 @@ activado. Cualquier otra llamada con valor en tiempo de ejecución va a
 `__builtin_vircon32_volume`, que comprueba el valor del canal contra `-1`
 (global) en tiempo de ejecución y acota en caso contrario.
 
-## Por qué desaparecieron los nombres simples
+**Por qué desaparecieron los nombres simples**
 
 `play` / `pause` / `resume` / `stop` eran los cuatro identificadores más
 propensos a colisión que un juego podría querer para sí mismo, que es lo
@@ -241,7 +449,7 @@ que la antigua salvaguarda de desvío `resolve_symbol()` en el despachador
 solucionaba. Han desaparecido; los espacios de nombres los reemplazan, y el
 mecanismo de alias los restaura por elección en lugar de por defecto.
 
-## Alias en tiempo de compilación
+**Alias en tiempo de compilación**
 
 `play = music.play` registra un alias y no emite nada. Las llamadas
 posteriores a `play(...)` compilan a la secuencia `OUT` en línea idéntica —
@@ -279,7 +487,7 @@ reales empaquetadas con `BOXED_FUNCTION`, resueltas en
 `try_emit_table_get_intrinsic()` donde `math.sin` como valor ya existe. Eso
 sería aditivo; la tabla de alias permanece como la ruta de costo cero.
 
-## music.playing() y por qué una bandera de Lua es el interruptor equivocado
+**music.playing() y por qué una bandera de Lua es el interruptor equivocado**
 
 `SPU_ChannelState` es un puerto entero de solo lectura que devuelve
 `channel_stopped` 0x40, `channel_paused` 0x41, `channel_playing` 0x42.
@@ -292,7 +500,7 @@ programa todavía cree que se está reproduciendo, así que la siguiente
 pulsación pausa un canal ya detenido en lugar de reanudarlo. Preguntarle al
 hardware no puede desincronizarse.
 
-## Generación de código: plegado híbrido
+**Generación de código: plegado híbrido**
 
 Todos los argumentos conocidos en tiempo de compilación → secuencia lineal
 de `OUT`, sin CALL. Cualquier cosa dinámica → empuja y hace CALL a la
@@ -316,7 +524,7 @@ cualquier parte del AST.
 
 ---
 
-# ioports.spu.cmd() — la vía de escape en bruto
+## ioports.spu.cmd() — la vía de escape en bruto
 
 Emite un comando SPU en bruto contra lo que sea que `SPU_SelectedChannel`
 nombre actualmente. Sin selección de canal, sin asignación de sonido, sin
@@ -333,7 +541,7 @@ Modos: `"play"` 0, `"pause"` 1, `"stop"` 2, `"pauseall"` 3, `"resume"` 4,
 
 ---
 
-# Puertos de E/S booleanos
+## Puertos de E/S booleanos
 
 Un booleano de Lua no es un flotante. `true`/`false`/`nil` son patrones de
 bits empaquetados en NaN; los puertos de hardware trafican en enteros 0 y
@@ -350,7 +558,7 @@ aritmética sobre uno de ellos necesita reescribirse como
 
 ---
 
-# Sistema: system.\*
+## Sistema: system.\*
 
 ```
 system.wait()   -> nil   (WAIT hasta la siguiente señal de nuevo ciclo)
@@ -359,7 +567,7 @@ system.date()   -> cadena, año, mes, día
 system.time()   -> cadena, hora, minuto, segundo
 ```
 
-## system.wait() / system.halt()
+**system.wait() / system.halt()**
 
 `system.wait()` compila directamente a `WAIT` — la misma instrucción que
 usa `ioports.gpu.sync()`, e intercambiable con ella; ambas simplemente
@@ -367,7 +575,7 @@ esperan la siguiente señal de nuevo ciclo del temporizador. `system.halt()`
 compila a `HLT`, deteniendo la CPU por completo — para un programa que ha
 completado su trabajo y no le queda nada por renderizar.
 
-## system.date() / system.time()
+**system.date() / system.time()**
 
 Ambas decodifican el reloj de tiempo real del chip temporizador (ver la
 Especificación del Sistema Vircon32, Parte 7, sección 1.2 — esto es un
@@ -395,17 +603,19 @@ ella. No hay soporte de cadena de formato ni construcción de tablas al
 estilo `os.time()`/`os.date()` — esto es una decodificación de forma fija
 del registro de hardware, no una biblioteca de fechas general.
 
-## system.frames / system.cycles
+**system.frames / system.cycles**
 
 ```lua
 local f = system.frames()   -- TIM_FrameCounter -- cuadros desde el encendido
-local c = system.cycles()   -- TIM_CycleCounter -- ciclos de CPU desde el encendido
+local c = system.cycles()   -- TIM_CycleCounter -- ciclos de CPU desde que empezó este cuadro
 ```
 
-Ambos son contadores de hardware de solo lectura, monótonos desde el
-arranque — a diferencia de `system.date()`/`system.time()`, estos **no**
-son de reloj de pared: miden el tiempo de ejecución propio de la consola,
-no el reloj en tiempo real. `system.frames()` es el ajuste natural para
+Ambos son contadores de hardware de solo lectura, y ninguno es tiempo de
+reloj de pared. `system.frames()` cuenta los cuadros desde el encendido;
+`system.cycles()` cuenta los ciclos de CPU desde que empezó el cuadro
+actual y vuelve a 0 en cada cuadro, así que leerlo justo antes de
+`system.wait()` muestra cuánto del presupuesto de CPU del cuadro se ha
+usado. `system.frames()` es el ajuste natural para
 temporización del tipo "cada N cuadros, haz X" (esto es exactamente lo que
 usa la demo de desplazamiento del mapa de mosaicos para marcar el ritmo de
 su velocidad de desplazamiento) ya que se ejecuta libremente sin importar
@@ -418,7 +628,7 @@ nombres más fácil de descubrir.
 
 ---
 
-# Gráficos: spr()
+## Gráficos: spr()
 
 ```
 spr(region_id, x, y [, scale_x [, scale_y [, angle_deg [, color_mult [, blend_mode]]]]])
@@ -435,27 +645,41 @@ píxel `(x, y)`.
 | `scale_x`, `scale_y` | `1.0` | factores de escala X/Y independientes |
 | `angle_deg` | `0` | rotación, en **grados**, sentido antihorario; convertido internamente a radianes (el `GPU_DrawingAngle` de la consola está en radianes) |
 | `color_mult` | `0xFFFFFFFF` | color de multiplicación RGBA empaquetado — `0xFFFFFFFF` es "sin cambio" |
-| `blend_mode` | `VIRCON32_BLEND_ALPHA` (`0x20`) | ver los modos de mezcla abajo |
+| `blend_mode` | `"alpha"` (`0x20`) | una cadena con el nombre del modo o su valor numérico — ver los modos de mezcla abajo |
 
 Un argumento puede **omitirse** (simplemente dejar de suministrar
 argumentos finales) o pasarse como un **`nil` explícito** para saltarlo y
 llegar a uno posterior — `spr(id, x, y, nil, nil, 45)` para rotar sin
 tocar la escala — ambos significan "usa el valor por defecto."
 
-Modos de mezcla:
+Modos de mezcla — pasa la cadena con el nombre o el número:
 
-| Constante | Valor |
-|---|---|
-| `VIRCON32_BLEND_ALPHA` | `0x20` |
-| `VIRCON32_BLEND_ADD` | `0x21` |
-| `VIRCON32_BLEND_SUBTRACT` | `0x22` |
+| Cadena | Número | Efecto |
+|---|---|---|
+| `"alpha"` o `"default"` | `0x20` | mezcla alfa normal (el valor por defecto) |
+| `"add"` | `0x21` | aditiva — aclara lo que hay debajo |
+| `"subtract"` | `0x22` | sustractiva — oscurece lo que hay debajo |
+
+```lua
+spr(7, 100, 80, nil, nil, nil, nil, "add")       -- efecto de brillo / luz
+spr(7, 100, 80, nil, nil, nil, nil, 0x21)        -- lo mismo, numérico
+spr(7, 100, 80, nil, nil, nil, 0x80FFFFFF, "alpha")
+```
+
+La cadena del modo debe ser un **literal de cadena**; se resuelve a su
+número en tiempo de compilación, y cualquier otra cadena (`"multiply"`,
+una errata) es un error de compilación. Una cadena guardada en una
+variable no se reconoce (no hay despacho de cadenas en tiempo de
+ejecución — llegaría a la GPU como un puntero, no como un modo); guarda el
+modo en una variable como número (`local mode = 0x21`). Los números se
+pasan tal cual, como antes.
 
 `spr()` no devuelve nada (`nil` de Lua), a la par de que la consola no
 tiene ningún valor significativo que devolver de una llamada de dibujo.
 Más de 8 argumentos es una advertencia en tiempo de compilación; los
 extras se ignoran.
 
-## Despacho en tiempo de ejecución, no plegado en tiempo de compilación
+**Despacho en tiempo de ejecución, no plegado en tiempo de compilación**
 
 A diferencia de la API de sonido, `spr()` siempre llama a
 `__builtin_vircon32_spr` — no hay una ruta rápida de `OUT` lineal para una
@@ -478,12 +702,21 @@ que solo se escriben en las ramas que realmente los usan (inofensivo
 dejarlos obsoletos, ya que por ejemplo `DrawRegionRotated` está definido
 para ignorar la escala por completo).
 
-El valor por defecto de `color_mult`, `0xFFFFFFFF`, se pasa a través de la
-convención de llamada como un flotante de Lua, y `4294967295.0` no es
-exactamente representable en un flotante de 32 bits — se redondea hacia
-arriba a `4294967296.0`. El tiempo de ejecución lo convierte mediante
-`CFI` (flotante → patrón de bits entero) en lugar de usarlo directamente,
-lo cual recupera el `0xFFFFFFFF` correcto de todos modos.
+`color_mult` es una palabra empaquetada `0xAABBGGRR` y se escribe en
+`GPU_MultiplyColor` tal cual, sin conversión de flotante a entero (el
+mismo modelo que `ioports.gpu.clear(color)`). Un literal numérico
+(`0xFFFFFFFF`, `0x80FFFFFF`, `-1`) se convierte en esa palabra al compilar.
+Cualquier otra expresión debe contener ya la palabra empaquetada:
+`rgba(r, g, b [, a])` (ver [Colores: rgba()](#colors-rgba)),
+`hex("0xFF8080FF")`, o una variable asignada desde uno de ellos. Un número
+calculado en tiempo de ejecución *no* se convierte — un float32 no puede
+representar exactamente un color de 32 bits. Para un color que cambia en
+ejecución (un fundido), guarda los componentes como números y empaquétalos
+al dibujar:
+
+```lua
+spr(REGION_SOLID, x, y, w, h, 0, rgba(0, 0, 0, frame * 8))   -- fundido a negro
+```
 
 Un `nil` pasado explícitamente para un argumento opcional (por ejemplo,
 `spr(id, x, y, nil, nil, 45)`) se trata idénticamente a que ese argumento
@@ -492,22 +725,145 @@ llamada situada en un contexto de expresión (`local unused = spr(1, 10, 10)`)
 recibe correctamente `nil` asignado, igual que cualquier otro intrínseco
 en este archivo.
 
-## ioports.gpu.clear([color])
+<a id="gpu-clear"></a>
+**ioports.gpu.clear([color]) / ioports.gpu.clear(r, g, b [, a])**
 
-Limpia la pantalla: escribe `GPU_ClearColor` (si se da un argumento de
-color) y luego emite `GPUCommand_ClearScreen`. `color` acepta ya sea un
-entero RGBA empaquetado o una de cinco cadenas de nombre preestablecidas —
-`"black"`, `"white"`, `"blue"`, `"red"`, `"green"` — resueltas en tiempo
-de compilación cuando es un literal de cadena. Omite el argumento para
-limpiar con lo que `GPU_ClearColor` contenga actualmente.
+Limpia la pantalla: escribe `GPU_ClearColor` (si se da un color) y luego
+emite `GPUCommand_ClearScreen`. Omite los argumentos para limpiar con lo
+que `GPU_ClearColor` contenga actualmente. El color puede darse de cuatro
+formas:
+
+| Forma | Ejemplo | Notas |
+|---|---|---|
+| nombre preestablecido | `clear("black")` | `"black"`, `"white"`, `"blue"`, `"red"`, `"green"` — literal de cadena, resuelto en tiempo de compilación; cualquier otro nombre es un error de compilación |
+| literal empaquetado | `clear(0xFF202020)` | `0xAABBGGRR`; se pliega en tiempo de compilación a la palabra cruda de 32 bits |
+| palabra empaquetada | `clear(rgba(32, 32, 32))`, `clear(hex("0xFF202020"))`, `clear(c)` | un valor no literal se escribe al puerto sin tocar, así que ya debe contener la palabra cruda — es decir, venir de `rgba()` o de `hex()` |
+| componentes | `clear(32, 32, 32)`, `clear(r, g, b, 128)` | rojo, verde, azul, alfa, cada uno `0`–`255`; alfa es opcional y por defecto vale `255` (opaco) |
 
 ```lua
 ioports.gpu.clear("black")
-ioports.gpu.clear(0xFF202020)   -- RGBA empaquetado, no un nombre preestablecido
-ioports.gpu.clear()             -- reutiliza el último ClearColor establecido
+ioports.gpu.clear(0xFF202020)       -- 0xAABBGGRR empaquetado, gris oscuro
+ioports.gpu.clear(32, 32, 32)       -- el mismo gris oscuro, por componentes
+ioports.gpu.clear(r, g, b)          -- también con variables; alfa = 255
+ioports.gpu.clear(0, 0, 64, 128)    -- azul oscuro semitransparente
+ioports.gpu.clear()                 -- reutiliza el último ClearColor establecido
 ```
 
-## Definiendo regiones de textura
+Ten en cuenta que el orden de bytes de la GPU es `0xAABBGGRR` — el rojo
+es el byte *bajo* — que es la razón principal de la forma por
+componentes: `clear(r, g, b)` lo empaqueta en el orden correcto por ti.
+
+La forma por componentes acepta 3 o 4 argumentos (2, o más de 4, es un
+error de compilación). Cuando todos los componentes son literales se
+pliega a una sola constante empaquetada en tiempo de compilación — los
+literales fuera de rango se limitan a `0`–`255` con una advertencia. En
+otro caso cada componente se evalúa como una expresión normal, se limita
+a `0`–`255`, se trunca a entero y se empaqueta en tiempo de ejecución. Un
+`nil` explícito para `a` significa opaco, igual que omitirlo, y también un
+alfa que sea `nil` en ejecución; no hay comprobación de nil en tiempo de
+ejecución en el rojo, el verde y el azul, así que una variable que sea
+`nil` ahí da un color indefinido.
+
+*Por qué una variable empaquetada necesita `rgba()` o `hex()`:* los
+números de v32lua son float32, así que un número como `0xFF202020`
+guardado en una variable contiene un flotante, no los bits del color, y
+`clear()` no puede distinguirlos en tiempo de ejecución. Los literales
+escritos directamente en la llamada funcionan, porque se pliegan en tiempo
+de compilación.
+
+<a id="colors-rgba"></a>
+**Colores: rgba(r, g, b [, a])**
+
+Devuelve la palabra empaquetada `0xAABBGGRR` de la GPU para un color — la
+palabra cruda de 32 bits, *no* un número Lua — para todo lo que espera una:
+el `color_mult` de `spr()`, `ioports.gpu.clear(color)`,
+`ioports.gpu.multiply`, `ioports.gpu.bgcolor`.
+
+```lua
+spr(id, x, y, 1, 1, 0, rgba(255, 255, 255, alpha))   -- fundido
+ioports.gpu.multiply = rgba(r, g, b)                 -- sin conversión a flotante
+ioports.gpu.clear(rgba(16, 16, 48))
+```
+
+* 3 o 4 argumentos (cualquier otra cantidad es un error de compilación).
+  El alfa vale 255 por defecto; un alfa `nil` (literal o en ejecución)
+  también vale 255.
+* Cada componente se limita a `0`–`255` y se trunca (`127.9` → 127),
+  exactamente como `clear(r, g, b [, a])`, con quien comparte el código.
+* Con todos los argumentos literales se pliega al compilar en una sola
+  constante (`rgba(1, 2, 3, 4)` es `0x04030201`); los literales fuera de
+  rango se limitan con una advertencia. Si no, se empaqueta en ejecución;
+  los componentes que llaman a funciones son seguros.
+* Solo en modo Vircon32 nativo. Una función tuya llamada `rgba` tiene
+  prioridad.
+
+**Cuidado — guarda los componentes, no la palabra.** Una palabra cruda
+cuyos bits altos coinciden con una de las etiquetas de valor del lenguaje
+*es* ese valor para el resto del programa: `rgba(0, 0, 192, 255)` es
+`0xFFC00000`, es decir `nil`, y `0xFF8xxxxx` se lee como una tabla.
+Pasarla directamente a una llamada o a un puerto siempre es seguro (solo
+se copia). Guardarla en una tabla (un valor `nil` borra la clave),
+comprobarla (`if c then`) o compararla con `nil` no lo es. `hex()` tiene
+el mismo problema. Lo seguro es guardar los componentes como números y
+llamar a `rgba()` donde se usa el color, como en los ejemplos de arriba.
+
+<a id="colors-color"></a>
+**Colores: color(n)**
+
+Convierte un número que contiene un color empaquetado `0xAABBGGRR` en la
+palabra cruda, para los colores que tienes como número en lugar de como
+componentes: uno calculado con aritmética, leído de una tabla de colores o
+cargado desde la tarjeta de memoria.
+
+```lua
+local palette = { 0xFF1D2B53, 0xFF7E2553, 0xFF008751 }
+ioports.gpu.multiply = color(palette[i])
+spr(id, x, y, 1, 1, 0, color(base + fade * 0x01000000))
+```
+
+* Un argumento (cualquier otra cantidad es un error de compilación; un
+  literal de cadena, `nil` o booleano también).
+* El número se redondea hacia abajo y se ajusta a 32 bits, así que los
+  números negativos dan su palabra en complemento a dos (`color(-1)` es
+  `0xFFFFFFFF`). Los valores fuera de `[-2^31, 2^32)` se saturan.
+* Un literal se pliega al compilar y es exacto: `color(0x802040FF)` es
+  `0x802040FF`.
+* En tiempo de ejecución el número es un float32, que solo guarda 24 bits
+  significativos, así que un color cuyos bits ocupan más de 24 se redondea
+  antes de que `color()` lo vea: una variable que contiene `0x802040FF`
+  da `0x80204100`. Los colores con alfa `0xFF` y muchos otros valores
+  habituales son exactos (`0xFF003366`, `0x80FFFFFF`), pero cuando
+  importan los bits exactos, guarda los componentes y usa `rgba()`.
+* El mismo cuidado que con `rgba()` respecto a las palabras que parecen
+  `nil` o una tabla.
+* Solo en modo Vircon32 nativo. Una función tuya llamada `color` tiene
+  prioridad (el `color()` de PICO-8 es la función propia de PICO-8).
+
+<a id="integer-ports-and-literals"></a>
+**Puertos enteros y literales**
+
+Un número escrito en un puerto entero (`ioports.gpu.x`, `bgcolor`,
+`multiply`, …) se convierte con `CFI`, truncando hacia cero. Un
+**literal numérico** se escribe en cambio como su palabra exacta de 32
+bits, calculada al compilar: `ioports.gpu.bgcolor = 0xFF003366` guarda
+`0xFF003366` (una conversión de flotante lo saturaría),
+`ioports.gpu.x = -5` guarda `-5`, e `ioports.gpu.y = 12.7` guarda `12`.
+Los literales fuera de `[-2^31, 2^32)` se saturan con una advertencia.
+
+**Números dados a puertos de color.** Un número Lua es un flotante: sus bits
+no son un color. Cuando un puerto de *color* (`ioports.gpu.clear`,
+`multiply`, `bgcolor`...), el `color_mult` de `spr` o el color de
+`rect`/`rectfill` recibe un número que no es un literal, el compilador lo
+redondea ahora hacia abajo a entero y lo usa como palabra `0xAABBGGRR`
+(módulo 2^32), con un aviso: un float32 solo conserva 24 bits (alfa ≥ 0x80
+requiere `rgba()`/`hex()`). Antes se enviaban los bits del flotante:
+`ioports.gpu.clear = 8` borraba a negro con 25 % de alfa, que el emulador
+mezcla con el fotograma anterior. `--allow-float-as-clearcolor` (o la
+directiva `--#allow-float-as-clearcolor`) devuelve ese comportamiento solo
+para el color de borrado, a propósito, para una estela de desenfoque. Usa
+`rgba()`, `hex()` o un literal para colores exactos.
+
+**Definiendo regiones de textura**
 
 El `region_id` de `spr()` no se refiere a nada hasta que se haya recortado
 realmente una región de una textura cargada. No hay autoría de regiones
@@ -527,20 +883,26 @@ ioports.gpu.hotX = 6            -- ver abajo -- NO 0
 ioports.gpu.hotY = 156          -- ver abajo -- NO 0
 ```
 
-**`hotX`/`hotY` deben establecerse a los mismos valores que `minX`/`minY`,
-no a `0`.** Esto se descubrió de la manera difícil al construir
-`tilemap.render()`: una región cuyo hotspot se deja sin establecer (o se
-pone en cero explícitamente) se dibuja desplazada hacia abajo y hacia la
-derecha aproximadamente por su propio `minX`/`minY` — una región recortada
-cerca de la esquina superior-izquierda de la hoja se ve bien, que es
-exactamente lo que hizo esto fácil de pasar por alto al principio, pero
-una región recortada más adentro en la hoja se desvía tanto como de
-adentro se recortó. Establecer `hotX`/`hotY` para que coincidan con
-`minX`/`minY` ancla el punto de dibujo en la propia esquina
-superior-izquierda de la región, que es lo que todo ejemplo en este
-documento asume que significa `spr(id, x, y, ...)`. Esto necesita hacerse
-para **cada** región que un cartucho defina — no es una configuración
-global de una sola vez.
+*Hotspots de región: consideraciones y comportamiento del compilador*
+
+Aunque los hotspots de región permiten dibujar las regiones respecto a un
+par de coordenadas de hotspot, olvidarse de establecerlos puede causar
+problemas de dibujo, ya que las coordenadas de hotspot sin establecer
+pueden valer 0, 0 por defecto. Si quedan lo bastante lejos de los
+extremos X e Y definidos para la región, puede que la región no se dibuje
+donde quieres, o que ni siquiera aparezca en la pantalla.
+
+Por eso `v32lua` establece automáticamente `ioports.gpu.hotX` e
+`ioports.gpu.hotY`, de modo que, aunque se descuiden las coordenadas del
+hotspot al definir una región, esta se siga dibujando de forma visible:
+
+Al establecer el X y el Y mínimos de una región, el X y el Y del hotspot
+correspondiente se establecen exactamente a los mismos valores. Así, por
+defecto el hotspot queda en la esquina superior-izquierda.
+
+Si quieres poner el hotspot en otro punto que no sea la esquina
+superior-izquierda de la región, basta con establecerlo DESPUÉS de fijar
+el X y el Y mínimos.
 
 `GPU_RegionMinX/MinY/MaxX/MaxY/HotSpotX/HotSpotY` son los puertos en bruto
 detrás de `ioports.gpu.minX` etc. — ver la tabla completa de puertos en
@@ -551,7 +913,61 @@ GPU-ocupada `ioports.gpu.pixels`).
 
 ---
 
-# Entrada: btn() / btnp()
+## Gráficos: rect() / rectfill()
+
+```
+rect(x1, y1, x2, y2 [, color])       -- contorno de 1 píxel
+rectfill(x1, y1, x2, y2 [, color])   -- relleno
+```
+
+`(x1, y1)` y `(x2, y2)` son esquinas opuestas, ambas **incluidas**, en
+cualquier orden: `rectfill(10, 20, 19, 24)` cubre 10 × 5 píxeles, columnas
+10–19 y filas 20–24, y `rectfill(19, 24, 10, 20)` es el mismo rectángulo.
+Las coordenadas se redondean hacia abajo (`rectfill(9.8, ...)` empieza en
+la columna 9); `nil` o algo que no sea un número cuenta como 0. Si las dos
+esquinas coinciden se dibuja un píxel.
+
+`color` es una palabra empaquetada `0xAABBGGRR`, igual que el `color_mult`
+de `spr()`: un literal (`0xFF0000FF`), `rgba()`, `color()`, `hex()`, o una
+variable que contenga uno de ellos. Ausente o `nil`: blanco opaco. Un color
+con alfa menor que 255 se mezcla con el modo de mezcla actual
+(`ioports.gpu.blending`), que `rect()` no cambia.
+
+```lua
+rectfill(0, 0, 639, 359, rgba(0, 0, 64))      -- toda la pantalla, azul oscuro
+rect(100, 50, 199, 99, 0xFF00FFFF)           -- marco amarillo de 100 x 50
+rectfill(px, py, px + 15, py + 15, rgba(255, 0, 0, 128))   -- rojo translúcido
+```
+
+**Cómo dibuja**
+
+Ambas dibujan con la textura de la BIOS (`-1`), región 256: un píxel
+blanco que define la BIOS, en (469, 29), con su punto de anclaje en él. No
+se añade nada al cartucho. `rectfill()` es **un** dibujo escalado de esa
+región con escala (ancho, alto), teñido con el color de multiplicación —
+exacto al píxel en cualquier tamaño (la corrección de escalado de la GPU
+mantiene el muestreo dentro de ese único píxel). `rect()` son hasta 4 dibujos que no se solapan (bordes superior e
+inferior de ancho completo, los laterales entre ellos), así que un contorno
+translúcido no queda más oscuro en las esquinas.
+
+El estado de la GPU que usa la llamada se restaura después: textura y
+región seleccionadas, color de multiplicación, escala de dibujo. Un
+`rect()` puede ir en medio de código de dibujo con `ioports.gpu.*` sin
+alterarlo.
+
+Cada dibujo cuesta píxeles de GPU como cualquier otro
+(`ioports.gpu.pixels`), más la penalización de escalado de la GPU; un
+`rectfill()` de pantalla completa cuesta una pantalla de píxeles.
+
+Una función propia llamada `rect` o `rectfill` reemplaza a la incorporada,
+como con todo intrínseco. Con `--#api pico8` los dos nombres son las
+versiones de PICO-8 con colores de paleta (ver [PICO8.md](PICO8.md)); con
+`--#api tic80`, `rect(x, y, w, h, color)` / `rectb(...)` son las de TIC-80
+(ver [TIC80.md](TIC80.md)).
+
+---
+
+## Entrada: btn() / btnp()
 
 ```
 btn(id [, player])   -> booleano, actualmente mantenido presionado
@@ -561,7 +977,7 @@ btnp(id [, player])  -> booleano, verdadero solo en el cuadro en que se presion�
 `player` selecciona un mando 0–3 (`INP_SelectedGamepad`); omitido o `nil`
 usa el mando que ya esté seleccionado sin escribir el puerto.
 
-## IDs de botones
+**IDs de botones**
 
 Orden de hardware de Vircon32, no el de PICO-8 ni el de TIC-80:
 
@@ -584,13 +1000,13 @@ lugar de dar un error — no hay una ruta de error a nivel de sistema
 operativo disponible en este objetivo (ver `pcall`/`error`/`assert` en la
 lista de características diferidas del compilador).
 
-## btn(): sondeo directo
+**btn(): sondeo directo**
 
 `__builtin_vircon32_btn` lee el puerto `INP_Gamepad*` mapeado para el
 mando seleccionado y devuelve `true` cuando el hardware reporta que está
 presionado (`>= 1`).
 
-## btnp(): detección de flanco
+**btnp(): detección de flanco**
 
 `btnp()` necesita un estado que el hardware no rastrea por sí mismo: "¿no
 estaba este botón presionado en el cuadro anterior, y está presionado
@@ -606,7 +1022,7 @@ Un `player` fuera de rango (un valor explícito fuera de 0–3) se acota a
 0–3 antes de usarse como índice en esa tabla de 44 palabras, en lugar de
 permitir que compute una dirección fuera de ella.
 
-## ioports.inp.inputs — máscara de una palabra
+**ioports.inp.inputs — máscara de una palabra**
 
 ```lua
 local mask = ioports.inp.inputs   -- mando actual, los 11 botones en una sola lectura
@@ -629,7 +1045,7 @@ un cuadro completo como un solo valor (por ejemplo, en un registro de
 repetición/entrada) en lugar de para la lógica de juego cotidiana por
 botón, donde `btn()`/`btnp()` se leen con más claridad.
 
-## Lo que deliberadamente NO está aquí
+**Lo que deliberadamente NO está aquí**
 
 - Ninguna forma de campo de bits/"cualquier botón" (`btn()` sin
   argumentos) al estilo de PICO-8 — cada llamada nombra un botón
@@ -645,7 +1061,411 @@ capas de compatibilidad `--#api pico8`/`--#api tic80`, no aquí.
 
 ---
 
-# Mapa de mosaicos: tilemap.\*
+## Teclado y ratón: qué se necesita (v32io)
+
+> **⚠ Requiere hardware adicional o un emulador modificado.** La consola
+> Vircon32 **no tiene teclado ni ratón**: sus únicos dispositivos de
+> entrada son cuatro mandos. `key()`, `keyp()`, `kbd.*`, `mouse()`,
+> `mouse.*` y `stat(32..34)` de PICO-8 leen un teclado o un ratón que llega
+> a la consola **disfrazado de mando**, mediante una de las dos opciones
+> **v32io** de abajo. **Sin una de ellas, no es posible ninguna entrada de
+> teclado ni de ratón**: las funciones compilan y se ejecutan, pero ninguna
+> tecla está pulsada nunca, nunca se escribe ningún carácter y el puntero
+> del ratón no se mueve. Esto vale para los emuladores originales de
+> Vircon32 y para cualquier otro entorno.
+
+**1. El adaptador de hardware v32io (funciona con cualquier emulador de
+Vircon32).** Una placa Waveshare **RP2350-USB-A** (sin la resistencia
+**R13**, para que su puerto USB-A pueda alojar dispositivos de baja
+velocidad) con el firmware v32io. Un teclado o ratón USB se conecta al
+adaptador; el adaptador se conecta al ordenador y aparece en él como un
+mando USB normal llamado **`v32io:kbd`** o **`v32io:mouse`**, según lo que
+tenga conectado. Como es solo un mando, funciona tanto con el emulador
+original como con el modificado. Configuración, una vez por modo: crear un
+perfil de joystick con el editor de controles del emulador (EditControls),
+asignando sus botones 0 a 10 a Left, Right, Up, Down, Start, A, B, X, Y,
+L, R en ese orden — el adaptador tiene un **modo de configuración** para
+ello (teclado: Bloq Despl, y luego F1–F11 para los 11 controles; ratón:
+mantener los tres botones 2 segundos, y luego cada clic izquierdo pulsa el
+siguiente control) — y seleccionar ese perfil para el puerto de mando que
+espera el programa. El firmware, sus notas de compilación y los pasos de
+configuración completos están en el proyecto **v32io** (`firmware/`).
+
+**2. Un emulador de Vircon32 modificado (sin hardware).** Los
+dispositivos v32io integrados en el propio DesktopEmulator, que leen el
+teclado y el ratón del ordenador. Puede ser:
+
+- el fork [wedge1020/ComputerSoftware](https://github.com/wedge1020/ComputerSoftware),
+  [rama `v32io`](https://github.com/wedge1020/ComputerSoftware/tree/v32io),
+  que tiene los dispositivos `v32kbd` y `v32mouse`; o
+- las fuentes del DesktopEmulator original con los dos parches del
+  proyecto v32io aplicados (`emulator/v32io/v32kbd.patch`, `emulator/v32io/v32kbd-text.patch`,
+  `emulator/v32io/v32mouse.patch`).
+
+En su menú *Gamepads*, elegir el mando que espera el programa y
+seleccionar **`v32kbd`** o **`v32mouse`**. `v32kbd` no se puede
+seleccionar mientras algún mando use el dispositivo *Keyboard* original
+(ambos necesitan el teclado del ordenador). Con `v32mouse`, al dar el
+foco a la ventana del emulador este captura el puntero; **Ctrl izquierdo
++ Alt izquierdo** lo libera. El dispositivo de mando *Keyboard* propio
+del emulador original **no** es un teclado v32io: solo asigna unas
+cuantas teclas a botones del mando, que un programa que lo lea ve como
+teclas aleatorias.
+
+**Qué puerto de mando.** Por defecto, el programa lee el teclado del
+**puerto de mando 2** (el tercero) y el ratón del **puerto 3** (el
+cuarto), dejando los puertos 0 y 1 para los mandos de los jugadores. Los
+puertos se numeran desde 0 y los menús del emulador desde 1: el puerto 2
+es *Gamepad 3* y el puerto 3 es *Gamepad 4*. Conecta el dispositivo en
+ese puerto, o indica al programa dónde está: `--keyboard N` / `--mouse N`
+en la línea de órdenes, `--#keyboard N` / `--#mouse N` en el código, o
+`kbd.port(n)` / `mouse.port(n)` en tiempo de ejecución.
+
+**Comprobar el dispositivo.** `kbd.connected()` y `mouse.connected()`
+indican si hay *un mando* conectado en ese puerto — la consola no puede
+distinguir un dispositivo v32io de un mando real. Con el adaptador de
+hardware, su mando solo existe mientras tiene un teclado o un ratón
+conectado. Un **mando normal** que se quede en el puerto del teclado o del
+ratón se lee como tal: sus botones se convierten en teclas, clics y
+movimientos aleatorios. Un programa que también deba funcionar sin estos
+dispositivos debería ofrecer otra forma de jugar (controles con mando, un
+teclado en pantalla) e, idealmente, dejar elegir el puerto.
+
+### Cómo funciona
+
+El diseño sigue las bibliotecas C del proyecto v32io (`v32io.h`,
+`keyboard.h`, `mouse.h`), cuya referencia de protocolos es
+`PROTOCOLS.md`:
+
+- **Una palabra empaquetada.** Un dispositivo v32io usa los 11 controles
+  de su mando como 11 bits de datos, no como botones de juego. El entorno
+  de ejecución lee los 11 a la vez en una palabra, bit *n* = puerto INP
+  `0x402 + n` (Left, Right, Up, Down, Start, A, B, X, Y, L, R) —
+  `__v32io_read` en `v32io.s`, la capa común que decodifican ambos
+  dispositivos, como `v32io.h`. La consola nunca muestra pulsadas dos
+  direcciones opuestas a la vez, así que cada par de direcciones es un
+  "trit" de 3 estados; ambos protocolos se basan en ello.
+- **Teclado (v32kbd).** Como mucho un evento de tecla por cuadro:
+  Left/Right se alternan como *estrobo* (un evento nuevo es un lado del
+  estrobo distinto del último visto, así que la misma tecla puede llegar
+  dos veces seguidas), Up = pulsada, Down = soltada, Start…R = el código de
+  tecla de 7 bits. El adaptador envía primero el código y cambia el
+  estrobo 8 ms después, manteniendo cada evento 2 cuadros (unos 23 eventos
+  por segundo; si se escribe más rápido, el adaptador los encola); el fork
+  del emulador entrega exactamente un evento por cuadro. El entorno de
+  ejecución lleva las teclas pulsadas, Bloq Mayús, una cola de 64 eventos
+  para `kbd.read()`/`kbd.event()`, y aplica él mismo Mayús/Bloq Mayús
+  (distribución de EE. UU.). Ver [Teclado](#teclado-key--keyp--kbd).
+- **Ratón (v32mouse).** Start/A/B = central/izquierdo/derecho, tal cual
+  (cada cambio dura al menos 25 ms). El movimiento viaja como dos
+  contadores de 12 posiciones, uno por eje, cada uno un código Gray de 2
+  bits más un trit, que cambian un control por paso; el entorno de
+  ejecución convierte el cambio desde el último cuadro en −5…+5 pasos (6 es
+  ambiguo: sin movimiento) y mueve su propio puntero pasos × escala. El
+  adaptador envía como mucho un paso por eje cada 5 ms. No queda sitio
+  para la rueda. Ver [Ratón](#ratón-mouse--mouse).
+- **En cada cuadro.** Ambos dispositivos deben leerse en cada cuadro: un
+  evento de teclado o un paso del ratón que no se vean a tiempo se pierden
+  o se leen mal. Cuando un programa los usa, el compilador los lee en cada
+  llamada de teclado/ratón (una vez por cuadro), al principio de cada
+  `game_loop()`/`TIC()`/tick de PICO-8, y justo antes del `WAIT` de
+  `system.wait()`, `ioports.gpu.sync()` y el `flip()` de PICO-8. Un bucle
+  con `__rawasm__("WAIT")` desnudo se lo salta.
+- **Solo si se usan.** El compilador busca en el código (fuera de
+  comentarios y cadenas) llamadas de teclado/ratón; un programa sin
+  ninguna no recibe nada de este código, RAM ni lectura por cuadro.
+- **Se conserva la selección de mando.** Leer el puerto del dispositivo
+  implica seleccionarlo, y hay que restaurar la selección del programa —
+  pero los emuladores de Vircon32 devuelven un valor erróneo al leer
+  `INP_SelectedGamepad`. Así que el entorno de ejecución recuerda él mismo
+  el mando seleccionado (`V32IO_GAMEPAD`, actualizado por cada `btn()`,
+  `btnp()` y escritura en `ioports.inp.gamepad`), y las lecturas de
+  `ioports.inp.gamepad` dan ese valor recordado. `btn()` e `ioports.inp.*`
+  siguen leyendo el mando que leían antes.
+
+---
+
+## Teclado: key() / keyp() / kbd.\*
+
+```
+key([k])                      -> booleano, k pulsada (sin k: cualquier tecla)
+keyp([k [, hold, period]])    -> booleano, k se pulsó en este cuadro (+ autorrepetición)
+kbd.read()                    -> siguiente carácter escrito (un número), o nil
+kbd.event()                   -> siguiente evento: +código pulsada, -código soltada, o nil
+kbd.glyph(v)                 -> carácter de la fuente de la BIOS de un valor de kbd.read(), o nil para un código de tecla
+kbd.port([n])                 -> puerto de mando del teclado (y lo cambia)
+kbd.capslock()                -> booleano, Bloq Mayús activo
+kbd.connected()               -> booleano, hay algo conectado en ese puerto
+kbd.clear()                   -- descarta los eventos aún no leídos
+```
+
+> **⚠ Solo con un dispositivo v32io.** Necesitan el adaptador de hardware
+> v32io con un teclado USB, o el dispositivo `v32kbd` del emulador
+> modificado — ver
+> [Teclado y ratón: qué se necesita](#teclado-y-ratón-qué-se-necesita-v32io).
+> Sin ellos, `key()` siempre es falso y `kbd.read()` siempre nil.
+
+Leen un teclado completo a través de un dispositivo **v32kbd**: un
+teclado USB que la consola ve como un mando normal, cuyos 11
+controles transportan eventos de teclas en lugar de botones (ver el
+proyecto v32io). Se conecta en un puerto de mando — **el puerto 2 (el
+tercero) por defecto**, dejando los puertos 0 y 1 para mandos normales. Se cambia
+con `--keyboard N` en la línea de órdenes, una pista `--#keyboard N` en el
+código, o `kbd.port(n)` en tiempo de ejecución.
+
+`key()`/`keyp()` siguen a los de TIC-80: mismos nombres, mismas reglas, con
+códigos de tecla de v32kbd. Con `--#api tic80` las mismas dos llamadas usan
+los códigos de TIC-80 (ver [TIC80.md](TIC80.md#input)); `kbd.*` funciona con
+todas las API. Una global propia llamada `kbd` (una tabla que asignes)
+reemplaza a las funciones `kbd.*` incorporadas.
+
+**Códigos de tecla**
+
+Un código nombra una **tecla**, no un carácter: las teclas que escriben un
+carácter usan ese carácter sin mayúsculas, distribución de EE. UU. —
+`'a'`–`'z'` (97–122), `'0'`–`'9'` (48–57), espacio (32) y
+`` ` - = [ ] \ ; ' , . / `` — y las demás:
+
+| Código | Tecla | Código | Tecla |
+|---|---|---|---|
+| 1 | Arriba | 11 | Ctrl derecho |
+| 2 | Abajo | 12 | Alt izquierdo (Option) |
+| 3 | Izquierda | 13 | Intro |
+| 4 | Derecha | 14–25 | F1–F12 |
+| 5 | Bloq Mayús | 26 | Alt derecho (Option) |
+| 6 | Mayús izquierda | 27 | Escape |
+| 7 | Mayús derecha | 28 | GUI izquierda (Command, Windows) |
+| 8 | Retroceso | 29 | GUI derecha |
+| 9 | Tabulador | 127 | Suprimir |
+| 10 | Ctrl izquierdo | | |
+
+Las teclas del teclado numérico dan los mismos códigos que sus equivalentes
+del teclado principal.
+
+`k` también puede ser un **literal de cadena**, convertido al código al
+compilar: un carácter (`"a"`, `"/"`, `" "`; un carácter con mayúsculas
+nombra su tecla, así que `"A"` es la tecla a y `"!"` la tecla 1), o un
+nombre — `up` `down` `left` `right` `enter` (`return`) `tab` `space`
+`backspace` `delete` (`del`) `escape` (`esc`) `capslock` `lshift` `rshift`
+`lctrl` `rctrl` `lalt` `ralt` `lgui` `rgui` `f1`–`f12`, sin distinguir
+mayúsculas. Cuatro nombres valen por cualquiera de los dos lados: `shift`,
+`ctrl`, `alt`, `gui` (`key("shift")` es verdadero mientras cualquiera de
+las dos Mayús esté pulsada). Un nombre desconocido es un error de
+compilación. Solo se convierten literales: una cadena guardada en una
+variable no es una tecla (`false`).
+
+```lua
+function game_loop()
+    if key("left")  then x = x - 2 end
+    if key("right") then x = x + 2 end
+    if keyp("space") then fire() end
+    if key("ctrl") and keyp("s") then save() end
+    if keyp("down", 20, 4) then menu_next() end   -- se repite mientras se mantiene
+end
+```
+
+**key([k]), keyp([k [, hold, period]])**
+
+`key(k)` es verdadero mientras la tecla está pulsada. `keyp(k)` es
+verdadero en el cuadro en que se pulsa; con `hold` y `period` dados y
+≥ 0, también mientras la tecla siga pulsada, desde `hold` cuadros, cada
+`period` cuadros (`period` 0: cada cuadro) — contando los cuadros después
+del primero, como hacen `keyp` y `btnp` de TIC-80. No hay autorrepetición
+por defecto. Sin `k`, `key()` es "alguna tecla pulsada" y `keyp()` "alguna
+tecla se pulsó en este cuadro". Un código sin tecla detrás es `false`.
+
+**Texto escrito: kbd.read()**
+
+```lua
+local text = ""
+function game_loop()
+    local c = kbd.read()
+    while c do
+        if c == 8 then                          -- Retroceso
+            text = string.sub(text, 1, -2)
+        else
+            local g = kbd.glyph(c)              -- nil for a key with no character
+            if g then text = text .. string.char(g) end
+        end
+        c = kbd.read()
+    end
+    print(0, 0, text .. "_")
+end
+```
+
+`kbd.read()` devuelve la siguiente **pulsación** como el carácter que
+escribe, con Mayús y Bloq Mayús aplicados tal como estaban al pulsarla
+(`"A"`, `"!"`, `"{"` ... como números, según la fuente de la BIOS), y las
+teclas sin carácter como su código (Intro 13, Retroceso 8, flechas 1–4...).
+Las liberaciones se saltan. `nil` cuando no queda nada.
+
+Los caracteres fuera de ASCII US (letras acentuadas, `€`, símbolos de
+recuadro) se escriben con la extensión de *texto* de v32io: el dispositivo
+envía el carácter como un par de eventos, que el código de teclado del
+compilador vuelve a unir (una primera mitad suelta se descarta tras 30
+fotogramas, y un dispositivo reconectado empieza limpio). `kbd.read()`
+devuelve un carácter así como su código en la fuente de la BIOS
+(Windows-1252, 128–255); los símbolos de recuadro 14–31 vuelven como
+**256 + código**, para no confundirse con códigos de tecla (Intro 13,
+flechas 1–4...). `kbd.glyph(v)` lo deshace: da el carácter para `print` o
+`string.char()`, y `nil` para un código de tecla. `kbd.event()` se salta
+los caracteres escritos y solo informa de teclas.
+
+`kbd.event()` devuelve en cambio todos los eventos, pulsaciones y
+liberaciones, como el código de tecla sin Mayús: positivo al pulsar,
+negativo al soltar (`-97`: se soltó la tecla a). Ambas leen la misma cola:
+usa una u otra. La cola guarda 64 eventos; a partir de ahí los nuevos se
+descartan hasta que se lea (`kbd.clear()` la vacía; las teclas pulsadas
+que ve `key()` no se ven afectadas).
+
+**kbd.port([n]), kbd.capslock(), kbd.connected()**
+
+`kbd.port(n)` mueve el teclado al puerto de mando `n` (0–3, acotado) y
+empieza de nuevo: se olvidan las teclas pulsadas, los eventos en cola y el
+Bloq Mayús, y el estado actual del dispositivo se toma como punto de
+partida. Devuelve el puerto; `kbd.port()` solo lo devuelve.
+`kbd.capslock()` es el estado de Bloq Mayús, llevado contando sus
+pulsaciones (empieza desactivado). `kbd.connected()` es verdadero cuando
+hay algo conectado en el puerto del teclado.
+
+**Leer en cada cuadro**
+
+El dispositivo informa como mucho de un evento de tecla por cuadro y lo
+mantiene hasta el siguiente, así que hay que leerlo **en cada cuadro** o se
+pierden eventos. El compilador se encarga de ello cuando el programa usa
+el teclado:
+
+- cada llamada a `key`/`keyp`/`kbd.*` lee el dispositivo (una vez por
+  cuadro);
+- los controladores de `game_loop()` y de `TIC()` de TIC-80 lo leen antes
+  de cada cuadro;
+- `system.wait()` e `ioports.gpu.sync()` lo leen antes de su `WAIT` (lo que
+  llega entonces cuenta para el cuadro siguiente, así que `keyp()` lo sigue
+  viendo).
+
+Así, un bucle `main()` que espera con `system.wait()` no pierde nada,
+aunque solo mire el teclado de vez en cuando. Un `__rawasm__("WAIT")`
+desnudo se salta esa lectura. Nada de esto está en un programa que no use
+el teclado.
+
+**El puerto de mando**
+
+El puerto del teclado se lee sin alterar el mando que el programa tiene
+seleccionado: `btn()`, `btnp()` e `ioports.inp.*` siguen leyendo el mando
+que leían antes. No leas el puerto del teclado con `btn()`: sus "botones"
+son bits del código de tecla.
+
+El mando seleccionado lo recuerda el entorno de ejecución (`V32IO_GAMEPAD`)
+en lugar de leerlo de `INP_SelectedGamepad`: los emuladores de Vircon32
+devuelven un valor erróneo al leer ese puerto. Las lecturas de
+`ioports.inp.gamepad` también dan el valor recordado. Una escritura en el
+puerto con `__rawasm__` se lo salta.
+
+---
+
+## Ratón: mouse() / mouse.\*
+
+```
+mouse()                       -> x, y, left, middle, right, scrollx, scrolly
+mouse.pressed([b])            -> booleano, un botón de b se pulsó en este cuadro
+mouse.released([b])           -> booleano, un botón de b se soltó en este cuadro
+mouse.buttons()               -> botones pulsados: 1 izquierdo + 2 derecho + 4 central
+mouse.delta()                 -> dx, dy: el movimiento de este cuadro
+mouse.position([x, y])        -> x, y (y mueve el puntero ahí)
+mouse.bounds(x1, y1, x2, y2)  -- la zona en la que se queda el puntero
+mouse.scale([n])              -> píxeles que se mueve el puntero por paso (y lo cambia)
+mouse.port([n])               -> puerto de mando del ratón (y lo cambia)
+mouse.connected()             -> booleano, hay algo conectado en ese puerto
+```
+
+> **⚠ Solo con un dispositivo v32io.** Necesitan el adaptador de hardware
+> v32io con un ratón USB, o el dispositivo `v32mouse` del emulador
+> modificado — ver
+> [Teclado y ratón: qué se necesita](#teclado-y-ratón-qué-se-necesita-v32io).
+> Sin él, el puntero se queda donde empieza y ningún botón está pulsado.
+
+Leen un ratón a través de un dispositivo **v32mouse**: un ratón USB
+que la consola ve como un mando normal (ver el proyecto v32io). Se
+conecta en un puerto de mando — **el puerto 3 (el cuarto) por defecto**,
+como en la demo de ratón de v32io, así caben a su lado un teclado (puerto 2)
+y los mandos de dos jugadores (puertos 0 y 1). Se cambia con `--mouse N` en la línea
+de órdenes, una pista `--#mouse N` en el código, o `mouse.port(n)` en tiempo
+de ejecución.
+
+`mouse()` es el de TIC-80: `x, y` del puntero, luego `left, middle, right`
+como booleanos, y luego `scrollx, scrolly`, que son siempre 0 — el
+dispositivo no tiene sitio para la rueda. La misma llamada, con los mismos 7
+valores, funciona también con `--#api tic80` y `--#api pico8`, en las
+unidades de pantalla de esa consola (ver [TIC80.md](TIC80.md#input) y
+[PICO8.md](PICO8.md#api)); `mouse.*` funciona con todas las API. Una función
+o global propia llamada `mouse` las reemplaza todas.
+
+```lua
+function game_loop()
+    local x, y, left = mouse()
+    if mouse.pressed(1) then          -- se pulsó el botón izquierdo
+        click_at(x, y)
+    end
+    if left then
+        draw_at(x, y)                 -- mantenido
+    end
+    rectfill(x - 1, y - 1, x + 1, y + 1)
+end
+```
+
+**El puntero**
+
+El dispositivo informa del movimiento, no de una posición, así que el
+entorno de ejecución lleva un puntero: empieza en el centro de la pantalla
+(320, 180), se mueve **pasos × escala** (escala 2 por defecto: 2 píxeles por
+paso) y se queda dentro de sus límites (toda la pantalla de 640 × 360 por
+defecto, ambos bordes incluidos). `mouse.bounds()` lo limita a una zona (un
+`nil` deja ese borde como está) y lo mueve dentro; `mouse.position(x, y)` lo
+coloca (cada coordenada dada se redondea hacia abajo y se mantiene dentro de
+los límites; `nil` la conserva); `mouse.scale(n)` fija la velocidad (n ≥ 1).
+Las tres devuelven sus valores actuales, así que `mouse.position()` y
+`mouse.scale()` solo leen. `mouse.delta()` es el movimiento de este cuadro
+en píxeles (después de la escala, antes de los límites); 0, 0 si no se
+movió.
+
+**Botones**
+
+`left`, `middle` y `right` siguen pulsados mientras lo estén los botones.
+Para `mouse.pressed(b)`, `mouse.released(b)` y `mouse.buttons()`, los
+botones son números: **1 izquierdo, 2 derecho, 4 central**, sumados para
+"cualquiera de estos" (`mouse.pressed(3)`: izquierdo o derecho). Sin `b`,
+cualquier botón. `pressed` / `released` solo son verdaderos en el cuadro en
+que cambió el botón. El adaptador mantiene cada cambio de botón al menos
+25 ms, así que hasta un clic rápido dura más de un cuadro.
+
+**Cómo se lee**
+
+El dispositivo lleva dos contadores, uno por eje, que recorren 12
+posiciones, cambiando un control del mando por paso; cada lectura los
+compara con la anterior, lo que da de −5 a +5 pasos por eje (6 no se
+distingue de −6 y cuenta como sin movimiento). Así que, como el teclado, el
+ratón hay que leerlo **en cada cuadro** — y el compilador se encarga cuando
+el programa lo usa: cada llamada a `mouse`/`mouse.*` lo lee (una vez por
+cuadro), los controladores de `game_loop()`, TIC-80 y PICO-8 lo leen en cada
+cuadro, y `system.wait()`, `ioports.gpu.sync()` y el `flip()` de PICO-8 lo
+leen antes de su `WAIT` (lo que llega entonces cuenta para el cuadro
+siguiente). Un bucle `main()` que espera con `system.wait()` no pierde
+movimiento aunque solo mire el ratón de vez en cuando. El movimiento solo se
+mide entre dos lecturas de un dispositivo conectado separadas como mucho 2
+cuadros; cualquier otro caso — un dispositivo recién conectado, cuadros
+pasados en una pantalla de pausa, un bucle con `__rawasm__("WAIT")` — solo
+toma los contadores como nuevo punto de partida, así que el puntero nunca
+salta.
+
+`mouse.port(n)` mueve el ratón al puerto de mando `n` (0–3, acotado) y
+empieza de nuevo desde el estado actual del dispositivo (el puntero se queda
+donde está). `mouse.connected()` es verdadero cuando hay algo conectado en
+el puerto del ratón. Como con el teclado, leer el puerto del ratón no altera
+el mando que el programa tiene seleccionado.
+
+---
+
+## Mapa de mosaicos: tilemap.\*
 
 ```
 tilemap.get(NAME, x, y)        -> número o nil (fuera de límites)
@@ -666,7 +1486,7 @@ recurso de cart-XML — sin entrada `<textures>`/`<sounds>`, sin id de
 recurso horneado en el código generado. Sus datos se incrustan como
 valores literales directamente en el programa ensamblado.
 
-## --#tilemap NOMBRE "archivo" y el formato CSV
+**--#tilemap NOMBRE "archivo" y el formato CSV**
 
 ```lua
 --#tilemap LEVEL1 "level1.csv"
@@ -687,7 +1507,7 @@ salida de **Export As... CSV** (por capa) de Tiled pueda usarse
 directamente sin ningún paso de conversión — no hay análisis de TMX/TSX
 en ninguna parte de este compilador.
 
-## tilemap.get() / tilemap.set()
+**tilemap.get() / tilemap.set()**
 
 ```lua
 local id = tilemap.get(LEVEL1, 4, 2)   -- mosaico en columna 4, fila 2
@@ -709,7 +1529,7 @@ de mosaico aquí es simplemente lo que el código que llama quiera que
 signifique, típicamente un id de región de GPU, que puede superar
 ampliamente los 255.
 
-## Promoción perezosa de ROM a RAM
+**Promoción perezosa de ROM a RAM**
 
 Un mapa de mosaicos comienza su vida de solo lectura, sentado donde sea
 que el compilador colocara sus datos en la imagen del programa —
@@ -723,7 +1543,7 @@ mosaicos, no globalmente. Un segundo `tilemap.set()` posterior en un mapa
 de mosaicos ya promovido escribe directamente, sin volver a copiar ni
 perturbar escrituras anteriores.
 
-## tilemap.render()
+**tilemap.render()**
 
 ```lua
 tilemap.render(LEVEL1, sx, sy, w, h, x, y, tile_w, tile_h)
@@ -767,7 +1587,7 @@ y desplazar el origen de pantalla de todo el bloque por un resto de
 píxel de sub-mosaico; esa es una extensión real y separada, no
 implementada aquí.
 
-## Lo que deliberadamente NO está aquí
+**Lo que deliberadamente NO está aquí**
 
 - Sin desplazamiento suave/de sub-píxel — ver arriba.
 - Sin nomenclatura `mget()`/`mset()`/`map()` — esos nombres pertenecen a
@@ -782,82 +1602,7 @@ implementada aquí.
 
 ---
 
-# Otros puertos de E/S en bruto
-
-Cada puerto `ioports.*` vive en una sola tabla (`IOPortMap` de `core.c`),
-organizada bajo seis categorías: `tim`, `rng`, `gpu`, `spu`, `inp`, `car`,
-`mem`. Las categorías de sonido (`spu`), gráficos (`gpu`, parcialmente —
-ver [Definiendo regiones de textura](#definiendo-regiones-de-textura)), y
-entrada (`inp`, parcialmente — ver [btn()/btnp()](#entrada-btn--btnp))
-se cubren arriba donde tienen un envoltorio de más alto nivel. Lo que
-queda es o bien hardware en bruto sin ningún envoltorio, o un envoltorio
-que solo cubre parte de una categoría.
-
-Una categoría o nombre de propiedad desconocido es un error de
-compilación que lista las categorías válidas, no un no-op silencioso ni
-una lectura de global no declarada — ver `validate_ioports_path()`.
-
-## ioports.tim.\* — temporizador en bruto
-
-```lua
-ioports.tim.date     -- TIM_CurrentDate,   solo lectura, entero empaquetado
-ioports.tim.time     -- TIM_CurrentTime,   solo lectura, entero empaquetado
-ioports.tim.frames    -- TIM_FrameCounter, solo lectura -- igual que system.frames()
-ioports.tim.cycles    -- TIM_CycleCounter, solo lectura -- igual que system.cycles()
-```
-
-`ioports.tim.date`/`ioports.tim.time` son los registros empaquetados en
-bruto que `system.date()`/`system.time()` decodifican en una cadena
-formateada y tres números separados — recurre a `system.date()`/
-`system.time()` a menos que la representación empaquetada en sí misma sea
-lo que se necesita (por ejemplo, almacenar una palabra en una tarjeta de
-memoria en lugar de tres campos separados).
-
-## ioports.rng.\* — RNG por hardware
-
-```lua
-ioports.rng.value            -- RNG_CurrentValue, lectura: el valor aleatorio actual
-ioports.rng.seed = 12345      -- RNG_CurrentValue, escritura: resembrar el generador
-```
-
-El mismo registro de hardware subyacente para ambas direcciones — leer
-devuelve el valor aleatorio actual (y avanza el generador), escribir lo
-resembra. Este es el propio RNG por hardware de la consola, independiente
-de `math.random()` (que es un PRNG por software en el tiempo de
-ejecución, sembrado por separado) — los dos no comparten estado y no
-producirán la misma secuencia a partir de la misma semilla.
-
-## ioports.car.\* — información del cartucho
-
-```lua
-ioports.car.connected  -- CAR_Connected,          booleano, solo lectura
-ioports.car.romsize    -- CAR_ProgramROMSize,     entero, solo lectura
-ioports.car.numvtex    -- CAR_NumberOfTextures,   entero, solo lectura
-ioports.car.numvsnd    -- CAR_NumberOfSounds,     entero, solo lectura
-```
-
-Introspección de solo lectura del cartucho actualmente insertado — el
-tamaño de su ROM de programa en palabras, y cuántas texturas/sonidos
-declaró su cart-XML. Dado que el propio cartucho de un programa en
-ejecución siempre está conectado, que `ioports.car.connected` lea `false`
-no es un caso que el código de cartucho normal necesite manejar; existe
-por completitud de la tabla de puertos más que como una condición de
-ramificación práctica; realmente solo algo transaccionado en el BIOS.
-
-## ioports.mem.connected — presencia de tarjeta de memoria
-
-```lua
-if ioports.mem.connected then
-    memcard.save(highscore)
-end
-```
-
-`MEM_Connected`, booleano, solo lectura — si una tarjeta de memoria está
-realmente presente antes de que las llamadas de `memcard.*` la toquen.
-
----
-
-# Tarjeta de memoria: memcard.\*
+## Tarjeta de memoria: memcard.\*
 
 ```
 memcard.save(value, position)   -> value   (escritura en bruto, exactamente 1 palabra)
@@ -865,7 +1610,8 @@ memcard.save(value)             -> value   (auto-anexado; ver abajo)
 memcard.load(position)          -> value   (lectura en bruto, exactamente 1 palabra)
 memcard.load()                  -> value   (posición 0)
 memcard.load_table(position)    -> table o nil   (ver Tablas, abajo)
-memcard.title(str)              -> nil     (establece el título de 20 palabras)
+memcard.title(str|tabla)        -> nil     (establece el título/id de 20 palabras)
+memcard.title()                 -> tabla   (obtiene el título/id de 20 palabras, índices 1-20)
 
 memcard[position]                  == memcard.load(position)
 memcard[position] = value          == memcard.save(value, position)
@@ -884,14 +1630,14 @@ coincide con cómo esta VM ya almacena las cadenas de Lua internamente —
 una palabra por carácter (ver `string.len()`) — en lugar de una
 representación empaquetada por byte.
 
-## memcard.save() / memcard.load()
+**memcard.save() / memcard.load()**
 
 Hay dos formas distintas, elegidas según si se da una `position`:
 
 **Con una `position` explícita** — la primitiva de bajo nivel. Escribe (o
 lee) exactamente una palabra en bruto en `position`, sin ningún tipo de
 contabilidad. `position 0` es la primera palabra de la región de datos;
-ver [Diseño de direcciones](#diseño-de-direcciones) abajo para el rango
+ver **Diseño de direcciones** abajo para el rango
 completo, incluyendo cómo las posiciones negativas alcanzan el título.
 Eres plenamente responsable de saber qué pones dónde — escribir la misma
 posición dos veces simplemente la sobrescribe.
@@ -908,7 +1654,7 @@ los guardados repetidos sin posición siguen extendiendo un registro a
 través de muchas sesiones de juego en lugar de sobrescribir la palabra 0
 en cada ejecución. Esta forma es consciente del tipo: guardar una cadena
 de Lua real escribe su contenido completo (etiquetado y con prefijo de
-longitud, ver [Etiquetas de tipo](#etiquetas-de-tipo-solo-la-forma-de-auto-anexado)),
+longitud, ver **Etiquetas de tipo**),
 no solo un puntero en bruto.
 
 ```lua
@@ -924,10 +1670,10 @@ se puede leer en cualquier momento como `memcard.load(-1)` /
 cursor de auto-anexado de la forma en que lo hace `memcard.save()`. Leer
 de vuelta una entrada escrita por la forma de auto-anexado significa leer
 tú mismo su palabra de etiqueta en una posición conocida (ver
-[Etiquetas de tipo](#etiquetas-de-tipo-solo-la-forma-de-auto-anexado)), o
+**Etiquetas de tipo**), o
 simplemente saber qué escribiste ahí.
 
-## memcard[position]
+**memcard[position]**
 
 `memcard[position]` y `memcard[position] = value` son abreviaturas de la
 forma de posición explícita de `load`/`save` de arriba — nunca de la
@@ -937,24 +1683,69 @@ forma de decir "sin índice".
 ```lua
 memcard[0] = 1234
 local hi = memcard[0]        -- 1234
-memcard[-1]                  -- lee el cursor de auto-anexado
+local cursor = memcard[-1]    -- lee el cursor de auto-anexado
 ```
 
-## memcard.title(str) -> nil
+**memcard.title(str|tabla) -> nil**
 
-Establece el título de la tarjeta de memoria — hasta 20 caracteres, una
-palabra por carácter, coincidiendo con la representación interna de
-cadenas de esta VM. Las cadenas más largas se truncan; las más cortas se
-rellenan con ceros. Esto es independiente de cualquier pista de cartucho
-`--#title`, que nombra al *cartucho*, no a los *datos guardados* — un solo
-cartucho puede tener muchas tarjetas de memoria en circulación, cada una
-con su propio título.
+Establece el título/id de la tarjeta de memoria: 20 palabras al comienzo
+del área de título de la tarjeta. Esto es independiente de cualquier pista
+de cartucho `--#title`, que nombra al *cartucho*, no a los *datos
+guardados* — un solo cartucho puede tener muchas tarjetas de memoria en
+circulación, cada una con su propio título.
+
+Dos formas de argumento:
+
+- **Una cadena.** Un carácter por palabra (coincidiendo con la
+  representación interna de cadenas de esta VM). Una cadena de más de 20
+  caracteres se trunca; una más corta se rellena con ceros.
+- **Una tabla indexada**, para un título que es más un ID que un texto.
+  Los elementos `1..20` son las 20 palabras, cada una un número guardado
+  como su valor entero de 32 bits. Un elemento ausente (`nil`) se guarda
+  como 0; los elementos pasados del 20 se ignoran. Como la palabra que
+  devuelve `memcard.title()` es la conversión inversa exacta,
+  `memcard.title(memcard.title())` conserva cada palabra bit a bit.
+
+Cualquier otra cosa (un número, una función, `true`/`false`/`nil`, o una
+tabla cuyos elementos `1..20` incluyan un no-número, como una cadena) es un
+**pánico en tiempo de ejecución**: la pantalla roja `PANIC` con el mensaje
+*RUNTIME ERROR: memcard.title() MUST BE STRING OR INDEXED TABLE* y el valor
+ofensor, y la consola se detiene. De que la forma de tabla se escriba
+palabra por palabra se desprende:
+
+- las palabras anteriores al elemento ofensor ya se han guardado cuando
+  ocurre el pánico (la escritura no es transaccional); valida antes si eso
+  importa;
+- cada número pasa por la conversión de flotante a entero de la consola,
+  que solo está definida para valores en el rango de 32 bits con signo (y un
+  flotante solo guarda enteros exactos hasta 2^24). Para guardar la palabra
+  `0xFFFFFFFF`, pasa `-1`; un valor de 2^31 o más se convierte de forma
+  distinta según el anfitrión del emulador, así que no cuentes con ello.
 
 ```lua
 memcard.title("My Save File")
+
+local id = {}
+for i = 1, 20 do id[i] = i * 100 end
+memcard.title(id)               -- 20 palabras numéricas
 ```
 
-## Tablas: memcard.save() / memcard.load_table()
+**memcard.title() -> tabla**
+
+Obtiene el título/id de la tarjeta de memoria como una **tabla nueva** de
+20 números, índices `1` a `20` (las tablas de esta versión empiezan en 1),
+una palabra cada uno. Para un título establecido desde una cadena, el
+elemento `n` es el código del carácter `n` (0 pasado el final de la
+cadena). La tabla se reserva de nuevo en cada llamada; el montón no recoge
+basura, así que lee el título una vez, no en cada cuadro. Igual que el
+establecedor, es independiente de cualquier pista de cartucho `--#title`.
+
+```lua
+local title = memcard.title()
+-- title[1] .. title[20]; para "My Save File": 77, 121, 32, 83, ... 0, 0
+```
+
+**Tablas: memcard.save() / memcard.load_table()**
 
 `memcard.save(a_table)` — **solamente** la forma de auto-anexado sin
 posición — escribe un **volcado en bruto** del contenido de la tabla: un
@@ -967,7 +1758,7 @@ local highscores = { alice = 500, bob = 350, carol = 900 }
 memcard.save(highscores)
 
 local restored = memcard.load_table(0)
-print(restored.alice)   -- 500
+print(10, 10, restored.alice)   -- 500
 ```
 
 `memcard.save(a_table, position)` (la forma de **posición explícita**) no
@@ -994,7 +1785,7 @@ es significativo dentro de la misma ejecución que lo escribió; volverlo a
 cargar en una sesión futura (o después de que el objetivo del puntero se
 haya movido o sido recolectado) es indefinido. Este es el mismo límite de
 seguridad que el resto de `memcard.*` ya traza (ver
-[Nota de seguridad](#nota-de-seguridad)) — un volcado de tabla no lo
+*Nota de seguridad*) — un volcado de tabla no lo
 cruza, simplemente lo aplica por entrada en lugar de una sola vez.
 
 **`memcard.load_table(position)`** reconstruye una tabla nueva a partir de
@@ -1006,7 +1797,7 @@ nada después de ella; leer en una posición que no contiene un volcado de
 tabla devuelve `nil` en lugar de leer mal palabras no relacionadas como un
 conteo de pares y claves/valores basura.
 
-## Diseño de direcciones
+**Diseño de direcciones**
 
 ```
 0x30000000  +-------------------------------------+  posición -24
@@ -1039,7 +1830,7 @@ caracteres; los 20 completos están disponibles ahora.
 | `VIRCON32_MEMCARD_CURSOR_ADDR` | `0x30000017` | el cursor de auto-anexado; posición `-1` |
 | `VIRCON32_MEMCARD_END` | `0x3003FFFF` | última palabra válida, inclusive |
 
-## Etiquetas de tipo (solo la forma de auto-anexado)
+**Etiquetas de tipo (solo la forma de auto-anexado)**
 
 `memcard.save(value)` sin posición escribe una de tres formas en el
 cursor, y luego avanza el cursor por la cantidad de palabras que esa
@@ -1061,9 +1852,9 @@ La forma de `position` explícita (`memcard.save(value, position)` /
 exactamente una palabra en bruto, sin importar el tipo de valor. Esto
 incluye tablas: una tabla guardada con una posición explícita es una
 única palabra de puntero en bruto, no un volcado — ver
-[Tablas](#tablas-memcardsave--memcardload_table) arriba.
+**Tablas** arriba.
 
-### Nota de seguridad
+*Nota de seguridad*
 
 Un número, booleano, o nil sobrevive el ciclo de ida y vuelta
 correctamente para siempre — ese patrón de bits significa lo mismo en
@@ -1085,7 +1876,7 @@ números/booleanos/nil (o cadenas/tablas reales de tales, mediante la
 forma de auto-anexado) para cualquier cosa destinada a sobrevivir un
 ciclo real de guardado/recarga.
 
-## Lo que deliberadamente NO está aquí
+**Lo que deliberadamente NO está aquí**
 
 - Sin serialización de tablas *recursiva* — un volcado de tabla copia
   solo sus pares clave/valor directos; una tabla anidada dentro de una es
@@ -1103,3 +1894,79 @@ bajo sus propias distribuciones — `memcard.*` no está disponible (es un
 error de compilación) bajo `--#api pico8`/`--#api tic80` para evitar que
 un programa mezcle ambos y corrompa el que no esté direccionando en ese
 momento.
+
+---
+
+## Otros puertos de E/S en bruto
+
+Cada puerto `ioports.*` vive en una sola tabla (`IOPortMap` de `core.c`),
+organizada bajo siete categorías: `tim`, `rng`, `gpu`, `spu`, `inp`, `car`,
+`mem`. Las categorías de sonido (`spu`), gráficos (`gpu`, parcialmente —
+ver **Definiendo regiones de textura**), y
+entrada (`inp`, parcialmente — ver [btn()/btnp()](#entrada-btn--btnp))
+se cubren arriba donde tienen un envoltorio de más alto nivel. Lo que
+queda es o bien hardware en bruto sin ningún envoltorio, o un envoltorio
+que solo cubre parte de una categoría. La tabla completa de puertos está
+en la [Referencia rápida](#ioports--every-hardware-port).
+
+Una categoría o nombre de propiedad desconocido es un error de
+compilación que lista las categorías válidas, no un no-op silencioso ni
+una lectura de global no declarada — ver `validate_ioports_path()`.
+
+**ioports.tim.\* — temporizador en bruto**
+
+```lua
+local d = ioports.tim.date    -- TIM_CurrentDate:  año * 65536 + día del año
+local t = ioports.tim.time    -- TIM_CurrentTime:  segundos desde la medianoche
+local f = ioports.tim.frames  -- TIM_FrameCounter: igual que system.frames()
+local c = ioports.tim.cycles  -- TIM_CycleCounter: igual que system.cycles()
+```
+
+`ioports.tim.date`/`ioports.tim.time` son los registros empaquetados en
+bruto que `system.date()`/`system.time()` decodifican en una cadena
+formateada y tres números separados — recurre a `system.date()`/
+`system.time()` a menos que la representación empaquetada en sí misma sea
+lo que se necesita (por ejemplo, almacenar una palabra en una tarjeta de
+memoria en lugar de tres campos separados).
+
+**ioports.rng.\* — RNG por hardware**
+
+```lua
+local r = ioports.rng.value   -- RNG_CurrentValue, lectura: el siguiente valor aleatorio
+ioports.rng.seed = 12345      -- RNG_CurrentValue, escritura: resembrar el generador
+```
+
+El mismo registro de hardware subyacente para ambas direcciones — leer
+devuelve el valor aleatorio actual (y avanza el generador), escribir lo
+resembra. Este es el propio RNG por hardware de la consola, independiente
+de `math.random()` (que es un PRNG por software en el tiempo de
+ejecución, sembrado por separado) — los dos no comparten estado y no
+producirán la misma secuencia a partir de la misma semilla.
+
+**ioports.car.\* — información del cartucho**
+
+```lua
+local ok   = ioports.car.connected  -- CAR_Connected,        booleano
+local size = ioports.car.romsize    -- CAR_ProgramROMSize,   entero
+local ntex = ioports.car.numvtex    -- CAR_NumberOfTextures, entero
+local nsnd = ioports.car.numvsnd    -- CAR_NumberOfSounds,   entero
+```
+
+Introspección de solo lectura del cartucho actualmente insertado — el
+tamaño de su ROM de programa en palabras, y cuántas texturas/sonidos
+declaró su cart-XML. Dado que el propio cartucho de un programa en
+ejecución siempre está conectado, que `ioports.car.connected` lea `false`
+no es un caso que el código de cartucho normal necesite manejar; existe
+por completitud de la tabla de puertos más que como una condición de
+ramificación práctica; realmente solo algo transaccionado en el BIOS.
+
+**ioports.mem.connected — presencia de tarjeta de memoria**
+
+```lua
+if ioports.mem.connected then
+    memcard.save(highscore)
+end
+```
+
+`MEM_Connected`, booleano, solo lectura — si una tarjeta de memoria está
+realmente presente antes de que las llamadas de `memcard.*` la toquen.

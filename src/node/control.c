@@ -34,13 +34,26 @@ void  node_return (ASTNode *node)
 {
     ASTNode *expr = node -> as.return_stmt.expressions_head;
     int ret_idx = 0;
+    bool forwarded = false;
+
+    // `return ...`, `return x, unpack(t)`, `return g()` with g's count
+    // unknown: the last expression's values follow the others, however
+    // many there are (node/multivalue.c).
+    if (expr != NULL) {
+        ASTNode *last = expr;
+        while (last->next != NULL) last = last->next;
+        if (mv_is_tail (last)) {
+            emit_mv_return (expr);
+            return;
+        }
+    }
 
     if (expr != NULL && expr->next == NULL && expr->type == NODE_FUNCTION_CALL) {
         ASTNode    *call_target = expr->as.call.target;
         SymbolNode *callee_sym  = NULL;
 
         if (call_target->type == NODE_IDENTIFIER) {
-            callee_sym = resolve_symbol(call_target->as.id.name);
+            callee_sym = resolve_function_symbol(call_target->as.id.name);
         } else {
             char path_buf[256] = {0};
             if (resolve_static_path(call_target, path_buf)) {
@@ -68,6 +81,7 @@ void  node_return (ASTNode *node)
             // correctly and this function just passes them through.
             ret_idx = callee_sym->return_count;
             expr = NULL;
+            forwarded = true;
         }
     }
 
@@ -163,6 +177,15 @@ void  node_return (ASTNode *node)
 
             unlock_register(pad_reg);
         }
+    }
+
+    // How many values this return produced, for callers that couldn't tell
+    // statically (`local x, y = obj:pos()` -- see __builtin_exec and
+    // node_multiple_assignment()). A tail-forwarded call already stored its
+    // own count.
+    if (!forwarded) {
+        emit_asm ("MOV R1, %d\n", ret_idx);
+        emit_asm ("MOV [RET_COUNT], R1 ; number of values returned\n");
     }
 
     emit_asm ("JMP __%s_return\n", get_current_function_name ());

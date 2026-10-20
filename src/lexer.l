@@ -1,8 +1,11 @@
 %{
 #include "v32lua.h"
-#include "parser.tab.h"  // Generated automatically by Bison
+#include <ctype.h>
+#include "parser.h"  // Generated automatically by Bison
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wsign-compare"
+
+static int lex_in_tic80_section = 0;   /* see the TIC-80 asset-data rule */
 
 char *process_string_literal (const char *text, int  len)
 {
@@ -24,8 +27,27 @@ char *process_string_literal (const char *text, int  len)
                 case 'r': processed[j++] = '\r'; break;
                 case '\\': processed[j++] = '\\'; break;
                 case '"':  processed[j++] = '"'; break;
-                // Add more cases here if you want to support \a, \b, or \0
+                case '\'': processed[j++] = '\''; break;
+                case 'x':               // \xHH (Lua 5.2+)
+                    if (i + 2 < len - 1 && isxdigit ((unsigned char) text[i + 1]) &&
+                        isxdigit ((unsigned char) text[i + 2])) {
+                        char hex[3] = { text[i + 1], text[i + 2], 0 };
+                        processed[j++] = (char) strtol (hex, NULL, 16);
+                        i += 2;
+                    } else {
+                        processed[j++] = text[i];
+                    }
+                    break;
                 default: 
+                    if (isdigit ((unsigned char) text[i])) {   // \ddd, up to 3 digits
+                        int v = 0, k = 0;
+                        while (k < 3 && i < len - 1 && isdigit ((unsigned char) text[i])) {
+                            v = v * 10 + (text[i] - '0'); i++; k++;
+                        }
+                        i--;
+                        processed[j++] = (char) (v & 255);
+                        break;
+                    }
                     // Unrecognized escape sequence, just keep the character
                     processed[j++] = text[i]; 
                     break;
@@ -37,7 +59,44 @@ char *process_string_literal (const char *text, int  len)
         i++;
     }
     processed[j] = '\0'; // Ensure it is null-terminated for the C-side
+    if (runtime_req.needs_pico8) pico8_fold_glyphs (processed);
     return (processed);
+}
+
+// PICO-8 compound assignment operators (+=, -=, *=, /=, %=). Standard Lua
+// has no compound assignment at all -- this is a PICO-8-only extension --
+// so all five share this one helper, gated on runtime_req.needs_pico8. By
+// the time any of these can be lexed, --#api pico8 (a normal TOKEN_CART_HINT
+// reduced earlier in this same single parse pass) has already set that flag,
+// PROVIDED the --#api hint appears before the first use in the source --
+// the existing convention every cart hint already follows. Outside PICO-8
+// mode this fails loudly and immediately rather than falling through to the
+// generic "syntax error" the separate '+' '=' tokens would otherwise produce.
+//
+// The operator itself is carried in yylval.number_val (reusing TOKEN_NUMBER's
+// slot in the union) as one of the NodeType enum values (NODE_ADD/NODE_SUB/
+// NODE_MUL/NODE_DIV/NODE_MOD) -- parser.y casts it back and feeds it straight
+// into the same make_node_binary() every plain '+'/'-'/'*'/'/'/'%' expr
+// already uses, so the arithmetic itself needed no new codegen.
+// PICO-8-only operator spellings (^^ >>> <<> >>< and their compound forms)
+static void require_pico8 (const char *what)
+{
+    if (!runtime_req.needs_pico8) {
+        compiler_error (ERR_LEXICAL, yylineno,
+            "'%s' is a PICO-8 operator; add --#api pico8 (or --api pico8) to use it", what);
+    }
+}
+
+static int long_comment_level;   // the n of --[==[ (n '='s) being skipped
+static int compound_assign_token (NodeType op)
+{
+    if (!runtime_req.needs_pico8) {
+        compiler_error (ERR_SYNTAX, yylineno,
+            "compound assignment operators (+=, -=, *=, /=, %%=, ..=, \\\\=) are a "
+            "PICO-8 extension; add --#api pico8 to use them");
+    }
+    yylval.number_val = (double) op;
+    return TOKEN_COMPOUND_ASSIGN;
 }
 %}
 
@@ -45,6 +104,7 @@ char *process_string_literal (const char *text, int  len)
 %option yylineno
 /* Add these options to disable the unused functions */
 %option nounput noinput
+%x LONGCOMMENT
 
 %%
 
@@ -89,6 +149,7 @@ char *process_string_literal (const char *text, int  len)
     char *end = strchr(yytext, '>');
     if (end) *end = '\0';
     yylval.string_val = strdup(start);  // Returns "TILES"
+    lex_in_tic80_section = 1;
     return TOKEN_TIC80_SECTION_HEADER;
 }
 
@@ -97,12 +158,20 @@ char *process_string_literal (const char *text, int  len)
     char *end = strchr(yytext, '>');
     if (end) *end = '\0';
     yylval.string_val = strdup(start);  // Returns "TILES"
+    lex_in_tic80_section = 0;
     return TOKEN_TIC80_SECTION_FOOTER;
 }
 
 "-- "[0-9]+[:][0-9a-fA-F]+\r?\n {
-    yylval.string_val = strdup(yytext + 3);  // Skip "-- "
-    return TOKEN_TIC80_ASSET_DATA;
+    // Only INSIDE a TIC-80 -- <SECTION> ... -- </SECTION> block. Outside
+    // one, "-- 5:6" / "-- 3:30 timeout" is just a comment -- it used to be
+    // returned as asset data anywhere and fail the parse with a syntax error.
+    if (!lex_in_tic80_section) {
+        /* ordinary comment: skip (yylineno counts the newline itself) */
+    } else {
+        yylval.string_val = strdup(yytext + 3);  // Skip "-- "
+        return TOKEN_TIC80_ASSET_DATA;
+    }
 }
 
 "--#".* { 
@@ -117,7 +186,35 @@ char *process_string_literal (const char *text, int  len)
 }
 
     /* 4. Standard Single-Line Comment: Matches '--' with text, or a bare '--' */
-"--".* { /* Skip standard single-line comments safely */ }
+"--".* {
+    // A comment to the end of the line -- unless it opens a long comment,
+    // --[[ ... ]] or --[==[ ... ]==]. The rule above only catches a --[[
+    // that runs past the end of its line; on one line (`--[[ x ]] end`)
+    // this rule's match is longer and used to swallow the code after the
+    // comment, and a --[==[ comment was never recognized at all.
+    if (yytext[2] == '[') {
+        int n = 0;
+        while (yytext[3 + n] == '=') n++;
+        if (yytext[3 + n] == '[') {
+            long_comment_level = n;
+            yyless (4 + n);          // rescan everything after the opener
+            BEGIN (LONGCOMMENT);
+        }
+    }
+}
+
+<LONGCOMMENT>"]"=*"]" {
+    if ((int) yyleng - 2 == long_comment_level) BEGIN (INITIAL);
+    else yyless (1);                 // a ] of another level: skip just it
+}
+<LONGCOMMENT>[^\]\n]+  { }
+<LONGCOMMENT>\n        { }
+<LONGCOMMENT>"]"        { }
+<LONGCOMMENT><<EOF>>   {
+    compiler_error (ERR_SYNTAX, yylineno, "unfinished long comment (missing ]%.*s])",
+                    long_comment_level, "==========================");
+    yyterminate ();
+}
 
 "while"                 { return TOKEN_WHILE;    }
 "repeat"                { return TOKEN_REPEAT;   }
@@ -125,6 +222,8 @@ char *process_string_literal (const char *text, int  len)
 "for"                   { return TOKEN_FOR;      }
 "in"                    { return TOKEN_IN;       }
 "break"                 { return TOKEN_BREAK;    }
+"goto"                  { return TOKEN_GOTO;     }
+"::"                    { return TOKEN_DBCOLON;  }
 "do"                    { return TOKEN_DO;       }
 "if"                    { return TOKEN_IF;       }
 "elseif"                { return TOKEN_ELSEIF;   }
@@ -142,6 +241,39 @@ char *process_string_literal (const char *text, int  len)
 
 "=="                    { return TOKEN_EQ;       }
 "~="                    { return TOKEN_NEQ;      }
+    /* Bitwise operators (node/bitops.c). Lua 5.3+: & | ~ << >> (and unary
+       ~). PICO-8 additionally: ^^ (xor), >>> (logical right shift),
+       <<> and >>< (rotate left/right); its >> is arithmetic. The longer
+       spellings come first; flex's longest match would pick them anyway. */
+">>>="                  { require_pico8 (">>>="); return compound_assign_token(NODE_LSHR); }
+"<<>="                  { require_pico8 ("<<>="); return compound_assign_token(NODE_ROTL); }
+">><="                  { require_pico8 (">><="); return compound_assign_token(NODE_ROTR); }
+"^^="                   { require_pico8 ("^^=");  return compound_assign_token(NODE_BXOR); }
+"<<="                   { return compound_assign_token(NODE_SHL); }
+">>="                   { return compound_assign_token(NODE_SHR); }
+"&="                    { return compound_assign_token(NODE_BAND); }
+"|="                    { return compound_assign_token(NODE_BOR); }
+">>>"                   { require_pico8 (">>>"); return TOKEN_LSHR; }
+"<<>"                   { require_pico8 ("<<>"); return TOKEN_ROTL; }
+">><"                   { require_pico8 (">><"); return TOKEN_ROTR; }
+"^^"                    { require_pico8 ("^^");  return TOKEN_BXOR; }
+"<<"                    { return TOKEN_SHL;      }
+">>"                    { return TOKEN_SHR;      }
+"&"                     { return '&';            }
+"|"                     { return '|';            }
+"~"                     { return TOKEN_BXOR;     }
+    /* PICO-8 alias for ~= (C-style "not equal"). Real Lua only ever has
+       ~=; this is PICO-8-specific sugar, same category as += and the
+       then-less if, so it's gated the same way -- checked here rather
+       than in parser.y since it produces the exact same TOKEN_NEQ the
+       parser already knows how to handle, so no grammar change at all. */
+"!="                    {
+                            if (!runtime_req.needs_pico8) {
+                                compiler_error (ERR_LEXICAL, yylineno,
+                                    "'!=' is a PICO-8 extension (use '~=', or add --#api pico8 to use '!=')");
+                            }
+                            return TOKEN_NEQ;
+                        }
 "<="                    { return TOKEN_LE;       }
 ">="                    { return TOKEN_GE;       }
 "<"                     { return TOKEN_LT;       }
@@ -153,10 +285,61 @@ char *process_string_literal (const char *text, int  len)
 "__asm__"               { return TOKEN_ASM;      }
 "__rawasm__"            { return TOKEN_RAWASM;   }
 "^"                     { return '^'; }
+    /* PICO-8-only compound assignment (see compound_assign_token() above).
+       Listed ahead of the plain '+' '-' '*' '/' '%' rules below, same
+       convention as "==" etc. being listed ahead of their single-char
+       prefixes -- flex's longest-match rule would pick these correctly
+       either way, but grouping the multi-char variant next to its base
+       operator matches the rest of this file. */
+"+="                    { return compound_assign_token(NODE_ADD); }
+"-="                    { return compound_assign_token(NODE_SUB); }
+"*="                    { return compound_assign_token(NODE_MUL); }
+"/="                    { return compound_assign_token(NODE_DIV); }
+"%="                    { return compound_assign_token(NODE_MOD); }
+"..="                   { return compound_assign_token(NODE_CONCAT); }
+"\\="                   { return compound_assign_token(NODE_FLOORDIV); }
+"^="                    { return compound_assign_token(NODE_POW); }
+    /* PICO-8 integer division a\b = flr(a/b) */
+"\\"                    {
+                            if (!runtime_req.needs_pico8) {
+                                compiler_error (ERR_LEXICAL, yylineno,
+                                    "'\\' (integer division) is a PICO-8 extension; use '//' or add --#api pico8");
+                            }
+                            return TOKEN_FLOORDIV;
+                        }
+    /* PICO-8 print shorthand: ?expr, ... at the start of a statement */
+"?"                     {
+                            if (!runtime_req.needs_pico8) {
+                                compiler_error (ERR_LEXICAL, yylineno,
+                                    "'?' (print shorthand) is a PICO-8 extension; add --#api pico8");
+                            }
+                            return TOKEN_PRINT_SHORT;
+                        }
+    /* PICO-8 button glyphs (P8SCII, stored as UTF-8 in .p8 files) are
+       predefined globals holding the button numbers. The trailing U+FE0F
+       variation selector is optional. */
+"\xE2\xAC\x85"(\xEF\xB8\x8F)?      { yylval.number_val = 0; return TOKEN_NUMBER; }
+"\xE2\x9E\xA1"(\xEF\xB8\x8F)?      { yylval.number_val = 1; return TOKEN_NUMBER; }
+"\xE2\xAC\x86"(\xEF\xB8\x8F)?      { yylval.number_val = 2; return TOKEN_NUMBER; }
+"\xE2\xAC\x87"(\xEF\xB8\x8F)?      { yylval.number_val = 3; return TOKEN_NUMBER; }
+"\xF0\x9F\x85\xBE"(\xEF\xB8\x8F)?  { yylval.number_val = 4; return TOKEN_NUMBER; }
+"\xE2\x9D\x8E"(\xEF\xB8\x8F)?      { yylval.number_val = 5; return TOKEN_NUMBER; }
+    /* PICO-8 peek operators: @a == peek(a), $a == peek4(a); %a == peek2(a)
+       is the unary use of '%' (parser.y) */
+"@"                     { require_pico8 ("@"); return TOKEN_PEEK; }
+"$"                     { require_pico8 ("$"); return TOKEN_PEEK4; }
 "+"                     { return '+'; }
 "-"                     { return '-'; }
 "*"                     { return '*'; }
-"//"                    { return TOKEN_FLOORDIV; }
+"//".*                  {
+                            /* PICO-8: `//` starts a line comment (PICO-8 has
+                               no floor-division operator; `\` divides). Lua:
+                               floor division -- give the rest of the line back. */
+                            if (!runtime_req.needs_pico8) {
+                                yyless (2);
+                                return TOKEN_FLOORDIV;
+                            }
+                        }
 "/"                     { return '/'; }
 "%"                     { return '%'; }
 "("                     { return '('; }
@@ -176,26 +359,80 @@ char *process_string_literal (const char *text, int  len)
                             return (TOKEN_IDENTIFIER); 
                         }
 
-0x[0-9a-fA-F]+          {
-                            // Parse hex string as 32-bit unsigned integer
-                            unsigned long val = strtoul(yytext, NULL, 16);
-                            // Store in your existing double AST payload
-                            yylval.number_val = (double) val;
+0[xX][0-9a-fA-F]+(\.[0-9a-fA-F]+)?  {
+                            // Hex, with an optional hex fraction (0x1.8 ==
+                            // 1.5 -- valid Lua, and PICO-8's 0x0.4 style)
+                            char *dot = strchr (yytext, '.');
+                            double val = (double) strtoul (yytext, NULL, 16);
+                            if (dot != NULL) {
+                                double scale = 1.0 / 16.0;
+                                for (char *p = dot + 1; *p; p++, scale /= 16.0) {
+                                    int d = isdigit ((unsigned char) *p) ? *p - '0'
+                                          : (tolower ((unsigned char) *p) - 'a' + 10);
+                                    val += d * scale;
+                                }
+                            }
+                            // PICO-8 numbers are signed 16.16: 0x8000..0xffff.ffff
+                            // are negative there (0xffff == -1).
+                            if (runtime_req.needs_pico8 && val >= 32768.0 && val < 65536.0) {
+                                val -= 65536.0;
+                            }
+                            yylval.number_val = val;
                             return (TOKEN_NUMBER);
                         }
 
-[0-9]+(\.[0-9]+)?       { 
+0[bB][01]+(\.[01]+)?     {
+                            // PICO-8 binary literal (0b1010, 0b0101.1)
+                            require_pico8 ("0b");
+                            double val = 0.0;
+                            char *p = yytext + 2;
+                            for (; *p && *p != '.'; p++) val = val * 2 + (*p - '0');
+                            if (*p == '.') {
+                                double scale = 0.5;
+                                for (p++; *p; p++, scale /= 2) val += (*p - '0') * scale;
+                            }
+                            if (val >= 32768.0 && val < 65536.0) val -= 65536.0;
+                            yylval.number_val = val;
+                            return (TOKEN_NUMBER);
+                        }
+
+[0-9]+(\.[0-9]+)?([eE][+-]?[0-9]+)? {
+                            /* exponent form (1e-17, 2.5E3) added: TIC-80
+                               exports and hand-written tables use it --
+                               warm_wheels.lua failed to parse without it */
                             yylval.number_val  = atof (yytext); 
                             return (TOKEN_NUMBER); 
                         }
 
-\.[0-9]+                {
+\.[0-9]+([eE][+-]?[0-9]+)? {
                             yylval.number_val  = atof (yytext);
                             return (TOKEN_NUMBER);
                         }
 
 \"(\\.|[^"\\])*\"       { 
                             yylval.string_val  = process_string_literal (yytext, yyleng); 
+                            return (TOKEN_STRING);
+                        }
+
+\'(\\.|[^'\\\n])*\'      {
+                            /* single-quoted strings -- plain Lua, but only
+                               "..." used to be accepted */
+                            yylval.string_val  = process_string_literal (yytext, yyleng);
+                            return (TOKEN_STRING);
+                        }
+
+"[["([^\]]|\][^\]])*"]]" {
+                            /* long string [[...]]: no escape processing; a
+                               newline right after the opening [[ is dropped,
+                               as in Lua */
+                            int start = 2, len = yyleng - 4;
+                            if (len > 0 && yytext[start] == '\r') { start++; len--; }
+                            if (len > 0 && yytext[start] == '\n') { start++; len--; }
+                            char *str = (char *) malloc (len + 1);
+                            memcpy (str, yytext + start, len);
+                            str[len] = '\0';
+                            if (runtime_req.needs_pico8) pico8_fold_glyphs (str);
+                            yylval.string_val  = str;
                             return (TOKEN_STRING);
                         }
 

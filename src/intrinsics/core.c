@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include "v32lua.h"
 
 // ============================================================================
@@ -127,6 +128,244 @@ void validate_ioports_path(const char* base_path, const char* key, int line_num)
 // ============================================================================
 
 // variables that are backed by functions
+// PICO-8 builtins whose arguments are all numbers (see the call site).
+static const char *pico8_numeric_builtins[] = {
+    "rnd", "srand", "flr", "ceil", "abs", "min", "max", "mid", "sgn", "sin",
+    "cos", "tan", "sqrt", "atan2", "sfx", "music", "spr", "sspr", "map",
+    "mget", "mset", "fget", "fset", "pset", "pget", "rect", "rectfill",
+    "circ", "circfill", "line", "cls", "color", "camera", "btn", "btnp",
+    "pal", "palt", "clip", "fillp", NULL
+};
+
+// `rectfill(...)` in a variadic function (a cart's drawing wrapper): the
+// builtins take a fixed argument list, counted at compile time, so a final
+// `...` is spread into explicit arguments -- vararg #0, #1, ... up to the
+// builtin's largest arity. Each reads nil when the caller passed fewer,
+// which the builtins take as "omitted", as PICO-8 does.
+static const struct { const char *name; int max_args; } pico8_arity[] = {
+    { "spr", 7 }, { "sspr", 10 }, { "map", 7 }, { "rectfill", 5 }, { "rect", 5 },
+    { "circfill", 4 }, { "circ", 4 }, { "line", 5 }, { "pset", 3 }, { "pget", 2 },
+    { "print", 4 }, { "mget", 2 }, { "mset", 3 }, { "fget", 2 }, { "fset", 3 },
+    { "sget", 2 }, { "sset", 3 }, { "sfx", 4 }, { "music", 3 }, { "camera", 2 },
+    { "color", 1 }, { "cls", 1 }, { "btn", 2 }, { "btnp", 2 }, { "pal", 3 },
+    { "palt", 2 }, { "clip", 5 }, { "fillp", 1 }, { NULL, 0 }
+};
+
+static void pico8_spread_vararg_args (ASTNode *node, const char *func_name)
+{
+    int max_args = 0;
+    for (int i = 0; pico8_arity[i].name; i++)
+        if (strcmp (pico8_arity[i].name, func_name) == 0) max_args = pico8_arity[i].max_args;
+    if (max_args == 0) return;
+
+    ASTNode *prev = NULL, *last = node->as.call.args_head;
+    int before = 0;
+    if (last == NULL) return;
+    while (last->next != NULL) { prev = last; last = last->next; before++; }
+    if (last->type != NODE_VARIADIC_EXPR || last->as.vararg.index != 0) return;
+
+    ASTNode *head = NULL, *tail = NULL;
+    for (int k = 0; k < max_args - before; k++) {
+        ASTNode *v = make_node (NODE_VARIADIC_EXPR);
+        v->line_number     = last->line_number;
+        v->as.vararg.index = k;
+        if (tail) tail->next = v; else head = v;
+        tail = v;
+    }
+    if (head == NULL) {                  // no room left: drop the `...`
+        if (prev) prev->next = NULL; else node->as.call.args_head = NULL;
+        return;
+    }
+    if (prev) prev->next = head; else node->as.call.args_head = head;
+}
+
+// A call to a runtime routine taking exactly nargs values, pushed in order
+// (the last at [BP+2]): missing ones are nil, extra ones are evaluated and
+// dropped. -> dest_reg = R0.
+bool emit_runtime_call_intrinsic (ASTNode *node, int dest_reg, int nargs, const char *routine)
+{
+    int n = 0;
+    int r = allocate_pinned_register ();
+    for (ASTNode *a = node->as.call.args_head; a != NULL; a = a->next, n++) {
+        generate_asm (a, r);
+        ensure_in_register (r);
+        if (n < nargs) emit_asm ("    PUSH R%d\n", r);
+    }
+    for (; n < nargs; n++) {
+        emit_asm ("    MOV R%d, BOXED_NIL\n", r);
+        emit_asm ("    PUSH R%d\n", r);
+    }
+    unlock_pinned_register (r);
+    emit_asm ("    CALL %s\n", routine);
+    emit_asm ("    IADD SP, %d\n", nargs);
+    if (dest_reg != 0) emit_asm ("    MOV R%d, R0\n", dest_reg);
+    return true;
+}
+
+// TIC-80 reset() / PICO-8 run([param]): hardware back to its defaults, a
+// black frame, then the cart from its first instruction with a fresh stack
+// (exec.s __builtin_cart_restart). Arguments are evaluated for their side
+// effects (run()'s parameter string isn't passed on).
+bool emit_cart_restart_intrinsic (ASTNode *node, int dest_reg, const char *name)
+{
+    (void) dest_reg;
+    emit_asm ("    ;; --- %s(): restart the cart ---\n", name);
+    for (ASTNode *a = node->as.call.args_head; a != NULL; a = a->next) {
+        int r = allocate_register ();
+        generate_asm (a, r);
+        unlock_register (r);
+    }
+    emit_asm ("    JMP __builtin_cart_restart ; never returns\n");
+    return true;
+}
+
+// The 16.16 fixed-point value of a PICO-8 literal: the nearest multiple of
+// 1/65536 (PICO-8 rounds: 0.1 is 0x0.199a). Values outside PICO-8's range
+// are left alone.
+double pico8_fix_literal (double v)
+{
+    if (!(v > -32768.0 && v < 32768.0)) return v;
+    return round (v * 65536.0) / 65536.0;
+}
+
+// Parses a whole string as a PICO-8 number literal (decimal, 0x hex,
+// optional sign). Returns false if anything but the number is present.
+static bool pico8_parse_number_string (const char *str, double *out)
+{
+    if (str == NULL || *str == '\0') return false;
+    const char *p = str;
+    int sign = 1;
+    if (*p == '-') { sign = -1; p++; }
+    else if (*p == '+') p++;
+    char *end = NULL;
+    double v;
+    if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) {
+        if (!isxdigit ((unsigned char) p[2])) return false;
+        v = (double) strtoul (p + 2, &end, 16);
+    } else {
+        if (!isdigit ((unsigned char) *p) && *p != '.') return false;
+        v = strtod (p, &end);
+    }
+    if (end == NULL || *end != '\0') return false;
+    *out = sign * v;
+    return true;
+}
+
+// unpack(split"a,b,c") as the LAST argument of a builtin call (a common
+// PICO-8 token-saving idiom: sspr(unpack(split"72,32,56,32,36,32"))) is
+// expanded at compile time into the literal values. A computed table can't
+// be expanded -- only its first value would be passed -- so that's an error.
+static void pico8_expand_unpack_arg (ASTNode *node, const char *func_name)
+{
+    // only for the drawing/sound builtins (a user function's unpack()
+    // argument is spread at run time, node/multivalue.c)
+    if (node->as.call.is_method_call || strchr (func_name, '.') || strchr (func_name, ':') ||
+        resolve_symbol (func_name) != NULL) return;
+    if (!pico8_prelude_builtin ("unpack")) return;   // the cart's own unpack
+    ASTNode **link = &node->as.call.args_head;
+    while (*link != NULL && (*link)->next != NULL) link = &(*link)->next;
+    ASTNode *last = *link;
+    if (last == NULL || last->type != NODE_FUNCTION_CALL ||
+        last->as.call.target == NULL || last->as.call.target->type != NODE_IDENTIFIER ||
+        strcmp (last->as.call.target->as.id.name, "unpack") != 0) return;
+    ASTNode *src = last->as.call.args_head;
+    if (src != NULL && src->type == NODE_FUNCTION_CALL && src->as.call.target &&
+        src->as.call.target->type == NODE_IDENTIFIER &&
+        strcmp (src->as.call.target->as.id.name, "split") == 0 &&
+        src->as.call.args_head && src->as.call.args_head->type == NODE_STRING &&
+        (src->as.call.args_head->next == NULL ||
+         src->as.call.args_head->next->type == NODE_STRING)) {
+        const char *text = src->as.call.args_head->as.string_val.value;
+        char sep = ',';
+        if (src->as.call.args_head->next)
+            sep = src->as.call.args_head->next->as.string_val.value[0];
+        ASTNode *head = NULL, **tail = &head;
+        const char *p = text;
+        for (;;) {
+            const char *e = sep ? strchr (p, sep) : NULL;
+            size_t len = e ? (size_t)(e - p) : strlen (p);
+            char *item = strndup (p, len);
+            double v;
+            ASTNode *n;
+            if (pico8_parse_number_string (item, &v)) {
+                n = make_node (NODE_NUMBER);
+                n->as.number.val = pico8_fix_literal (v);
+                free (item);
+            } else {
+                n = make_node_string (item);
+            }
+            n->line_number = node->line_number;
+            *tail = n;
+            tail = &n->next;
+            if (!e) break;
+            p = e + 1;
+        }
+        *link = head;
+        return;
+    }
+    compiler_error (ERR_SEMANTIC, node->line_number,
+        "unpack() as a builtin's argument is only supported on a literal split\"...\"; "
+        "index the table instead (t[1], t[2], ...)");
+}
+
+// poke(a, unpack(t)) / poke2 / poke4 with a table only known at run time
+// (a custom font: `poke(0x5600, unpack(split(font)))`): becomes the prelude's
+// __p8_pokeu(width, a, t), which writes t's values one after another.
+// Returns true when the call was rewritten into that ordinary call.
+static bool pico8_rewrite_poke_unpack (ASTNode *node, const char *func_name)
+{
+    int w = strcmp (func_name, "poke")  == 0 ? 1 :
+            strcmp (func_name, "poke2") == 0 ? 2 :
+            strcmp (func_name, "poke4") == 0 ? 4 : 0;
+    if (w == 0) return false;
+    ASTNode *a = node->as.call.args_head;
+    if (a == NULL || a->next == NULL || a->next->next != NULL) return false;
+    ASTNode *u = a->next;
+    if (u->type != NODE_FUNCTION_CALL || u->as.call.target == NULL ||
+        u->as.call.target->type != NODE_IDENTIFIER ||
+        strcmp (u->as.call.target->as.id.name, "unpack") != 0 ||
+        u->as.call.args_head == NULL || u->as.call.args_head->next != NULL) return false;
+    ASTNode *t = u->as.call.args_head;
+    // a literal split"..." is expanded at compile time instead
+    if (t->type == NODE_FUNCTION_CALL && t->as.call.target &&
+        t->as.call.target->type == NODE_IDENTIFIER &&
+        strcmp (t->as.call.target->as.id.name, "split") == 0 &&
+        t->as.call.args_head && t->as.call.args_head->type == NODE_STRING) return false;
+
+    ASTNode *wn = make_node (NODE_NUMBER);
+    wn->as.number.val = w;
+    wn->line_number = node->line_number;
+    wn->next = a;
+    a->next = t;
+    t->next = NULL;
+    node->as.call.args_head = wn;
+    node->as.call.target = make_node_ident ("__p8_pokeu");
+    node->as.call.target->line_number = node->line_number;
+    return true;
+}
+
+bool pico8_fold_numeric_string_args (ASTNode *node, const char *func_name)
+{
+    if (pico8_rewrite_poke_unpack (node, func_name)) return true;
+    pico8_expand_unpack_arg (node, func_name);
+
+    bool numeric = false;
+    for (int i = 0; pico8_numeric_builtins[i] != NULL; i++) {
+        if (strcmp (func_name, pico8_numeric_builtins[i]) == 0) { numeric = true; break; }
+    }
+    if (!numeric) return false;
+    for (ASTNode *a = node->as.call.args_head; a != NULL; a = a->next) {
+        double v;
+        if (a->type == NODE_STRING && pico8_parse_number_string (a->as.string_val.value, &v)) {
+            ASTNode *next = a->next;
+            a->type = NODE_NUMBER;
+            a->as.number.val = pico8_fix_literal (v);
+            a->next = next;
+        }
+    }
+    return false;
+}
+
 int try_emit_action_intrinsic (const char *action, int  dest_reg)
 {
     if (strcmp (action, "ioports.inp.inputs") == 0) {
@@ -140,7 +379,32 @@ int try_emit_action_intrinsic (const char *action, int  dest_reg)
 // ============================================================================
 // --- Helper: Check if an AST node produces a raw hardware integer ---
 // ============================================================================
+// A call to the native-mode intrinsic `name` (not a function the program
+// defines itself)
+static bool is_native_intrinsic_call (ASTNode *node, const char *name)
+{
+    return node != NULL && node->type == NODE_FUNCTION_CALL &&
+           node->as.call.target != NULL && node->as.call.target->type == NODE_IDENTIFIER &&
+           strcmp (node->as.call.target->as.id.name, name) == 0 &&
+           runtime_req.needs_vircon32 && !runtime_req.needs_pico8 && !runtime_req.needs_tic80 &&
+           resolve_symbol (name) == NULL;
+}
+
+// rgba(...) in native Vircon32 mode
+bool is_rgba_intrinsic_call (ASTNode *node)
+{
+    return is_native_intrinsic_call (node, "rgba");
+}
+
+// color(n) in native Vircon32 mode
+bool is_color_intrinsic_call (ASTNode *node)
+{
+    return is_native_intrinsic_call (node, "color");
+}
+
 bool is_raw_integer_expression (ASTNode *node) {
+    // rgba() and color() give a raw word too
+    if (is_rgba_intrinsic_call (node) || is_color_intrinsic_call (node)) return true;
     if (node != NULL)
     {
         // 1. Check if the expression is a direct call to the hex() intrinsic
@@ -159,6 +423,16 @@ bool is_raw_integer_expression (ASTNode *node) {
     return (false);
 }
 
+/*
+int try_emit_call_vircon32_intrinsic(ASTNode *node, int dest_reg) {
+}
+
+int try_emit_call_pico8_intrinsic(ASTNode *node, int dest_reg) {
+}
+
+int try_emit_call_tic80_intrinsic(ASTNode *node, int dest_reg) {
+}
+*/
 
 int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     char func_name[256] = {0};
@@ -173,6 +447,17 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         const char *aliased = resolve_intrinsic_alias(func_name);
         if (aliased != NULL) {
             snprintf(func_name, sizeof(func_name), "%s", aliased);
+        }
+        // A function the program defines itself shadows the built-in of
+        // the same name, as in Lua: witchem_up.lua defines its own fget(),
+        // fset() and pal(), and PICO-8/TIC-80 carts routinely redefine
+        // helpers like these. So does a local of that name.
+        else if (strchr(func_name, '.') == NULL) {
+            SymbolNode *own = resolve_function_symbol(func_name);
+            if (own != NULL && ((own->is_function && own->def_node != NULL && !own->is_c_native) ||
+                                own->type != SYM_GLOBAL)) {
+                return 0;
+            }
         }
     }
 
@@ -248,31 +533,6 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     // Non-ioports Intrinsics
     // =========================================================================
 
-    // print()
-    if (strcmp (func_name, "print")  == 0) {
-        runtime_req.needs_print       = true;
-        runtime_req.needs_strings     = true;
-
-        if (runtime_req.needs_tic80  == true)
-        {
-            return (emit_tic80_print_intrinsic (node));
-        }
-        else
-        {
-            emit_print_intrinsic (node);
-            return (1);
-        }
-    }
-
-    // printf()
-    if (strcmp(func_name, "printf") == 0) {
-        runtime_req.needs_print      = true;
-        runtime_req.needs_strings    = true;
-        if (emit_printf_intrinsic(node, dest_reg)) {
-            return 1;
-        }
-    }
-
     // system.date()
     if (strcmp (func_name, "system.date") == 0) {
         int  ret_count  = emit_system_date_intrinsic (node, dest_reg);
@@ -300,6 +560,21 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         return 1;
     }
 
+    // system.frames() / system.cycles(): the same read as the properties
+    // system.frames / system.cycles (TIM_FrameCounter / TIM_CycleCounter)
+    if (strcmp(func_name, "system.frames") == 0 || strcmp(func_name, "system.cycles") == 0) {
+        if (node->as.call.args_head != NULL) {
+            compiler_error(ERR_SEMANTIC, node->line_number, "%s() takes no arguments", func_name);
+            return 0;
+        }
+        if (dest_reg != 0) {
+            emit_asm("IN R%d, %s ; %s()\n", dest_reg,
+                     func_name[7] == 'f' ? "TIM_FrameCounter" : "TIM_CycleCounter", func_name);
+            emit_asm("CIF R%d\n", dest_reg);
+        }
+        return 1;
+    }
+
     // system.wait / ioports.gpu.sync
     if (strcmp(func_name, "system.wait") == 0 ) {
         emit_system_wait_intrinsic();
@@ -320,6 +595,22 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         return 0;
     }
 
+    // kbd.* -- v32kbd keyboard, every API mode (v32kbd.c)
+    if (strncmp(func_name, "kbd.", 4) == 0 && resolve_symbol ("kbd") == NULL) {
+        return try_emit_kbd_namespace_intrinsic (node, dest_reg, func_name);
+    }
+
+    // mouse() / mouse.* -- v32mouse mouse, every API mode (v32mouse.c).
+    // (A function or global of the program's own named mouse replaces
+    // them; a bare mouse() of its own never gets here.)
+    if (strcmp(func_name, "mouse") == 0 && resolve_symbol ("mouse") == NULL) {
+        return emit_v32mouse_intrinsic (node, dest_reg);
+    }
+    if (strncmp(func_name, "mouse.", 6) == 0 && resolve_symbol ("mouse") == NULL &&
+        resolve_function_symbol ("mouse") == NULL) {
+        return try_emit_mouse_namespace_intrinsic (node, dest_reg, func_name);
+    }
+
     // hex("0x...")
     if (strcmp(func_name, "hex") == 0) {
         return emit_hex_intrinsic(node, dest_reg);
@@ -327,60 +618,62 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
 
     //////////////////////////////////////////////////////////////////////////
     //
-    // Fantasy console routines: spr(), btn(), btnp()
+    // Vircon32 Fantasy console API intrinsics: spr(), btn(), btnp(), ...
     //
     //////////////////////////////////////////////////////////////////////////
 
-    // spr()
-    if (strcmp(func_name, "spr") == 0) {
-        if (runtime_req.needs_pico8 == true)
+    if ((runtime_req.needs_vircon32 == true)  &&
+        (runtime_req.needs_pico8    == false) &&
+        (runtime_req.needs_tic80    == false))
+    {
+        //try_emit_call_vircon32_instinsic (node, dest_reg);
+
+        // color(n) -> the number as a raw 32-bit word (gpu.c)
+        if (strcmp (func_name, "color") == 0)
         {
-            return (emit_pico8_spr_intrinsic (node));
+            return (emit_color_intrinsic (node, dest_reg));
         }
-        else if (runtime_req.needs_tic80 == true)
+
+        // rgba(r, g, b [, a]) -> raw packed 0xAABBGGRR word (gpu.c)
+        if (strcmp (func_name, "rgba") == 0)
         {
-            return (emit_tic80_spr_intrinsic (node));
+            return (emit_rgba_intrinsic (node, dest_reg));
         }
-        else
+
+        // spr()
+        if (strcmp (func_name, "spr") == 0)
         {
             return (emit_vircon32_spr_intrinsic (node, dest_reg));
         }
-    }
 
-    // btn()
-    if (strcmp (func_name, "btn") == 0) {
-        if (runtime_req.needs_pico8 == true)
-        {
-            return (emit_pico8_btn_intrinsic (node, dest_reg));
-        }
-        else if (runtime_req.needs_tic80 == true)
-        {
-            return (emit_tic80_btn_intrinsic (node, dest_reg));
-        }
-        else
+        // btn()
+        if (strcmp (func_name, "btn") == 0)
         {
             return (emit_vircon32_btn_intrinsic (node, dest_reg));
         }
-    }
 
-    // btnp()
-    if (strcmp (func_name, "btnp") == 0) {
-        if (runtime_req.needs_pico8 == true)
-        {
-            return (emit_pico8_btnp_intrinsic (node, dest_reg));
-        }
-        else if (runtime_req.needs_tic80 == true)
-        {
-            return (emit_tic80_btnp_intrinsic (node, dest_reg));
-        }
-        else
+        // btnp()
+        if (strcmp (func_name, "btnp") == 0)
         {
             return (emit_vircon32_btnp_intrinsic (node, dest_reg));
         }
-    }
 
-    if (runtime_req.needs_vircon32 == true)
-    {
+        // rect() / rectfill() -- rectangle outline / filled, from 2 corners
+        if (strcmp (func_name, "rect") == 0)
+        {
+            return (emit_vircon32_rect_intrinsic (node, dest_reg, false));
+        }
+        if (strcmp (func_name, "rectfill") == 0)
+        {
+            return (emit_vircon32_rect_intrinsic (node, dest_reg, true));
+        }
+
+        // key() / keyp() -- v32kbd keyboard, native key codes (v32kbd.c)
+        if (strcmp (func_name, "key") == 0 || strcmp (func_name, "keyp") == 0)
+        {
+            return (emit_v32kbd_key_intrinsic (node, dest_reg, func_name, false));
+        }
+
         // music.* / sfx.* -- native Vircon32 sound API
         if (strncmp(func_name, "music.", 6) == 0 ||
             strncmp(func_name, "sfx.",   4) == 0) {
@@ -409,161 +702,504 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         }
     }
 
-    // add()
-    if (strcmp (func_name, "add") == 0) {
-        if (runtime_req.needs_pico8 == true)
+    //////////////////////////////////////////////////////////////////////////
+    //
+    // PICO-8 Fantasy console intrinsics: spr(), btn(), btnp(), ...
+    //
+    //////////////////////////////////////////////////////////////////////////
+
+    else if (runtime_req.needs_pico8 == true)
+    {
+        //try_emit_call_pico8_intrinsic (node, dest_reg);
+
+        // PICO-8 coerces numeric strings wherever a number is expected, and
+        // token-saving carts lean on it: rnd"128", sfx"38", music"-1".
+        // Literal arguments are folded to numbers here; a runtime string
+        // reaching a numeric argument is converted by the runtime helpers.
+        if (pico8_fold_numeric_string_args (node, func_name)) {
+            return 0;       // rewritten into an ordinary call (see above)
+        }
+        pico8_spread_vararg_args (node, func_name);
+
+        // spr()
+        if (strcmp (func_name, "spr") == 0)
+        {
+            return (emit_pico8_spr_intrinsic (node, dest_reg));
+        }
+
+        // btn()
+        if (strcmp (func_name, "btn") == 0)
+        {
+            return (emit_pico8_btn_intrinsic (node, dest_reg));
+        }
+
+        // btnp()
+        if (strcmp (func_name, "btnp") == 0)
+        {
+            return (emit_pico8_btnp_intrinsic (node, dest_reg));
+        }
+
+        //////////////////////////////////////////////////////////////////////////
+        //
+        // PICO-8 bare math globals: flr/ceil/abs/min/max/rnd/srand/sgn/mid
+        // Aliases onto the existing math.* intrinsics where semantics match
+        // exactly; rnd()/sgn()/mid() get their own bodies below where
+        // PICO-8 diverges from Lua's math library.
+        //
+        //////////////////////////////////////////////////////////////////////////
+
+        if (strcmp (func_name, "flr")   == 0)
+        {
+            return (emit_math_floor_intrinsic (node, dest_reg));
+        }
+
+        if (strcmp (func_name, "ceil")  == 0)
+        {
+            return (emit_math_ceil_intrinsic (node, dest_reg));
+        }
+
+        if (strcmp (func_name, "abs")   == 0)
+        {
+            return (emit_math_abs_intrinsic (node, dest_reg));
+        }
+
+        if (strcmp (func_name, "sqrt")  == 0)
+        {
+            runtime_req.needs_math = true;
+            return (emit_pico8_sqrt_intrinsic (node, dest_reg));
+        }
+
+        if (strcmp (func_name, "flip")  == 0)
+        {
+            return (emit_pico8_flip_intrinsic (node, dest_reg));
+        }
+
+        // PICO-8 treats a missing min()/max() argument as 0: max(x) == max(x, 0)
+        if ((strcmp (func_name, "min") == 0 || strcmp (func_name, "max") == 0) &&
+            node->as.call.args_head != NULL && node->as.call.args_head->next == NULL)
+        {
+            ASTNode *zero = make_node (NODE_NUMBER);
+            zero->as.number.val = 0.0;
+            node->as.call.args_head->next = zero;
+        }
+
+        if (strcmp (func_name, "min")   == 0)
+        {
+            return (emit_math_min_intrinsic (node, dest_reg));
+        }
+
+        if (strcmp (func_name, "max")   == 0)
+        {
+            return (emit_math_max_intrinsic (node, dest_reg));
+        }
+
+        if (strcmp (func_name, "srand") == 0)
+        {
+            return (emit_math_randomseed_intrinsic (node, dest_reg));
+        }
+    
+        if (strcmp (func_name, "rnd")   == 0)
+        {
+            return (emit_pico8_rnd_intrinsic (node, dest_reg));
+        }
+
+        if (strcmp (func_name, "sgn")   == 0)
+        {
+            return (emit_pico8_sgn_intrinsic (node, dest_reg));
+        }
+
+        if (strcmp (func_name, "mid")   == 0)
+        {
+            return (emit_pico8_mid_intrinsic (node, dest_reg));
+        }
+
+        // sin() -- PICO-8 turns-based, inverted
+        if (strcmp (func_name, "sin") == 0)
+        {
+            return (emit_pico8_sin_intrinsic (node, dest_reg));
+        }
+
+        // cos() -- PICO-8 turns-based, NOT inverted
+        if (strcmp (func_name, "cos") == 0)
+        {
+            return (emit_pico8_cos_intrinsic (node, dest_reg));
+        }
+
+        // the pause menu's plumbing (pico8_prelude.c __p8_pausemenu)
+        if (strcmp (func_name, "__p8_menu_hook") == 0)
+        {
+            return (emit_pico8_menu_hook_intrinsic (node, dest_reg));
+        }
+        if (strcmp (func_name, "__p8_start_pressed") == 0)
+        {
+            return (emit_pico8_start_pressed_intrinsic (node, dest_reg));
+        }
+
+        // run([param]) -- start the cart over (exec.s __builtin_cart_restart)
+        if (strcmp (func_name, "run") == 0)
+        {
+            return (emit_cart_restart_intrinsic (node, dest_reg, "run"));
+        }
+
+        // the prelude stat(): the devkit mouse, stat(32..34) (v32mouse.c)
+        if (strcmp (func_name, "__p8_stat") == 0)
+        {
+            return (emit_pico8_stat_intrinsic (node, dest_reg));
+        }
+
+        // the prelude cursor()'s state access (pico8.s)
+        if (strcmp (func_name, "__p8_cursor_get") == 0)
+        {
+            return (emit_pico8_cursor_get_intrinsic (node, dest_reg));
+        }
+        if (strcmp (func_name, "__p8_cursor_set") == 0)
+        {
+            return (emit_pico8_cursor_set_intrinsic (node, dest_reg));
+        }
+
+        // __p8_split1(s, sep, conv) -- the prelude split()'s native fast path
+        if (strcmp (func_name, "__p8_split1") == 0)
+        {
+            return (emit_pico8_split1_intrinsic (node, dest_reg));
+        }
+
+        // atan2(dx, dy) -- PICO-8 turns-based, screen space
+        if (strcmp (func_name, "atan2") == 0)
+        {
+            return (emit_pico8_atan2_intrinsic (node, dest_reg));
+        }
+
+        // tan() -- PICO-8 turns-based, inverted via sin/cos
+        if (strcmp (func_name, "tan") == 0)
+        {
+            return (emit_pico8_tan_intrinsic (node, dest_reg));
+        }
+
+        // add()
+        if (strcmp (func_name, "add")   == 0)
         {
             return (emit_pico8_add_intrinsic (node, dest_reg));
         }
-    }
 
-    // TIC-80 cls()
-    if (strcmp(func_name, "cls") == 0) {
-        if (runtime_req.needs_tic80 == true)
+        // cls()
+        if (strcmp (func_name, "cls") == 0)
         {
-            return emit_tic80_cls_intrinsic(node);
+            return (emit_pico8_cls_intrinsic (node, dest_reg));
         }
-        else if (runtime_req.needs_pico8 == true)
+
+        // mget()
+        if (strcmp (func_name, "mget") == 0)
         {
-            return (emit_pico8_add_intrinsic (node, dest_reg));
+            return (emit_pico8_mget_intrinsic(node, dest_reg));
+        }
+
+        // mset()
+        if (strcmp (func_name, "mset") == 0)
+        {
+            return (emit_pico8_mset_intrinsic (node, dest_reg));
+        }
+
+        // map()
+        if (strcmp (func_name, "map") == 0)
+        {
+            return (emit_pico8_map_intrinsic (node, dest_reg));
+        }
+
+        // foreach()
+        if (strcmp (func_name, "foreach") == 0)
+        {
+            return (emit_pico8_foreach_intrinsic (node, dest_reg));
+        }
+
+        // music()
+        if (strcmp (func_name, "music") == 0)
+        {
+            return (emit_pico8_music_intrinsic (node, dest_reg));
+        }
+
+        // sfx()
+        if (strcmp (func_name, "sfx") == 0)
+        {
+            return (emit_pico8_sfx_intrinsic (node, dest_reg));
+        }
+
+        // count()
+        if (strcmp (func_name, "count") == 0)
+        {
+            return (emit_pico8_count_intrinsic (node, dest_reg));
+        }
+
+        // del()
+        if (strcmp (func_name, "del") == 0)
+        {
+            return (emit_pico8_del_intrinsic (node, dest_reg));
+        }
+
+        // camera()
+        if (strcmp (func_name, "camera") == 0)
+        {
+            return (emit_pico8_camera_intrinsic (node, dest_reg));
+        }
+
+            // rectfill()
+        if (strcmp (func_name, "rectfill") == 0)
+        {
+            return (emit_pico8_rectfill_intrinsic (node, dest_reg));
+        }
+
+        // circfill()
+        if (strcmp (func_name, "circfill") == 0)
+        {
+            return (emit_pico8_circfill_intrinsic (node, dest_reg));
+        }
+
+        // line()
+        if (strcmp (func_name, "line") == 0)
+        {
+            return (emit_pico8_line_intrinsic (node, dest_reg));
+        }
+
+        // print() -- PICO-8 coordinate/color wrapper over __builtin_print
+        if (strcmp (func_name, "print") == 0)
+        {
+            runtime_req.needs_print   = true;
+            runtime_req.needs_strings = true;
+            return (emit_pico8_print_intrinsic (node, dest_reg));
+        }
+
+        if (strcmp (func_name, "sspr")  == 0) return (emit_pico8_sspr_intrinsic  (node, dest_reg));
+        // time() / t() -- seconds, counted in PICO-8 frames
+        if (strcmp (func_name, "time") == 0 || strcmp (func_name, "t") == 0)
+        {
+            return (emit_pico8_time_intrinsic (node, dest_reg));
+        }
+
+        // peek/poke family, memcpy, memset, reload, cstore, sget/sset,
+        // cartdata/dget/dset -- emulated 64 KB RAM (pico8mem.c)
+        if (emit_pico8_memory_intrinsic (node, func_name, dest_reg))
+        {
+            return true;
+        }
+        if (strcmp (func_name, "rect")  == 0) return (emit_pico8_rect_intrinsic  (node, dest_reg));
+        if (strcmp (func_name, "pset")  == 0) return (emit_pico8_pset_intrinsic  (node, dest_reg));
+        if (strcmp (func_name, "circ")  == 0) return (emit_pico8_circ_intrinsic  (node, dest_reg));
+        if (strcmp (func_name, "color") == 0) return (emit_pico8_color_intrinsic (node, dest_reg));
+        if (strcmp (func_name, "fget")  == 0) return (emit_pico8_fget_intrinsic  (node, dest_reg));
+        if (strcmp (func_name, "fset")  == 0) return (emit_pico8_fset_intrinsic  (node, dest_reg));
+        if (strcmp (func_name, "pal")   == 0) return (emit_pico8_pal_intrinsic   (node, dest_reg, "pal"));
+        if (strcmp (func_name, "palt")  == 0) return (emit_pico8_pal_intrinsic   (node, dest_reg, "palt"));
+        if (strcmp (func_name, "clip")  == 0) return (emit_pico8_pal_intrinsic   (node, dest_reg, "clip"));
+        if (strcmp (func_name, "fillp") == 0) return (emit_pico8_pal_intrinsic   (node, dest_reg, "fillp"));
+
+        // sub(s, i [, j]) -- PICO-8's bare name for string.sub
+        if (strcmp (func_name, "sub") == 0)
+        {
+            runtime_req.needs_strings = true;
+            return (emit_string_sub_intrinsic (node, dest_reg));
+        }
+
+        // all(t) is only meaningful as a for-in iterator; node_for_generic
+        // lowers `for v in all(t)` itself, so reaching here means all() was
+        // used as a plain value.
+        if (strcmp (func_name, "all") == 0)
+        {
+            compiler_error (ERR_SEMANTIC, node->line_number,
+                "all() is only supported directly in a for-in loop: for v in all(t) do ... end");
+            return false;
         }
     }
 
-    // TIC-80 mget()
-    if (strcmp(func_name, "mget") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_mget_intrinsic(node, dest_reg);
+    //////////////////////////////////////////////////////////////////////////
+    //
+    // TIC80 Fantasy console intrinsics: spr(), btn(), btnp(), ...
+    //
+    //////////////////////////////////////////////////////////////////////////
+
+    else if (runtime_req.needs_tic80 == true)
+    {
+        //try_emit_call_tic80_intrinsic (node, dest_reg);
+
+        // spr()
+        if (strcmp (func_name, "spr") == 0)
+        {
+            return (emit_tic80_spr_intrinsic (node));
         }
-        else if (runtime_req.needs_pico8 == true) {
-            return emit_pico8_mget_intrinsic(node, dest_reg);
+
+        // btn()
+        if (strcmp (func_name, "btn") == 0)
+        {
+            return (emit_tic80_btn_intrinsic (node, dest_reg));
+        }
+
+        // btnp()
+        if (strcmp (func_name, "btnp") == 0)
+        {
+            return (emit_tic80_btnp_intrinsic (node, dest_reg));
+        }
+
+        // cls()
+        if (strcmp (func_name, "cls") == 0)
+        {
+            return (emit_tic80_cls_intrinsic (node));
+        }
+
+        // mget()
+        if (strcmp (func_name, "mget") == 0)
+        {
+            return (emit_tic80_mget_intrinsic(node, dest_reg));
+        }
+
+        // mset()
+        if (strcmp (func_name, "mset") == 0)
+        {
+            return (emit_tic80_mset_intrinsic (node, dest_reg));
+        }
+
+        // map()
+        if (strcmp (func_name, "map") == 0)
+        {
+            return (emit_tic80_map_intrinsic (node));
+        }
+
+        // play()
+        if (strcmp (func_name, "play") == 0)
+        {
+            return (emit_tic80_play_intrinsic (node, dest_reg));
+        }
+
+        // sfx()
+        if (strcmp (func_name, "sfx") == 0)
+        {
+            return (emit_tic80_sfx_intrinsic (node, dest_reg));
+        }
+
+        // music()
+        if (strcmp (func_name, "music") == 0)
+        {
+            return (emit_tic80_music_intrinsic (node, dest_reg));
+        }
+
+        if (strcmp (func_name, "trace") == 0)
+        {
+            return emit_tic80_stub_intrinsic (node, func_name, dest_reg);
+        }
+
+        // key() / keyp() -- v32kbd keyboard, TIC-80 key codes (v32kbd.c)
+        if (strcmp (func_name, "key") == 0 || strcmp (func_name, "keyp") == 0)
+        {
+            return (emit_v32kbd_key_intrinsic (node, dest_reg, func_name, true));
+        }
+
+        // peek/poke family, memcpy, memset -- emulated 96 KB RAM
+        if (strncmp (func_name, "peek", 4) == 0 || strncmp (func_name, "poke", 4) == 0 ||
+            strcmp (func_name, "memcpy") == 0 || strcmp (func_name, "memset") == 0)
+        {
+            if (emit_tic80_memory_intrinsic (node, func_name, dest_reg)) return true;
+        }
+
+        // pmem() - persistent memory
+        if (strcmp (func_name, "pmem") == 0)
+        {
+            return (emit_tic80_pmem_intrinsic (node, dest_reg));
+        }
+
+        // fget() - sprite flags
+        if (strcmp (func_name, "fget") == 0)
+        {
+            return (emit_tic80_fget_intrinsic (node, dest_reg));
+        }
+
+        // fset() - sprite flags
+        if (strcmp (func_name, "fset") == 0)
+        {
+            return (emit_tic80_fset_intrinsic (node, dest_reg));
+        }
+
+        // sync() - adjust memory banks
+        if (strcmp (func_name, "sync") == 0)
+        {
+            return (emit_tic80_sync_intrinsic (node, dest_reg));
+        }
+
+        // pix() -- set/read a single pixel
+        if (strcmp (func_name, "pix") == 0)
+        {
+            return (emit_tic80_pix_intrinsic (node, dest_reg));
+        }
+
+        // line()
+        if (strcmp (func_name, "line") == 0)
+        {
+            return (emit_tic80_line_intrinsic (node, dest_reg));
+        }
+
+        // rect() -- filled rectangle
+        if (strcmp (func_name, "rect") == 0)
+        {
+            return (emit_tic80_rect_intrinsic (node, dest_reg));
+        }
+
+        // rectb() -- rectangle border
+        if (strcmp (func_name, "rectb") == 0)
+        {
+            return (emit_tic80_rectb_intrinsic (node, dest_reg));
+        }
+
+        // circ() -- filled circle
+        if (strcmp (func_name, "circ") == 0)
+        {
+            return (emit_tic80_circ_intrinsic (node, dest_reg));
+        }
+
+        // circb() -- circle border only
+        if (strcmp (func_name, "circb") == 0)
+        {
+            return (emit_tic80_circb_intrinsic (node, dest_reg));
+        }
+
+        // time() -- returns milliseconds since cartridge began execution
+        if (strcmp (func_name, "time") == 0)
+        {
+            return (emit_tic80_time_intrinsic (node, dest_reg));
+        }
+
+        // reset() -- start the cart over (exec.s __builtin_cart_restart)
+        if (strcmp (func_name, "reset") == 0)
+        {
+            return (emit_cart_restart_intrinsic (node, dest_reg, "reset"));
+        }
+
+        // exit() -- request the cart stop after the current frame
+        if (strcmp (func_name, "exit") == 0)
+        {
+            return (emit_tic80_exit_intrinsic (node, dest_reg));
         }
     }
 
-    // TIC-80 mset()
-    if (strcmp(func_name, "mset") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_mset_intrinsic(node, dest_reg);
+    // print()
+    if (strcmp (func_name, "print")  == 0) {
+        runtime_req.needs_print       = true;
+        runtime_req.needs_strings     = true;
+
+        if (runtime_req.needs_tic80  == true)
+        {
+            return (emit_tic80_print_intrinsic (node, dest_reg));
         }
-        else if (runtime_req.needs_pico8 == true) {
-            return emit_pico8_mset_intrinsic(node, dest_reg);
+        else
+        {
+            emit_print_intrinsic (node);
+            return (1);
         }
     }
 
-    // TIC-80 map()
-    if (strcmp(func_name, "map") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_map_intrinsic(node);
-        }
-        else if (runtime_req.needs_pico8 == true) {
-            return emit_pico8_map_intrinsic(node);
-        }
-    }
-
-    // play() -- TIC-80 form, or the native Vircon32 form
-    if (strcmp(func_name, "play") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_play_intrinsic(node, dest_reg);
-        }
-    }
-
-    // sfx()
-    if (strcmp(func_name, "sfx") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_sfx_intrinsic(node, dest_reg);
-        }
-    }
-
-    // music()
-    if (strcmp(func_name, "music") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_music_intrinsic(node, dest_reg);
-        }
-    }
-
-    // TIC-80 pmem()
-    if (strcmp(func_name, "pmem") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_pmem_intrinsic(node, dest_reg);
-        }
-    }
-
-    // TIC-80 fget() - sprite flags
-    if (strcmp(func_name, "fget") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_fget_intrinsic(node, dest_reg);
-        }
-    }
-
-    // TIC-80 fset() - sprite flags
-    if (strcmp(func_name, "fset") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_fset_intrinsic(node, dest_reg);
-        }
-    }
-
-    // TIC-80 sync() -- Vircon32 has no cart memory banks, so this is a
-    // deliberate no-op. Arguments are still evaluated for side effects
-    // (Lua semantics), just never used.
-    if (strcmp(func_name, "sync") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_sync_intrinsic(node, dest_reg);
-        }
-    }
-
-    // TIC-80 pix() -- set/read a single pixel
-    if (strcmp(func_name, "pix") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_pix_intrinsic(node, dest_reg);
-        }
-    }
-
-    // TIC-80 line()
-    if (strcmp(func_name, "line") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_line_intrinsic(node, dest_reg);
-        }
-    }
-
-    // TIC-80 rect() -- filled rectangle
-    if (strcmp(func_name, "rect") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_rect_intrinsic(node, dest_reg);
-        }
-    }
-
-    // TIC-80 rectb() -- rectangle border
-    if (strcmp(func_name, "rectb") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_rectb_intrinsic(node, dest_reg);
-        }
-    }
-
-    // TIC-80 circ() -- filled circle
-    if (strcmp(func_name, "circ") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_circ_intrinsic(node, dest_reg);
-        }
-    }
-
-    // TIC-80 circb() -- circle border only
-    if (strcmp(func_name, "circb") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_circb_intrinsic(node, dest_reg);
-        }
-    }
-
-    // TIC-80 time() -- returns milliseconds since cartridge began execution
-    if (strcmp(func_name, "time") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_time_intrinsic(node, dest_reg);
-        }
-    }
-
-    // TIC-80 exit() -- request the cart stop after the current frame
-    if (strcmp(func_name, "exit") == 0) {
-        if (runtime_req.needs_tic80 == true) {
-            return emit_tic80_exit_intrinsic(node, dest_reg);
-        }
+    // printf()
+    // There is no printf runtime routine: the call used to compile to a
+    // CALL of an undefined label and fail only in the assembler. A user
+    // function named printf is still called normally.
+    if (strcmp(func_name, "printf") == 0 && resolve_function_symbol ("printf") == NULL
+        && resolve_symbol ("printf") == NULL) {
+        compiler_error (ERR_SEMANTIC, node->line_number,
+            "printf() is not available: use print(x, y, string.format(fmt, ...))");
     }
 
     //////////////////////////////////////////////////////////////////////////
@@ -601,6 +1237,25 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
     {
         runtime_req.needs_strings          = true;
         return emit_tonumber_intrinsic(node, dest_reg);
+    }
+
+    // Metatables (table.s): setmetatable / getmetatable / rawget / rawset /
+    // rawlen / rawequal
+    {
+        static const struct { const char *name; int nargs; const char *routine; } mt[] = {
+            { "setmetatable", 2, "__builtin_setmetatable" },
+            { "getmetatable", 1, "__builtin_getmetatable" },
+            { "rawget",       2, "__builtin_rawget" },
+            { "rawset",       3, "__builtin_rawset" },
+            { "rawlen",       1, "__builtin_rawlen" },
+            { "rawequal",     2, "__builtin_eq" },
+        };
+        for (size_t i = 0; i < sizeof (mt) / sizeof (mt[0]); i++) {
+            if (strcmp (func_name, mt[i].name) == 0) {
+                if (strcmp (mt[i].name, "rawequal") == 0) runtime_req.needs_strings = true;
+                return emit_runtime_call_intrinsic (node, dest_reg, mt[i].nargs, mt[i].routine);
+            }
+        }
     }
 
     // string.format(format, ...)
@@ -948,24 +1603,67 @@ int  try_emit_table_set_intrinsic (ASTNode *table_expr, ASTNode *key_expr, ASTNo
     }
 
     // Validate ioports path structure
-    validate_ioports_path(base_path, key_expr->as.string_val.value, yylineno);
+    validate_ioports_path(base_path, key_expr->as.string_val.value, (key_expr->line_number > 0 ? key_expr->line_number : yylineno));
 
     char full_path[512];
     snprintf(full_path, sizeof(full_path), "%s.%s", base_path, key_expr->as.string_val.value);
 
+    // ioports.gpu.minX/minY default ioports.gpu.hotX/hotY to the same
+    // value, since a region defined without an explicit hotspot is the
+    // single most common cause of visually-wrong sprite placement. This
+    // is purely a convenience default applied at the point minX/minY is
+    // written: a later, separate assignment to hotX/hotY (the documented
+    // way to ask for a different hotspot) still emits its own OUT and
+    // simply overwrites the port afterward, since codegen is linear in
+    // source order. No effect on minX/minY's own read/write behavior.
+    const char *paired_hotspot_port                  = NULL;
+    if      (strcmp (full_path, "ioports.gpu.minX") == 0)
+        paired_hotspot_port                          = "GPU_RegionHotSpotX";
+    else if (strcmp (full_path, "ioports.gpu.minY") == 0)
+        paired_hotspot_port                          = "GPU_RegionHotSpotY";
+
+    // ioports.inp.gamepad = n: selected through v32io.s __v32io_select,
+    // which remembers it -- the emulator can't read INP_SelectedGamepad
+    // back (see v32io.s), and the keyboard/pause code must restore it.
+    if (strcmp (full_path, "ioports.inp.gamepad") == 0) {
+        int reg = allocate_register ();
+        register_pinned[reg] = 1;
+        double lit;
+        if (spu_static_number (val_node, &lit)) {
+            emit_asm ("MOV R%d, %d ; ioports.inp.gamepad = %g\n", reg, (int) trunc (lit), lit);
+        } else {
+            generate_asm (val_node, reg);
+            if (!is_raw_integer_expression (val_node)) {
+                emit_asm ("CFI R%d ; Cast Lua Float to Hardware Integer\n", reg);
+            }
+        }
+        emit_asm ("PUSH R1\n");
+        emit_asm ("MOV  R1, R%d\n", reg);
+        emit_asm ("CALL __v32io_select ; INP_SelectedGamepad (0-3), remembered\n");
+        emit_asm ("POP  R1\n");
+        register_pinned[reg] = 0;
+        unlock_register (reg);
+        return 1;
+    }
+
     for (int i = 0; ioports[i].lua_path != NULL; i++) {
-        if (strcmp(full_path, ioports[i].lua_path) == 0) {
-            if ((ioports[i].mode & IOPORT_WRITE) != IOPORT_WRITE) {
-                compiler_error(ERR_SEMANTIC, yylineno, "%s: port cannot be written to", full_path);
+        if (strcmp(full_path, ioports[i].lua_path)  == 0) {
+            if ((ioports[i].mode & IOPORT_WRITE)    != IOPORT_WRITE) {
+                compiler_error (ERR_SEMANTIC, (key_expr->line_number > 0 ? key_expr->line_number : yylineno),
+                                "%s: port cannot be written to", full_path);
             }
 
-            bool is_raw = is_raw_integer_expression(val_node);
+            bool is_raw  = is_raw_integer_expression (val_node);
 
             // Handle immediate operands or allocate register for value
             char imm_str[64];
             if (is_raw && try_get_immediate_operand(val_node, imm_str, sizeof(imm_str))) {
                 emit_asm("    ;; --- Intrinsic: Direct Immediate Hardware Write (%s) ---\n", full_path);
                 emit_asm("OUT %s, %s\n", ioports[i].asm_port, imm_str);
+                if (paired_hotspot_port != NULL) {
+                    emit_asm("    ;; --- Intrinsic: Default hotspot from %s ---\n", full_path);
+                    emit_asm("OUT %s, %s\n", paired_hotspot_port, imm_str);
+                }
                 return 1;
             }
 
@@ -984,6 +1682,32 @@ int  try_emit_table_set_intrinsic (ASTNode *table_expr, ASTNode *key_expr, ASTNo
                 return 1;
             }
 
+            // A numeric literal into an integer port: the word, folded here.
+            // (A float32 CFI of 0xFF003366 is out of range -- host-dependent,
+            // 0x80000000 on x86 -- so `ioports.gpu.bgcolor = 0xFF003366`
+            // used to set the wrong color.) Truncated toward zero like CFI;
+            // negative values are two's complement, 2^31..2^32-1 unsigned.
+            double lit;
+            if ((ioports[i].type & IOPORT_TYPE_INTEGER) == IOPORT_TYPE_INTEGER &&
+                spu_static_number (val_node, &lit)) {
+                double t = trunc (lit);
+                unsigned int word;
+                if (t >= 4294967296.0 || t < -2147483648.0) {
+                    word = (t < 0.0) ? 0x80000000u : 0xFFFFFFFFu;
+                    compiler_warning (ERR_SEMANTIC, val_node->line_number,
+                        "%s = %g does not fit in 32 bits; saturated to 0x%08X", full_path, lit, word);
+                } else if (t < 0.0) {
+                    word = (unsigned int) (long long) (t + 4294967296.0);
+                } else {
+                    word = (unsigned int) (long long) t;
+                }
+                emit_asm("    ;; --- Intrinsic: Literal Hardware Write (%s = %g) ---\n", full_path, lit);
+                emit_asm("OUT %s, 0x%08X\n", ioports[i].asm_port, word);
+                if (paired_hotspot_port != NULL)
+                    emit_asm("OUT %s, 0x%08X\n", paired_hotspot_port, word);
+                return 1;
+            }
+
             // On-demand register evaluation
             int val_reg = allocate_register();
             register_pinned[val_reg] = 1;
@@ -997,7 +1721,16 @@ int  try_emit_table_set_intrinsic (ASTNode *table_expr, ASTNode *key_expr, ASTNo
                 register_pinned[out_reg] = 1;
                 emit_asm("MOV R%d, R%d ; Copy value for hardware type cast\n", out_reg, val_reg);
 
-                if ((ioports[i].type & IOPORT_TYPE_INTEGER) == IOPORT_TYPE_INTEGER) {
+                if ((ioports[i].type & IOPORT_TYPE_INTEGER) == IOPORT_TYPE_INTEGER &&
+                    (strcmp(ioports[i].asm_port, "GPU_ClearColor")    == 0 ||
+                     strcmp(ioports[i].asm_port, "GPU_MultiplyColor") == 0)) {
+                    // A color word is 32 bits (0xAABBGGRR): from 0x80000000 on
+                    // (alpha >= 128) a bare CFI is out of range, which is
+                    // host-dependent -- 0x80000000 on x86-64, 0x7FFFFFFF on
+                    // ARM64 -- so a number goes through floor + wrap, as color(n).
+                    emit_asm("    ;; --- Intrinsic: Cast Lua Number to 32-bit Color Word ---\n");
+                    emit_number_to_color_word(out_reg);
+                } else if ((ioports[i].type & IOPORT_TYPE_INTEGER) == IOPORT_TYPE_INTEGER) {
                     emit_asm("    ;; --- Intrinsic: Cast Lua Float to Hardware Integer ---\n");
                     emit_asm("CFI R%d\n", out_reg);
                 } else if ((ioports[i].type & IOPORT_TYPE_BOOLEAN) == IOPORT_TYPE_BOOLEAN) {
@@ -1037,6 +1770,11 @@ int  try_emit_table_set_intrinsic (ASTNode *table_expr, ASTNode *key_expr, ASTNo
             }
             emit_asm("OUT %s, R%d\n", ioports[i].asm_port, out_reg);
 
+            if (paired_hotspot_port != NULL) {
+                emit_asm("    ;; --- Intrinsic: Default hotspot from %s ---\n", full_path);
+                emit_asm("OUT %s, R%d\n", paired_hotspot_port, out_reg);
+            }
+
             if (needs_cast) {
                 register_pinned[out_reg] = 0;
                 unlock_register(out_reg);
@@ -1050,7 +1788,7 @@ int  try_emit_table_set_intrinsic (ASTNode *table_expr, ASTNode *key_expr, ASTNo
 
     // Category was valid but property not found - emit specific error
     if (strncmp(base_path, "ioports.", 8) == 0) {
-        compiler_error(ERR_SEMANTIC, yylineno,
+        compiler_error(ERR_SEMANTIC, (key_expr->line_number > 0 ? key_expr->line_number : yylineno),
             "Unknown ioports property '%s.%s'", base_path, key_expr->as.string_val.value);
     }
 
@@ -1132,6 +1870,11 @@ int  try_emit_table_get_intrinsic (ASTNode *table_expr, ASTNode *key_expr, int d
         else if (strcmp (key, "random") == 0) label = "__builtin_random";
         else if (strcmp (key, "floor")  == 0) label = "__builtin_floor";
         else if (strcmp (key, "abs")    == 0) label = "__builtin_abs";
+        else if (strcmp (key, "pow")    == 0) label = "__mathfn_pow";
+        else if (strcmp (key, "ceil")   == 0) label = "__mathfn_ceil";
+        else if (strcmp (key, "fmod")   == 0) label = "__builtin_fmod";
+        else if (strcmp (key, "acos")   == 0) label = "__builtin_acos";
+        else if (strcmp (key, "log10")  == 0) label = "__builtin_log10";
 
         if (label != NULL) {
             runtime_req.needs_math = true;
@@ -1150,13 +1893,13 @@ int  try_emit_table_get_intrinsic (ASTNode *table_expr, ASTNode *key_expr, int d
     snprintf(full_path, sizeof(full_path), "%s.%s", base_path, key_expr->as.string_val.value);
 
     // Validate ioports path structure (for error messages only)
-    validate_ioports_path(base_path, key_expr->as.string_val.value, yylineno);
+    validate_ioports_path(base_path, key_expr->as.string_val.value, (key_expr->line_number > 0 ? key_expr->line_number : yylineno));
 
     // Scan ENTIRE IOPortMap table for a match
     for (int i = 0; ioports[i].lua_path != NULL; i++) {
         if (strcmp(full_path, ioports[i].lua_path) == 0) {
             if ((ioports[i].mode & IOPORT_READ) != IOPORT_READ) {
-                compiler_error(ERR_SEMANTIC, yylineno, "%s: port cannot be read from", full_path);
+                compiler_error(ERR_SEMANTIC, (key_expr->line_number > 0 ? key_expr->line_number : yylineno), "%s: port cannot be read from", full_path);
             }
 
             if ((ioports[i].mode & IOPORT_ACTION) == IOPORT_ACTION) {
@@ -1164,7 +1907,13 @@ int  try_emit_table_get_intrinsic (ASTNode *table_expr, ASTNode *key_expr, int d
                 return 1;
             }
 
-            if (dest_reg != 0) {
+            if (dest_reg != 0 && strcmp (full_path, "ioports.inp.gamepad") == 0) {
+                // not the port: the emulator returns garbage for it (v32io.s)
+                emit_asm("    ;; --- Intrinsic: selected gamepad, as last set (V32IO_GAMEPAD) ---\n");
+                emit_asm("    MOV R%d, [V32IO_GAMEPAD]\n", dest_reg);
+                emit_asm("    CIF R%d\n", dest_reg);
+            }
+            else if (dest_reg != 0) {
                 if ((ioports[i].type & IOPORT_TYPE_INTEGER) == IOPORT_TYPE_INTEGER) {
                     emit_asm("    ;; --- Intrinsic: Read Hardware Integer (%s) ---\n", full_path);
                     emit_asm("    IN R%d, %s\n", dest_reg, ioports[i].asm_port);
@@ -1208,7 +1957,7 @@ int  try_emit_table_get_intrinsic (ASTNode *table_expr, ASTNode *key_expr, int d
 
     // ioports-specific error for invalid properties
     if (strncmp(base_path, "ioports.", 8) == 0) {
-        compiler_error(ERR_SEMANTIC, yylineno,
+        compiler_error(ERR_SEMANTIC, (key_expr->line_number > 0 ? key_expr->line_number : yylineno),
             "Unknown ioports property '%s.%s'", base_path, key_expr->as.string_val.value);
         return 0;
     }
@@ -1220,8 +1969,8 @@ bool emit_type_intrinsic(ASTNode *node, int dest_reg) {
     ASTNode *arg = node->as.call.args_head;
 
     // === DEBUG: Show what we actually parsed ===
-    fprintf(stderr, "[debug] emit_type_intrinsic(): args_head = %p\n", (void*)arg);
-    if (arg) {
+    if (g_verbose_debug) fprintf(stderr, "[debug] emit_type_intrinsic(): args_head = %p\n", (void*)arg);
+    if (arg && g_verbose_debug) {
         fprintf(stderr, "[debug] emit_type_intrinsic(): arg->type = %d, arg->next = %p\n",
                 arg->type, (void*)arg->next);
     }

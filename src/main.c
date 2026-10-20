@@ -54,12 +54,136 @@ static void  print_usage (const char *prog_name)
     fprintf (stdout, "  --version    Displays compiler version\n");
     //fprintf (stdout, "  --debugmode  Creates files with results of internal stages\n");
     fprintf (stdout, "  -o <file>    Output file, default name is the same as input\n");
-    //fprintf (stdout, "  -b           Compiles the program as a BIOS\n");
+    fprintf (stdout, "  -b           Compiles the program as a Vircon32 BIOS, not a cartridge: needs a\n");
+    fprintf (stdout, "               'function error_handler()' (run on a CPU hardware error), exactly\n");
+    fprintf (stdout, "               one --#texture and at most one --#sound; the XML <rom> gets\n");
+    fprintf (stdout, "               type=\"bios\" and the build scripts assemble with -b\n");
     fprintf (stdout, "  -v           Displays additional information (verbose)\n");
     fprintf (stdout, "  -g           Outputs an additional file with debug info\n");
     fprintf (stdout, "  -d           Displays operational debug information\n");
     fprintf (stdout, "  -w           Inhibit all warnings\n");
     //fprintf (stdout, "  -Wall        Enable all warnings\n");
+    fprintf (stdout, "\nCartridge options (override the matching --# hint in the source):\n");
+    fprintf (stdout, "  --api <name>     API layer: pico8, tic80 or vircon32. Default: detected\n");
+    fprintf (stdout, "                   from the file (.p8 -> pico8, .tic -> tic80; a .lua by\n");
+    fprintf (stdout, "                   its --#api hint, else TIC()/_draw()/_update() entry points)\n");
+    fprintf (stdout, "  --title <text>   Cartridge title. Default: the --#title hint, else the\n");
+    fprintf (stdout, "                   cart's own title (TIC-80 '-- title:', PICO-8's first\n");
+    fprintf (stdout, "                   comment line) or the file name, prefixed with\n");
+    fprintf (stdout, "                   [PICO8] / [TIC80] in those API modes\n");
+    fprintf (stdout, "  --titleopt <text>\n");
+    fprintf (stdout, "                   Title of the optimized (v32opt) cartridge, <name>Opt.xml.\n");
+    fprintf (stdout, "                   Default: the --#titleopt hint, else the title + \" [optimized]\"\n");
+    fprintf (stdout, "  --no-diff-opt-title\n");
+    fprintf (stdout, "                   Give the optimized cartridge the same title as the regular one\n");
+    fprintf (stdout, "                   (an explicit --titleopt / --#titleopt still wins)\n");
+    fprintf (stdout, "  --rate <hz>      Sample rate of sounds synthesized from a PICO-8 or TIC-80\n");
+    fprintf (stdout, "                   cart: 11025, 22050, 44100. Default 22050 (inc/config.h)\n");
+    fprintf (stdout, "  --bezel <file>   PICO-8: custom side-panel art -- a PNG (or .vtex) with both\n");
+    fprintf (stdout, "                   panels side by side, 4:5 (288x360 1:1, 96x120 at 3x...)\n");
+    fprintf (stdout, "  --no-bezel       PICO-8: black side margins instead of the side panels\n");
+    fprintf (stdout, "  --fast-circles   TIC-80/PICO-8: draw filled circles above radius 31 as a\n");
+    fprintf (stdout, "                   scaled disc (1 draw instead of ~1.2 per radius; about\n");
+    fprintf (stdout, "                   1.5%% of the edge pixels differ). Outlines stay exact\n");
+    fprintf (stdout, "  --allow-float-as-clearcolor\n");
+    fprintf (stdout, "                   TIC-80: cls(variable) hands the variable's float bit pattern\n");
+    fprintf (stdout, "                   to the GPU as the clear color (the old behaviour; witchem_up's\n");
+    fprintf (stdout, "                   translucent-clear streaks) instead of a palette index\n");
+    fprintf (stdout, "  --keyboard <n>   Gamepad port (0-3) of a v32kbd keyboard, for key()/keyp()/\n");
+    fprintf (stdout, "                   kbd.*. Default %d (inc/config.h)\n", V32LUA_DEFAULT_KEYBOARD_PORT);
+    fprintf (stdout, "                   (needs a v32io adapter or the modified emulator)\n");
+    fprintf (stdout, "  --mouse <n>      Gamepad port (0-3) of a v32mouse mouse, for mouse()/mouse.*\n");
+    fprintf (stdout, "                   (PICO-8: stat(32..34)). Default %d (inc/config.h)\n", V32LUA_DEFAULT_MOUSE_PORT);
+    fprintf (stdout, "                   (needs a v32io adapter or the modified emulator)\n");
+    fprintf (stdout, "\nCartridge XML (packrom reads every path in it relative to the XML itself):\n");
+    fprintf (stdout, "  Default: the XML (and its optimizer twin, <name>Opt.xml) is written beside the\n");
+    fprintf (stdout, "                   -o file and holds bare file names (<binary path=\"game.vbin\" />,\n");
+    fprintf (stdout, "                   textures/ship.png -> ship.vtex), the converted assets being\n");
+    fprintf (stdout, "                   expected beside it\n");
+    fprintf (stdout, "  --xml-preserve-paths\n");
+    fprintf (stdout, "                   keep --#texture/--#sound paths as written (textures/ship.vtex),\n");
+    fprintf (stdout, "                   write the XML into the project folder (the source file's\n");
+    fprintf (stdout, "                   directory, or its parent when the source is in src/ and the\n");
+    fprintf (stdout, "                   output in a sibling such as obj/), and make <binary> the\n");
+    fprintf (stdout, "                   .vbin path relative to it\n");
+    fprintf (stdout, "\nBuild scripts:\n");
+    fprintf (stdout, "  Make.sh and Make.bat (the usual Vircon32 build scripts: v32lua, png2vircon,\n");
+    fprintf (stdout, "                   wav2vircon, assemble, packrom, and v32opt when installed) are\n");
+    fprintf (stdout, "                   written beside the source file, or in its parent when the source\n");
+    fprintf (stdout, "                   is in src/ and the output in a sibling folder such as obj/\n");
+    fprintf (stdout, "  --no-build-scripts\n");
+    fprintf (stdout, "                   do not write Make.sh / Make.bat\n");
+    fprintf (stdout, "\nInput files: .lua, .p8 (PICO-8 cart), .tic (TIC-80 cart, Lua only)\n");
+}
+
+// "--opt value" or "--opt=value": returns the value (advancing *i past it),
+// or NULL when argv[*i] is not this option.
+static const char *option_value (int argc, char **argv, int *i, const char *name)
+{
+    size_t n = strlen (name);
+    if (strncmp (argv[*i], name, n) != 0) return NULL;
+    if (argv[*i][n] == '=') return argv[*i] + n + 1;
+    if (argv[*i][n] != '\0') return NULL;
+    if (*i + 1 >= argc) {
+        fprintf (stderr, "Compiler Error: %s needs a value\n", name);
+        exit (1);
+    }
+    return argv[++(*i)];
+}
+
+// True if some line of src starts (after indentation) with prefix.
+static bool has_line_starting (const char *src, const char *prefix)
+{
+    size_t n = strlen (prefix);
+    for (const char *p = src; p && *p; ) {
+        const char *q = p;
+        while (*q == ' ' || *q == '\t') q++;
+        if (strncmp (q, prefix, n) == 0) return true;
+        p = strchr (p, '\n');
+        if (p) p++;
+    }
+    return false;
+}
+
+// API auto-detection for a .lua with no --#api / --#p8 hint (and no --api):
+// the entry points name the platform. Returns NULL when it isn't clear.
+static const char *detect_api_from_source (const char *src)
+{
+    bool tic   = has_line_starting (src, "function TIC(")    || has_line_starting (src, "function TIC (") ||
+                 has_line_starting (src, "TIC=function")      || has_line_starting (src, "TIC = function");
+    bool pico8 = has_line_starting (src, "function _draw(")  || has_line_starting (src, "function _update(") ||
+                 has_line_starting (src, "function _update60(");
+    bool v32   = has_line_starting (src, "function main(")   || has_line_starting (src, "function game_loop(");
+    if (tic && !pico8 && !v32) return "tic80";
+    if (pico8 && !tic && !v32) return "pico8";
+    return NULL;
+}
+
+// PICO-8 shows a cart's first comment line as its title: the first line of
+// Lua code that isn't blank or a --# hint, if it is a "--" comment.
+static void pico8_embedded_title (const char *lua, char *out, size_t out_size)
+{
+    out[0] = '\0';
+    for (const char *p = lua; p && *p; ) {
+        const char *eol = strchr (p, '\n');
+        size_t len = eol ? (size_t) (eol - p) : strlen (p);
+        const char *q = p;
+        while (q < p + len && (*q == ' ' || *q == '\t' || *q == '\r')) q++;
+        if (q < p + len && strncmp (q, "--#", 3) != 0) {
+            if (strncmp (q, "--", 2) == 0 && strncmp (q, "--[[", 4) != 0) {
+                q += 2;
+                while (q < p + len && (*q == ' ' || *q == '\t')) q++;
+                const char *e = p + len;
+                while (e > q && (e[-1] == ' ' || e[-1] == '\t' || e[-1] == '\r')) e--;
+                size_t n = (size_t) (e - q);
+                if (n >= out_size) n = out_size - 1;
+                memcpy (out, q, n);
+                out[n] = '\0';
+            }
+            return;
+        }
+        p = eol ? eol + 1 : NULL;
+    }
 }
 
 static void log_stage (int  stage_num, const char *stage_name, int  verbose)
@@ -70,8 +194,14 @@ static void log_stage (int  stage_num, const char *stage_name, int  verbose)
     }
 }
 
+#define RECORD_OPT(f, v, path) do { if (n_build_opts < 32) { \
+        build_opts[n_build_opts].flag = (f); build_opts[n_build_opts].value = (v); \
+        build_opts[n_build_opts].is_path = (path); n_build_opts++; } } while (0)
+
 int  main (int  argc, char** argv)
 {
+    include_set_program_name (argv[0]);
+
     if (argc                   <  2)
     {
         print_usage (argv[0]);
@@ -81,18 +211,95 @@ int  main (int  argc, char** argv)
     char *input_filename        = NULL;
     char  output_filename[256]  = { 0 };
     int   verbose               = 0;
-    int   o_dowarnings          = 1; // display warnings by default
+    int   o_dowarnings          = V32LUA_DEFAULT_WARNINGS;   // inc/config.h
+    const char *cli_api         = NULL;
+    const char *cli_title       = NULL;
+    int         cli_rate      = 0;
+    int         xml_preserve_paths = 0;   // --xml-preserve-paths
+    int         build_scripts      = V32LUA_DEFAULT_BUILD_SCRIPTS;   // --no-build-scripts
+    BuildOpt    build_opts[32];           // options repeated in the generated scripts
+    int         n_build_opts       = 0;
 
     g_verbose_debug             = false;
+    g_suppress_warnings         = !V32LUA_DEFAULT_WARNINGS;
 
     // --- Command Line Argument Parsing ---
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
+        const char *val;
+        if ((val = option_value(argc, argv, &i, "--api")) != NULL) {
+            if      (strcmp(val, "native") == 0 || strcmp(val, "v32") == 0) val = "vircon32";
+            if (strcmp(val, "pico8") != 0 && strcmp(val, "tic80") != 0 && strcmp(val, "vircon32") != 0) {
+                fprintf(stderr, "Compiler Error: --api must be pico8, tic80 or vircon32 (got '%s')\n", val);
+                return 1;
+            }
+            cli_api = val;
+            RECORD_OPT ("--api", val, 0);
+        } else if ((val = option_value(argc, argv, &i, "--title")) != NULL) {
+            cli_title = val;
+            RECORD_OPT ("--title", val, 0);
+        } else if ((val = option_value(argc, argv, &i, "--titleopt")) != NULL) {
+            snprintf (cart_title_opt, sizeof (cart_title_opt), "%.*s", (int) sizeof (cart_title_opt) - 1, val);
+            cart_title_opt_set = true;
+            g_cli_titleopt_set = true;
+            RECORD_OPT ("--titleopt", val, 0);
+        } else if (strcmp(argv[i], "--no-diff-opt-title") == 0) {
+            g_no_diff_opt_title = true;
+            RECORD_OPT ("--no-diff-opt-title", NULL, 0);
+        } else if (strcmp(argv[i], "--no-build-scripts") == 0) {
+            build_scripts = 0;
+        } else if ((val = option_value(argc, argv, &i, "--rate")) != NULL ||
+                   (val = option_value(argc, argv, &i, "--p8rate")) != NULL) {   // old name
+            cli_rate = atoi(val);
+            if (cli_rate != 11025 && cli_rate != 22050 && cli_rate != 44100) {
+                fprintf(stderr, "Compiler Error: --rate must be 11025, 22050 or 44100 (got '%s')\n", val);
+                return 1;
+            }
+            RECORD_OPT ("--rate", val, 0);
+        } else if ((val = option_value(argc, argv, &i, "--bezel")) != NULL) {
+            pico8_bezel_file = strdup(val);
+            pico8_bezel_enabled = true;
+            g_cli_bezel_set = true;
+            RECORD_OPT ("--bezel", val, 1);
+        } else if (strcmp(argv[i], "--no-bezel") == 0) {
+            pico8_bezel_enabled = false;
+            g_cli_bezel_set = true;
+            RECORD_OPT ("--no-bezel", NULL, 0);
+        } else if (strcmp(argv[i], "--xml-preserve-paths") == 0) {
+            xml_preserve_paths = 1;
+            RECORD_OPT ("--xml-preserve-paths", NULL, 0);
+        } else if (strcmp(argv[i], "--fast-circles") == 0) {
+            shapes_fast = true;
+            RECORD_OPT ("--fast-circles", NULL, 0);
+        } else if (strcmp(argv[i], "--allow-float-as-clearcolor") == 0) {
+            allow_float_clearcolor = true;
+            g_cli_float_clearcolor_set = true;
+            RECORD_OPT ("--allow-float-as-clearcolor", NULL, 0);
+        } else if ((val = option_value(argc, argv, &i, "--keyboard")) != NULL) {
+            if (val[0] < '0' || val[0] > '3' || val[1] != '\0') {
+                fprintf(stderr, "Compiler Error: --keyboard must be a gamepad port 0-3 (got '%s')\n", val);
+                return 1;
+            }
+            v32kbd_default_port = val[0] - '0';
+            g_cli_keyboard_set  = true;
+            RECORD_OPT ("--keyboard", val, 0);
+        } else if ((val = option_value(argc, argv, &i, "--mouse")) != NULL) {
+            if (val[0] < '0' || val[0] > '3' || val[1] != '\0') {
+                fprintf(stderr, "Compiler Error: --mouse must be a gamepad port 0-3 (got '%s')\n", val);
+                return 1;
+            }
+            v32mouse_default_port = val[0] - '0';
+            g_cli_mouse_set       = true;
+            RECORD_OPT ("--mouse", val, 0);
+        } else if (strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
             strncpy(output_filename, argv[++i], sizeof(output_filename) - 1);
+        } else if (strcmp(argv[i], "-b") == 0) {
+            g_bios_mode = true;     // repeated in the build scripts by their own -b handling
         } else if (strcmp(argv[i], "-g") == 0) {
             g_debug_mode = true;
         } else if (strcmp(argv[i], "-w") == 0) {
             o_dowarnings = 0; // disable display of compiler warnings
+            g_suppress_warnings = true;
+            RECORD_OPT ("-w", NULL, 0);
         } else if (strcmp(argv[i], "--verbose") == 0 || strcmp(argv[i], "-v") == 0) {
             verbose = 1;
         } else if (strcmp(argv[i], "--debug") == 0 || strcmp(argv[i], "-d") == 0) {
@@ -118,9 +325,13 @@ int  main (int  argc, char** argv)
 
     // Default output filename to input_filename.asm if not specified by -o
     if (output_filename[0] == '\0') {
+        // (-5 leaves room for ".asm"; the array is zero-filled, so the copy
+        // stays terminated.) Only a dot after the last '/' is an extension:
+        // `v32lua ../game` must not become "..asm".
         strncpy(output_filename, input_filename, sizeof(output_filename) - 5);
         char* last_dot = strrchr(output_filename, '.');
-        if (last_dot != NULL) {
+        char* last_slash = strrchr(output_filename, '/');
+        if (last_dot != NULL && (last_slash == NULL || last_dot > last_slash)) {
             strcpy(last_dot, ".asm");
         } else {
             strcat(output_filename, ".asm");
@@ -135,6 +346,29 @@ int  main (int  argc, char** argv)
     runtime_req.needs_vircon32      = true;
 
     tic80_init_default_palette ();
+
+    // --- Command-line cartridge options ---
+    // Applied before lexing: PICO-8's extra syntax is only recognised once
+    // pico8 mode is on. The in-source hints check the g_cli_*_set flags and
+    // leave these values alone.
+    if (cli_api != NULL) {
+        apply_api_mode (cli_api);
+        g_cli_api_set = true;
+    }
+    if (cli_rate != 0) {
+        synth_audio_rate = cli_rate;
+        g_cli_rate_set = true;
+    }
+    if (cli_title != NULL) {
+        strncpy (cart_title, cli_title, sizeof (cart_title) - 1);
+        cart_title[sizeof (cart_title) - 1] = '\0';
+        cart_title_was_set = true;
+        g_cli_title_set    = true;
+    }
+    bool is_tic_cart = tic80_is_binary_cart_path (input_filename);
+    char *program_text = NULL;
+    char embedded_tic80_title[128] = { 0 };   // TIC-80 "-- title:" metadata
+    char embedded_pico8_title[128] = { 0 };   // PICO-8 first comment line
 
     g_lua_filename                  = input_filename;
     g_asm_filename                  = output_filename;
@@ -152,7 +386,81 @@ int  main (int  argc, char** argv)
     // TIC-80 sections) sees one ordinary linear token stream either way.
     log_stage(2, "preprocessor", verbose);
     {
-        char *expanded_source = expand_includes (input_filename, &g_line_map, &g_line_map_count);
+        // A binary TIC-80 cart becomes the text of its .lua project export
+        // (code + -- <TILES> ... sections), which the rest of the compiler
+        // already understands. See tic80_cart.c.
+        char *expanded_source = is_tic_cart
+                              ? tic80_cart_to_text (input_filename)
+                              : expand_includes (input_filename, &g_line_map, &g_line_map_count);
+
+        // CRLF -> LF (Windows-saved sources): Lua reads a line break inside
+        // a long string as "\n", and a stray '\r' in split([[...]], "\n")
+        // data silently broke evercore's name lookups.
+        {
+            char *r = expanded_source, *w = expanded_source;
+            for (; *r; r++) {
+                if (r[0] == '\r' && r[1] == '\n') continue;
+                *w++ = *r;
+            }
+            *w = '\0';
+        }
+
+        // A .p8 cartridge compiles directly: only its __lua__ section is
+        // lexed (every other line blanked so line numbers still match the
+        // .p8, header replaced by "--#api pico8"), and __gfx__/__gff__/
+        // __map__ are parsed as the cart's assets. See pico8_assets.c.
+        bool is_p8_cart = pico8_is_cart_text (expanded_source);
+        if (is_p8_cart) {
+            char *lua_only = pico8_split_cart (expanded_source);
+            if (lua_only == NULL) {
+                compiler_error (ERR_INTERNAL, -1, "Out of memory splitting .p8 cartridge");
+            }
+            free (expanded_source);
+            expanded_source = lua_only;
+        }
+
+        // --- API auto-detection (no --api given) ---
+        // .p8 and .tic say what they are. A .lua keeps its own --#api/--#p8
+        // hint when it has one; otherwise its entry points decide.
+        if (!g_cli_api_set) {
+            const char *detected = NULL;
+            if (is_p8_cart)       detected = "pico8";
+            else if (is_tic_cart) detected = "tic80";
+            else if (!strstr (expanded_source, "--#api") && !strstr (expanded_source, "--#p8"))
+                detected = detect_api_from_source (expanded_source);
+            if (detected != NULL) {
+                apply_api_mode (detected);
+                if (verbose) {
+                    fprintf (stdout, "api: %s (detected)\n", detected);
+                }
+            }
+        }
+
+        // Titles a cart carries itself, used when neither --title nor
+        // --#title gives one (decided after parsing, once the API is final).
+        snprintf (embedded_tic80_title, sizeof (embedded_tic80_title), "%s",
+                  tic80_metatag (expanded_source, "title"));
+        pico8_embedded_title (expanded_source, embedded_pico8_title, sizeof (embedded_pico8_title));
+
+        // PICO-8 builtins implemented in Lua (split, tostr, stat, ...):
+        // appended when the program uses them. See pico8_prelude.c.
+        if (runtime_req.needs_pico8 ||
+            (!g_cli_api_set &&
+             (strstr (expanded_source, "--#api pico8") ||
+              strstr (expanded_source, "--#api \"pico8\"") ||
+              strstr (expanded_source, "--#p8")))) {
+            // then-less `if (c) ...` / do-less `while (c) ...`: the body
+            // is the rest of the line (see pico8_shorthand.c)
+            char *expanded = pico8_expand_shorthand (expanded_source);
+            if (expanded == NULL) {
+                compiler_error (ERR_INTERNAL, -1, "Out of memory expanding PICO-8 shorthand");
+            }
+            free (expanded_source);
+            expanded_source = expanded;
+            expanded_source = pico8_append_prelude (expanded_source);
+        }
+
+        g_uses_metatables = strstr (expanded_source, "setmetatable") != NULL;
 
         yyin = tmpfile ();
         if (yyin == NULL) {
@@ -161,7 +469,7 @@ int  main (int  argc, char** argv)
         }
         fwrite (expanded_source, 1, strlen (expanded_source), yyin);
         rewind (yyin);
-        free (expanded_source);
+        program_text = expanded_source;   // kept: TIC-80 audio scans it for sfx()/music() calls
     }
 
     log_stage(3, "parser", verbose);
@@ -171,9 +479,79 @@ int  main (int  argc, char** argv)
     }
     fclose(yyin);
 
+    // --- BIOS (-b) constraints ---
+    // Same three as the Vircon32 toolchain's: a BIOS has exactly one texture,
+    // at most one sound, and an error_handler() (checked by the generator).
+    // Every violation is reported at once. A BIOS is always native Vircon32:
+    // the PICO-8 / TIC-80 layers need their own generated textures.
+    if (g_bios_mode)
+    {
+        int ntex = 0, nsnd = 0, bad = 0;
+        for (CARTresource *r = textures_head; r != NULL; r = r -> next) ntex++;
+        for (CARTresource *r = sounds_head;   r != NULL; r = r -> next) nsnd++;
+        if (runtime_req.needs_pico8 || runtime_req.needs_tic80)
+        {
+            fprintf (stderr, "Compiler Error: -b (BIOS) only works with the native vircon32 API, not pico8 or tic80\n");
+            bad = 1;
+        }
+        if (ntex != 1)
+        {
+            fprintf (stderr, "Compiler Error: -b (BIOS) requires exactly one --#texture (found %d)\n", ntex);
+            bad = 1;
+        }
+        if (nsnd > 1)
+        {
+            fprintf (stderr, "Compiler Error: -b (BIOS) allows at most one --#sound (found %d)\n", nsnd);
+            bad = 1;
+        }
+        if (bad) return 1;
+    }
+
+    // --- Cartridge title ---
+    // --title > --#title > the cart's own title > the file name; the last
+    // two get a [PICO8] / [TIC80] prefix in those API modes. Always resolved
+    // here, so the XML <rom title> and the __cart_title label agree.
+    if (!cart_title_was_set) {
+        const char *base   = NULL;
+        const char *prefix = "";
+        if (runtime_req.needs_tic80) {
+            prefix = "[TIC80] ";
+            if (embedded_tic80_title[0]) base = embedded_tic80_title;
+        } else if (runtime_req.needs_pico8) {
+            prefix = "[PICO8] ";
+            if (embedded_pico8_title[0]) base = embedded_pico8_title;
+        }
+        if (base == NULL) base = derive_cart_title_from_filename (input_filename);
+        if (strncmp (base, prefix, strlen (prefix)) == 0) prefix = "";
+        // Long names are cut to fit cart_title (the XML title has no fixed
+        // limit; the memory-card label takes the first 20 characters anyway).
+        int room = (int) (sizeof (cart_title) - 1 - strlen (prefix));
+        snprintf (cart_title, sizeof (cart_title), "%s%.*s", prefix, room, base);
+        cart_title_was_set = true;
+    }
+    if (verbose) {
+        fprintf (stdout, "cart title: \"%s\"\n", cart_title);
+        if (cart_title_opt_set)        fprintf (stdout, "optimized cart title: \"%s\"\n", cart_title_opt);
+        else if (g_no_diff_opt_title)  fprintf (stdout, "optimized cart title: same as the cart title\n");
+        else                           fprintf (stdout, "optimized cart title: \"%s [optimized]\"\n", cart_title);
+    }
+
+    // Sound sample rate: --rate > --#rate > the API's default in config.h
+    if (synth_audio_rate == 0) {
+        synth_audio_rate = runtime_req.needs_tic80 ? V32LUA_DEFAULT_TIC80_RATE
+                                                   : V32LUA_DEFAULT_PICO8_RATE;
+    }
+
     if (runtime_req.needs_tic80)
     {
         process_all_tic80_sections();
+
+        // The cart's own WAVES/SFX/PATTERNS/TRACKS, synthesized into sounds
+        // for the sfx()/music() calls the program makes (tic80_audio.c).
+        register_tic80_audio (program_text);
+        if (verbose && tic80_audio_rendered) {
+            fprintf (stdout, "tic80 audio: %.1f MB at %d Hz\n", tic80_audio_bytes / 1048576.0, tic80_audio_rate ());
+        }
 
         // Always generate + register the texture atlas when TIC-80 support is
         // needed, regardless of whether the source declared any TILES/SPRITES/
@@ -185,15 +563,19 @@ int  main (int  argc, char** argv)
         // that no longer determines whether textures need to exist at all.
         log_stage(3, "tic80 assets parsing", verbose);
 
+        // Output name minus its extension -- only a dot in the file name
+        // itself counts (`-o ./game` / `-o ../build/game` have dots in the
+        // directory part), and the copy is always NUL-terminated.
         char base_path[256];
-        strncpy(base_path, output_filename, sizeof(base_path));
+        strncpy(base_path, output_filename, sizeof(base_path) - 1);
+        base_path[sizeof(base_path) - 1] = '\0';
         char *last_dot = strrchr(base_path, '.');
-        if (last_dot) *last_dot = '\0';
+        char *last_slash = strrchr(base_path, '/');
+        if (last_dot && (!last_slash || last_dot > last_slash)) *last_dot = '\0';
 
         generate_all_tic80_colorkey_textures(base_path);
 
         // Register all 17 textures in CORRECT order (0-16)
-        CARTresource *prev = NULL;
         for (int tex_idx = 0; tex_idx < 17; tex_idx++) {
             char sheet_name[32];
             char sheet_path[512];
@@ -201,10 +583,51 @@ int  main (int  argc, char** argv)
             snprintf (sheet_name, sizeof (sheet_name), "tic80_spritesheet_%d", tex_idx);
             snprintf (sheet_path, sizeof (sheet_path), "%s_colorkey_%d", base_path, tex_idx);
 
-            cart_resource_append (&textures_head, &textures_tail,
+            cart_resource_append_generated (&textures_head, &textures_tail,
                                   next_texture_id++, sheet_name, sheet_path);
         }
+        register_shapes_texture (program_text, base_path, true);
     }
+
+    if (runtime_req.needs_pico8)
+    {
+        // Texture 0 ALWAYS exists for a PICO-8 cart: it holds the sprite
+        // atlas (from __gfx__, or blank) AND the swatch row that cls()'s
+        // siblings rectfill()/circfill()/line()/rect()/pset() draw with.
+        // Previously no texture was ever generated or registered, so every
+        // spr()/map()/shape primitive drew from a texture that did not exist.
+        // Palette index 0 is transparent in the atlas (PICO-8's default palt).
+        char base_path[256];
+        strncpy (base_path, output_filename, sizeof (base_path) - 1);
+        base_path[sizeof (base_path) - 1] = '\0';
+        char *last_dot = strrchr (base_path, '.');
+        char *last_slash = strrchr (base_path, '/');
+        if (last_dot && (!last_slash || last_dot > last_slash)) *last_dot = '\0';
+
+        char sheet_path[300], vtex_path[310];
+        snprintf (sheet_path, sizeof (sheet_path), "%s_pico8", base_path);
+        snprintf (vtex_path, sizeof (vtex_path), "%s.vtex", sheet_path);
+        pico8_bezel_build (cart_title);      // side panels, with the final title
+        generate_vtex_from_pico8 (vtex_path, pico8_gfx_pixel, 0);
+
+        if (textures_head != NULL) {
+            // hint nodes already baked their ids at parse time
+            compiler_error (ERR_SEMANTIC, -1,
+                "PICO-8 carts cannot declare --#texture resources: texture 0 "
+                "is reserved for the PICO-8 sprite sheet");
+        }
+        cart_resource_append_generated (&textures_head, &textures_tail,
+                              0, "pico8_spritesheet", sheet_path);
+        next_texture_id++;
+        register_shapes_texture (program_text, base_path, false);
+        pico8_bezel_register_custom (base_path);   // --bezel FILE: after the atlas
+    }
+
+    // v32kbd keyboard support (v32kbd.c): key()/keyp()/kbd.* -- decided
+    // from the source before codegen, since the WAIT hooks it adds can be
+    // emitted before the first key() call is compiled.
+    v32kbd_prescan (program_text);
+    v32mouse_prescan (program_text);
 
     // --- Stage 4: Semantic Analyzer ---
     log_stage(4, "analyzer", verbose);
@@ -220,19 +643,27 @@ int  main (int  argc, char** argv)
         register_global ("TIC80_COLOR_MULTIPLY");
         register_global ("TIC80_SPRITE_FLAGS_PTR");
         register_global ("TIC80_EXIT_FLAG");
+        register_global ("TIC80_RAM_PTR");     // peek/poke RAM, created on first use
+        register_global ("TIC80_PMEM_PTR");    // pmem() slots when there is no memory card
     }
 
-    if (runtime_req.needs_pico8)
-    {
-        // TIC-80 map buffer pointer - must be registered before prepass
-        register_global ("PICO8_MAP_BUFFER_PTR");
-    }
 
-    if (runtime_req.needs_vircon32)
+    // ALWAYS allocated (49 + MV_MAX + META_CALL_STACK_SIZE words), regardless of runtime_req.needs_vircon32.
+    // That flag is not final here: "--#api pico8/tic80" clears it, and the
+    // sound/memcard/tilemap intrinsics set it again DURING codegen -- long
+    // after this allocation. PICO-8 sfx()/music() did exactly that, and every
+    // one of these bases stayed -1, emitting "%define VIRCON32_SFX_CURSOR
+    // 0xFFFFFFFF" (a hardware error on first use), while __builtin_pico8_sfx
+    // in a cart that never called sfx() referenced an undefined symbol and
+    // failed to assemble at all.
     {
         vircon32_btn_prev_state_base      = next_ram_address;
         next_ram_address                  = next_ram_address + 44;
         vircon32_sfx_cursor_base          = next_ram_address;
+        next_ram_address                  = next_ram_address + 1;
+        // the selected gamepad, as last written (v32io.s): the emulator's
+        // INP_SelectedGamepad port can't be read back reliably
+        v32io_gamepad_base                = next_ram_address;
         next_ram_address                  = next_ram_address + 1;
 
         // One word each: a 16-bit-relevant bitmask (bit N set = channel N
@@ -246,10 +677,17 @@ int  main (int  argc, char** argv)
         next_ram_address                  = next_ram_address + 1;
         vircon32_sfx_channel_mask_base    = next_ram_address;
         next_ram_address                  = next_ram_address + 1;
+        ret_count_base                    = next_ram_address;   // RET_COUNT
+        next_ram_address                  = next_ram_address + 1;
+        mv_buf_base                       = next_ram_address;   // MV_BUF
+        next_ram_address                  = next_ram_address + MV_MAX;
+        meta_call_base                    = next_ram_address;   // META_CALL_DEPTH
+        next_ram_address                  = next_ram_address + 1 + META_CALL_STACK_SIZE;
     }
     
     // Perform full symbol pre-pass before code generation
     register_all_globals_prepass(root_node);
+    settle_return_counts();
 
     // Aliases are recorded before codegen so that "play = music.play" at the
     // bottom of a file still governs a play(...) call at the top.
@@ -284,10 +722,13 @@ int  main (int  argc, char** argv)
     if (verbose)
     {
         fprintf (stdout, "saving output file\n");
-        fprintf (stdout, "saving cart config file\n");
     }
     
-    emit_cart_xml (output_filename, verbose);
+    emit_cart_xml (output_filename, input_filename, xml_preserve_paths, verbose);
+    if (build_scripts) {
+        emit_build_scripts (output_filename, input_filename, xml_preserve_paths,
+                            g_debug_mode ? 1 : 0, g_bios_mode ? 1 : 0, build_opts, n_build_opts, verbose);
+    }
 
     if (verbose)
     {

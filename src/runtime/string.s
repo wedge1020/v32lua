@@ -169,7 +169,9 @@ __strcat_finish:
     RET
 
 ;; ---------------------------------------------------------------------------
-;; Universal Equality (==): Returns raw integer 1 (true) or 0 (false) in R0
+;; Universal Equality (==): Returns BOXED_TRUE / BOXED_FALSE in R0.
+;; (This header used to say "raw integer 1 / 0" -- it never did; both boxed
+;; booleans are non-zero, so a caller testing JT R0 always saw "equal".)
 ;; Incoming Stack: [BP+3] = Left_Val, [BP+2] = Right_Val
 ;; Handles: bitwise-identical values (fast path), string comparisons, and
 ;;         numeric comparisons (raw IEEE 754 floats in NaN-boxing scheme)
@@ -189,8 +191,8 @@ __builtin_eq:
     ;; In NaN-boxing: numbers are raw floats, other types have BOXED_DATA tag
     MOV  R1, [BP+3]
     MOV  R3, R1
-    AND  R3, BOXED_DATA
-    INE  R3, 0               ; Non-zero = tagged (not a number)
+    AND  R3, NAN_VALUE       ; exponent all ones = NaN-boxed (not a number);
+    IEQ  R3, NAN_VALUE       ; (BOXED_DATA caught every float >= 2.0 or < 0)
     JF   R3, __eq_check_right_number
 
     ;; Left is tagged, so not a number - check if it's a string
@@ -198,8 +200,8 @@ __builtin_eq:
 
 __eq_check_right_number:
     MOV  R3, R2
-    AND  R3, BOXED_DATA
-    INE  R3, 0               ; Non-zero = tagged (not a number)
+    AND  R3, NAN_VALUE       ; exponent all ones = NaN-boxed (not a number);
+    IEQ  R3, NAN_VALUE       ; (BOXED_DATA caught every float >= 2.0 or < 0)
     JF   R3, __eq_both_numbers
 
     ;; Right is tagged, left is not - different types, not equal
@@ -447,6 +449,12 @@ __relcmp_error:
 ;; ===========================================================================
 ;; Runtime Built-in: __builtin_string_len
 ;; ABI: Arg 1 at [BP+2] (Stack Parameter), Caller cleans up.
+;;      Arg 1 MUST be the BOXED string value -- this routine unboxes it
+;;      itself. Callers that pre-unboxed their string and passed the RAW
+;;      pointer caused a SECOND unbox here: harmless for ROM strings
+;;      (OR-ing the cart page bit back on is idempotent) but a RAM/heap
+;;      address got misread as a ROM address, yielding a garbage length
+;;      and silently wrong results for any string built at runtime.
 ;; Returns: R0 = Length of string as a Lua Float.
 ;; ===========================================================================
 __builtin_string_len:
@@ -643,6 +651,15 @@ __tostring_passthrough:
     RET
 
 __tostring_table:
+    MOV   R0, R1                 ; a metatable's __tostring answers first
+    MOV   R1, __mm_str_tostring
+    OR    R1, BOXED_ROMSTRING
+    CALL  __table_unary_meta
+    JF    R1, __tostring_table_plain
+    MOV   SP, BP
+    POP   BP
+    RET
+__tostring_table_plain:
     MOV   R0, __const_str_table  ; Load result directly
     OR    R0, BOXED_ROMSTRING
     MOV   SP, BP                 ; Restore stack
@@ -1004,6 +1021,37 @@ __ftoa_reverse_frac_loop:
     JMP  __ftoa_reverse_frac_loop
 
 __ftoa_done:
+    ;; Default mode (precision -1) formats like Lua's %.14g as far as float32
+    ;; allows: no trailing zeros ("0.5", not "0.500000"; "2.25", not
+    ;; "2.250000"), and no '.' when rounding left nothing after it. Only
+    ;; applied when a '.' was actually written, so "100" keeps its zeros.
+    MOV  R10, [BP+2]
+    IEQ  R10, -1
+    JF   R10, __ftoa_terminate
+    MOV  R10, R2
+__ftoa_find_dot:
+    MOV  R11, R10
+    IGE  R11, R9
+    JT   R11, __ftoa_terminate       ; no '.' -> nothing to trim
+    MOV  R11, [R10]
+    IEQ  R11, 46
+    JT   R11, __ftoa_trim_zeros
+    IADD R10, 1
+    JMP  __ftoa_find_dot
+__ftoa_trim_zeros:
+    MOV  R10, R9
+    ISUB R10, 1                      ; last written char
+    MOV  R11, [R10]
+    IEQ  R11, 48                     ; '0'?
+    JF   R11, __ftoa_trim_dot
+    MOV  R9, R10
+    JMP  __ftoa_trim_zeros
+__ftoa_trim_dot:
+    MOV  R11, [R10]
+    IEQ  R11, 46                     ; bare '.' left?
+    JF   R11, __ftoa_terminate
+    MOV  R9, R10
+__ftoa_terminate:
     MOV  R10, 0
     MOV  [R9], R10               ; null terminator
     MOV  R0, R2                  ; return base pointer
@@ -1328,7 +1376,8 @@ __string_byte_validate:
     PUSH  R1                  ; preserve string pointer across the CALL below
     PUSH  R2                  ; preserve start index across the CALL below
     PUSH  R3                  ; preserve end index across the CALL below
-    PUSH  R1                  ; Arg 1 for __builtin_string_len
+    MOV   R0, [BP+2]          ; Arg 1: the BOXED string (NOT the pre-unboxed
+    PUSH  R0                  ; pointer in R1 -- see string_len's header)
     CALL  __builtin_string_len
     IADD  SP, 1               ; Clean up the length-call's own argument
     MOV   R4, R0              ; R4 = length as float
@@ -1770,7 +1819,15 @@ __string_format_handle_f:
     PUSH R5
     PUSH R6
     PUSH R0                     ; value
-    PUSH R12                    ; precision parsed from the format string (-1 if none)
+    ;; %f with no precision is C's/Lua's %.6f ("2.500000"). -1 would select
+    ;; ftoa's default mode, which since the tostring() change formats like
+    ;; %.14g ("2.5") -- right for tostring/.., wrong for %f.
+    MOV  R2, R12
+    IEQ  R2, -1
+    JF   R2, __string_format_f_has_prec
+    MOV  R12, 6
+__string_format_f_has_prec:
+    PUSH R12                    ; precision (6 if the format string gave none)
     CALL __builtin_ftoa_scratch_a  ; was __builtin_ftoa
     IADD SP, 2
     POP  R6
@@ -1807,6 +1864,21 @@ __string_format_handle_s:
     MOV  R2, R0
     IEQ  R2, BOXED_NIL
     JT   R2, __string_format_arg_nil
+    ;; %s applies tostring() to its argument, as Lua does: a number, boolean,
+    ;; table or function is converted first. Unboxing a number as if it were
+    ;; a string pointer read from a wild address ("invalid memory read" on
+    ;; tomb_of_the_tic's level-clear screen, format("%s / %s", score, ...)).
+    PUSH R1
+    PUSH R4
+    PUSH R5
+    PUSH R6
+    PUSH R0
+    CALL __builtin_tostring_scratch_a
+    IADD SP, 1
+    POP  R6
+    POP  R5
+    POP  R4
+    POP  R1
     PUSH R1                     ; save loop state: __unbox_string clobbers R1
     CALL __unbox_string
     POP  R1
@@ -1828,6 +1900,21 @@ __string_format_handle_q:
     MOV  R2, R0
     IEQ  R2, BOXED_NIL
     JT   R2, __string_format_arg_nil
+    ;; Only strings are quoted; a number/boolean is written as a literal
+    ;; (Lua 5.4), which is what %s produces.
+    MOV  R2, R0
+    AND  R2, BOXED_DATA
+    IEQ  R2, BOXED_ROMSTRING
+    JT   R2, __string_format_q_is_string
+    MOV  R2, R0
+    AND  R2, BOXED_DATA
+    IEQ  R2, BOXED_RAMSTRING
+    JF   R2, __string_format_handle_s
+    MOV  R2, R0                 ; false/true share the RAM-string tag
+    AND  R2, BOXED_PAYLOAD      ; (payloads 1/2); real strings are >= 4
+    ILT  R2, 4
+    JT   R2, __string_format_handle_s
+__string_format_q_is_string:
     PUSH R1                     ; save loop state: __unbox_string clobbers R1
     CALL __unbox_string
     POP  R1
@@ -2226,7 +2313,8 @@ __builtin_string_sub:
     MOV   R1, R0               ; R1 = unboxed string pointer (persist)
 
     PUSH  R1
-    PUSH  R1                   ; Arg 1 for __builtin_string_len
+    MOV   R0, [BP+2]           ; Arg 1: the BOXED string (NOT the pre-unboxed
+    PUSH  R0                   ; pointer in R1 -- see string_len's header)
     CALL  __builtin_string_len
     IADD  SP, 1
     MOV   R4, R0
@@ -2379,7 +2467,8 @@ __builtin_string_upper:
     MOV   R1, R0                ; R1 = source string pointer (persist)
 
     PUSH  R1
-    PUSH  R1
+    MOV   R0, [BP+2]           ; Arg 1: the BOXED string (NOT the pre-unboxed
+    PUSH  R0                   ; pointer in R1 -- see string_len's header)
     CALL  __builtin_string_len
     IADD  SP, 1
     MOV   R4, R0
@@ -2462,7 +2551,8 @@ __builtin_string_lower:
     MOV   R1, R0
 
     PUSH  R1
-    PUSH  R1
+    MOV   R0, [BP+2]           ; Arg 1: the BOXED string (NOT the pre-unboxed
+    PUSH  R0                   ; pointer in R1 -- see string_len's header)
     CALL  __builtin_string_len
     IADD  SP, 1
     MOV   R4, R0
@@ -2540,7 +2630,8 @@ __builtin_string_rep:
     MOV   R1, R0                ; R1 = source string pointer (persist)
 
     PUSH  R1
-    PUSH  R1
+    MOV   R0, [BP+2]           ; Arg 1: the BOXED string (NOT the pre-unboxed
+    PUSH  R0                   ; pointer in R1 -- see string_len's header)
     CALL  __builtin_string_len
     IADD  SP, 1
     MOV   R4, R0
@@ -2666,7 +2757,8 @@ __builtin_string_reverse:
     MOV   R1, R0                ; R1 = source string pointer (persist)
 
     PUSH  R1
-    PUSH  R1
+    MOV   R0, [BP+2]           ; Arg 1: the BOXED string (NOT the pre-unboxed
+    PUSH  R0                   ; pointer in R1 -- see string_len's header)
     CALL  __builtin_string_len
     IADD  SP, 1
     MOV   R4, R0
@@ -2853,13 +2945,15 @@ __builtin_string_gsub:
     CALL  __unbox_string
     MOV   R9, R0                 ; R9 = repl pointer (persist)
 
-    PUSH  R7
+    MOV   R0, [BP+2]           ; Arg 1: the BOXED string s (NOT the
+    PUSH  R0                   ; pre-unboxed R7 -- see string_len's header)
     CALL  __builtin_string_len
     IADD  SP, 1
     MOV   R3, R0
     CFI   R3                     ; R3 = len(s)
 
-    PUSH  R8
+    MOV   R0, [BP+3]           ; Arg 1: the BOXED pattern (NOT R8)
+    PUSH  R0
     CALL  __builtin_string_len
     IADD  SP, 1
     MOV   R4, R0
@@ -2869,7 +2963,8 @@ __builtin_string_gsub:
     IEQ   R1, 0
     JT    R1, __string_gsub_no_match_copy
 
-    PUSH  R9
+    MOV   R0, [BP+4]           ; Arg 1: the BOXED repl (NOT R9)
+    PUSH  R0
     CALL  __builtin_string_len
     IADD  SP, 1
     MOV   R5, R0
@@ -3012,7 +3107,8 @@ __string_gsub_no_match_copy:
     CALL  __unbox_string
     MOV   R7, R0
 
-    PUSH  R7
+    MOV   R0, [BP+2]           ; Arg 1: the BOXED string (NOT the
+    PUSH  R0                   ; pre-unboxed R7 -- see string_len's header)
     CALL  __builtin_string_len
     IADD  SP, 1
     MOV   R3, R0
@@ -3055,3 +3151,398 @@ __string_gsub_finish:
     POP   BP
     RET
 
+;; ===========================================================================
+;; String methods: s:name(...) support
+;; ---------------------------------------------------------------------------
+;; __builtin_string_method_lookup: [BP+2] = key -> R0 = boxed function for
+;; a known string-library name, or BOXED_NIL. Called by __builtin_table_get
+;; when the "table" is a string. Saves everything but R0.
+;;
+;; __strmeth_*: Lua-ABI wrappers ([BP+2] = self string, [BP+3].. = args;
+;; the compiler NIL-pads method calls to these names, see
+;; string_method_arity() in function.c) that forward to the existing
+;; __builtin_string_* routines, which take the same [BP+2].. layout.
+;; format() is variadic and is not offered as a method.
+;; ===========================================================================
+__strmeth_name_len:
+    string "len"
+__strmeth_name_sub:
+    string "sub"
+__strmeth_name_upper:
+    string "upper"
+__strmeth_name_lower:
+    string "lower"
+__strmeth_name_rep:
+    string "rep"
+__strmeth_name_byte:
+    string "byte"
+__strmeth_name_find:
+    string "find"
+__strmeth_name_reverse:
+    string "reverse"
+__strmeth_name_gsub:
+    string "gsub"
+
+__builtin_string_method_lookup:
+    PUSH BP
+    MOV  BP, SP
+    PUSH R1
+    PUSH R2
+    MOV  R1, __strmeth_name_len
+    CALL __strmeth_key_is
+    JF   R0, __strmeth_try_after_len
+    MOV  R0, __strmeth_len
+    OR   R0, BOXED_FUNCTION
+    JMP  __strmeth_lookup_done
+__strmeth_try_after_len:
+    MOV  R1, __strmeth_name_sub
+    CALL __strmeth_key_is
+    JF   R0, __strmeth_try_after_sub
+    MOV  R0, __strmeth_sub
+    OR   R0, BOXED_FUNCTION
+    JMP  __strmeth_lookup_done
+__strmeth_try_after_sub:
+    MOV  R1, __strmeth_name_upper
+    CALL __strmeth_key_is
+    JF   R0, __strmeth_try_after_upper
+    MOV  R0, __strmeth_upper
+    OR   R0, BOXED_FUNCTION
+    JMP  __strmeth_lookup_done
+__strmeth_try_after_upper:
+    MOV  R1, __strmeth_name_lower
+    CALL __strmeth_key_is
+    JF   R0, __strmeth_try_after_lower
+    MOV  R0, __strmeth_lower
+    OR   R0, BOXED_FUNCTION
+    JMP  __strmeth_lookup_done
+__strmeth_try_after_lower:
+    MOV  R1, __strmeth_name_rep
+    CALL __strmeth_key_is
+    JF   R0, __strmeth_try_after_rep
+    MOV  R0, __strmeth_rep
+    OR   R0, BOXED_FUNCTION
+    JMP  __strmeth_lookup_done
+__strmeth_try_after_rep:
+    MOV  R1, __strmeth_name_byte
+    CALL __strmeth_key_is
+    JF   R0, __strmeth_try_after_byte
+    MOV  R0, __strmeth_byte
+    OR   R0, BOXED_FUNCTION
+    JMP  __strmeth_lookup_done
+__strmeth_try_after_byte:
+    MOV  R1, __strmeth_name_find
+    CALL __strmeth_key_is
+    JF   R0, __strmeth_try_after_find
+    MOV  R0, __strmeth_find
+    OR   R0, BOXED_FUNCTION
+    JMP  __strmeth_lookup_done
+__strmeth_try_after_find:
+    MOV  R1, __strmeth_name_reverse
+    CALL __strmeth_key_is
+    JF   R0, __strmeth_try_after_reverse
+    MOV  R0, __strmeth_reverse
+    OR   R0, BOXED_FUNCTION
+    JMP  __strmeth_lookup_done
+__strmeth_try_after_reverse:
+    MOV  R1, __strmeth_name_gsub
+    CALL __strmeth_key_is
+    JF   R0, __strmeth_try_after_gsub
+    MOV  R0, __strmeth_gsub
+    OR   R0, BOXED_FUNCTION
+    JMP  __strmeth_lookup_done
+__strmeth_try_after_gsub:
+    MOV  R0, BOXED_NIL
+__strmeth_lookup_done:
+    POP  R2
+    POP  R1
+    MOV  SP, BP
+    POP  BP
+    RET
+
+;; __strmeth_key_is (internal): R1 = raw ROM address of a name; compares it
+;; with the lookup key at [BP+2] of the CALLER's frame -> R0 = 1 / 0
+__strmeth_key_is:
+    OR   R1, BOXED_ROMSTRING
+    MOV  R2, [BP+2]
+    PUSH R2                      ; left  -> [BP+3]
+    PUSH R1                      ; right -> [BP+2]
+    CALL __builtin_eq
+    IADD SP, 2
+    IEQ  R0, BOXED_TRUE
+    RET
+
+__strmeth_len:
+    PUSH BP
+    MOV  BP, SP
+    MOV  R0, [BP+2]
+    PUSH R0
+    CALL __builtin_string_len
+    MOV  SP, BP
+    POP  BP
+    RET
+__strmeth_upper:
+    PUSH BP
+    MOV  BP, SP
+    MOV  R0, [BP+2]
+    PUSH R0
+    CALL __builtin_string_upper
+    MOV  SP, BP
+    POP  BP
+    RET
+__strmeth_lower:
+    PUSH BP
+    MOV  BP, SP
+    MOV  R0, [BP+2]
+    PUSH R0
+    CALL __builtin_string_lower
+    MOV  SP, BP
+    POP  BP
+    RET
+__strmeth_reverse:
+    PUSH BP
+    MOV  BP, SP
+    MOV  R0, [BP+2]
+    PUSH R0
+    CALL __builtin_string_reverse
+    MOV  SP, BP
+    POP  BP
+    RET
+__strmeth_rep:
+    PUSH BP
+    MOV  BP, SP
+    MOV  R0, [BP+3]
+    PUSH R0
+    MOV  R0, [BP+2]
+    PUSH R0
+    CALL __builtin_string_rep
+    MOV  SP, BP
+    POP  BP
+    RET
+__strmeth_find:
+    PUSH BP
+    MOV  BP, SP
+    MOV  R0, [BP+3]
+    PUSH R0
+    MOV  R0, [BP+2]
+    PUSH R0
+    CALL __builtin_string_find
+    MOV  SP, BP
+    POP  BP
+    RET
+__strmeth_sub:
+    PUSH BP
+    MOV  BP, SP
+    MOV  R0, [BP+4]
+    PUSH R0
+    MOV  R0, [BP+3]
+    PUSH R0
+    MOV  R0, [BP+2]
+    PUSH R0
+    CALL __builtin_string_sub
+    MOV  SP, BP
+    POP  BP
+    RET
+__strmeth_byte:
+    PUSH BP
+    MOV  BP, SP
+    MOV  R0, [BP+4]
+    PUSH R0
+    MOV  R0, [BP+3]
+    PUSH R0
+    MOV  R0, [BP+2]
+    PUSH R0
+    CALL __builtin_string_byte
+    MOV  SP, BP
+    POP  BP
+    RET
+__strmeth_gsub:
+    PUSH BP
+    MOV  BP, SP
+    MOV  R0, [BP+4]
+    PUSH R0
+    MOV  R0, [BP+3]
+    PUSH R0
+    MOV  R0, [BP+2]
+    PUSH R0
+    CALL __builtin_string_gsub
+    MOV  SP, BP
+    POP  BP
+    RET
+
+;; ===========================================================================
+;; __builtin_tonumber_base: tonumber(s, base), as Lua 5.4's (b_str2int):
+;; s must be a string and base 2..36; leading/trailing whitespace, one
+;; optional '-', then at least one digit 0-9 / a-z / A-Z below base, and
+;; nothing else ("0x10" in base 16 is nil). Anything else gives nil.
+;;   [BP+2] = base   [BP+3] = s      (base pushed first: argument order)
+;; Returns R0 = the number or nil. Preserves R1-R7.
+;; ===========================================================================
+__builtin_tonumber_base:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
+    PUSH  R7
+
+    ;; --- base: a number, 2..36 ---
+    MOV   R5, [BP+2]
+    MOV   R1, R5
+    AND   R1, NAN_VALUE
+    IEQ   R1, NAN_VALUE
+    JT    R1, __tnb_nil               ; not a number
+    CFI   R5
+    MOV   R1, R5
+    ILT   R1, 2
+    JT    R1, __tnb_nil
+    MOV   R1, R5
+    IGT   R1, 36
+    JT    R1, __tnb_nil
+    MOV   R6, R5
+    CIF   R6                          ; R6 = base as a float
+
+    ;; --- s: a string ---
+    MOV   R0, [BP+3]
+    MOV   R1, R0
+    AND   R1, BOXED_DATA
+    IEQ   R1, BOXED_ROMSTRING
+    JT    R1, __tnb_is_string
+    MOV   R1, R0
+    AND   R1, BOXED_DATA
+    IEQ   R1, BOXED_RAMSTRING
+    JF    R1, __tnb_nil
+    MOV   R1, R0
+    AND   R1, BOXED_PAYLOAD
+    ILT   R1, 4
+    JT    R1, __tnb_nil               ; nil / false / true
+__tnb_is_string:
+    CALL  __unbox_string              ; R0 = char pointer
+
+    CALL  __tnb_skip_space
+    MOV   R3, 0                       ; negative?
+    MOV   R1, [R0]
+    IEQ   R1, 45                      ; '-'
+    JF    R1, __tnb_digits
+    MOV   R3, 1
+    IADD  R0, 1
+__tnb_digits:
+    MOV   R4, 0.0                     ; value
+    MOV   R2, 0                       ; digits seen
+__tnb_loop:
+    MOV   R1, [R0]
+    MOV   R7, R1
+    ISUB  R7, 48                      ; '0'..'9'
+    MOV   R1, R7
+    ILT   R1, 0
+    JT    R1, __tnb_end
+    MOV   R1, R7
+    ILT   R1, 10
+    JT    R1, __tnb_have_digit
+    MOV   R7, [R0]
+    OR    R7, 32                      ; lower-case a letter
+    ISUB  R7, 87                      ; 'a' -> 10
+    MOV   R1, R7
+    ILT   R1, 10
+    JT    R1, __tnb_end
+    MOV   R1, R7
+    IGT   R1, 35
+    JT    R1, __tnb_end
+__tnb_have_digit:
+    MOV   R1, R7
+    IGE   R1, R5                      ; digit >= base: not part of the number
+    JT    R1, __tnb_end
+    FMUL  R4, R6
+    CIF   R7
+    FADD  R4, R7
+    IADD  R2, 1
+    IADD  R0, 1
+    JMP   __tnb_loop
+__tnb_end:
+    JF    R2, __tnb_nil               ; no digits
+    CALL  __tnb_skip_space
+    MOV   R1, [R0]
+    JT    R1, __tnb_nil               ; something else follows
+    JF    R3, __tnb_done
+    FSGN  R4
+__tnb_done:
+    MOV   R0, R4
+    JMP   __tnb_ret
+__tnb_nil:
+    MOV   R0, BOXED_NIL
+__tnb_ret:
+    POP   R7
+    POP   R6
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; skips whitespace (space, \t \n \v \f \r) at R0; clobbers R1
+__tnb_skip_space:
+    MOV   R1, [R0]
+    IEQ   R1, 32
+    JT    R1, __tnb_skip_one
+    MOV   R1, [R0]
+    ISUB  R1, 9
+    ILT   R1, 0
+    JT    R1, __tnb_skip_done
+    MOV   R1, [R0]
+    IGT   R1, 13
+    JT    R1, __tnb_skip_done
+__tnb_skip_one:
+    IADD  R0, 1
+    JMP   __tnb_skip_space
+__tnb_skip_done:
+    RET
+
+;; ---------------------------------------------------------------------------
+;; __arith_coerce: R0 = an arithmetic operand that is not a number (the
+;; compiler only calls this for NaN-boxed values). A numeric string becomes
+;; its number, as Lua and PICO-8 do ("12" + 1 == 13, ("0x".."ff") + 0 ==
+;; 255); anything else is returned unchanged. Preserves R1-R13.
+;; ---------------------------------------------------------------------------
+__arith_coerce:
+    PUSH R1
+    PUSH R2
+    PUSH R3
+    PUSH R4
+    PUSH R5
+    PUSH R6
+    PUSH R7
+    PUSH R8
+    PUSH R9
+    PUSH R10
+    PUSH R11
+    PUSH R12
+    PUSH R13
+    PUSH R0
+    PUSH R0
+    CALL __builtin_string_to_number
+    IADD SP, 1
+    POP  R1                      ; the original value
+    MOV  R2, R0
+    IEQ  R2, BOXED_NIL
+    JF   R2, __arith_coerce_done
+    MOV  R0, R1                  ; not a numeric string: unchanged
+__arith_coerce_done:
+    POP  R13
+    POP  R12
+    POP  R11
+    POP  R10
+    POP  R9
+    POP  R8
+    POP  R7
+    POP  R6
+    POP  R5
+    POP  R4
+    POP  R3
+    POP  R2
+    POP  R1
+    RET

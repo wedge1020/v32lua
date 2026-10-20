@@ -22,8 +22,13 @@ int emit_system_date_intrinsic(ASTNode *node, int dest_reg)
     emit_asm("    ;; --- Intrinsic: system.date() ---\n");
 
     // --- Step 1: read the hardware register and unpack it ---
+    // allocate_register() hands out a free register. This used to also
+    // force_spill_register() it, which stored the register to its spill
+    // slot and left that slot marked: the next ensure_in_register() of
+    // the same register, anywhere later in the function, then "reloaded"
+    // the stale word over a freshly computed value (`a == b` compared a
+    // with junk after a math.randomseed(system.time())).
     int raw_reg = allocate_register();
-    force_spill_register(raw_reg);
     emit_asm("    IN R%d, TIM_CurrentDate\n", raw_reg);
     emit_asm("    PUSH R%d\n", raw_reg);
     emit_asm("    CALL __builtin_unpack_date\n");
@@ -73,6 +78,10 @@ int emit_system_date_intrinsic(ASTNode *node, int dest_reg)
     emit_asm("    MOV R2, R1 ; return value 2: year\n");
     // R0 already holds the formatted string: return value 1
 
+    // single-value context (`local s = system.X()`, an argument): the
+    // caller's dest_reg gets the string; multi-value sites pass 0.
+    if (dest_reg != 0) emit_asm("    MOV R%d, R0 ; first return value\n", dest_reg);
+
     return 4;
 }
 
@@ -93,8 +102,13 @@ int emit_system_time_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: system.time() ---\n");
 
+    // allocate_register() hands out a free register. This used to also
+    // force_spill_register() it, which stored the register to its spill
+    // slot and left that slot marked: the next ensure_in_register() of
+    // the same register, anywhere later in the function, then "reloaded"
+    // the stale word over a freshly computed value (`a == b` compared a
+    // with junk after a math.randomseed(system.time())).
     int raw_reg = allocate_register();
-    force_spill_register(raw_reg);
     emit_asm("    IN R%d, TIM_CurrentTime\n", raw_reg);
     emit_asm("    PUSH R%d\n", raw_reg);
     emit_asm("    CALL __builtin_unpack_time\n");
@@ -137,6 +151,10 @@ int emit_system_time_intrinsic(ASTNode *node, int dest_reg)
     emit_asm("    MOV R3, R2 ; return value 3: minute\n");
     emit_asm("    MOV R2, R1 ; return value 2: hour\n");
     // R0 already holds the formatted string: return value 1
+
+    // single-value context (`local s = system.X()`, an argument): the
+    // caller's dest_reg gets the string; multi-value sites pass 0.
+    if (dest_reg != 0) emit_asm("    MOV R%d, R0 ; first return value\n", dest_reg);
 
     return 4;
 }

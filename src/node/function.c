@@ -9,7 +9,16 @@ void  node_function_def (ASTNode *node)
 
     mark_global_as_function (node);
 
-    bool is_nested_def = (context_stack_head != NULL);
+    // The body is emitted exactly where this node is generated. Only the
+    // hoisting pass (generate_functions(), for plain top-level `function f`
+    // statements) emits it outside any running code; EVERYWHERE else --
+    // inside another function, or inside a file-scope block/expression that
+    // runs as part of __global_scope_initialization (`do local x; function
+    // f() end end`, `t = { f = function() end }`) -- execution would fall
+    // straight into the body, so it must be jumped over. The old test
+    // (context stack non-empty) missed the file-scope cases: tomb_of_the_tic
+    // ran ui() during global init, celeste ran player.init with this = junk.
+    bool is_nested_def = (context_stack_head != NULL) || !g_emitting_hoisted_functions;
     if (is_nested_def) {
         emit_asm("JMP __%s_skip\n", func_name);
     }
@@ -19,6 +28,23 @@ void  node_function_def (ASTNode *node)
     int saved_register_use_distance[NUM_GPRS];
     memcpy(saved_spill_slot_for_reg, spill_slot_for_reg, sizeof(saved_spill_slot_for_reg));
     memcpy(saved_register_use_distance, register_use_distance, sizeof(saved_register_use_distance));
+
+    // The body runs in its own frame, whenever it's called -- not in the
+    // middle of whatever expression encloses its definition. So it starts
+    // with every register free, whatever that enclosing code holds: a
+    // `u = function(m) ... end` inside a nested table constructor used to
+    // inherit the constructor's live, PINNED registers (5 of 13 in
+    // witchem_up's enemy_def), and under that pressure the allocator's
+    // last-resort steal handed out registers still in use -- `m.t - m.smove`
+    // came out as FSUB R1, R1. Restored below for the enclosing code.
+    int saved_register_inventory[NUM_GPRS];
+    int saved_register_pinned[NUM_GPRS];
+    memcpy(saved_register_inventory, register_inventory, sizeof(saved_register_inventory));
+    memcpy(saved_register_pinned, register_pinned, sizeof(saved_register_pinned));
+    for (int i = 1; i < NUM_GPRS; i++) {
+        register_inventory[i] = 0;
+        register_pinned[i]    = 0;
+    }
 
     push_function_context (func_name, node);
 
@@ -34,8 +60,34 @@ void  node_function_def (ASTNode *node)
 
     reset_spill_slots(-(num_locals + 1));
     int total_stack = num_locals + NUM_GPRS;
+
+    // Variadic ABI: every call that may reach a variadic function loads the
+    // number of arguments it pushed (self included, NIL padding excluded)
+    // into VARARG_COUNT_REG right before CALL __builtin_exec -- which only
+    // touches R0-R5 -- so the callee can save it here, whatever path the
+    // call took (named function, local function, table field, parameter,
+    // runtime callback). It used to be a stack word pushed only when the
+    // call site could statically prove the target variadic, so a call
+    // through a local or any other value left the callee reading a fixed
+    // parameter as the count (and every parameter one slot off).
+    bool fn_is_variadic = false;
+    for (ASTNode *pp = node->as.function_def.params; pp != NULL; pp = pp->next) {
+        if (pp->type == NODE_IDENTIFIER && strcmp(pp->as.id.name, "...") == 0) {
+            fn_is_variadic = true;
+            break;
+        }
+    }
+    int vararg_count_slot = -(total_stack + 1);   // just below the spill area
+    if (fn_is_variadic) {
+        total_stack++;
+    }
+
     if (total_stack > 0) {
         emit_asm("ISUB SP, %d ; Reserve stack for locals + spills\n", total_stack);
+    }
+    if (fn_is_variadic) {
+        emit_asm("MOV [BP %d], R%d ; save caller's argument count (variadic ABI)\n",
+                 vararg_count_slot, VARARG_COUNT_REG);
     }
 
     // --- Default implicit return value(s): nil until overwritten ---
@@ -69,8 +121,9 @@ void  node_function_def (ASTNode *node)
 
     push_function_scope();
 
+    // Captured upvalues arrive as hidden leading parameters ([BP+2]...),
+    // pushed by __builtin_exec from the closure record.
     int param_offset  = 2;
-    int upvalue_count = name_list_length(node->as.function_def.upvalues);
 
     for (NameList *up = node->as.function_def.upvalues; up != NULL; up = up->next) {
         register_upvalue(up->name, param_offset++);
@@ -93,19 +146,9 @@ void  node_function_def (ASTNode *node)
     // shifts every real fixed parameter's offset out by exactly one,
     // matching where node_function_call() actually put them.
     // -------------------------------------------------------------------
-    bool has_dots_marker = false;
-    for (ASTNode *pp = node->as.function_def.params; pp != NULL; pp = pp->next) {
-        if (pp->type == NODE_IDENTIFIER && strcmp(pp->as.id.name, "...") == 0) {
-            has_dots_marker = true;
-            break;
-        }
-    }
-
-    int vararg_count_offset = -1;
-    if (has_dots_marker) {
-        vararg_count_offset = param_offset; // this slot will hold the runtime arg count
-        param_offset++;
-    }
+    // (Superseded: the count now arrives in VARARG_COUNT_REG and lives in
+    // a frame slot, so fixed parameters sit at their ordinary offsets.)
+    int vararg_count_offset = fn_is_variadic ? vararg_count_slot : -1;
 
     int is_variadic = 0;
     int fixed_param_count = 0;
@@ -146,7 +189,11 @@ void  node_function_def (ASTNode *node)
     SymbolNode *sym = resolve_symbol(func_name);
     if (sym) {
         sym->is_variadic = is_variadic;
-        sym->arity = is_variadic ? -1 : explicit_param_count;
+        if (body_returns_mv (node->as.function_def.body)) sym->returns_mv = true;
+        // Fixed parameter count for variadic functions too: call sites pad
+        // omitted fixed parameters with nil (the count register still says
+        // how many were really passed).
+        sym->arity = explicit_param_count;
     }
 
     // NOTE: the old unconditional "ISUB SP, 1 ; Space for argument count
@@ -157,7 +204,9 @@ void  node_function_def (ASTNode *node)
     // actually populated with the count in the first place; it was dead,
     // uninitialized stack space.
 
+    numlocals_enter(node);      // locals that only ever hold numbers (node/math.c)
     generate_block(node->as.function_def.body);
+    numlocals_leave();
     pop_scope();
 
     // -------------------------------------------------------------------
@@ -213,6 +262,8 @@ void  node_function_def (ASTNode *node)
 
             unlock_register(pad_reg);
         }
+        emit_asm("MOV R1, 0\n");
+        emit_asm("MOV [RET_COUNT], R1 ; no values returned\n");
     }
 
     emit_asm ("__%s_return:\n", func_name);
@@ -236,6 +287,8 @@ void  node_function_def (ASTNode *node)
     base_spill_frame_offset = saved_base_spill_frame_offset;
     memcpy(spill_slot_for_reg, saved_spill_slot_for_reg, sizeof(spill_slot_for_reg));
     memcpy(register_use_distance, saved_register_use_distance, sizeof(register_use_distance));
+    memcpy(register_inventory, saved_register_inventory, sizeof(register_inventory));
+    memcpy(register_pinned, saved_register_pinned, sizeof(register_pinned));
 
     if (is_nested_def) {
         emit_asm("__%s_skip:\n", func_name);
@@ -266,6 +319,19 @@ void  node_function_def (ASTNode *node)
 //   - arg_reg: Temporary for each argument evaluation
 //   - pad_reg: For padding missing arguments
 // ============================================================================
+// The call node whose CALL __builtin_exec was emitted most recently. Right
+// after it, [RET_COUNT] says how many values the callee returned (a compiled
+// function stores it on return; __builtin_exec presets 1 for runtime
+// routines). A caller checks `g_last_exec_call == its call node` after
+// generating the call: an intrinsic emits no exec call for its own node, so
+// an argument's call (the last one emitted) never passes for it.
+ASTNode *g_last_exec_call = NULL;
+
+// Whether the program can have metatables at all (it mentions setmetatable):
+// without them, a nil read from an array slot is simply nil, and the inline
+// t[i] path skips the check that would ask __index (node/table.c).
+bool g_uses_metatables = false;
+
 void  node_function_call (ASTNode *node, int  dest_reg)
 {
     // -------------------------------------------------------------------------
@@ -410,11 +476,15 @@ void  node_function_call (ASTNode *node, int  dest_reg)
                 table_get_node->as.table_get.key,
                 target_reg)) {
             // Fallback: Runtime table lookup
+            if (table_get_node->as.table_get.key->type == NODE_STRING) {
+                emit_getk_lookup(table_reg, key_reg, table_get_node->as.table_get.key, target_reg);
+            } else {
             emit_asm("PUSH R%d ; Arg1: Table pointer for method lookup\n", table_reg);
             emit_asm("PUSH R%d ; Arg2: Method key\n", key_reg);
             emit_asm("CALL __builtin_table_get\n");
             emit_asm("IADD SP, 2 ; Clean up lookup arguments\n");
             emit_asm("MOV R%d, R0 ; Store retrieved method pointer\n", target_reg);
+            }
         }
 
         // Clean up key register
@@ -477,6 +547,28 @@ void  node_function_call (ASTNode *node, int  dest_reg)
 
     int expected_arity = get_expected_arity(node->as.call.target);
 
+    // s:sub(i) etc. dispatch at run time to a __strmeth_* wrapper (see
+    // __builtin_string_method_lookup), which, like any Lua function here,
+    // has no argument count -- so NIL-pad calls to those method names up to
+    // the wrapper's full arity. Harmless for a user table's own method of
+    // the same name: extra trailing NILs are simply ignored.
+    if (expected_arity < 0 && node->as.call.is_method_call &&
+        node->as.call.target != NULL && node->as.call.target->type == NODE_TABLE_GET) {
+        ASTNode *k = node->as.call.target->as.table_get.key;
+        if (k != NULL && k->type == NODE_STRING) {
+            static const struct { const char *name; int arity; } strmeth[] = {
+                { "len", 1 }, { "upper", 1 }, { "lower", 1 }, { "reverse", 1 },
+                { "rep", 2 }, { "find", 2 }, { "sub", 3 }, { "byte", 3 }, { "gsub", 3 },
+            };
+            for (size_t m = 0; m < sizeof (strmeth) / sizeof (strmeth[0]); m++) {
+                if (strcmp (k->as.string_val.value, strmeth[m].name) == 0) {
+                    expected_arity = strmeth[m].arity;   // includes self
+                    break;
+                }
+            }
+        }
+    }
+
     // --- Detect a trailing table.unpack(...) call -- the only expression ---
     // --- form that can expand into more than one argument slot, matching ---
     // --- real Lua's rule that only the LAST expression in an argument ---
@@ -487,6 +579,20 @@ void  node_function_call (ASTNode *node, int  dest_reg)
     // --- (a call through a function VALUE, where expected_arity is -1) -- ---
     // --- in either case this falls through to ordinary single-value ---
     // --- handling, same as any other expression. ---
+    // Unknown target (a call's result, a function stored in a table, a
+    // parameter, obj:m():m()): nothing tells the callee how many arguments
+    // arrived, so any parameter the call omits would be read from stack
+    // garbage instead of being nil -- `obj:inc():inc()` with
+    // `function obj.inc(self, by) ... (by or 1)` added a junk `by`. Pad such
+    // calls with NIL up to the largest parameter count of any function in the
+    // program; callees ignore the extra trailing slots and the caller pops
+    // everything it pushed. (Known variadic targets keep their own
+    // argument-count convention below.)
+    if (expected_arity < 0 && !is_c_call) {
+        extern int g_max_param_count;
+        expected_arity = g_max_param_count;
+    }
+
     int unpack_extra_slots = 0;
     ASTNode *last_arg = NULL;
     if (explicit_arg_count > 0) {
@@ -495,7 +601,65 @@ void  node_function_call (ASTNode *node, int  dest_reg)
     }
     bool last_arg_is_unpack = (last_arg != NULL && is_table_unpack_call(last_arg));
 
-    if (last_arg_is_unpack && expected_arity >= 0) {
+    // A multi-value last argument (`...`, unpack(t), a call returning an
+    // unknown number of values): its values are pushed at run time, as many
+    // as there are (node/multivalue.c). The stack pointer from before the
+    // arguments and the real argument count are kept in pinned registers
+    // (spilled to their frame slots across the other arguments' calls):
+    // after the call, SP is restored instead of popping a known count.
+    bool mv_args = !is_c_call && last_arg != NULL && mv_is_tail (last_arg);
+    int  mv_sp_reg = -1, mv_cnt_reg = -1;
+    if (mv_args) {
+        int self_slot = node->as.call.is_method_call ? 1 : 0;
+        int fixed     = explicit_arg_count - 1;
+        int need      = (expected_arity >= 0) ? expected_arity - self_slot - fixed : 0;
+        int p2 = register_pinned[2], p3 = register_pinned[3];
+        register_pinned[2] = register_pinned[3] = 1;     // R2/R3: return values after the call
+        mv_sp_reg  = allocate_pinned_register ();
+        mv_cnt_reg = allocate_pinned_register ();
+        register_pinned[2] = p2; register_pinned[3] = p3;
+        emit_asm ("MOV R%d, SP ; stack before the arguments (multi-value call)\n", mv_sp_reg);
+        force_spill_register (mv_sp_reg);
+
+        emit_mv_to_buf (last_arg);
+
+        int rt = allocate_register ();
+        int rv = allocate_register ();
+        int id = get_next_label ();
+        const char *ctx = get_current_function_name ();
+        emit_asm ("MOV R%d, [RET_COUNT] ; values in the list\n", mv_cnt_reg);
+        if (need > 1) {
+            // nil for the parameters the list doesn't reach
+            emit_asm ("MOV R%d, %d\n", rt, need);
+            emit_asm ("ISUB R%d, R%d ; parameters left without a value\n", rt, mv_cnt_reg);
+            emit_asm ("__%s_mvpad_%d:\n", ctx, id);
+            emit_asm ("MOV R%d, R%d\n", rv, rt);
+            emit_asm ("IGT R%d, 0\n", rv);
+            emit_asm ("JF  R%d, __%s_mvpad_end_%d\n", rv, ctx, id);
+            emit_asm ("MOV R%d, BOXED_NIL\n", rv);
+            emit_asm ("PUSH R%d\n", rv);
+            emit_asm ("ISUB R%d, 1\n", rt);
+            emit_asm ("JMP __%s_mvpad_%d\n", ctx, id);
+            emit_asm ("__%s_mvpad_end_%d:\n", ctx, id);
+        }
+        emit_asm ("MOV R%d, R%d\n", rt, mv_cnt_reg);
+        emit_asm ("__%s_mvarg_%d:\n", ctx, id);
+        emit_asm ("JF  R%d, __%s_mvarg_end_%d\n", rt, ctx, id);
+        emit_asm ("ISUB R%d, 1\n", rt);
+        emit_asm ("MOV R%d, R%d\n", rv, rt);
+        emit_asm ("IADD R%d, MV_BUF\n", rv);
+        emit_asm ("MOV R%d, [R%d]\n", rv, rv);
+        emit_asm ("PUSH R%d ; list value (last first)\n", rv);
+        emit_asm ("JMP __%s_mvarg_%d\n", ctx, id);
+        emit_asm ("__%s_mvarg_end_%d:\n", ctx, id);
+        emit_asm ("IADD R%d, %d ; + the other arguments -> argument count\n",
+                  mv_cnt_reg, fixed + self_slot);
+        unlock_register (rv);
+        unlock_register (rt);
+        force_spill_register (mv_cnt_reg);
+    }
+
+    if (last_arg_is_unpack && expected_arity >= 0 && !mv_args) {
         int self_slot = node->as.call.is_method_call ? 1 : 0;
         int needed = expected_arity - self_slot - (explicit_arg_count - 1);
         if (needed > 1) {
@@ -510,7 +674,7 @@ void  node_function_call (ASTNode *node, int  dest_reg)
                             (node->as.call.is_method_call ? 1 : 0) +
                             unpack_extra_slots;
 
-    if (expected_arity > actual_passed_count) {
+    if (expected_arity > actual_passed_count && !mv_args) {
         int missing_args = expected_arity - actual_passed_count;
         emit_asm("    ; --- Padding %d omitted arguments ---\n",
                  missing_args, is_c_call ? "with 0 (C ABI)" : "with Nil");
@@ -550,6 +714,9 @@ void  node_function_call (ASTNode *node, int  dest_reg)
         emit_asm("    ; --- Pushing explicit arguments Right-to-Left ---\n");
 
         for (int i = explicit_arg_count - 1; i >= 0; i--) {
+            if (i == explicit_arg_count - 1 && mv_args) {
+                continue;       // already pushed, above
+            }
             if (i == explicit_arg_count - 1 && unpack_extra_slots > 0) {
                 // --- Trailing table.unpack(...) expanding into ---
                 // --- (1 + unpack_extra_slots) argument slots. Pushed in ---
@@ -615,14 +782,16 @@ void  node_function_call (ASTNode *node, int  dest_reg)
     // -------------------------------------------------------------------------
     // STEP 3.5: Push Argument Count for Variadic Functions
     // -------------------------------------------------------------------------
-    if (target_sym && target_sym->is_variadic) {
-        emit_asm("    ; --- Variadic call: push argument count ---\n");
-        int arg_count_reg = allocate_register();
-        emit_asm("MOV R%d, %d ; Load total argument count\n", arg_count_reg, total_arg_count);
-        emit_asm("PUSH R%d ; Push arg count for variadic function\n", arg_count_reg);
-        unlock_register(arg_count_reg);
-        total_arg_count++; // Account for the arg count itself
+    // (Now VARARG_COUNT_REG, loaded just before CALL __builtin_exec below --
+    // see node_function_def().) Skipped only when the target is statically
+    // known to be a non-variadic Lua function.
+    SymbolNode *callee_fn = NULL;
+    if (node->as.call.target->type == NODE_IDENTIFIER) {
+        callee_fn = resolve_function_symbol(node->as.call.target->as.id.name);
+    } else {
+        callee_fn = target_sym;
     }
+    bool pass_arg_count = !(callee_fn != NULL && callee_fn->is_function && !callee_fn->is_variadic);
 
     // -------------------------------------------------------------------------
     // STEP 4: Execute Call & Clean Up Stack
@@ -658,11 +827,25 @@ void  node_function_call (ASTNode *node, int  dest_reg)
         // Unlock target_reg now that we've moved its value to R0
         unlock_pinned_register(target_reg);
 
+        if (mv_args) {
+            ensure_in_register (mv_cnt_reg);
+            emit_asm("MOV R%d, R%d ; argument count (variadic ABI)\n", VARARG_COUNT_REG, mv_cnt_reg);
+            unlock_pinned_register (mv_cnt_reg);
+        } else if (pass_arg_count) {
+            emit_asm("MOV R%d, %d ; argument count (variadic ABI)\n",
+                     VARARG_COUNT_REG, actual_passed_count);
+        }
+
         // Call the Lua function executor (handles tag validation & tail-call)
         emit_asm("CALL __builtin_exec ; Validate and execute\n");
+        g_last_exec_call = node;   // RET_COUNT is valid right after this call
 
         // Clean up arguments from stack
-        if (total_arg_count > 0) {
+        if (mv_args) {
+            ensure_in_register (mv_sp_reg);
+            emit_asm("MOV SP, R%d ; drop the arguments (multi-value call)\n", mv_sp_reg);
+            unlock_pinned_register (mv_sp_reg);
+        } else if (total_arg_count > 0) {
             emit_asm("IADD SP, %d ; Clean up call arguments\n", total_arg_count);
         }
 
@@ -676,7 +859,7 @@ void  node_function_call (ASTNode *node, int  dest_reg)
 void node_function_pointer (ASTNode *node, int dest_reg)
 {
     if (node->as.func_ptr.func_def) {
-        generate_asm(node->as.func_ptr.func_def, 0);
+        generate_asm(node->as.func_ptr.func_def, 0);   // jumps over its own body
     }
     emit_load_function_value(node->as.func_ptr.func_def, node->as.func_ptr.mangled_name, dest_reg);
 }

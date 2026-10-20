@@ -64,6 +64,10 @@ bool emit_math_sqrt_intrinsic(ASTNode *node, int dest_reg)
     generate_asm(arg, arg_reg);
 
     // Compute sqrt(x) = x^0.5
+    // POW of a negative base by 0.5 is a hardware PowerError; the real
+    // answer (NaN) can't be NaN-boxed, so sqrt(negative) = 0.
+    emit_asm("MOV R%d, 0.0\n", tmp_reg);
+    emit_asm("FMAX R%d, R%d ; sqrt(negative) = 0, not a PowerError\n", arg_reg, tmp_reg);
     emit_asm("MOV R%d, 0.5 ; Load exponent\n", tmp_reg);
     emit_asm("POW R%d, R%d ; Compute x^0.5\n", arg_reg, tmp_reg);
 
@@ -183,6 +187,16 @@ bool emit_math_acos_intrinsic(ASTNode *node, int dest_reg)
 
     int arg_reg = allocate_register();
     generate_asm(arg, arg_reg);
+    // ACOS outside [-1, 1] is a hardware ArcCosineError: clamp (float
+    // rounding in e.g. acos(dot / (|a| * |b|)) lands just outside).
+    {
+        int t = allocate_register();
+        emit_asm("MOV  R%d, -1.0\n", t);
+        emit_asm("FMAX R%d, R%d\n", arg_reg, t);
+        emit_asm("MOV  R%d, 1.0\n", t);
+        emit_asm("FMIN R%d, R%d ; clamp to [-1, 1]: no ArcCosineError\n", arg_reg, t);
+        unlock_register(t);
+    }
     emit_asm("ACOS R%d ; Arc cosine\n", arg_reg);
 
     if (dest_reg != 0) {
@@ -211,7 +225,23 @@ bool emit_math_log_intrinsic(ASTNode *node, int dest_reg)
 
     int arg_reg = allocate_register();
     generate_asm(arg, arg_reg);
-    emit_asm("LOG R%d ; Natural log\n", arg_reg);
+    // LOG of x <= 0 is a hardware LogarithmError; log(0) = -inf in Lua
+    // (saturated to -huge here, as x / 0 is), log(negative) = NaN -> -huge.
+    {
+        int         id  = get_next_label();
+        const char *ctx = get_current_function_name();
+        int         t   = allocate_register();
+        emit_asm("MOV  R%d, R%d\n", t, arg_reg);
+        emit_asm("FLE  R%d, 0.0 ; x <= 0?\n", t);
+        emit_asm("JF   R%d, __%s_log_ok_%d\n", t, ctx, id);
+        emit_asm("MOV  R%d, [__const_math_huge]\n", arg_reg);
+        emit_asm("FSGN R%d ; log(x <= 0) = -huge, not a LogarithmError\n", arg_reg);
+        emit_asm("JMP  __%s_log_done_%d\n", ctx, id);
+        emit_asm("__%s_log_ok_%d:\n", ctx, id);
+        emit_asm("LOG  R%d ; Natural log\n", arg_reg);
+        emit_asm("__%s_log_done_%d:\n", ctx, id);
+        unlock_register(t);
+    }
 
     if (dest_reg != 0) {
         emit_asm("MOV R%d, R%d ; Transfer result to dest_reg\n", dest_reg, arg_reg);
@@ -241,13 +271,20 @@ bool emit_math_pow_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.pow(x, y) ---\n");
 
+    // The second argument may CALL (max(a, f())), and registers don't
+    // survive a CALL: hold the first on the stack meanwhile (as node_add()).
     int x_reg = allocate_register();
-    int y_reg = allocate_register();
-
     generate_asm(arg, x_reg);
-    generate_asm(arg->next, y_reg);
+    ensure_in_register(x_reg);
+    emit_asm("PUSH R%d ; hold the first argument while the second is evaluated\n", x_reg);
 
-    emit_asm("POW R%d, R%d ; R%d = R%d ^ R%d\n", x_reg, y_reg, x_reg, x_reg, y_reg);
+    int y_reg = allocate_register();
+    mark_register_live(y_reg, 1);
+    generate_asm(arg->next, y_reg);
+    ensure_in_register(y_reg);
+    emit_asm("POP R%d\n", x_reg);
+
+    emit_safe_pow(x_reg, y_reg, false);
 
     if (dest_reg != 0) {
         emit_asm("MOV R%d, R%d ; Transfer result to dest_reg\n", dest_reg, x_reg);
@@ -275,17 +312,42 @@ bool emit_math_atan2_intrinsic(ASTNode *node, int dest_reg)
     emit_asm("    ;; --- Intrinsic: math.atan2(y, x) ---\n");
 
     int y_reg = allocate_register();
-    int x_reg = allocate_register();
-
+    register_pinned[y_reg] = 1;
     generate_asm(arg, y_reg);      // First arg = y
-    generate_asm(arg->next, x_reg); // Second arg = x
+    ensure_in_register(y_reg);
+    emit_asm("PUSH R%d ; spill y across x's evaluation\n", y_reg);
 
+    int x_reg = allocate_register();
+    register_pinned[x_reg] = 1;
+    generate_asm(arg->next, x_reg); // Second arg = x
+    ensure_in_register(x_reg);
+    emit_asm("POP R%d\n", y_reg);
+
+    // ATAN2 with both operands zero is a Vircon32 HARDWARE ERROR (the CPU
+    // halts); Lua gives 0. warm_wheels' angle() hit it on its first lap.
+    int t_reg = allocate_register();
+    int u_reg = allocate_register();
+    int id = get_next_label();
+    emit_asm("MOV  R%d, R%d\n", t_reg, y_reg);
+    emit_asm("FEQ  R%d, 0.0\n", t_reg);
+    emit_asm("MOV  R%d, R%d\n", u_reg, x_reg);
+    emit_asm("FEQ  R%d, 0.0\n", u_reg);
+    emit_asm("AND  R%d, R%d\n", t_reg, u_reg);
+    emit_asm("JF   R%d, __atan2_ok_%d\n", t_reg, id);
+    emit_asm("MOV  R%d, 0.0 ; atan2(0, 0) = 0\n", y_reg);
+    emit_asm("JMP  __atan2_done_%d\n", id);
+    emit_asm("__atan2_ok_%d:\n", id);
     emit_asm("ATAN2 R%d, R%d ; R%d = atan2(R%d, R%d)\n", y_reg, x_reg, y_reg, y_reg, x_reg);
+    emit_asm("__atan2_done_%d:\n", id);
 
     if (dest_reg != 0) {
         emit_asm("MOV R%d, R%d ; Transfer result to dest_reg\n", dest_reg, y_reg);
     }
 
+    unlock_register(t_reg);
+    unlock_register(u_reg);
+    register_pinned[y_reg] = 0;
+    register_pinned[x_reg] = 0;
     unlock_register(y_reg);
     unlock_register(x_reg);
     return true;
@@ -322,44 +384,45 @@ bool emit_math_random_intrinsic(ASTNode *node, int dest_reg)
  
     emit_asm("    ;; --- Intrinsic: math.random() ---\n");
  
-    // Push arguments in REVERSE order, matching every other intrinsic in
-    // this codebase and __builtin_random's own documented contract:
-    // [BP+2] = first argument, [BP+3] = second argument. Since the last
-    // value pushed ends up at [BP+2], arg2 must be pushed BEFORE arg1.
- 
-    int arg1_reg = 0, arg2_reg = 0;
- 
+    // ALWAYS push exactly two slots -- [BP+3] = second argument, [BP+2] =
+    // first -- with BOXED_NIL standing in for a missing one.
+    // __builtin_random tells "no argument" from "argument" by whether the
+    // slot holds a NaN-boxed word; it used to be handed NO slots for
+    // math.random() and so inspected whatever the CALLER had left on the
+    // stack (PICO-8 rnd(10) spills its 10.0 there, so its inner no-arg
+    // call took the math.random(10) integer path and returned 1..10).
+    //
+    // Arguments are evaluated left to right and each is pushed at once, so
+    // a nested CALL in the second can't clobber the first.
     if (arg_count >= 1) {
-        arg1_reg = allocate_pinned_register();
-        generate_asm(arg, arg1_reg);
+        int r1 = allocate_pinned_register();
+        generate_asm(arg, r1);
+        emit_asm("    PUSH R%d       ; math.random: arg 1 (temp)\n", r1);
+        if (arg_count == 2) {
+            int r2 = allocate_pinned_register();
+            generate_asm(arg->next, r2);
+            emit_asm("    POP  R%d       ; reload arg 1\n", r1);
+            emit_asm("    PUSH R%d       ; [BP+3] = arg 2\n", r2);
+            unlock_pinned_register(r2);
+        } else {
+            emit_asm("    POP  R%d       ; reload arg 1\n", r1);
+            emit_asm("    MOV  R0, BOXED_NIL\n");
+            emit_asm("    PUSH R0        ; [BP+3] = no arg 2\n");
+        }
+        emit_asm("    PUSH R%d       ; [BP+2] = arg 1\n", r1);
+        unlock_pinned_register(r1);
+    } else {
+        emit_asm("    MOV  R0, BOXED_NIL\n");
+        emit_asm("    PUSH R0        ; [BP+3] = no arg 2\n");
+        emit_asm("    PUSH R0        ; [BP+2] = no arg 1\n");
     }
- 
-    if (arg_count == 2) {
-        arg2_reg = allocate_pinned_register();
-        generate_asm(arg->next, arg2_reg);
-        emit_asm("    PUSH R%d       ; Push second argument\n", arg2_reg);
-    }
- 
-    if (arg_count >= 1) {
-        emit_asm("    PUSH R%d       ; Push first argument\n", arg1_reg);
-    }
- 
-    // Call the runtime subroutine
+
     emit_asm("    CALL __builtin_random\n");
- 
-    // Clean up stack: 2 args = pop 2, 1 arg = pop 1, 0 args = pop 0
-    if (arg_count > 0) {
-        emit_asm("    IADD SP, %d    ; Clean up %d argument(s)\n", arg_count, arg_count);
-    }
- 
-    // Result is in R0
+    emit_asm("    IADD SP, 2     ; Clean up both argument slots\n");
+
     if (dest_reg != 0) {
         emit_asm("    MOV R%d, R0    ; Transfer result to dest_reg\n", dest_reg);
     }
- 
-    if (arg1_reg) unlock_pinned_register(arg1_reg);
-    if (arg2_reg) unlock_pinned_register(arg2_reg);
- 
     return true;
 }
 
@@ -380,6 +443,21 @@ bool emit_math_randomseed_intrinsic(ASTNode *node, int dest_reg)
     }
 
     emit_asm("    ;; --- Intrinsic: math.randomseed(x) ---\n");
+
+    // system.time()/system.date() return a string first ("HH:MM:SS"); the
+    // runtime seeds from the clock for a non-number, but say so.
+    if (arg->type == NODE_FUNCTION_CALL && arg->as.call.target != NULL) {
+        char path[256] = {0};
+        if (resolve_static_path (arg->as.call.target, path) &&
+            (strcmp (path, "system.time") == 0 || strcmp (path, "system.date") == 0)) {
+            compiler_warning (ERR_SEMANTIC, node->line_number,
+                "math.randomseed(%s()): its first value is a string, not a number; "
+                "the RNG is seeded from the clock instead (use ioports.tim.time for a numeric seed)", path);
+        }
+    } else if (arg->type == NODE_STRING || arg->type == NODE_NIL) {
+        compiler_warning (ERR_SEMANTIC, node->line_number,
+            "math.randomseed(): the seed is not a number; the RNG is seeded from the clock instead");
+    }
 
     int arg_reg = allocate_pinned_register();
     generate_asm(arg, arg_reg);
@@ -528,13 +606,35 @@ bool emit_math_fmod_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.fmod(x, y) ---\n");
 
+    // The second argument may CALL (max(a, f())), and registers don't
+    // survive a CALL: hold the first on the stack meanwhile (as node_add()).
     int x_reg = allocate_register();
-    int y_reg = allocate_register();
-
     generate_asm(arg, x_reg);
-    generate_asm(arg->next, y_reg);
+    ensure_in_register(x_reg);
+    emit_asm("PUSH R%d ; hold the first argument while the second is evaluated\n", x_reg);
 
-    emit_asm("FMOD R%d, R%d ; R%d = fmod(R%d, R%d)\n", x_reg, y_reg, x_reg, x_reg, y_reg);
+    int y_reg = allocate_register();
+    mark_register_live(y_reg, 1);
+    generate_asm(arg->next, y_reg);
+    ensure_in_register(y_reg);
+    emit_asm("POP R%d\n", x_reg);
+
+    // FMOD by zero is a hardware DivisionError; fmod(x, 0) = 0 (NaN in
+    // Lua, which NaN-boxing can't carry).
+    {
+        int         id  = get_next_label();
+        const char *ctx = get_current_function_name();
+        int         t   = allocate_register();
+        emit_asm("MOV  R%d, 0.0\n", t);
+        emit_asm("FEQ  R%d, R%d ; zero divisor?\n", t, y_reg);
+        emit_asm("JF   R%d, __%s_fmod_ok_%d\n", t, ctx, id);
+        emit_asm("MOV  R%d, 0.0 ; fmod(x, 0) = 0\n", x_reg);
+        emit_asm("JMP  __%s_fmod_done_%d\n", ctx, id);
+        emit_asm("__%s_fmod_ok_%d:\n", ctx, id);
+        emit_asm("FMOD R%d, R%d ; R%d = fmod(R%d, R%d)\n", x_reg, y_reg, x_reg, x_reg, y_reg);
+        emit_asm("__%s_fmod_done_%d:\n", ctx, id);
+        unlock_register(t);
+    }
 
     if (dest_reg != 0) {
         emit_asm("    MOV R%d, R%d ; Transfer result to dest_reg\n", dest_reg, x_reg);
@@ -563,11 +663,18 @@ bool emit_math_max_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.max(x, y) ---\n");
 
+    // The second argument may CALL (max(a, f())), and registers don't
+    // survive a CALL: hold the first on the stack meanwhile (as node_add()).
     int x_reg = allocate_register();
-    int y_reg = allocate_register();
-
     generate_asm(arg, x_reg);
+    ensure_in_register(x_reg);
+    emit_asm("PUSH R%d ; hold the first argument while the second is evaluated\n", x_reg);
+
+    int y_reg = allocate_register();
+    mark_register_live(y_reg, 1);
     generate_asm(arg->next, y_reg);
+    ensure_in_register(y_reg);
+    emit_asm("POP R%d\n", x_reg);
 
     emit_asm("FMAX R%d, R%d ; R%d = max(R%d, R%d)\n", x_reg, y_reg, x_reg, x_reg, y_reg);
 
@@ -598,11 +705,18 @@ bool emit_math_min_intrinsic(ASTNode *node, int dest_reg)
 
     emit_asm("    ;; --- Intrinsic: math.min(x, y) ---\n");
 
+    // The second argument may CALL (max(a, f())), and registers don't
+    // survive a CALL: hold the first on the stack meanwhile (as node_add()).
     int x_reg = allocate_register();
-    int y_reg = allocate_register();
-
     generate_asm(arg, x_reg);
+    ensure_in_register(x_reg);
+    emit_asm("PUSH R%d ; hold the first argument while the second is evaluated\n", x_reg);
+
+    int y_reg = allocate_register();
+    mark_register_live(y_reg, 1);
     generate_asm(arg->next, y_reg);
+    ensure_in_register(y_reg);
+    emit_asm("POP R%d\n", x_reg);
 
     emit_asm("FMIN R%d, R%d ; R%d = min(R%d, R%d)\n", x_reg, y_reg, x_reg, x_reg, y_reg);
 
@@ -879,10 +993,13 @@ int  emit_math_modf_intrinsic(ASTNode *node, int dest_reg)
     emit_asm("    CALL __builtin_modf\n");
     emit_asm("    IADD SP, 1\n");
 
-    // ✅ FIX: Store BOTH return values (R0=int, R1=frac) in spill slots
-    // We can't use dest_reg here because it's a single register.
-    // Instead, we'll let node_multiple_assignment handle the registers.
+    // Both results stay in the multi-return registers (R0 = integral part,
+    // R2 = fraction) for node_multiple_assignment(). In a single-value
+    // context (`math.modf(x) + 1`, an argument) the caller passes a real
+    // dest_reg and wants the FIRST value there -- it used to be left in R0,
+    // so the expression read whatever dest_reg happened to hold.
     unlock_register(arg_reg);
+    if (dest_reg != 0) emit_asm("    MOV R%d, R0 ; first return value\n", dest_reg);
 
     // Mark that this intrinsic produces multiple values
     return 2;  // ✅ Return 2 to indicate TWO return values
@@ -907,6 +1024,8 @@ int  emit_math_frexp_intrinsic(ASTNode *node, int dest_reg)
     emit_asm("    CALL __builtin_frexp\n");
     emit_asm("    IADD SP, 1\n");
     unlock_register(arg_reg);
+    // single-value context: the mantissa (see math.modf above)
+    if (dest_reg != 0) emit_asm("    MOV R%d, R0 ; first return value\n", dest_reg);
 
     // ✅ Return 2 to indicate TWO return values
     return 2;
@@ -925,13 +1044,16 @@ int   emit_math_ldexp_intrinsic(ASTNode *node, int dest_reg)
     }
 
     emit_asm("    ;; --- Intrinsic: math.ldexp(m, e) ---\n");
+    // Push m first, then e (so m is at [BP+3], e at [BP+2]). m is pushed
+    // before e is evaluated: e may CALL, and registers don't survive one.
     int m_reg = allocate_register();
-    int e_reg = allocate_register();
     generate_asm(arg, m_reg);
-    generate_asm(arg->next, e_reg);
-
-    // ✅ FIX: Push m first, then e (so m is at [BP+3], e at [BP+2])
+    ensure_in_register(m_reg);
     emit_asm("    PUSH R%d\n", m_reg);
+    int e_reg = allocate_register();
+    mark_register_live(e_reg, 1);
+    generate_asm(arg->next, e_reg);
+    ensure_in_register(e_reg);
     emit_asm("    PUSH R%d\n", e_reg);
     emit_asm("    CALL __builtin_ldexp\n");
     emit_asm("    IADD SP, 2\n");

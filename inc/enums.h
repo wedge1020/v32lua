@@ -12,6 +12,8 @@ typedef enum
     NODE_FOR_NUMERIC,
     NODE_FOR_GENERIC,
     NODE_BREAK,
+    NODE_GOTO,
+    NODE_LABEL,
     NODE_IF,
     NODE_DO_BLOCK,
     NODE_FUNCTION_DEF,
@@ -47,7 +49,18 @@ typedef enum
     NODE_TIC80_SECTION_HEADER,
     NODE_TIC80_ASSET_DATA,
     NODE_TIC80_SECTION_FOOTER,
-    NODE_CART_HINT
+    NODE_CART_HINT,
+    // Bitwise operators (node/bitops.c). Lua 5.3/5.4: & | ~ << >>;
+    // PICO-8 adds ^^ (xor), >>> (logical right), <<> / >>< (rotates), and
+    // its >> is arithmetic. Unary ~ is NODE_UNARY with OP_BNOT.
+    NODE_BAND,
+    NODE_BOR,
+    NODE_BXOR,
+    NODE_SHL,
+    NODE_SHR,
+    NODE_LSHR,
+    NODE_ROTL,
+    NODE_ROTR
 } NodeType;
 
 typedef enum
@@ -60,7 +73,8 @@ typedef enum
     OP_GE,
     OP_LEN,
     OP_NOT,
-    OP_UNM
+    OP_UNM,
+    OP_BNOT
 } Operator;
 
 typedef enum

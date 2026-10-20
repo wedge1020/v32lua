@@ -8,7 +8,10 @@ bool is_table_unpack_call(ASTNode *call_node)
     if (call_node->type != NODE_FUNCTION_CALL) return false;
     char path[256] = {0};
     if (!resolve_static_path(call_node->as.call.target, path)) return false;
-    return strcmp(path, "table.unpack") == 0;
+    if (strcmp(path, "table.unpack") == 0) return true;
+    // PICO-8's bare unpack(t [, i [, j]]): the prelude's (pico8_prelude.c),
+    // same semantics -- unless the program defines its own
+    return strcmp(path, "unpack") == 0 && pico8_prelude_builtin("unpack");
 }
 
 // Resolves table.unpack(t, [i], [j])'s arguments into synthetic locals

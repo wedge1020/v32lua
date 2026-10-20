@@ -4,6 +4,42 @@
 char          cart_version[64]    = "1.0";
 char          cart_title[128]     = "Vircon32 Program";
 bool          cart_title_was_set  = false;
+char          cart_title_opt[128] = "";
+bool          cart_title_opt_set  = false;
+bool          g_no_diff_opt_title = false;
+bool          g_cli_titleopt_set  = false;
+bool          g_cli_api_set       = false;
+bool          g_cli_rate_set    = false;
+bool          g_cli_title_set     = false;
+
+// Switches the compiler into one API mode: shared by the --#api hint, the
+// --api command-line option and API auto-detection. False for an unknown name.
+bool apply_api_mode (const char *api_name)
+{
+    if (strcmp(api_name, "pico8") == 0) {
+        runtime_req.needs_pico8           = true;
+        runtime_req.needs_tic80           = false;
+        runtime_req.needs_vircon32        = false;
+        runtime_req.needs_tables          = true;
+        // PICO-8's bare math globals (rnd/flr/min/max/tan/...) alias onto
+        // math.* emitters that CALL __builtin_* routines in math.s, but
+        // needs_math is otherwise only set for a literal "math." prefix
+        // -- tan()/rnd() in a PICO-8 cart failed to assemble without it.
+        runtime_req.needs_math            = true;
+    } else if (strcmp(api_name, "tic80") == 0) {
+        runtime_req.needs_tic80           = true;
+        runtime_req.needs_pico8           = false;
+        runtime_req.needs_vircon32        = false;
+        runtime_req.needs_tables          = true;
+    } else if (strcmp(api_name, "vircon32") == 0 || strcmp(api_name, "native") == 0) {
+        runtime_req.needs_tic80           = false;
+        runtime_req.needs_pico8           = false;
+        runtime_req.needs_vircon32        = true;
+    } else {
+        return false;
+    }
+    return true;
+}
 CARTresource *textures_head       = NULL;
 CARTresource *sounds_head         = NULL;
 CARTresource *textures_tail       = NULL;
@@ -71,6 +107,7 @@ CARTresource *cart_resource_append (CARTresource **head, CARTresource **tail,
     res->id       = id;
     res->var_name = (var_name != NULL) ? strdup (var_name) : NULL;
     res->filename = (filename != NULL) ? strdup (filename) : NULL;
+    res->generated = false;
     res->next     = NULL;
 
     if (*tail != NULL) {
@@ -80,6 +117,18 @@ CARTresource *cart_resource_append (CARTresource **head, CARTresource **tail,
     }
     *tail = res;
 
+    return res;
+}
+
+// Same, for a file the compiler itself writes (a PICO-8/TIC-80 sprite sheet,
+// synthesized sound, ...): it sits beside the output file, which is what the
+// cartridge XML needs to know to name it correctly.
+CARTresource *cart_resource_append_generated (CARTresource **head, CARTresource **tail,
+                                              int id, const char *var_name, const char *filename)
+{
+    CARTresource *res = cart_resource_append (head, tail, id, var_name, filename);
+
+    if (res != NULL) res->generated = true;
     return res;
 }
 
@@ -112,34 +161,135 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
             api_name[sizeof(api_name) - 1] = '\0';
         }
 
-        if (strcmp(api_name, "pico8")        == 0) {
-            runtime_req.needs_pico8           = true;
-            runtime_req.needs_tic80           = false;
-            runtime_req.needs_vircon32        = false;
-            runtime_req.needs_tables          = true;
-        } else if (strcmp(api_name, "tic80") == 0) {
-            runtime_req.needs_tic80           = true;
-            runtime_req.needs_pico8           = false;
-            runtime_req.needs_vircon32        = false;
-            runtime_req.needs_tables          = true;
-        } else {
+        if (g_cli_api_set) {
+            // --api on the command line wins over the source's own hint
+        } else if (strcmp(api_name, "pico8") != 0 && strcmp(api_name, "tic80") != 0) {
             compiler_error(ERR_SEMANTIC, -1, "Unknown API: %s. Use 'pico8' or 'tic80'", api_name);
+        } else {
+            apply_api_mode(api_name);
         }
         node->as.cart_hint.value = strdup(api_name);
     }
+    else if (strcmp(action, "p8") == 0 && tokens >= 2) {
+        // --#p8 "cart.p8" -- take __gfx__/__gff__/__map__ from a .p8 file
+        // (a stripped .lua export carries none of them). Implies pico8.
+        char path[128];
+        size_t n = strlen(param1);
+        if (n >= 2 && param1[0] == '"' && param1[n-1] == '"') {
+            snprintf(path, sizeof(path), "%.*s", (int)(n - 2), param1 + 1);
+        } else {
+            snprintf(path, sizeof(path), "%s", param1);
+        }
+        if (!pico8_load_cart_assets(path, g_lua_filename)) {
+            compiler_error(ERR_SEMANTIC, yylineno, "--#p8: cannot read cartridge '%s'", path);
+        }
+        // same effect as --#api pico8 (put this hint first, like --#api,
+        // so PICO-8-only syntax later in the file is recognised)
+        if (!g_cli_api_set) {
+            apply_api_mode("pico8");
+        }
+        node->as.cart_hint.value = strdup(path);
+    }
+    else if ((strcmp(action, "rate") == 0 || strcmp(action, "p8rate") == 0) && tokens >= 2) {
+        // --#rate 11025 | 22050 | 44100 -- sample rate of the sounds
+        // synthesized from a PICO-8 cart's __sfx__ (pico8_audio.c) or a
+        // TIC-80 cart's <SFX>/<WAVES> (tic80_audio.c). --#p8rate: old name.
+        int rate = atoi(param1[0] == '"' ? param1 + 1 : param1);
+        if (rate != 11025 && rate != 22050 && rate != 44100) {
+            compiler_error(ERR_SEMANTIC, yylineno, "--#%s: use 11025, 22050 or 44100 (got '%s')", action, param1);
+        }
+        if (!g_cli_rate_set) {      // --rate on the command line wins
+            synth_audio_rate = rate;
+        }
+        node->as.cart_hint.value = strdup(param1);
+    }
+    else if (strcmp(action, "bezel") == 0 && tokens >= 2) {
+        // --#bezel off | on -- PICO-8 side panels (pico8_bezel.c)
+        // --#bezel "art.png" -- custom panel art (see pico8_bezel.c)
+        const char *v = param1[0] == '"' ? param1 + 1 : param1;
+        if (!g_cli_bezel_set) {
+            if (strncmp (v, "off", 3) == 0) {
+                pico8_bezel_enabled = false;
+            } else if (strncmp (v, "on", 2) == 0 && (v[2] == '\0' || v[2] == '"')) {
+                pico8_bezel_enabled = true;
+            } else {
+                char file[256];
+                snprintf (file, sizeof file, "%s", v);
+                size_t n = strlen (file);
+                if (n > 0 && file[n - 1] == '"') file[n - 1] = '\0';
+                pico8_bezel_enabled = true;
+                pico8_bezel_file = strdup (file);
+            }
+        }
+        node->as.cart_hint.value = strdup (param1);
+    }
+    else if (strcmp(action, "keyboard") == 0 && tokens >= 2) {
+        // --#keyboard 0-3 -- gamepad port of a v32kbd keyboard (v32kbd.c)
+        const char *v = param1[0] == '"' ? param1 + 1 : param1;
+        if (v[0] < '0' || v[0] > '3' || (v[1] != '\0' && v[1] != '"')) {
+            compiler_error(ERR_SEMANTIC, yylineno, "--#keyboard: use a gamepad port 0-3 (got '%s')", param1);
+        }
+        if (!g_cli_keyboard_set) {  // --keyboard on the command line wins
+            v32kbd_default_port = v[0] - '0';
+        }
+        node->as.cart_hint.value = strdup(param1);
+    }
+    else if (strcmp(action, "mouse") == 0 && tokens >= 2) {
+        // --#mouse 0-3 -- gamepad port of a v32mouse mouse (v32mouse.c)
+        const char *v = param1[0] == '"' ? param1 + 1 : param1;
+        if (v[0] < '0' || v[0] > '3' || (v[1] != '\0' && v[1] != '"')) {
+            compiler_error(ERR_SEMANTIC, yylineno, "--#mouse: use a gamepad port 0-3 (got '%s')", param1);
+        }
+        if (!g_cli_mouse_set) {     // --mouse on the command line wins
+            v32mouse_default_port = v[0] - '0';
+        }
+        node->as.cart_hint.value = strdup(param1);
+    }
+    else if (strcmp(action, "fast-circles") == 0) {
+        // --#fast-circles: filled circles above the shape atlas's largest
+        // radius are drawn as that disc, scaled (1 draw; ~1.5% of the edge
+        // pixels differ from the console's). Outlines are always exact.
+        shapes_fast = true;
+    }
+    else if (strcmp(action, "allow-float-as-clearcolor") == 0) {
+        // --#allow-float-as-clearcolor: cls(variable) / ioports.gpu.clear(<number>)
+        // pass the number's float32 bit pattern to the GPU as the clear
+        // color, as before 20261015-dev (see config.h). The command-line
+        // option does the same.
+        allow_float_clearcolor = true;
+    }
     else if (strcmp(action, "version") == 0 && tokens >= 2) {
         // e.g., --#version 1.1
-        strncpy(cart_version, param1, sizeof(cart_version) - 1);
+        snprintf(cart_version, sizeof(cart_version), "%.*s", (int) sizeof(cart_version) - 1, param1);
         node->as.cart_hint.value = strdup(param1);
     }
     else if (strcmp(action, "title") == 0) {
         // e.g., --#title "My Awesome Game"
         char title_buf[128] = {0};
         if (sscanf(raw_hint, "%*s \"%127[^\"]\"", title_buf) == 1) {
-            cart_title_was_set = true;
-            strncpy(cart_title, title_buf, sizeof(cart_title) - 1);
+            if (!g_cli_title_set) {    // --title on the command line wins
+                cart_title_was_set = true;
+                snprintf(cart_title, sizeof(cart_title), "%.*s", (int) sizeof(cart_title) - 1, title_buf);
+            }
             node->as.cart_hint.value = strdup(title_buf);
         }
+    }
+    else if (strcmp(action, "titleopt") == 0) {
+        // e.g., --#titleopt "My Awesome Game (optimized)": the title of the
+        // optimized cart (the Opt XML). Without it: the title + " [optimized]".
+        char title_buf[128] = {0};
+        if (sscanf(raw_hint, "%*s \"%127[^\"]\"", title_buf) == 1) {
+            if (!g_cli_titleopt_set) {    // --titleopt on the command line wins
+                cart_title_opt_set = true;
+                snprintf(cart_title_opt, sizeof(cart_title_opt), "%.*s", (int) sizeof(cart_title_opt) - 1, title_buf);
+            }
+            node->as.cart_hint.value = strdup(title_buf);
+        }
+    }
+    else if (strcmp(action, "no-diff-opt-title") == 0) {
+        // --#no-diff-opt-title: the optimized cart keeps the same title
+        // (no " [optimized]" added). The command-line option does the same.
+        g_no_diff_opt_title = true;
     }
     else if (strcmp(action, "texture") == 0 && tokens == 3) {
         // e.g., --#texture background "filename.png"
@@ -353,6 +503,33 @@ ASTNode *make_node_nil (void)
 bool try_get_immediate_operand(ASTNode *node, char *imm_buffer, size_t buf_size)
 {
     if (node == NULL) return false;
+
+    // CASE 1b: rgba() with literal components -> its packed word
+    if (is_rgba_intrinsic_call(node)) {
+        ASTNode *args[5] = { NULL };
+        int argc = 0;
+        for (ASTNode *a = node->as.call.args_head; a != NULL; a = a->next) {
+            if (argc < 5) args[argc] = a;
+            argc++;
+        }
+        unsigned int word;
+        if (rgba_static_word(args, argc, &word)) {
+            snprintf(imm_buffer, buf_size, "0x%08X", word);
+            return true;
+        }
+        return false;
+    }
+
+    // CASE 1c: color() of a literal -> its word
+    if (is_color_intrinsic_call(node)) {
+        unsigned int word;
+        ASTNode *arg = node->as.call.args_head;
+        if (arg != NULL && arg->next == NULL && color_static_word(arg, &word)) {
+            snprintf(imm_buffer, buf_size, "0x%08X", word);
+            return true;
+        }
+        return false;
+    }
 
     // CASE 1: The node is a function call like hex("0xFF000000")
     if (node->type == NODE_FUNCTION_CALL)

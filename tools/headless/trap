@@ -1,0 +1,10 @@
+#!/bin/bash
+# trap prog LABEL [v32run args] -- run until LABEL, print trail + call stack as asm lines
+T=$(cd "$(dirname "$0")" && pwd)
+b=$1; lab=$2; shift 2
+addr=$(grep ",$lab\$" $b.vbin.debug | head -1 | cut -d, -f1)
+[ -z "$addr" ] && { echo "label $lab not found"; exit 1; }
+out=$($T/v32run $b.vbin -t ${addr#0x} -q "$@")
+echo "$out" | grep "TRAP\|STATUS"
+echo "--- trail (oldest first)"; python3 $T/where.py $b.vbin.debug $b.asm $(echo "$out" | grep "^TRAIL" | cut -d' ' -f2-) | uniq | tail -${TRAIL:-25}
+echo "--- call stack (return addresses, innermost first)"; python3 $T/where.py $b.vbin.debug $b.asm $(echo "$out" | grep "^STACK" | cut -d' ' -f2-)

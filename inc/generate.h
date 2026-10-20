@@ -7,6 +7,7 @@ extern char  last_emitted_src[128];
 
 // Debug flags set by your main argument parser (e.g., main.c)
 extern bool        g_debug_mode;    // Set to 1 if -g is passed
+extern bool        g_bios_mode;     // Set to 1 if -b is passed (build a BIOS, not a cartridge)
 extern const char *g_asm_filename; // Pointer to output filename (e.g., "main.asm")
 extern const char *g_lua_filename; // Pointer to input filename (e.g., "main.lua")
 
@@ -37,6 +38,8 @@ void  node_floordiv            (ASTNode *, int);
 void  node_for_numeric         (ASTNode *);
 void  node_for_generic         (ASTNode *);
 void  node_function_call       (ASTNode *, int);
+extern ASTNode *g_last_exec_call;
+extern bool     g_uses_metatables;   // the source calls setmetatable() (main.c)
 void  node_function_def        (ASTNode *);
 void  node_function_pointer    (ASTNode *, int);
 void  node_identifier          (ASTNode *, int);
@@ -48,12 +51,37 @@ void  node_nil                 (int);
 void  node_number              (ASTNode *, int);
 void  node_or                  (ASTNode *, int);
 void  node_pow                 (ASTNode *, int);
+void  emit_safe_pow            (int, int, bool);
+void  node_bitop               (ASTNode *, int);   // node/bitops.c
+void  node_bnot                (ASTNode *, int);
+double bitop_eval              (NodeType, double, double);
 void  node_relational          (ASTNode *, int);
+void  generate_cond_jump       (ASTNode *, bool when_true, const char *label);
+void  generate_bool_value      (ASTNode *, int);
+void  emit_truth_jump          (int reg, bool when_true, const char *label);
+void  emit_getk_lookup         (int table_reg, int key_reg, ASTNode *key, int dest_reg);
+void  emit_index_lookup        (int table_reg, int key_reg, ASTNode *key, int dest_reg);
+bool  expr_is_simple_load      (ASTNode *);
+void  emit_globals_to_nil      (void);
 void  node_repeat              (ASTNode *);
 void  node_return              (ASTNode *);
 void  node_string              (ASTNode *, int);
 void  node_sub                 (ASTNode *, int);
 void  node_table_constructor   (ASTNode *, int);
+
+// node/math.c: a numeric-string operand becomes its number
+void  emit_arith_coerce        (int, ASTNode *);
+void  numlocals_enter          (ASTNode *);
+void  numlocals_leave          (void);
+
+// node/multivalue.c
+bool  mv_is_tail               (ASTNode *);
+bool  mv_is_unpack             (ASTNode *);
+bool  body_returns_mv          (ASTNode *);
+void  emit_mv_to_buf           (ASTNode *);
+void  emit_mv_return           (ASTNode *);
+void  emit_mv_table_tail       (ASTNode *, int, int);
+void  emit_mv_push_values      (int);
 void  node_table_get           (ASTNode *, int);
 void  node_table_set           (ASTNode *);
 void  node_unary               (ASTNode *, int);
@@ -64,6 +92,7 @@ void  set_output_stream(FILE* stream);
 void  close_output_stream(void);
 void  trim_spaces (char *);
 int   resolve_static_path (ASTNode *, char *);
+extern bool g_emitting_hoisted_functions;
 int   check_needs_stack (ASTNode *);
 void  generate_block (ASTNode *);
 void  generate_asm (ASTNode *, int);

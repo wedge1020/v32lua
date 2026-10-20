@@ -11,6 +11,7 @@ struct cart_resource
     int           id;
     char         *var_name;
     char         *filename;
+    bool          generated;   // written by the compiler itself (PICO-8/TIC-80 assets), beside the output
     CARTresource *next;
 };
 
@@ -146,6 +147,10 @@ typedef struct astnode {
             char* value;     // e.g., "filename.png" or "1.0"
             int resource_id; // Assigned sequential ID (0, 1, 2...)
         } cart_hint;
+
+        struct {
+            int index;       // NODE_VARIADIC_EXPR: which vararg (0 = the first)
+        } vararg;
     } as;
 } ASTNode;
 
@@ -167,6 +172,19 @@ uint32_t tic80_get_palette_color(int index);
 extern char cart_version[64];
 extern char cart_title[128];
 extern bool cart_title_was_set;
+// Title of the optimized cart (the Opt XML): --titleopt / --#titleopt, else
+// the title plus " [optimized]" unless --no-diff-opt-title / --#no-diff-opt-title.
+extern char cart_title_opt[128];
+extern bool cart_title_opt_set;
+extern bool g_no_diff_opt_title;
+extern bool g_cli_titleopt_set;  // --titleopt given
+
+// Command-line overrides (main.c). When set, the matching in-source hint
+// (--#api / --#rate / --#title) is ignored, so a cart compiles unmodified.
+extern bool g_cli_api_set;       // --api given
+extern bool g_cli_rate_set;      // --rate (or --p8rate) given
+extern bool g_cli_title_set;     // --title given
+bool apply_api_mode (const char *api_name);   // "pico8" | "tic80" | "vircon32"
 extern CARTresource *textures_head;
 extern CARTresource *sounds_head;
 extern CARTresource *textures_tail;
@@ -194,6 +212,7 @@ ASTNode *make_node_table_set         (ASTNode    *, ASTNode    *, ASTNode *);
 ASTNode *make_node_boolean           (bool);
 ASTNode *make_node_nil               (void);
 CARTresource *cart_resource_append   (CARTresource **, CARTresource **, int, const char *, const char *);
+CARTresource *cart_resource_append_generated (CARTresource **, CARTresource **, int, const char *, const char *);
 bool     try_get_immediate_operand   (ASTNode    *, char       *, size_t);
 
 #endif

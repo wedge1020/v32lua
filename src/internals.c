@@ -2,6 +2,15 @@
 #ifdef _WIN32
   #include <stdlib.h>
   #define realpath(N, R) _fullpath((R), (N), _MAX_PATH)
+  // Declared by hand rather than through <windows.h>, whose macros (ERROR,
+  // ...) collide with names used across the compiler. kernel32 is always
+  // linked in.
+  __declspec(dllimport) unsigned long __stdcall
+      GetModuleFileNameA (void *module, char *filename, unsigned long size);
+#elif defined(__APPLE__)
+  #include <mach-o/dyld.h>
+#elif defined(__linux__)
+  #include <unistd.h>
 #endif
 
 int  w_mainwait  = -1;
@@ -111,11 +120,35 @@ typedef struct DoneListNode {
 // Path helpers
 // ----------------------------------------------------------------------------
 
-// Returns a malloc'd copy of the directory portion of path ("." if path has
-// no '/'). Never returns NULL.
-static char *dir_of (const char *path)
+// Is path absolute? '/'-rooted everywhere; on Windows also "\\..." and a
+// drive letter ("C:/...", "C:\\...").
+static int is_absolute_path (const char *path)
+{
+    if (path[0] == '/') return 1;
+#ifdef _WIN32
+    if (path[0] == '\\') return 1;
+    if (isalpha ((unsigned char) path[0]) && path[1] == ':') return 1;
+#endif
+    return 0;
+}
+
+// The last directory separator in path ('/', and on Windows also '\\'), or
+// NULL if it has none.
+static const char *last_separator (const char *path)
 {
     const char *slash = strrchr (path, '/');
+#ifdef _WIN32
+    const char *bslash = strrchr (path, '\\');
+    if (bslash != NULL && (slash == NULL || bslash > slash)) slash = bslash;
+#endif
+    return slash;
+}
+
+// Returns a malloc'd copy of the directory portion of path ("." if path has
+// no directory separator). Never returns NULL.
+static char *dir_of (const char *path)
+{
+    const char *slash = last_separator (path);
     if (slash == NULL) {
         return strdup (".");
     }
@@ -134,7 +167,7 @@ static char *dir_of (const char *path)
 static char *join_path (const char *base_dir, const char *rel_path)
 {
     char *joined;
-    if (rel_path[0] == '/') {
+    if (is_absolute_path (rel_path)) {
         joined = strdup (rel_path);
     } else {
         size_t need = strlen (base_dir) + 1 + strlen (rel_path) + 1;
@@ -150,7 +183,7 @@ static char *join_path (const char *base_dir, const char *rel_path)
 // Canonicalizes a path for cycle/dedup comparison. Falls back to a plain
 // strdup if the file doesn't exist yet (shouldn't happen -- callers resolve
 // only after confirming the file opens) or realpath is unavailable.
-static char *canonicalize (const char *path)
+static char *canonicalize_path (const char *path)
 {
     char resolved[PATH_MAX];
     if (realpath (path, resolved) != NULL) {
@@ -308,13 +341,229 @@ static char *match_include_directive (const char *line)
 }
 
 // ----------------------------------------------------------------------------
+// Include search path
+// ----------------------------------------------------------------------------
+
+// Returns true when a file exists and can be opened for reading. Used only
+// to probe --#include candidates; the winner is then opened for real by
+// read_whole_file() inside expand_file().
+static bool include_file_exists (const char *path)
+{
+    FILE *f = fopen (path, "rb");
+    if (f == NULL) {
+        return false;
+    }
+    fclose (f);
+    return true;
+}
+
+// ----------------------------------------------------------------------------
+// The compiler's own location (for the last-resort include candidates)
+// ----------------------------------------------------------------------------
+
+// argv[0], recorded by main() through include_set_program_name(). Only
+// looked at when an include is found nowhere else, so the (cheap, but
+// platform-specific) executable lookup below runs at most once and only on
+// that path.
+static const char *g_program_argv0 = NULL;
+
+void include_set_program_name (const char *argv0)
+{
+    g_program_argv0 = argv0;
+}
+
+// Returns a malloc'd path to the running executable, or NULL when it can't
+// be determined. The OS is asked first where it can say (Windows, macOS,
+// Linux); elsewhere (the BSDs, Haiku, ...) argv[0] is used: as a path when
+// it has a directory separator, otherwise looked up on PATH, as the shell
+// did to start us.
+static char *find_executable_path (const char *argv0)
+{
+    char buf[PATH_MAX];
+
+#if defined(_WIN32)
+    unsigned long n = GetModuleFileNameA (NULL, buf, (unsigned long) sizeof (buf));
+    if (n > 0 && n < sizeof (buf)) {
+        return strdup (buf);
+    }
+#elif defined(__APPLE__)
+    uint32_t size = (uint32_t) sizeof (buf);
+    if (_NSGetExecutablePath (buf, &size) == 0) {
+        return canonicalize_path (buf);
+    }
+#elif defined(__linux__)
+    ssize_t n = readlink ("/proc/self/exe", buf, sizeof (buf) - 1);
+    if (n > 0) {
+        buf[n] = '\0';
+        return strdup (buf);
+    }
+#endif
+
+    if (argv0 == NULL || argv0[0] == '\0') {
+        return NULL;
+    }
+    if (last_separator (argv0) != NULL) {
+        return canonicalize_path (argv0);
+    }
+
+    const char *path_env = getenv ("PATH");
+    if (path_env == NULL || path_env[0] == '\0') {
+        return NULL;
+    }
+    char *path_copy = strdup (path_env);
+    char *save      = NULL;
+    char *found     = NULL;
+    for (char *entry = strtok_r (path_copy, V32LUA_PATH_LIST_SEP, &save);
+         entry != NULL && found == NULL;
+         entry = strtok_r (NULL, V32LUA_PATH_LIST_SEP, &save)) {
+        char *candidate = join_path (entry, argv0);
+        if (include_file_exists (candidate)) {
+            found = canonicalize_path (candidate);
+        }
+        free (candidate);
+    }
+    free (path_copy);
+    return found;
+}
+
+// The directories next to the compiler that can hold the --#include
+// library, relative to the executable's directory:
+//   include/v32lua                    -- Windows installs (v32tools/
+//                                        v32lua.exe beside v32tools/include/
+//                                        v32lua) and the release zips
+//   ../Vircon32/v32tools/include/v32lua -- Unix installs under any prefix
+//                                        (<prefix>/bin/v32lua)
+static const char *const program_relative_include_dirs[] = {
+    "include/v32lua",
+    "../Vircon32/v32tools/include/v32lua",
+};
+
+// The executable's directory (malloc'd), computed once; NULL if unknown.
+static const char *program_dir (void)
+{
+    static bool  looked = false;
+    static char *dir    = NULL;
+    if (!looked) {
+        looked = true;
+        char *exe = find_executable_path (g_program_argv0);
+        if (exe != NULL) {
+            dir = dir_of (exe);
+            free (exe);
+        }
+    }
+    return dir;
+}
+
+// Resolves one --#include target to an existing file.
+//
+// Search order (first hit wins):
+//   1. The directory of the file containing the directive -- the original
+//      behavior, kept first so includes nested inside includes keep
+//      resolving relative to their own file no matter what else is on the
+//      search path.
+//   2. The compiler's current working directory ("the present directory").
+//   3. Each entry of the V32LUA_INCLUDE environment variable, when set --
+//      a colon-separated list (semicolon-separated on Windows), letting a
+//      project point at its own library copy without installing anything.
+//   4. The compile-time default V32LUA_INCLUDE_PATH (see inc/config.h),
+//      where an installed v32lua standard-library port is expected to live.
+//   5. The library directories next to the compiler executable (see
+//      program_relative_include_dirs): what lets a release zip, unpacked
+//      anywhere, or an install under a prefix other than the compiled-in
+//      one, find its own library.
+//
+// An ABSOLUTE include path skips the search and is returned verbatim, so
+// the preexisting behavior (and read_whole_file()'s own error message)
+// is unchanged for it.
+//
+// Returns a malloc'd path. If no candidate exists, calls compiler_error()
+// (which exits) naming every location searched -- falling back to only the
+// first candidate would make a missing include look like a plain "file not
+// found" with no hint that the search path exists at all.
+static char *resolve_include_path (const char *base_dir, const char *inc_path,
+                                   const char *referenced_from)
+{
+    // Candidate 1: next to the including file (or verbatim when absolute --
+    // join_path() already returns absolute paths untouched).
+    char *candidate = join_path (base_dir, inc_path);
+    if (is_absolute_path (inc_path) || include_file_exists (candidate)) {
+        return candidate;
+    }
+    free (candidate);
+
+    // Candidate 2: the current working directory. A bare relative path
+    // already means "relative to the CWD" to fopen(), so it can be probed
+    // as-is; canonicalize_path() later normalizes it for dedup/cycle checks.
+    if (include_file_exists (inc_path)) {
+        return strdup (inc_path);
+    }
+
+    // Candidate 3: each entry of V32LUA_INCLUDE (colon-separated; ';' on
+    // Windows, see V32LUA_PATH_LIST_SEP). strtok_r skips empty entries, so
+    // a stray "::" or a trailing ':' is harmless.
+    const char *env_paths = getenv (V32LUA_INCLUDE_ENV_VAR);
+    if (env_paths != NULL && env_paths[0] != '\0') {
+        char *env_copy = strdup (env_paths);
+        char *save     = NULL;
+
+        char *entry = strtok_r (env_copy, V32LUA_PATH_LIST_SEP, &save);
+        while (entry != NULL) {
+            candidate = join_path (entry, inc_path);
+            if (include_file_exists (candidate)) {
+                free (env_copy);
+                return candidate;
+            }
+            free (candidate);
+            entry = strtok_r (NULL, V32LUA_PATH_LIST_SEP, &save);
+        }
+
+        free (env_copy);
+    }
+
+    // Candidate 4: the compile-time default include directory.
+    candidate = join_path (V32LUA_INCLUDE_PATH, inc_path);
+    if (include_file_exists (candidate)) {
+        return candidate;
+    }
+    free (candidate);
+
+    // Candidate 5: the library directories next to the compiler.
+    const char *exe_dir = program_dir ();
+    if (exe_dir != NULL) {
+        size_t count = sizeof (program_relative_include_dirs)
+                     / sizeof (program_relative_include_dirs[0]);
+        for (size_t i = 0; i < count; i++) {
+            char *lib_dir = join_path (exe_dir, program_relative_include_dirs[i]);
+            candidate = join_path (lib_dir, inc_path);
+            free (lib_dir);
+            if (include_file_exists (candidate)) {
+                return candidate;
+            }
+            free (candidate);
+        }
+    }
+
+    compiler_error (ERR_INTERNAL, -1,
+        "--#include: could not find '%s' (referenced from '%s'). Searched: "
+        "the including file's directory, the current directory, the "
+        V32LUA_INCLUDE_ENV_VAR " environment variable, \""
+        V32LUA_INCLUDE_PATH "\" and the library directories next to the "
+        "compiler (in '%s')",
+        inc_path,
+        (referenced_from != NULL) ? referenced_from : "the main program",
+        (exe_dir != NULL) ? exe_dir : "an unknown directory");
+
+    return NULL;    // unreachable -- compiler_error() exits
+}
+
+// ----------------------------------------------------------------------------
 // Core recursive expansion
 // ----------------------------------------------------------------------------
 static void expand_file (const char *path, const char *referenced_from, int is_included,
                           StrBuf *out, LineMapBuilder *lm, int *combined_line,
                           IncludeStackNode **stack, DoneListNode **done)
 {
-    char *resolved = canonicalize (path);
+    char *resolved = canonicalize_path (path);
 
     for (IncludeStackNode *s = *stack; s != NULL; s = s->next) {
         if (strcmp (s->resolved_path, resolved) == 0) {
@@ -386,7 +635,7 @@ static void expand_file (const char *path, const char *referenced_from, int is_i
             // Close off the run of plain lines emitted so far from this file.
             lmb_push (lm, run_start_combined, *combined_line, path, run_start_source);
 
-            char *child_path = join_path (base_dir, inc_path);
+            char *child_path = resolve_include_path (base_dir, inc_path, path);
             expand_file (child_path, path, /*is_included=*/1, out, lm, combined_line, stack, done);
             free (child_path);
             free (inc_path);
@@ -579,8 +828,13 @@ void compiler_error (ErrorType type, int line_num, const char* format, ...)
     exit (1);
 }
 
+// Set by -w: suppresses every compiler_warning().
+bool g_suppress_warnings = false;
+
 void compiler_warning (ErrorType type, int line_num, const char* format, ...)
 {
+    if (g_suppress_warnings) return;
+
     // 1. Print the Error Type Prefix
     fprintf (stderr, "\n");
     switch (type)
@@ -668,6 +922,9 @@ void compiler_warning (ErrorType type, int line_num, const char* format, ...)
 
 // Helper function to look up return count
 int get_builtin_return_count(const char *func_name) {
+    // mouse() 7, mouse.delta()/position() 2 -- unless the program has its own mouse
+    int mouse_values = v32mouse_call_values (func_name);
+    if (mouse_values > 0) return mouse_values;
     for (int i = 0; builtin_return_counts[i].name != NULL; i++) {
         if (strcmp(func_name, builtin_return_counts[i].name) == 0) {
             return builtin_return_counts[i].return_count;
@@ -695,7 +952,8 @@ char *derive_cart_title_from_filename(const char *path)
     title_buf[sizeof(title_buf) - 1] = '\0';
 
     char *dot = strrchr(title_buf, '.');
-    if (dot != NULL && strcmp(dot, ".lua") == 0) {
+    if (dot != NULL && (strcmp(dot, ".lua") == 0 || strcmp(dot, ".p8") == 0 ||
+                        strcmp(dot, ".tic") == 0)) {
         *dot = '\0';
     }
     return title_buf;

@@ -13,6 +13,92 @@ void yyerror (const char *s);
 // Add your new helper prototype here:
 char *mangle_method_name (const char *table_name, const char *method_name);
 
+/* Largest parameter count of any function in the program (self included for
+   ':' methods, '...' excluded). Calls whose target arity is unknown at
+   compile time are NIL-padded up to this -- see node_function_call(). */
+int g_max_param_count = 0;
+/* nesting depth of `function` bodies while parsing (see func_start) */
+static int g_func_depth = 0;
+static void note_function_param_count (ASTNode *params)
+{
+    int n = 0;
+    for (ASTNode *p = params; p != NULL; p = p->next) {
+        if (p->type == NODE_IDENTIFIER && strcmp (p->as.id.name, "...") == 0) continue;
+        n++;
+    }
+    if (n > g_max_param_count) g_max_param_count = n;
+}
+
+
+/* function t.f(...) / function t:f(...): t.f = function([self,] ...) end */
+static int method_fn_counter = 0;
+static ASTNode *make_method_function_assignment (ASTNode *func_def, char *table,
+                                                 char *method, ASTNode *params,
+                                                 ASTNode *body, bool add_self)
+{
+    char buf[256];
+    snprintf (buf, sizeof (buf), "%s_%s__m%d", table, method, method_fn_counter++);
+    if (add_self) {
+        ASTNode *self_param = make_node_ident ("self");
+        self_param->next = params;
+        params = self_param;
+    }
+    func_def->as.function_def.name = strdup (buf);
+    func_def->as.function_def.params = params;
+    note_function_param_count (params);
+    func_def->as.function_def.body = body;
+    func_def->as.function_def.is_variadic = 0;
+    for (ASTNode *p = params; p != NULL; p = p->next)
+        if (p->type == NODE_IDENTIFIER && strcmp (p->as.id.name, "...") == 0)
+            func_def->as.function_def.is_variadic = 1;
+
+    ASTNode *func_ptr = make_node (NODE_FUNCTION_POINTER);
+    func_ptr->as.func_ptr.mangled_name = strdup (buf);
+    func_ptr->as.func_ptr.func_def = func_def;
+
+    ASTNode *table_set = make_node (NODE_TABLE_SET);
+    table_set->as.table_set.table_expr = make_node_ident (table);
+    table_set->as.table_set.key        = make_node_string (method);
+    table_set->as.table_set.value      = func_ptr;
+    return table_set;
+}
+
+// An assignment target must be a variable or a table field; the grammar
+// accepts any prefix expression there (so that `a.b` needn't be spelled out
+// twice -- that duplication made the grammar ambiguous) and checks here.
+static ASTNode *assign_target (ASTNode *e)
+{
+    if (e->type != NODE_IDENTIFIER && e->type != NODE_TABLE_GET) {
+        compiler_error (ERR_SYNTAX, yylineno,
+            "cannot assign to this expression (only a variable or a table field)");
+    }
+    return e;
+}
+
+static ASTNode *append_node (ASTNode *list, ASTNode *item)
+{
+    ASTNode *curr = list;
+    while (curr->next) curr = curr->next;
+    curr->next = item;
+    return list;
+}
+
+// PICO-8's peek operators (@a, %a, $a) as calls of peek/peek2/peek4 --
+// PICO-8-only, like the other PICO-8 operators.
+static ASTNode *make_peek_call (const char *name, ASTNode *addr)
+{
+    if (!runtime_req.needs_pico8) {
+        compiler_error (ERR_SYNTAX, yylineno,
+            "'%s' as a prefix operator is a PICO-8 extension; add --#api pico8",
+            name[4] == '2' ? "%" : (name[4] == '4' ? "$" : "@"));
+    }
+    ASTNode *call = make_node (NODE_FUNCTION_CALL);
+    call->as.call.target = make_node_ident (name);
+    call->as.call.is_method_call = 0;
+    call->as.call.args_head = addr;
+    return call;
+}
+
 %}
 
 %union {
@@ -21,12 +107,18 @@ char *mangle_method_name (const char *table_name, const char *method_name);
     ASTNode *ast_node;
 }
 
-//%expect 5
+/* The two shift/reduce conflicts are Lua's own ambiguity: a '(' after a
+   complete expression, or after a call statement, could continue it as a
+   call or start the next statement ("a = b\n(f)()"). Both are resolved by
+   shifting -- a call -- which is what Lua 5.2+ (and PICO-8) do. Any other
+   conflict is a grammar error: bison stops if the count changes. */
+%expect 2
 
 /* --- AST Node Types --- */
 %type <ast_node> parameter_list
 %type <ast_node> argument_list
-%type <ast_node> var_list       /* Added for multiple assignment */
+%type <ast_node> var_list       /* assignment targets (prefix expressions) */
+%type <ast_node> name_list      /* local / for-in names */
 %type <ast_node> expr_list      /* Added for multiple assignment */
 %type <ast_node> tic80_section tic80_asset_lines
 
@@ -36,14 +128,18 @@ char *mangle_method_name (const char *table_name, const char *method_name);
 %token <string_val> TOKEN_TIC80_SECTION_HEADER TOKEN_TIC80_ASSET_DATA
 %token <string_val> TOKEN_TIC80_SECTION_FOOTER
 %token <string_val> TOKEN_CART_HINT
+%token <number_val> TOKEN_COMPOUND_ASSIGN  /* PICO-8-only += -= *= /= %= (see lexer.l) */
 
 %token TOKEN_WHILE TOKEN_FOR TOKEN_BREAK TOKEN_IF TOKEN_ELSEIF TOKEN_THEN TOKEN_ELSE TOKEN_END 
 %token TOKEN_FUNCTION TOKEN_ASM TOKEN_RAWASM TOKEN_RETURN TOKEN_AND TOKEN_OR
 %token TOKEN_EQ TOKEN_NEQ TOKEN_LE TOKEN_GE TOKEN_LT TOKEN_GT TOKEN_CONCAT
 %token TOKEN_LOCAL TOKEN_IN TOKEN_DO TOKEN_NOT TOKEN_LEN UNARY_MINUS
+%token TOKEN_PEEK TOKEN_PEEK4
 %token TOKEN_TRUE TOKEN_FALSE TOKEN_NIL TOKEN_FLOORDIV
+%token TOKEN_BXOR TOKEN_SHL TOKEN_SHR TOKEN_LSHR TOKEN_ROTL TOKEN_ROTR
 %token TOKEN_DOTS
 %token TOKEN_REPEAT TOKEN_UNTIL
+%token TOKEN_GOTO TOKEN_DBCOLON TOKEN_PRINT_SHORT
 
 %type <ast_node> statement statement_list stat_list expr function_def return_stmt
 %type <ast_node> table_constructor function_call else_branch prefix_expr
@@ -55,10 +151,14 @@ char *mangle_method_name (const char *table_name, const char *method_name);
 %left TOKEN_OR
 %left TOKEN_AND
 %left TOKEN_EQ TOKEN_NEQ TOKEN_LT TOKEN_GT TOKEN_LE TOKEN_GE
+%left '|'
+%left TOKEN_BXOR
+%left '&'
+%left TOKEN_SHL TOKEN_SHR TOKEN_LSHR TOKEN_ROTL TOKEN_ROTR
 %right TOKEN_CONCAT
 %left '+' '-'
 %left '*' '/' '%' TOKEN_FLOORDIV
-%right TOKEN_NOT TOKEN_LEN UNARY_MINUS
+%right TOKEN_NOT TOKEN_LEN UNARY_MINUS TOKEN_PEEK TOKEN_PEEK4
 %right '^'
 %left '['
 %left '.'
@@ -168,7 +268,7 @@ argument_list:
 
 /* --- Helper Rules to Capture Opening Line Numbers --- */
 func_start:
-    TOKEN_FUNCTION { $$ = make_node(NODE_FUNCTION_DEF); }
+    TOKEN_FUNCTION { $$ = make_node(NODE_FUNCTION_DEF); g_func_depth++; }
     ;
 
 while_start:
@@ -187,28 +287,118 @@ if_start:
     ;
 
 statement:
-      function_call              { $$ = $1; }
-    | var_list '=' expr_list {
-        $$ = make_node(NODE_MULTIPLE_ASSIGNMENT);
-        $$->as.mult_assign.targets_head = $1;
-        $$->as.mult_assign.values_head = $3;
-        $$->as.mult_assign.is_local = 0;
+      prefix_expr {
+        /* A call as a statement. The grammar takes any prefix expression
+           here and checks it is a call: a separate `statement: function_call`
+           made `f()` followed by '(' a reduce/reduce conflict (which bison
+           resolved as two statements, so `f()(x)` didn't parse). Now it is
+           a shift/reduce resolved as Lua 5.2+ does: `f()(x)` is one call. */
+        if ($1->type != NODE_FUNCTION_CALL) {
+            compiler_error(ERR_SYNTAX, yylineno,
+                "syntax error: an expression on its own is not a statement (only a call is)");
+        }
+        $$ = $1;
     }
-    | TOKEN_LOCAL var_list '=' expr_list {
+    | TOKEN_PRINT_SHORT expr_list {
+        /* PICO-8 `?a, b, c` == print(a, b, c) */
+        $$ = make_node(NODE_FUNCTION_CALL);
+        $$->as.call.target = make_node_ident("print");
+        $$->as.call.is_method_call = 0;
+        $$->as.call.args_head = $2;
+    }
+    | TOKEN_GOTO TOKEN_IDENTIFIER {
+        /* Lua 5.2+ goto -- see generate_block()'s label scopes */
+        $$ = make_node(NODE_GOTO);
+        $$->as.id.name = $2;
+    }
+    | TOKEN_DBCOLON TOKEN_IDENTIFIER TOKEN_DBCOLON {
+        $$ = make_node(NODE_LABEL);
+        $$->as.id.name = $2;
+    }
+    | var_list '=' expr_list {
+        if ($1->next == NULL && $1->type == NODE_TABLE_GET && $3->next == NULL) {
+            /* t.k = v / t[k] = v: a single table store */
+            $$ = make_node_table_set ($1->as.table_get.table_expr, $1->as.table_get.key, $3);
+        } else {
+            $$ = make_node(NODE_MULTIPLE_ASSIGNMENT);
+            $$->as.mult_assign.targets_head = $1;
+            $$->as.mult_assign.values_head = $3;
+            $$->as.mult_assign.is_local = 0;
+        }
+    }
+    | TOKEN_LOCAL name_list '=' expr_list {
         $$ = make_node(NODE_MULTIPLE_ASSIGNMENT);
         $$->as.mult_assign.targets_head = $2;
         $$->as.mult_assign.values_head = $4;
         $$->as.mult_assign.is_local = 1;
     }
-    | prefix_expr '[' expr ']' '=' expr
-    { 
-        // $1 = table, $3 = key, $6 = value being assigned
-        $$ = make_node_table_set ($1, $3, $6); 
-    }
-    | prefix_expr '.' TOKEN_IDENTIFIER '=' expr
-    {
-        ASTNode *string_key  = make_node_string ($3);
-        $$                   = make_node_table_set ($1, string_key, $5);
+    | var_list TOKEN_COMPOUND_ASSIGN expr {
+        // PICO-8-only += -= *= /= %=. Gating already happened in the
+        // lexer (compound_assign_token() in lexer.l) the moment the
+        // operator token itself was recognized, so nothing to check here.
+        //
+        // var_list is reused rather than introducing a separate
+        // single-target nonterminal: var_list's first three productions
+        // (bare identifier, '.field', '[index]') are exactly the three
+        // PICO-8 compound-assignment target shapes, and a parallel
+        // nonterminal with the identical production shapes would create a
+        // reduce-reduce conflict (after shifting TOKEN_IDENTIFIER, the
+        // parser would have two different single-token rules it could
+        // reduce into, with no lookahead able to distinguish them). Reusing
+        // var_list means there's only one reduction, and the choice of
+        // which statement rule continues from it (this one, the plain '='
+        // rule, or the ',' multi-target continuation) is an ordinary
+        // lookahead-driven shift decision, not a reduce-reduce choice.
+        // The tradeoff is that var_list also accepts a comma-separated
+        // multi-target list, which real PICO-8 compound assignment does
+        // not support -- rejected below instead, with a clear message
+        // rather than a parse failure.
+        if ($1->next != NULL) {
+            compiler_error(ERR_SYNTAX, yylineno,
+                "compound assignment (+=, -=, *=, /=, %%=) only supports a single target");
+        }
+
+        NodeType op = (NodeType)(int) $2;
+
+        if ($1->type == NODE_IDENTIFIER) {
+            // lhs = lhs OP rhs, via the exact same plain-assignment path
+            // 'var_list = expr_list' above already uses -- $1 becomes
+            // the (single) write target, and a second, independent
+            // make_node_ident() with the same name is the read reference
+            // embedded in the RHS. Safe to duplicate: an identifier read
+            // has no side effects, so evaluating the name twice is free.
+            ASTNode *read_ref = make_node_ident($1->as.id.name);
+            ASTNode *new_val  = make_node_binary(op, read_ref, $3);
+
+            $$ = make_node(NODE_MULTIPLE_ASSIGNMENT);
+            $$->as.mult_assign.targets_head = $1;
+            $$->as.mult_assign.values_head  = new_val;
+            $$->as.mult_assign.is_local     = 0;
+        } else {
+            // NODE_TABLE_GET shape, from var_list's '.'/'[' productions:
+            // t.field OP= rhs  desugars to  t.field = t.field OP rhs,
+            // via the same make_node_table_set() the plain
+            // 'prefix_expr . TOKEN_IDENTIFIER = expr' statement
+            // rule uses.
+            //
+            // KNOWN LIMITATION: table_expr (and, for the '[' form, the key
+            // expression) is evaluated once by the read side and once by
+            // the write side below -- fine for the common case (a plain
+            // variable or a chain of plain field accesses, which is every
+            // occurrence in celeste.lua), but if table_expr itself has a
+            // side effect (e.g. get_obj().x += 1), that side effect runs
+            // TWICE. Deliberately out of scope for now: fixing it for the
+            // general case needs a dedicated AST node + codegen that
+            // evaluates the table pointer once and reuses it for both the
+            // read and the write, rather than this parse-time desugar.
+            ASTNode *table_expr = $1->as.table_get.table_expr;
+            ASTNode *key        = $1->as.table_get.key;
+
+            ASTNode *read_ref = make_node_table_get(table_expr, key);
+            ASTNode *new_val  = make_node_binary(op, read_ref, $3);
+
+            $$ = make_node_table_set(table_expr, key, new_val);
+        }
     }
     | while_start expr TOKEN_DO statement_list TOKEN_END {
         $$ = $1;
@@ -242,7 +432,7 @@ statement:
         $$->as.for_numeric.step_expr   = $8;  // Explicit step
         $$->as.for_numeric.body        = $10;
     }
-    | for_start var_list TOKEN_IN expr_list TOKEN_DO statement_list TOKEN_END {
+    | for_start name_list TOKEN_IN expr_list TOKEN_DO statement_list TOKEN_END {
         $$ = make_node(NODE_FOR_GENERIC);
         $$->as.for_generic.var_list    = $2;
         $$->as.for_generic.iter_expr   = $4;
@@ -254,6 +444,92 @@ statement:
         $$ -> as.if_stmt.if_body       = $4;
         $$ -> as.if_stmt.else_body     = $5;
     }
+    | if_start expr statement {
+        // PICO-8's then-less, end-less single-statement if: `if (cond) stmt`.
+        // Not standard Lua. NOTE: PICO-8 source is now rewritten before
+        // parsing (pico8_shorthand.c: `if (c) ...` -> `if (c) then ... end`,
+        // the body being the rest of the line), so these rules only see
+        // what that pass leaves alone. Gated on runtime_req.needs_pico8, which is
+        // already set by the time this reduces IF --#api pico8 appears
+        // before this line in the source (the same single-pass ordering
+        // constraint the compound-assignment tokens rely on in lexer.l).
+        //
+        // No ambiguity with the TOKEN_THEN rule above: after 'if_start
+        // expr', the parser needs exactly one token of lookahead to
+        // choose between shifting TOKEN_THEN (the rule above) and
+        // reducing into 'statement' here -- TOKEN_THEN can never itself
+        // start a statement, so the two never compete for the same
+        // lookahead token.
+        //
+        // Scope: a single statement, ending wherever that statement's own
+        // grammar naturally ends (Lua statements are self-delimiting; no
+        // newline-tracking is needed or done). No 'elseif'/'else' in this
+        // form, matching real PICO-8. Chaining multiple statements on one
+        // line (if PICO-8 even allows that) is NOT supported here.
+        if (!runtime_req.needs_pico8) {
+            compiler_error(ERR_SYNTAX, yylineno,
+                "then-less if is a PICO-8 extension; add --#api pico8 to use it");
+        }
+        $$                             = $1;
+        $$ -> as.if_stmt.condition     = $2;
+        $$ -> as.if_stmt.if_body       = $3;
+        $$ -> as.if_stmt.else_body     = NULL;
+    }
+    | if_start expr TOKEN_RETURN {
+        // Bare `if (cond) return`, e.g. celeste.lua's actual line 118.
+        //
+        // Deliberately NOT routed through 'last_statement'/'return_stmt'
+        // (an earlier version of this rule was 'if_start expr
+        // last_statement', covering both bare and value-returning forms).
+        // bison -Wcounterexamples caught two real ambiguities that
+        // introduced: (1) return_stmt's OPTIONAL expr_list means
+        // `if (x) return foo()` can't tell whether `foo()` is the
+        // returned value or an unrelated statement immediately
+        // following a bare return -- 'return' is only unambiguous in
+        // its normal position because it's always immediately followed
+        // by end/else/elseif/until/EOF, none of which can start an
+        // expr_list, and this shorthand breaks that by allowing
+        // arbitrary code to follow; (2) last_statement's OWN optional
+        // trailing ';' (TOKEN_BREAK ';' / return_stmt ';') collided with
+        // the outer stat_list: statement ';' rule over which of the two
+        // gets to consume a trailing semicolon. Consuming the bare
+        // TOKEN_RETURN terminal directly here, with no expr_list and no
+        // semicolon-swallowing of its own, sidesteps both: nothing else
+        // in the grammar has 'if_start expr TOKEN_RETURN' as a prefix,
+        // so there's exactly one handle to reduce, and any trailing ';'
+        // is left entirely to the ordinary stat_list: statement ';'
+        // handling every other statement already goes through.
+        //
+        // Scope note: `if (x) return <value>` (a shorthand return WITH a
+        // value) is consequently NOT supported -- write it with
+        // then/end. Not a loss for celeste.lua: every then-less if in it
+        // is a bare `return` with nothing after it.
+        if (!runtime_req.needs_pico8) {
+            compiler_error(ERR_SYNTAX, yylineno,
+                "then-less if is a PICO-8 extension; add --#api pico8 to use it");
+        }
+        ASTNode *ret_node = make_node(NODE_RETURN);
+        ret_node->as.return_stmt.expressions_head = NULL;
+        ret_node->as.return_stmt.parent_func_arg_count = 0;
+
+        $$                             = $1;
+        $$ -> as.if_stmt.condition     = $2;
+        $$ -> as.if_stmt.if_body       = ret_node;
+        $$ -> as.if_stmt.else_body     = NULL;
+    }
+    | if_start expr TOKEN_BREAK {
+        // Bare `if (cond) break`. Same reasoning as the TOKEN_RETURN
+        // alternative above -- consumed as a raw terminal, not through
+        // 'last_statement', so there's no optional-semicolon collision.
+        if (!runtime_req.needs_pico8) {
+            compiler_error(ERR_SYNTAX, yylineno,
+                "then-less if is a PICO-8 extension; add --#api pico8 to use it");
+        }
+        $$                             = $1;
+        $$ -> as.if_stmt.condition     = $2;
+        $$ -> as.if_stmt.if_body       = make_node(NODE_BREAK);
+        $$ -> as.if_stmt.else_body     = NULL;
+    }
     | TOKEN_DO statement_list TOKEN_END {
         // Bare scoping block: no condition, no loop tracking -- just gives
         // the enclosed statements their own lexical scope. Most useful for
@@ -262,7 +538,7 @@ statement:
         // workaround.
         $$ = make_node_do_block ($2);
     }
-    | TOKEN_LOCAL var_list {
+    | TOKEN_LOCAL name_list {
         $$ = make_node(NODE_MULTIPLE_ASSIGNMENT);
         $$->as.mult_assign.is_local = 1;
         $$->as.mult_assign.targets_head = $2;
@@ -274,7 +550,7 @@ statement:
         $$->as.inline_asm.code = $3;
     }
     | TOKEN_LOCAL func_start TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END
-    {
+    { g_func_depth--; 
         // local function myfunc(...) ... end
         // This is equivalent to: local myfunc = function(...) ... end
 
@@ -282,6 +558,7 @@ statement:
         ASTNode* func_def = $2;
         func_def->as.function_def.name = strdup($3);
         func_def->as.function_def.params = $5;
+        note_function_param_count(func_def->as.function_def.params);
         func_def->as.function_def.body = $7;
 
         // 2. Initialize and check variadic status
@@ -295,15 +572,45 @@ statement:
             p = p->next;
         }
 
-        // ✅ SILENTLY IGNORE 'local': Just return the function_def node directly
-        // (No assignment node created, no is_local flag set)
-        $$ = func_def;
+        if (g_func_depth > 0) {
+            // Inside another function: a real local closure, exactly
+            // `local NAME; NAME = function(...) ... end` -- so the body can
+            // capture the enclosing function's locals (and itself, for
+            // recursion). It used to become a global, capture-less named
+            // function, which read garbage for captured variables.
+            static int local_fn_counter = 0;
+            char buf[256];
+            snprintf (buf, sizeof (buf), "%s__l%d", $3, local_fn_counter++);
+            func_def->as.function_def.name = strdup (buf);
+
+            ASTNode *decl = make_node (NODE_MULTIPLE_ASSIGNMENT);
+            decl->as.mult_assign.is_local = 1;
+            decl->as.mult_assign.targets_head = make_node_ident ($3);
+            decl->as.mult_assign.values_head = NULL;
+
+            ASTNode *func_ptr = make_node (NODE_FUNCTION_POINTER);
+            func_ptr->as.func_ptr.mangled_name = strdup (buf);
+            func_ptr->as.func_ptr.func_def = func_def;
+
+            ASTNode *assign = make_node (NODE_MULTIPLE_ASSIGNMENT);
+            assign->as.mult_assign.is_local = 0;
+            assign->as.mult_assign.targets_head = make_node_ident ($3);
+            assign->as.mult_assign.values_head = func_ptr;
+
+            decl->next = assign;
+            $$ = decl;
+        } else {
+            // Top level: stays a named function (direct calls, no closure
+            // needed -- there are no enclosing locals to capture).
+            $$ = func_def;
+        }
 
         /* until we pursue actual local functions, comment this out
         // 1. Get the pre-allocated function_def node from func_start
         ASTNode* func_def = $2;
         func_def->as.function_def.name = strdup($3);
         func_def->as.function_def.params = $5;
+        note_function_param_count(func_def->as.function_def.params);
         func_def->as.function_def.body = $7;
 
         // 2. Initialize and check variadic status for local functions
@@ -332,7 +639,7 @@ statement:
         $$ = func_def;*/
     }
     | TOKEN_LOCAL func_start TOKEN_IDENTIFIER ':' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END
-    {
+    { g_func_depth--; 
         // local function obj:method(...) ... end
         //
         // Not standard Lua (real Lua's "local function" only accepts a
@@ -353,6 +660,7 @@ statement:
         ASTNode* func_def = $2;
         func_def->as.function_def.name = mangled_name;
         func_def->as.function_def.params = self_param;
+        note_function_param_count(func_def->as.function_def.params);
         func_def->as.function_def.body = $9;
         func_def->as.function_def.is_variadic = 0;
 
@@ -375,7 +683,7 @@ statement:
         $$ = func_def;
     }
     | TOKEN_LOCAL func_start TOKEN_IDENTIFIER '.' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END
-    {
+    { g_func_depth--; 
         // local function obj.method(...) ... end
         //
         // Dot form: unlike the colon form above, NO implicit 'self' is
@@ -388,6 +696,7 @@ statement:
         ASTNode* func_def = $2;
         func_def->as.function_def.name = mangled_name;
         func_def->as.function_def.params = $7;
+        note_function_param_count(func_def->as.function_def.params);
         func_def->as.function_def.body = $9;
         func_def->as.function_def.is_variadic = 0;
 
@@ -445,37 +754,20 @@ else_branch:
 
 /* --- LIST RULES FOR MULTIPLE ASSIGNMENT --- */
 var_list:
+    prefix_expr {
+        $$ = assign_target ($1);
+    }
+    | var_list ',' prefix_expr {
+        $$ = append_node ($1, assign_target ($3));
+    }
+    ;
+
+name_list:
     TOKEN_IDENTIFIER {
         $$ = make_node_ident($1);
     }
-    | prefix_expr '.' TOKEN_IDENTIFIER {
-        ASTNode *string_key = make_node_string ($3);
-        $$ = make_node_table_get ($1, string_key);
-    }
-    | prefix_expr '[' expr ']' {
-        $$ = make_node_table_get ($1, $3);
-    }
-    | var_list ',' TOKEN_IDENTIFIER {
-        ASTNode* new_ident = make_node_ident($3);
-        ASTNode* curr = $1;
-        while(curr->next) curr = curr->next;
-        curr->next = new_ident;
-        $$ = $1;
-    }
-    | var_list ',' prefix_expr '.' TOKEN_IDENTIFIER {
-        ASTNode *string_key = make_node_string ($5);
-        ASTNode *new_target = make_node_table_get ($3, string_key);
-        ASTNode* curr = $1;
-        while(curr->next) curr = curr->next;
-        curr->next = new_target;
-        $$ = $1;
-    }
-    | var_list ',' prefix_expr '[' expr ']' {
-        ASTNode *new_target = make_node_table_get ($3, $5);
-        ASTNode* curr = $1;
-        while(curr->next) curr = curr->next;
-        curr->next = new_target;
-        $$ = $1;
+    | name_list ',' TOKEN_IDENTIFIER {
+        $$ = append_node ($1, make_node_ident($3));
     }
     ;
 
@@ -493,11 +785,12 @@ expr_list:
 
 function_def:
     /* Standard Function: function my_func() ... end */
-    func_start TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
+    func_start TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END { g_func_depth--; 
         // 1. Build the structural function definition using pre-allocated node
         ASTNode* func_def = $1;
         func_def->as.function_def.name = strdup($2);
         func_def->as.function_def.params = $4;
+        note_function_param_count(func_def->as.function_def.params);
         func_def->as.function_def.body = $6;
 
         // NEW: Check if parameter_list contains "..."
@@ -525,64 +818,20 @@ function_def:
         $$ = func_def;
     }
     | /* Table Dot Method Desugaring: function my_table.my_func() ... end */
-    func_start TOKEN_IDENTIFIER '.' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
-        // 1. Create a unique mangled label using the helper function
-        char* mangled_name = mangle_method_name($2, $4);
-
-        // 2. Build the structural function definition body using pre-allocated node
-        ASTNode* func_def = $1;
-        func_def->as.function_def.name = mangled_name;
-        func_def->as.function_def.params = $6;
-        func_def->as.function_def.body = $8;
-
-        // 3. Instantiate a function pointer node evaluating to that address
-        ASTNode* func_ptr = make_node(NODE_FUNCTION_POINTER);
-        func_ptr->as.func_ptr.mangled_name = strdup(mangled_name);
-
-        ASTNode* key_node = make_node_string($4);
-        ASTNode* table_node = make_node_ident($2);
-        
-        // 4. Tie it all into a table assignment: table[key] = func_ptr
-        ASTNode* table_set = make_node(NODE_TABLE_SET);
-        table_set->as.table_set.table_expr = table_node;
-        table_set->as.table_set.key = key_node;
-        table_set->as.table_set.value = func_ptr;
-
-        // 5. Chain them sequentially so the compiler outputs both properties cleanly
-        func_def->next = table_set;
-        $$ = func_def;
+    func_start TOKEN_IDENTIFIER '.' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END { g_func_depth--; 
+        // Lua semantics: exactly `my_table.my_func = function(...) ... end`.
+        // Built as a function EXPRESSION (func_def carried by the pointer,
+        // uniquely named) so that a definition inside another function
+        // captures that function's locals as a closure -- evercore's
+        // `function obj.left() return obj.x ... end` inside init_object().
+        // (It used to become a hoisted, capture-less function named
+        // my_table_my_func, which read garbage for `obj`.)
+        $$ = make_method_function_assignment($1, $2, $4, $6, $8, false);
     }
     | /* Table Colon Method Desugaring: function my_table:my_func() ... end */
-    func_start TOKEN_IDENTIFIER ':' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END {
-        // 1. Create a unique mangled label using the helper function
-        char* mangled_name = mangle_method_name($2, $4);
-
-        // 2. INJECT "self" as the first parameter!
-        ASTNode* self_param = make_node_ident("self");
-        self_param->next = $6; // Link it to the rest of the parameters
-
-        // 3. Build the structural function definition body using pre-allocated node
-        ASTNode* func_def = $1;
-        func_def->as.function_def.name = mangled_name;
-        func_def->as.function_def.params = self_param; // Set self as the head of the list
-        func_def->as.function_def.body = $8;
-
-        // 4. Instantiate a function pointer node evaluating to that address
-        ASTNode* func_ptr = make_node(NODE_FUNCTION_POINTER);
-        func_ptr->as.func_ptr.mangled_name = strdup(mangled_name);
-
-        ASTNode* key_node = make_node_string($4);
-        ASTNode* table_node = make_node_ident($2);
-        
-        // 5. Tie it all into a table assignment: table[key] = func_ptr
-        ASTNode* table_set = make_node(NODE_TABLE_SET);
-        table_set->as.table_set.table_expr = table_node;
-        table_set->as.table_set.key = key_node;
-        table_set->as.table_set.value = func_ptr;
-
-        // 6. Chain them sequentially so the compiler outputs both properties cleanly
-        func_def->next = table_set;
-        $$ = func_def;
+    func_start TOKEN_IDENTIFIER ':' TOKEN_IDENTIFIER '(' parameter_list ')' statement_list TOKEN_END { g_func_depth--; 
+        // `my_table.my_func = function(self, ...) ... end` -- see the dot form.
+        $$ = make_method_function_assignment($1, $2, $4, $6, $8, true);
     }
     ;
 
@@ -637,7 +886,13 @@ expr:
     }
     | TOKEN_NUMBER {
         $$ = make_node(NODE_NUMBER);
-        $$->as.number.val = $1;
+        // PICO-8 numbers are 16.16 fixed point: a literal holds the nearest
+        // multiple of 1/65536 (0.4 is 0x0.6666). Snapped here so the float
+        // holds exactly PICO-8's value -- and sums of such values stay
+        // exact: `v += 0.4` four times then `v -= 0.4` four times returns
+        // to 0, where plain float32 left 6e-8 and `if v > 0` never settled
+        // (froggo's player drifted a pixel at a time).
+        $$->as.number.val = runtime_req.needs_pico8 ? pico8_fix_literal ($1) : $1;
     }
     | TOKEN_STRING      { $$ = make_node_string($1); }
     | table_constructor { $$ = $1; }
@@ -649,11 +904,24 @@ expr:
     | expr '/' expr     { $$ = make_node_binary (NODE_DIV, $1, $3); }
     | expr '%' expr     { $$ = make_node_binary (NODE_MOD, $1, $3); }
     | expr '^' expr     { $$ = make_node_binary (NODE_POW, $1, $3); }
+    | expr '&' expr         { $$ = make_node_binary (NODE_BAND, $1, $3); }
+    | expr '|' expr         { $$ = make_node_binary (NODE_BOR,  $1, $3); }
+    | expr TOKEN_BXOR expr  { $$ = make_node_binary (NODE_BXOR, $1, $3); }
+    | expr TOKEN_SHL expr   { $$ = make_node_binary (NODE_SHL,  $1, $3); }
+    | expr TOKEN_SHR expr   { $$ = make_node_binary (NODE_SHR,  $1, $3); }
+    | expr TOKEN_LSHR expr  { $$ = make_node_binary (NODE_LSHR, $1, $3); }
+    | expr TOKEN_ROTL expr  { $$ = make_node_binary (NODE_ROTL, $1, $3); }
+    | expr TOKEN_ROTR expr  { $$ = make_node_binary (NODE_ROTR, $1, $3); }
+    | TOKEN_BXOR expr %prec UNARY_MINUS { $$ = make_node_unary (OP_BNOT, $2); }
     | TOKEN_TRUE  { $$ = make_node_boolean (true);  }
     | TOKEN_FALSE { $$ = make_node_boolean (false); }
     | TOKEN_NIL   { $$ = make_node_nil ();          }
     | TOKEN_LEN expr    { $$ = make_node_unary  (OP_LEN,   $2);     }
     | '-' expr %prec UNARY_MINUS { $$ = make_node_unary (OP_UNM, $2); }
+    /* PICO-8 peek operators: @a, %a, $a == peek(a), peek2(a), peek4(a) */
+    | TOKEN_PEEK expr  %prec UNARY_MINUS { $$ = make_peek_call ("peek",  $2); }
+    | '%' expr         %prec UNARY_MINUS { $$ = make_peek_call ("peek2", $2); }
+    | TOKEN_PEEK4 expr %prec UNARY_MINUS { $$ = make_peek_call ("peek4", $2); }
     | TOKEN_NOT expr             { $$ = make_node_unary (OP_NOT, $2); }
     | expr TOKEN_EQ expr      { $$ = make_node(NODE_RELATIONAL); $$->as.binary.operator = OP_EQ;  $$->as.binary.left = $1; $$->as.binary.right = $3; }
     | expr TOKEN_NEQ expr     { $$ = make_node(NODE_RELATIONAL); $$->as.binary.operator = OP_NEQ; $$->as.binary.left = $1; $$->as.binary.right = $3; }
@@ -665,7 +933,7 @@ expr:
     | expr TOKEN_OR expr      { $$ = make_node(NODE_OR);         $$->as.binary.left = $1;     $$->as.binary.right = $3; }
     | expr TOKEN_CONCAT expr  { $$ = make_node(NODE_CONCAT);     $$->as.binary.left = $1;     $$->as.binary.right = $3; }
     | func_start '(' parameter_list ')' statement_list TOKEN_END
-    {
+    { g_func_depth--; 
         static int anon_counter = 0;
         char buf[64];
         snprintf(buf, sizeof(buf), "__anon_%d", anon_counter++);
@@ -673,6 +941,7 @@ expr:
         ASTNode* func_def = $1;
         func_def->as.function_def.name = strdup(buf);
         func_def->as.function_def.params = $3;
+        note_function_param_count(func_def->as.function_def.params);
         func_def->as.function_def.body = $5;
 
         // Initialize and check variadic status for anonymous functions
@@ -695,30 +964,17 @@ expr:
     ;
 
 function_call:
-    TOKEN_IDENTIFIER '(' argument_list ')' {
+    prefix_expr '(' argument_list ')' {
         ASTNode* node = make_node(NODE_FUNCTION_CALL);
-        node->as.call.target = make_node_ident($1);
-        node->as.call.is_method_call = 0; 
-        node->as.call.args_head = $3;
-        $$ = node;
-    }
-    | prefix_expr '.' TOKEN_IDENTIFIER '(' argument_list ')' {
-        ASTNode* node = make_node(NODE_FUNCTION_CALL);
+        node->as.call.target = $1;
         node->as.call.is_method_call = 0;
-        
-        // Dynamically look up the function inside the table
-        ASTNode* dynamic_lookup = make_node(NODE_TABLE_GET);
-        dynamic_lookup->as.table_get.table_expr = $1;
-        dynamic_lookup->as.table_get.key = make_node_string($3);
-        node->as.call.target = dynamic_lookup;
-        node->as.call.args_head = $5;
+        node->as.call.args_head = $3;
+        pico8_parse_rewrite_peek(node);   /* peek(a, n): several values */
         $$ = node;
     }
     | prefix_expr ':' TOKEN_IDENTIFIER '(' argument_list ')' {
         ASTNode* node = make_node(NODE_FUNCTION_CALL);
-        node->as.call.target = $1;
         node->as.call.is_method_call = 1;
-        
         ASTNode* dynamic_lookup = make_node(NODE_TABLE_GET);
         dynamic_lookup->as.table_get.table_expr = $1;
         dynamic_lookup->as.table_get.key = make_node_string($3);
@@ -726,12 +982,27 @@ function_call:
         node->as.call.args_head = $5;
         $$ = node;
     }
-    | prefix_expr '(' argument_list ')' {
-        ASTNode* node = make_node(NODE_FUNCTION_CALL);
-        node->as.call.target = $1;
-        node->as.call.is_method_call = 0;
-        node->as.call.args_head = $3;
-        $$ = node;
+    /* Lua's single-argument call forms: f"str" and f{table} */
+    | prefix_expr TOKEN_STRING {
+        $$ = make_node(NODE_FUNCTION_CALL);
+        $$->as.call.target = $1;
+        $$->as.call.is_method_call = 0;
+        $$->as.call.args_head = make_node_string($2);
+    }
+    | prefix_expr table_constructor {
+        $$ = make_node(NODE_FUNCTION_CALL);
+        $$->as.call.target = $1;
+        $$->as.call.is_method_call = 0;
+        $$->as.call.args_head = $2;
+    }
+    | prefix_expr ':' TOKEN_IDENTIFIER TOKEN_STRING {
+        ASTNode* dynamic_lookup = make_node(NODE_TABLE_GET);
+        dynamic_lookup->as.table_get.table_expr = $1;
+        dynamic_lookup->as.table_get.key = make_node_string($3);
+        $$ = make_node(NODE_FUNCTION_CALL);
+        $$->as.call.target = dynamic_lookup;
+        $$->as.call.is_method_call = 1;
+        $$->as.call.args_head = make_node_string($4);
     }
     ;
 
@@ -759,13 +1030,18 @@ field_list:
     field {
         $$ = $1;
     }
-    | field_list ',' field {
+    | field_list field_sep field {
         // Chain fields together via next pointer
         ASTNode* curr = $1;
         while (curr->next) curr = curr->next;
         curr->next = $3;
         $$ = $1;
     }
+    ;
+
+    /* Lua allows ';' as well as ',' between table fields ({a=1; b=2}) */
+field_sep:
+    ',' | ';'
     ;
 
 table_constructor:
@@ -775,7 +1051,7 @@ table_constructor:
     | '{' field_list '}' {
         $$ = make_node_table_constructor($2);
     }
-    | '{' field_list ',' '}' {
+    | '{' field_list field_sep '}' {
         // Trailing comma before the closing brace -- e.g.
         //   { [1] = a, [2] = b, }
         // Standard, idiomatic Lua; the parser previously had no

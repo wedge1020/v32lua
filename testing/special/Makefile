@@ -21,7 +21,7 @@ all: $(ASM_OUTS)
 asm:
 	@for f in $(LUA_SRCS); do \
 		echo "Compiling test case: $$f -> $${f%.lua}.asm"; \
-		$(COMPILER) -g $$f -o $${f%.lua}.asm; \
+		$(COMPILER) --no-build-scripts -g $$f -o $${f%.lua}.asm; \
 	done
 
 tests:
@@ -59,7 +59,7 @@ debug:
 # Pattern rule: How to convert a .lua file into a .asm file
 %.asm: %.lua
 	@echo "Compiling test case: $< -> $@"
-	$(COMPILER) -g $< -o $@
+	$(COMPILER) --no-build-scripts -g $< -o $@
 
 # Assembly verification: Attempt to assemble all .asm files without halting on errors
 vbin: $(ASM_OUTS)
@@ -88,4 +88,4 @@ v32: $(XML_OUTS)
 
 # Clean target drops all generated assembly and binary test files
 clean:
-	rm -f *.asm *.vbin *.xml *.v32 *.debug *.txt *.cmd *.out *.err *.want* *.have* *.output
+	rm -f *.asm *.vbin *.xml *.v32 *.debug *.txt *.cmd *.out *.err *.want* *.have* *.output *.vtex *.vsnd

@@ -11,6 +11,7 @@
 #define IOPORT_TYPE_FLOAT   2
 #define IOPORT_TYPE_BOOLEAN 4
 
+extern unsigned int pico8_palette[16];
 extern unsigned int tic80_palette[16];
 
 typedef struct {
@@ -24,9 +25,13 @@ extern const IOPortMap  ioports[];
 extern const char      *valid_ioports_categories[];
 
 extern int              vircon32_sfx_cursor_base;
+extern int              v32io_gamepad_base;
 extern int              vircon32_btn_prev_state_base;
 extern int              vircon32_music_channel_mask_base;
 extern int              vircon32_sfx_channel_mask_base;
+extern int              ret_count_base;
+extern int              mv_buf_base;
+extern int              meta_call_base;
 
 // Returns 1 if the node was an intrinsic and assembly was emitted; 0 otherwise.
 //
@@ -41,6 +46,18 @@ void  validate_ioports_path        (const char *, const char *, int);
 bool  emit_gpu_draw_intrinsic(ASTNode *node, int dest_reg);
 void  emit_gpu_blending_intrinsic (ASTNode *node, int  dest_reg);
 void  emit_gpu_clear_intrinsic(ASTNode *node, int dest_reg);
+bool  emit_rgba_intrinsic     (ASTNode *node, int dest_reg);
+int   emit_pack_rgba          (const char *fname, ASTNode **args, int argc, int line);
+bool  rgba_static_word        (ASTNode **args, int argc, unsigned int *word);
+bool  is_rgba_intrinsic_call  (ASTNode *node);
+bool  is_color_intrinsic_call (ASTNode *node);
+bool  emit_color_intrinsic    (ASTNode *node, int dest_reg);
+bool  color_static_word       (ASTNode *arg, unsigned int *word);
+extern bool allow_float_clearcolor;      // --allow-float-as-clearcolor (config.h)
+extern bool g_cli_float_clearcolor_set;
+bool  expr_is_known_number    (ASTNode *e);      // node/math.c: provably a Lua number
+void  emit_number_to_color_word (int reg);        // reg: Lua number -> raw 32-bit word
+void  emit_color_word_arg     (ASTNode *arg, int reg, const char *what, int line, bool clear_port);
 bool  emit_spu_cmd_intrinsic       (ASTNode *, int);
 bool  emit_hex_intrinsic(ASTNode *, int);
 void  emit_get_gamepad_inputs_intrinsic (int);
@@ -50,16 +67,52 @@ bool  emit_type_intrinsic (ASTNode *, int);
 
 //////////////////////////////////////////////////////////////////////////////
 //
-// pico-8 api intrinsics
+// PICO8 API layer intrinsics
 //
-bool  emit_pico8_spr_intrinsic   (ASTNode *);
-bool  emit_pico8_btn_intrinsic   (ASTNode *, int);
-bool  emit_pico8_btnp_intrinsic  (ASTNode *, int);
-bool  emit_pico8_add_intrinsic   (ASTNode *, int);
-bool  emit_pico8_cls_intrinsic   (ASTNode *);
-bool  emit_pico8_mget_intrinsic  (ASTNode *, int);
-bool  emit_pico8_mset_intrinsic  (ASTNode *, int);
-bool  emit_pico8_map_intrinsic   (ASTNode *);
+bool  emit_pico8_spr_intrinsic      (ASTNode *, int);
+bool  emit_pico8_btn_intrinsic      (ASTNode *, int);
+bool  emit_pico8_btnp_intrinsic     (ASTNode *, int);
+bool  emit_pico8_add_intrinsic      (ASTNode *, int);
+bool  emit_pico8_cls_intrinsic      (ASTNode *, int);
+bool  emit_pico8_mget_intrinsic     (ASTNode *, int);
+bool  emit_pico8_mset_intrinsic     (ASTNode *, int);
+bool  emit_pico8_map_intrinsic      (ASTNode *, int);
+bool  emit_pico8_rnd_intrinsic      (ASTNode *, int);
+bool  emit_pico8_sqrt_intrinsic     (ASTNode *, int);
+bool  emit_pico8_flip_intrinsic     (ASTNode *, int);
+bool  emit_pico8_sgn_intrinsic      (ASTNode *, int);
+bool  emit_pico8_split1_intrinsic    (ASTNode *, int);
+bool  emit_pico8_cursor_get_intrinsic (ASTNode *, int);
+bool  emit_pico8_cursor_set_intrinsic (ASTNode *, int);
+bool  emit_pico8_menu_hook_intrinsic (ASTNode *, int);
+bool  emit_pico8_start_pressed_intrinsic (ASTNode *, int);
+bool  emit_pico8_atan2_intrinsic    (ASTNode *, int);
+bool  emit_pico8_mid_intrinsic      (ASTNode *, int);
+bool  emit_pico8_foreach_intrinsic  (ASTNode *, int);
+bool  emit_pico8_sfx_intrinsic      (ASTNode *, int);
+bool  emit_pico8_music_intrinsic    (ASTNode *, int);
+bool pico8_fold_numeric_string_args (ASTNode *, const char *);
+bool emit_cart_restart_intrinsic (ASTNode *, int, const char *);
+double pico8_fix_literal (double);
+bool emit_runtime_call_intrinsic (ASTNode *, int, int, const char *);
+bool  emit_pico8_sspr_intrinsic     (ASTNode *, int);
+bool  emit_pico8_count_intrinsic    (ASTNode *, int);
+bool  emit_pico8_del_intrinsic      (ASTNode *, int);
+bool  emit_pico8_sin_intrinsic      (ASTNode *, int);
+bool  emit_pico8_cos_intrinsic      (ASTNode *, int);
+bool  emit_pico8_tan_intrinsic      (ASTNode *, int);
+bool  emit_pico8_camera_intrinsic   (ASTNode *, int);
+bool  emit_pico8_rectfill_intrinsic (ASTNode *, int);
+bool  emit_pico8_circfill_intrinsic (ASTNode *, int);
+bool  emit_pico8_line_intrinsic     (ASTNode *, int);
+bool  emit_pico8_print_intrinsic    (ASTNode *, int);
+bool  emit_pico8_rect_intrinsic     (ASTNode *, int);
+bool  emit_pico8_pset_intrinsic     (ASTNode *, int);
+bool  emit_pico8_circ_intrinsic     (ASTNode *, int);
+bool  emit_pico8_color_intrinsic    (ASTNode *, int);
+bool  emit_pico8_fget_intrinsic     (ASTNode *, int);
+bool  emit_pico8_fset_intrinsic     (ASTNode *, int);
+bool  emit_pico8_pal_intrinsic      (ASTNode *, int, const char *);
 
 //////////////////////////////////////////////////////////////////////////////
 //
@@ -70,7 +123,7 @@ bool  emit_tic80_btn_intrinsic   (ASTNode *, int);
 bool  emit_tic80_btnp_intrinsic  (ASTNode *, int);
 bool  emit_tic80_add_intrinsic   (ASTNode *, int);
 bool  emit_tic80_cls_intrinsic   (ASTNode *);
-bool  emit_tic80_print_intrinsic (ASTNode *);
+bool  emit_tic80_print_intrinsic    (ASTNode *, int);
 // TIC-80 Map Functions
 bool  emit_tic80_mget_intrinsic  (ASTNode *, int);
 bool  emit_tic80_mset_intrinsic  (ASTNode *, int);
@@ -82,6 +135,16 @@ bool  emit_tic80_sfx_intrinsic   (ASTNode *, int);
 bool  emit_tic80_music_intrinsic (ASTNode *, int);
 // TIC-80 pmem
 bool  emit_tic80_pmem_intrinsic  (ASTNode *, int);
+bool  emit_tic80_memory_intrinsic (ASTNode *, const char *, int);   // peek/poke/memcpy/memset
+void  emit_tic80_ram_rom          (FILE *);
+bool  emit_tic80_stub_intrinsic   (ASTNode *, const char *, int);   // trace/key/keyp
+extern bool tic80_uses_memory;
+extern ASTNode    *iter_intrinsic_node;
+extern const char *iter_intrinsic_label;
+extern bool pico8_uses_memory;
+bool  emit_pico8_memory_intrinsic   (ASTNode *, const char *, int);
+bool  emit_pico8_time_intrinsic     (ASTNode *, int);
+void  pico8_parse_rewrite_peek      (ASTNode *);
 // TIC-80 Sprite Flag Functions
 bool  emit_tic80_fget_intrinsic  (ASTNode *, int);
 bool  emit_tic80_fset_intrinsic  (ASTNode *, int);
@@ -112,6 +175,7 @@ bool  emit_vircon32_spr_intrinsic            (ASTNode *, int);
 bool  emit_vircon32_tilemap_render_intrinsic (ASTNode *, int);
 bool  emit_vircon32_btn_intrinsic            (ASTNode *, int);
 bool  emit_vircon32_btnp_intrinsic           (ASTNode *, int);
+bool  emit_vircon32_rect_intrinsic           (ASTNode *, int, bool);   // rect / rectfill
 bool  emit_vircon32_play_intrinsic           (ASTNode *, int);
 bool  emit_vircon32_channel_cmd_intrinsic    (ASTNode *, int, const char *);
 bool  emit_vircon32_sfx_play_intrinsic       (ASTNode *, int);

@@ -3,6 +3,7 @@
 // Allocate storage for the global variables exactly once
 int  o_optflag  = 0; // by default, no compiler optimizations take place
 bool g_debug_mode = false;
+bool g_bios_mode  = false;
 const char *g_asm_filename = NULL;
 const char *g_lua_filename = NULL;
 int g_temp_asm_line        = 0;      // Adjust buffer size to match your project's original size
@@ -88,7 +89,7 @@ int  get_expected_arity (ASTNode *target)
 
     // 1. Direct function call: foo(1, 2)
     if (target->type == NODE_IDENTIFIER) {
-        SymbolNode *sym = resolve_symbol(target->as.id.name);
+        SymbolNode *sym = resolve_function_symbol(target->as.id.name);
         if (sym && sym->is_function) {
             return sym->arity;
         }
@@ -239,6 +240,8 @@ int check_needs_stack (ASTNode *node)
         case NODE_FOR_NUMERIC:
         case NODE_FOR_GENERIC:
         case NODE_CONCAT:
+        case NODE_BAND: case NODE_BOR: case NODE_BXOR: case NODE_SHL: case NODE_SHR:
+        case NODE_LSHR: case NODE_ROTL: case NODE_ROTR:
         case NODE_TABLE_SET:
         case NODE_TABLE_GET:
         case NODE_ASM:
@@ -322,7 +325,78 @@ int check_needs_stack (ASTNode *node)
     return check_needs_stack (node -> next);
 }
 
+// ----------------------------------------------------------------------------
+// goto / ::label:: support. Labels are visible in their own block and every
+// block nested in it, including FORWARD references (`goto continue` before
+// `::continue::`), and the same name may be reused in sibling blocks -- the
+// usual `::continue::` at the end of several loops in one function. So each
+// block pre-registers its own labels (unique asm name each) on a scope stack
+// before any of its statements are generated; a goto resolves to the
+// innermost visible label of the same function. Frames reserve all locals up
+// front, so a statement-level goto is a plain JMP.
+// ----------------------------------------------------------------------------
+typedef struct {
+    const char *name;
+    const char *func;
+    ASTNode    *node;
+    char        asm_label[192];
+} LabelEntry;
+static LabelEntry label_stack[512];
+static int        label_top = 0;
+
+static int push_label_scope (ASTNode *head)
+{
+    int mark = label_top;
+    const char *func = get_current_function_name ();
+    for (ASTNode *s = head; s != NULL; s = s->next) {
+        if (s->type != NODE_LABEL) continue;
+        for (int i = mark; i < label_top; i++) {
+            if (strcmp (label_stack[i].name, s->as.id.name) == 0) {
+                compiler_error (ERR_SEMANTIC, s->line_number,
+                    "label '%s' already defined in this block", s->as.id.name);
+            }
+        }
+        if (label_top >= 512) {
+            compiler_error (ERR_INTERNAL, s->line_number, "too many nested labels");
+        }
+        LabelEntry *e = &label_stack[label_top++];
+        e->name = s->as.id.name;
+        e->func = func;
+        e->node = s;
+        snprintf (e->asm_label, sizeof (e->asm_label), "__%s_label_%s_%d",
+                  func, s->as.id.name, get_next_label ());
+    }
+    return mark;
+}
+
+static void pop_label_scope (int mark) { label_top = mark; }
+
+static void emit_label_node (ASTNode *node)
+{
+    for (int i = label_top - 1; i >= 0; i--) {
+        if (label_stack[i].node == node) {
+            emit_asm ("%s:\n", label_stack[i].asm_label);
+            return;
+        }
+    }
+}
+
+static void emit_goto_node (ASTNode *node)
+{
+    const char *func = get_current_function_name ();
+    for (int i = label_top - 1; i >= 0; i--) {
+        if (strcmp (label_stack[i].func, func) == 0 &&
+            strcmp (label_stack[i].name, node->as.id.name) == 0) {
+            emit_asm ("JMP %s ; goto %s\n", label_stack[i].asm_label, node->as.id.name);
+            return;
+        }
+    }
+    compiler_error (ERR_SEMANTIC, node->line_number,
+        "no visible label '%s' for goto", node->as.id.name);
+}
+
 void generate_block(ASTNode *head) {
+    int label_mark = push_label_scope (head);
     ASTNode *current = head;
     while (current != NULL) {
         // -------------------------------------------------------------
@@ -385,6 +459,7 @@ void generate_block(ASTNode *head) {
         }
         current = current->next;
     }
+    pop_label_scope (label_mark);
 }
 
 void  generate_asm (ASTNode *node, int  dest_reg)
@@ -422,6 +497,14 @@ void  generate_asm (ASTNode *node, int  dest_reg)
 
             case NODE_BREAK:
                 node_break ();
+                break;
+
+            case NODE_GOTO:
+                emit_goto_node (node);
+                break;
+
+            case NODE_LABEL:
+                emit_label_node (node);
                 break;
 
             case NODE_IF:
@@ -489,6 +572,11 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 node_floordiv (node, dest_reg);
                 break;
 
+            case NODE_BAND: case NODE_BOR: case NODE_BXOR: case NODE_SHL:
+            case NODE_SHR:  case NODE_LSHR: case NODE_ROTL: case NODE_ROTR:
+                node_bitop (node, dest_reg);
+                break;
+
             case NODE_BOOLEAN:
                 node_boolean (node, dest_reg);
                 break;
@@ -510,10 +598,41 @@ void  generate_asm (ASTNode *node, int  dest_reg)
                 break;
 
             case NODE_VARIADIC_EXPR:
-                // Don't register as variable!
-                // Instead, generate code to access variadic arguments
-                emit_asm("    ; Variadic expression - access from stack\n");
-                // You'll need to implement proper variadic arg access here
+                // '...' in a single-value context (local a = ..., f(...) as a
+                // non-final argument, x + ...): the FIRST vararg, or nil if
+                // there are none. This used to be an empty stub that left
+                // dest_reg holding garbage -- `local a = ...` read back the
+                // raw argument-count word (1.4e-45). The table constructor
+                // expands '...' to all values itself (node_table.c).
+                if (dest_reg != 0) {
+                    emit_asm("MOV R%d, BOXED_NIL ; '...' -> nil unless a vararg exists\n", dest_reg);
+                    if (context_stack_head != NULL && context_stack_head->vararg_count_offset != -1) {
+                        int cnt  = allocate_register();
+                        lock_register(cnt);
+                        int addr = allocate_register();
+                        char done[128];
+                        snprintf(done, sizeof(done), "__%s_vararg1_done_%d",
+                                 get_current_function_name(), get_next_label());
+                        emit_asm("MOV R%d, BP\n", addr);
+                        emit_asm("IADD R%d, %d ; BP offset of runtime arg count\n",
+                                 addr, context_stack_head->vararg_count_offset);
+                        emit_asm("MOV R%d, [R%d]\n", cnt, addr);
+                        emit_asm("ISUB R%d, %d ; -> vararg count\n",
+                                 cnt, context_stack_head->fixed_param_count);
+                        // vararg #index (0 unless an intrinsic call spread
+                        // `...` into explicit arguments, see core.c)
+                        int vi = node->as.vararg.index;
+                        emit_asm("IGT R%d, %d\n", cnt, vi);
+                        emit_asm("JF R%d, %s\n", cnt, done);
+                        emit_asm("MOV R%d, BP\n", addr);
+                        emit_asm("IADD R%d, %d ; vararg #%d\n",
+                                 addr, context_stack_head->vararg_first_offset + vi, vi);
+                        emit_asm("MOV R%d, [R%d]\n", dest_reg, addr);
+                        emit_asm("%s:\n", done);
+                        unlock_register(addr);
+                        unlock_register(cnt);
+                    }
+                }
                 break;
 
             case NODE_STRING:
@@ -608,6 +727,12 @@ void generate_global_setup (ASTNode *node)
     // (reserving nil/false/true) lives in emit_variable_map() now.
     emit_asm ("MOV R0, HEAP_START ; heap start (see variable map)");
     emit_asm ("MOV [HEAP_POINTER], R0");
+    // Every global starts as nil. Their RAM words used to be left as they
+    // were: 0.0 (a truthy number) in a freshly reset machine, and whatever
+    // the BIOS left there on hardware -- so `if pause_player then return
+    // end` with pause_player never assigned always returned (evercore's
+    // player never moved).
+    emit_asm ("CALL __globals_to_nil");
 
     // NEW: FTOA_SCRATCH_PTR_A/B MUST start at 0 -- their lazy-allocate
     // check in __builtin_ftoa_scratch_a/b treats "nonzero" as "a real
@@ -620,7 +745,14 @@ void generate_global_setup (ASTNode *node)
     emit_asm ("MOV [FTOA_SCRATCH_PTR_A], R0 ; must start at 0 -- see generate_global_setup() comment\n");
     emit_asm ("MOV [FTOA_SCRATCH_PTR_B], R0 ; must start at 0 -- see generate_global_setup() comment\n");
 
-    if (runtime_req.needs_vircon32)
+    // PICO-8: GPU regions, draw state, map + sprite flags -- BEFORE any
+    // top-level cart statement below can call mset()/fget()/spr().
+    if (runtime_req.needs_pico8)
+    {
+        emit_asm ("CALL __builtin_pico8_init ; PICO-8 regions, draw state, map/flags RAM\n");
+    }
+
+    // Unconditional -- see the allocation comment in main.c.
     {
         emit_asm ("MOV R1, VIRCON32_BTN_PREV_STATE ; zero-init btnp() prev-state     table\n");
         emit_asm ("MOV R2, 44\n");
@@ -633,12 +765,22 @@ void generate_global_setup (ASTNode *node)
         emit_asm ("JMP __vircon32_btn_prev_state_zero_loop\n");
         emit_asm ("__vircon32_btn_prev_state_zero_done:\n");
 
+        emit_asm ("OUT INP_SelectedGamepad, 0 ; gamepad 0 selected, and known to be\n");
+        emit_asm ("MOV R1, 0\n");
+        emit_asm ("MOV [V32IO_GAMEPAD], R1 ; (the port can't be read back: v32io.s)\n");
         emit_asm ("MOV R1, 1 ; sfx.play() round-robin starts at channel 1\n");
         emit_asm ("MOV [VIRCON32_SFX_CURSOR], R1\n");
         emit_asm ("MOV R1, 0 ; no channels claimed by either namespace yet\n");
         emit_asm ("MOV [VIRCON32_MUSIC_CHANNEL_MASK], R1\n");
         emit_asm ("MOV [VIRCON32_SFX_CHANNEL_MASK], R1\n");
+        emit_asm ("MOV [META_CALL_DEPTH], R1 ; no __call trampolines pending\n");
     }
+
+    // v32kbd keyboard: state and strobe baseline (v32kbd.c)
+    v32kbd_emit_setup ();
+
+    // v32mouse: pointer and counter baseline (v32mouse.c)
+    v32mouse_emit_setup ();
 
     // NEW: Explicitly nil-initialize every plain (non-function) global.
     // Previously a global's value before its first assignment was
@@ -683,6 +825,7 @@ void generate_global_setup (ASTNode *node)
     if (node != NULL)
     {
         ASTNode *current = node;
+        int top_label_mark = push_label_scope (node);   // file-scope ::labels::
 
         while (current != NULL)
         {
@@ -704,6 +847,7 @@ void generate_global_setup (ASTNode *node)
             // Move to the next statement in the AST chain
             current = current -> next;
         }
+        pop_label_scope (top_label_mark);
     }
 
     // 4. Emit RET to prevent falling through into __malloc or the runtime library
@@ -711,6 +855,8 @@ void generate_global_setup (ASTNode *node)
     emit_asm ("POP BP\n");
     emit_asm ("RET\n");
 }
+
+bool  g_emitting_hoisted_functions = false;   // see node_function_def()
 
 void  generate_functions (ASTNode *node)
 {
@@ -720,7 +866,9 @@ void  generate_functions (ASTNode *node)
         {
             ASTNode *next_sibling  = node -> next;
             node -> next           = NULL;
+            g_emitting_hoisted_functions = true;
             generate_asm (node, 0);
+            g_emitting_hoisted_functions = false;
             node -> next           = next_sibling;
         }
         node                       = node -> next;
@@ -766,7 +914,14 @@ void generate_program (ASTNode *head)
     {
         init_sym             = resolve_symbol ("_init");
         main_sym             = resolve_symbol ("_draw");
-        update_sym           = resolve_symbol ("_update");
+        // _update60 (60 fps) wins over _update (30 fps) -- PICO-8's rule.
+        update_sym           = resolve_symbol ("_update60");
+        pico8_frame_step     = 1;
+        if (update_sym == NULL || update_sym -> is_function != 1)
+        {
+            update_sym       = resolve_symbol ("_update");
+            pico8_frame_step = 2;
+        }
     }
     else
     {
@@ -785,15 +940,33 @@ void generate_program (ASTNode *head)
         compiler_error(ERR_SEMANTIC, -1, 
             "Compilation failed: Your program must declare a 'TIC()' function.");
     }
-    else if (runtime_req.needs_pico8 && !has_update)
+    else if (runtime_req.needs_pico8)
     {
-        compiler_error(ERR_SEMANTIC, -1, 
-            "Compilation failed: Your program must declare a '_update()' function.");
+        // Nothing to require: a PICO-8 cart may be all top-level code or an
+        // _init() running its own `while true do ... flip() end` loop. With
+        // no _update/_draw the frame loop below just keeps time (and music)
+        // once that code returns, as PICO-8 idles on the last frame.
     }
     else if (!has_update && !has_main)
     {
         compiler_error(ERR_SEMANTIC, -1, 
             "Compilation failed: Your program must declare either a 'main()' or a 'game_loop()' function.");
+    }
+
+    if (g_bios_mode)
+    {
+        SymbolNode *eh = resolve_symbol ("error_handler");
+        if (eh == NULL || eh -> is_function != 1)
+        {
+            compiler_error (ERR_SEMANTIC, -1,
+                "Compilation failed: -b (BIOS) requires a 'function error_handler()' "
+                "(run by the console on a CPU hardware error)");
+        }
+        else if (eh -> arity != 0)
+        {
+            compiler_error (ERR_SEMANTIC, -1,
+                "Compilation failed: -b (BIOS) 'error_handler()' cannot have any parameters");
+        }
     }
 
     // =========================================================================
@@ -812,14 +985,26 @@ void generate_program (ASTNode *head)
     // =========================================================================
     // 3. EMIT COMPILED CODE ENTRY VECTOR
     // =========================================================================
+    if (g_bios_mode)
+    {
+        // A BIOS starts with the hardware error vector: the console jumps
+        // here when the CPU raises a hardware error (and the normal start
+        // follows it). The exact same three instructions the Vircon32 C
+        // compiler emits for `compile -b`, so the layout matches.
+        emit_asm (";; --- Hardware Error Vector (BIOS) ---\n");
+        emit_asm ("CALL __function_error_handler\n");
+        emit_asm ("WAIT\n");
+        emit_asm ("HLT\n");
+        emit_asm ("\n");
+    }
     emit_asm (";; --- Compiled Code Entry Vector ---\n");
     emit_asm ("CALL __global_scope_initialization  ; Run top-level setups first\n");
     
     // --- API Initialization: Call the appropriate region setup routine ---
     // Only call one based on which API is enabled (mutually exclusive)
-    if (runtime_req.needs_pico8) {
-        emit_asm ("CALL __builtin_pico8_init  ; Initialize PICO-8 assets\n");
-    } else if (runtime_req.needs_tic80) {
+    // (PICO-8's __builtin_pico8_init now runs inside
+    //  __global_scope_initialization -- see generate_global_setup().)
+    if (runtime_req.needs_tic80) {
         emit_asm ("CALL __builtin_tic80_init  ; Initialize TIC-80 assets\n");
     }
 
@@ -840,6 +1025,90 @@ void generate_program (ASTNode *head)
         w_mainwait  = 1; // look for WAIT, issue warning if not found
         emit_asm ("CALL __function_main ; Execute main execution cycle\n");
     }
+    else if (runtime_req.needs_pico8)
+    {
+        // PICO-8 frame: _update THEN _draw (the old order was reversed),
+        // at 30 fps for _update (two Vircon32 frames per tick -- the old
+        // loop ran every cart at double speed) or 60 fps for _update60.
+        emit_asm ("MOV  R0, 0\n");
+        emit_asm ("MOV  [PICO8_DRAW_COST], R0 ; RAM isn't clean after the BIOS\n");
+        emit_asm ("__start:\n");
+        v32io_emit_frame_start_hooks ();
+        emit_asm ("CALL __builtin_pico8_pause_check ; Start pauses, as on the TIC-80 layer\n");
+        // time()/t(): PICO-8 counts frames (_update calls), not wall time,
+        // so time stands still while paused
+        emit_asm ("MOV  R0, [PICO8_TICKS]\n");
+        emit_asm ("IADD R0, 1\n");
+        emit_asm ("MOV  [PICO8_TICKS], R0 ; one more PICO-8 frame for time()\n");
+        emit_asm ("IN   R0, TIM_FrameCounter\n");
+        emit_asm ("MOV  [PICO8_TICK_FRAME], R0 ; frame this tick started on\n");
+        if (has_update)
+        {
+            emit_asm ("CALL %s ; Execute %s()\n",
+                      (pico8_frame_step == 1) ? "__function__update60" : "__function__update",
+                      (pico8_frame_step == 1) ? "_update60" : "_update");
+            // A pattern change is on time if it is issued anywhere within
+            // the frame it falls on (the SPU mixes at the frame's end); an
+            // _update() that ran into the next frame would otherwise make
+            // it one frame late.
+            emit_asm ("CALL __builtin_pico8_music_tick\n");
+        }
+        if (has_main)
+        {
+            // Don't let _draw() cross a frame boundary: the GPU draws
+            // straight into the displayed image, so a frame that ends
+            // mid-draw is shown half-drawn (background without sprites --
+            // the flicker in celeste's 400m room). Draw now if the rest of
+            // this frame can hold it (judged by the last draw's cost plus
+            // 1/8), otherwise start it on a fresh frame. A tick whose
+            // update + draw fit its frames still costs no extra frame.
+            if (has_update)
+            {
+                emit_asm ("IN   R0, TIM_CycleCounter ; cycles used this frame\n");
+                emit_asm ("MOV  R1, [PICO8_DRAW_COST]\n");
+                emit_asm ("IADD R0, R1\n");
+                emit_asm ("SHL  R1, -3\n");
+                emit_asm ("IADD R0, R1 ; + 1/8 margin\n");
+                emit_asm ("IGT  R0, 250000 ; would the draw run past the frame?\n");
+                emit_asm ("JF   R0, __pico8_draw_now\n");
+                v32io_emit_frame_end_hooks ();
+                emit_asm ("WAIT ; start _draw() on a fresh frame\n");
+                emit_asm ("CALL __builtin_pico8_music_tick\n");
+                emit_asm ("__pico8_draw_now:\n");
+            }
+            emit_asm ("IN   R0, TIM_FrameCounter\n");
+            emit_asm ("MOV  [PICO8_DRAW_FRAME], R0\n");
+            emit_asm ("IN   R0, TIM_CycleCounter\n");
+            emit_asm ("MOV  [PICO8_DRAW_CYCLE], R0\n");
+            emit_asm ("CALL __function__draw   ; Execute _draw()\n");
+            emit_asm ("CALL __builtin_pico8_present ; mask off-canvas drawing (PICO-8 clips to 128x128)\n");
+            emit_asm ("CALL __builtin_pico8_music_tick\n");
+            // cost = (frames elapsed) * 250000 + cycle now - cycle at start
+            emit_asm ("IN   R0, TIM_FrameCounter\n");
+            emit_asm ("MOV  R1, [PICO8_DRAW_FRAME]\n");
+            emit_asm ("ISUB R0, R1\n");
+            emit_asm ("IMUL R0, 250000\n");
+            emit_asm ("IN   R1, TIM_CycleCounter\n");
+            emit_asm ("IADD R0, R1\n");
+            emit_asm ("MOV  R1, [PICO8_DRAW_CYCLE]\n");
+            emit_asm ("ISUB R0, R1\n");
+            emit_asm ("MOV  [PICO8_DRAW_COST], R0\n");
+        }
+        // Pace by the frame counter, not a fixed number of WAITs: a tick
+        // that runs past one frame then costs no extra frame, so _update
+        // keeps its 30 (or 60) calls per second as long as a tick fits in
+        // its PICO8_FRAME_STEP frames.
+        emit_asm ("__pico8_pace:\n");
+        v32io_emit_frame_end_hooks ();         // every frame, 30 fps ticks too
+        emit_asm ("WAIT\n");
+        emit_asm ("CALL __builtin_pico8_music_tick ; start the next music pattern on time\n");
+        emit_asm ("IN   R0, TIM_FrameCounter\n");
+        emit_asm ("MOV  R1, [PICO8_TICK_FRAME]\n");
+        emit_asm ("ISUB R0, R1\n");
+        emit_asm ("ILT  R0, PICO8_FRAME_STEP\n");
+        emit_asm ("JT   R0, __pico8_pace\n");
+        emit_asm ("JMP __start\n");
+    }
     else if (has_update)
     {
         if (runtime_req.needs_tic80)
@@ -852,15 +1121,7 @@ void generate_program (ASTNode *head)
         }
 
         emit_asm ("__start:\n");
-        if (runtime_req.needs_pico8)
-        {
-            if (has_main)
-            {
-                emit_asm ("CALL __function__draw   ; Execute _draw()\n");
-            }
-            emit_asm ("CALL __function__update ; Execute _update()\n");
-        }
-        else if (runtime_req.needs_tic80)
+        if (runtime_req.needs_tic80)
         {
             // Check START button rising edge
             emit_asm ("IN R0, INP_GamepadButtonStart\n");
@@ -880,8 +1141,11 @@ void generate_program (ASTNode *head)
             emit_asm ("MOV R1, [R1]\n");
             emit_asm ("IEQ R1, 0\n");
             emit_asm ("JF R1, __just_wait ; If paused, skip TIC\n");
+            v32io_emit_frame_start_hooks ();
             emit_asm ("CALL __function_TIC\n");
+            emit_asm ("CALL __builtin_tic80_sound_tick ; sfx() durations\n");
             emit_asm ("__just_wait:");
+            v32io_emit_frame_end_hooks ();     // paused frames too
             emit_asm ("WAIT\n");
 
             // exit() defers termination to the end of the current frame --
@@ -899,10 +1163,11 @@ void generate_program (ASTNode *head)
 
             // PAUSE: dim, render one frame, print, set flag
             emit_asm ("__do_pause:\n");
+            emit_asm ("OUT SPU_Command, SPUCommand_PauseAllChannels ; music and sfx hold while paused\n");
             emit_asm ("MOV R1, var_TIC80_COLOR_MULTIPLY\n");
             emit_asm ("IN R2, GPU_MultiplyColor\n");
             emit_asm ("MOV [R1], R2 ; Save current multiply\n");
-            emit_asm ("MOV R2, 0xFF404040 ; 50% gray\n");
+            emit_asm ("MOV R2, 0xFF404040 ; 50%% gray\n");
             emit_asm ("OUT GPU_MultiplyColor, R2\n");
             emit_asm ("CALL __function_TIC ; Render ONE dimmed frame\n");
             emit_asm ("MOV R1, 0xFFFFFFFF ; Restore for text\n");
@@ -924,6 +1189,7 @@ void generate_program (ASTNode *head)
 
             // UNPAUSE: restore color, clear flag
             emit_asm ("__do_unpause:\n");
+            emit_asm ("OUT SPU_Command, SPUCommand_ResumeAllChannels\n");
             emit_asm ("MOV R1, var_TIC80_COLOR_MULTIPLY\n");
             emit_asm ("MOV R2, [R1]\n");
             emit_asm ("OUT GPU_MultiplyColor, R2 ; Restore\n");
@@ -933,6 +1199,7 @@ void generate_program (ASTNode *head)
         }
         else
         {
+            v32io_emit_frame_start_hooks ();
             emit_asm ("CALL __function_game_loop ; Execute game loop tick\n");
         }
         emit_asm ("WAIT\n");
@@ -974,6 +1241,7 @@ void generate_program (ASTNode *head)
     fclose (temp_asm_stream);
 
     emit_runtime_library ();
+    emit_globals_to_nil ();
     emit_string_data_section ();
 
     // --- GENERATE DEBUG FILE ---

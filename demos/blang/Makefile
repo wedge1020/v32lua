@@ -29,8 +29,7 @@ asm: obj/$(DEMO).asm
 
 obj/$(DEMO).asm: $(DEMO).lua
 	@mkdir -p bin obj
-	$(LUA_COMPILER) $(DEBUG_FLAGS) -o obj/$(DEMO).asm $(DEMO).lua
-	mv obj/$(DEMO).xml .
+	$(LUA_COMPILER) --no-build-scripts $(DEBUG_FLAGS) -o obj/$(DEMO).asm $(DEMO).lua
 
 # Assemble Assembly to Binary
 vbin: obj/$(DEMO).vbin
@@ -48,8 +47,8 @@ obj/$(DEMO).vbin: obj/$(DEMO).asm
 v32: bin/$(DEMO).v32
 
 bin/$(DEMO).v32: obj/$(DEMO).vbin
-	$(PACKER) $(DEMO).xml -o bin/$(DEMO).v32
+	$(PACKER) obj/$(DEMO).xml -o bin/$(DEMO).v32
 
 # --- Clean Up ---
 clean:
-	rm -f bin/*.v32 obj/* textures/*.vtex *.xml
+	rm -f bin/*.v32 obj/* textures/*.vtex

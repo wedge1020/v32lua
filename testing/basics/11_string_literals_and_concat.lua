@@ -122,6 +122,6 @@ string_result12: "a1b2c3"
 string_result13: "start-1-2-3-4"
 string_result14: "12345"
 string_result15: "value- -5"
-string_result16: "pi-ish- 3.500000"
+string_result16: "pi-ish- 3.5"
 
 --]]

@@ -33,8 +33,17 @@ function fail()
 ##
 [ -z "${DEBUG}" ] && DEBUG="false" || DEBUG="true"
 UNIT=$(echo "${1}" | cut -d'.' -f1)
-COMPILE="../bin/v32lua"
-COMPILE="v32lua"
+# Prefer the compiler built in this tree, so the tests exercise the sources they
+# sit next to rather than whatever "v32lua" an earlier install left on the PATH.
+# Set COMPILE in the environment to force another one.
+if [ -z "${COMPILE}" ]; then
+    SELF_DIR=$(cd "$(dirname "$0")" && pwd)
+    if [ -x "${SELF_DIR}/../bin/v32lua" ]; then
+        COMPILE="${SELF_DIR}/../bin/v32lua"
+    else
+        COMPILE="v32lua"
+    fi
+fi
 CFLAGS="-w -g"
 ASSEMBLE="assemble"
 AFLAGS="-g program"

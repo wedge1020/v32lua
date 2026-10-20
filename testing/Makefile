@@ -23,7 +23,7 @@ all: $(ASM_OUTS)
 # Pattern rule: How to convert a .lua file into a .asm file
 %.asm: %.lua $(COMPILER)
 	@echo "Compiling test case: $< -> $@"
-	$(COMPILER) -g $< -o $@
+	$(COMPILER) --no-build-scripts -g $< -o $@
 
 # Assembly verification: Attempt to assemble all .asm files without halting on errors
 vbin: $(ASM_OUTS)
@@ -93,6 +93,7 @@ tests:
 	@$(MAKE) -C tables tests
 	@$(MAKE) -C special tests
 	@$(MAKE) -C api tests
+	@$(MAKE) -C v32stdapi tests
 
 # Clean target drops all generated assembly and binary test files
 clean:
@@ -102,4 +103,4 @@ clean:
 		echo "========================================"; \
 		$(MAKE) -C $$dir clean; \
 	done
-	@rm -f *.asm *.vbin *.xml *.v32 *.debug *.txt
+	@rm -f *.asm *.vbin *.xml *.v32 *.debug *.txt *.vtex *.vsnd textures/*.vtex
