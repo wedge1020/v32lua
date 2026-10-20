@@ -107,7 +107,7 @@ bin/$(TARGET):
 
 # Clean both the build files in src/ and the generated assembly in testing/
 clean:
-	rm -f err.txt put/* *.zip
+	rm -f err.txt put/* *.zip ../v32lua-project.zip
 	$(MAKE) -C src clean
 	$(MAKE) -C testing clean
 	$(MAKE) -C demos clean
