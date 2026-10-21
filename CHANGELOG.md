@@ -92,6 +92,17 @@ or speakers.
 
 ### Fixed — compiler core
 
+- **A comment (or string) that merely mentioned `--#api pico8` half-enabled
+  PICO-8.** `main.c` looked for the hint with a plain `strstr()`, so
+  `-- no --#api pico8 here` switched on the PICO-8 shorthand pass and
+  prelude while the API stayed native: `Undeclared function:
+  '__p8_cursor_get'` (any source also containing the word "cursor"), and
+  then-less `if`s were silently expanded in native mode. It also disabled
+  entry-point API auto-detection. Hints are now found the way the lexer
+  finds them (a `--#` that opens a comment; text inside comments, long
+  brackets and strings is skipped). Tests: `testing/apihint00.lua`,
+  `testing/fail/apihint00.lua`.
+
 - Globals started out as 0.0 (a truthy number) instead of `nil` -- and on
   hardware, as whatever the BIOS left in RAM. evercore's player never
   moved: `if pause_player then return end` with `pause_player` never

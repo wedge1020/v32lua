@@ -145,6 +145,76 @@ static bool has_line_starting (const char *src, const char *prefix)
     return false;
 }
 
+// The API a REAL "--#api X" / "--#p8" hint in src selects, found the way the
+// lexer finds hints: a "--#" that opens a comment, not one that merely
+// appears inside a comment ("-- no --#api pico8 here"), a string or a long
+// bracket. A plain strstr() matched all of those, so a comment that only
+// MENTIONED the hint half-enabled the PICO-8 front end (shorthand pass and
+// prelude appended) while the API itself stayed native -> "Undeclared
+// function: '__p8_cursor_get'". Returns true and fills out (e.g. "pico8")
+// for the first such hint; --#p8 implies pico8. False when there is none.
+static bool find_api_hint (const char *src, char *out, size_t out_size)
+{
+    const char *p = src;
+    while (p && *p) {
+        if (*p == '"' || *p == '\'') {                       // short string
+            char quote = *p++;
+            while (*p && *p != quote && *p != '\n') {
+                if (*p == '\\' && p[1]) p++;
+                p++;
+            }
+            if (*p) p++;
+            continue;
+        }
+        bool long_open = false;
+        const char *b = p;
+        if (p[0] == '-' && p[1] == '-') b = p + 2;
+        if (*b == '[') {                                     // [[, [=[ ...
+            const char *e = b + 1;
+            while (*e == '=') e++;
+            if (*e == '[') {
+                long_open = true;
+                size_t level = (size_t) (e - (b + 1));
+                p = e + 1;
+                for (; *p; p++) {                            // find ]==]
+                    if (*p == ']') {
+                        const char *c = p + 1;
+                        size_t k = 0;
+                        while (*c == '=') { c++; k++; }
+                        if (k == level && *c == ']') { p = c + 1; break; }
+                    }
+                }
+                if (!*p) return false;
+            }
+        }
+        if (long_open) continue;
+        if (p[0] == '-' && p[1] == '-') {
+            if (p[2] == '#') {                               // a real hint
+                char action[64] = {0}, param[128] = {0};
+                int  tokens = sscanf (p + 3, "%63s %127s", action, param);
+                if (tokens >= 1 && strcmp (action, "p8") == 0) {
+                    snprintf (out, out_size, "pico8");
+                    return true;
+                }
+                if (tokens >= 2 && strcmp (action, "api") == 0) {
+                    size_t n = strlen (param);
+                    const char *v = param;
+                    if (n >= 2 && param[0] == '"' && param[n - 1] == '"') {
+                        param[n - 1] = '\0';
+                        v = param + 1;
+                    }
+                    snprintf (out, out_size, "%s", v);
+                    return true;
+                }
+            }
+            while (*p && *p != '\n') p++;                    // line comment
+            continue;
+        }
+        p++;
+    }
+    return false;
+}
+
 // API auto-detection for a .lua with no --#api / --#p8 hint (and no --api):
 // the entry points name the platform. Returns NULL when it isn't clear.
 static const char *detect_api_from_source (const char *src)
@@ -422,11 +492,14 @@ int  main (int  argc, char** argv)
         // --- API auto-detection (no --api given) ---
         // .p8 and .tic say what they are. A .lua keeps its own --#api/--#p8
         // hint when it has one; otherwise its entry points decide.
+        char source_api_hint[128] = "";
+        bool source_has_hint = find_api_hint (expanded_source, source_api_hint,
+                                              sizeof (source_api_hint));
         if (!g_cli_api_set) {
             const char *detected = NULL;
             if (is_p8_cart)       detected = "pico8";
             else if (is_tic_cart) detected = "tic80";
-            else if (!strstr (expanded_source, "--#api") && !strstr (expanded_source, "--#p8"))
+            else if (!source_has_hint)
                 detected = detect_api_from_source (expanded_source);
             if (detected != NULL) {
                 apply_api_mode (detected);
@@ -445,10 +518,8 @@ int  main (int  argc, char** argv)
         // PICO-8 builtins implemented in Lua (split, tostr, stat, ...):
         // appended when the program uses them. See pico8_prelude.c.
         if (runtime_req.needs_pico8 ||
-            (!g_cli_api_set &&
-             (strstr (expanded_source, "--#api pico8") ||
-              strstr (expanded_source, "--#api \"pico8\"") ||
-              strstr (expanded_source, "--#p8")))) {
+            (!g_cli_api_set && source_has_hint &&
+             strcmp (source_api_hint, "pico8") == 0)) {
             // then-less `if (c) ...` / do-less `while (c) ...`: the body
             // is the rest of the line (see pico8_shorthand.c)
             char *expanded = pico8_expand_shorthand (expanded_source);
