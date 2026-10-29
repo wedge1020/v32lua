@@ -9,6 +9,36 @@ or speakers.
 
 ### New
 
+- **PICO-8 `stat()` reports real values.** `stat(n)` was a stub that knew
+  only the devkit mouse (32-34). It now answers Lua memory in KB (0), CPU
+  used this tick (1, from the cycle counter: 1.0 is the whole tick), the
+  version id (5, 43), the frame rates (7-9), the sound state (the sfx index
+  playing on each channel, 16-19 / 46-49; the music pattern, 24 / 54; music
+  playing, 57; a channel reports its `sfx()` sound first, else the music's),
+  the clock (80-85, and 90-95 which is the same clock), and the string / nil
+  / false ids (4, 6, 31, 100, 101, 30, 110). The mouse ids still go to the
+  v32mouse decoder. Not tracked: the note on a channel (-1), patterns and
+  ticks played (0), the devkit keyboard, system CPU. Froggo's
+  `srand(stat(95))` and `stat(54) == 63` now do what they say.
+  `__builtin_pico8_stat` (pico8.s), `emit_pico8_stat_intrinsic`
+  (v32mouse.c), the prelude's `stat`. Tests: `testing/special/26_...` and
+  `27_...` (with the mouse), `tests/audit/pico8/stat_audio.p8` (sound
+  state, needs `V32_SPU_STATE=1`).
+- **PICO-8 `all(t)` works as a value.** It was a compile error anywhere but
+  `for v in all(t)`. `local it = all(t)`, `f = all`, an iterator stored in a
+  table or passed to a function, and `for v in all(t), x do` now call a
+  prelude `all()` that returns PICO-8's own iterator function (same
+  deletion-tolerant order as the inline loop; `all(nil)` is empty). It is a
+  closure, so it costs a heap block per call that nothing frees; carts that
+  only use `for v in all(t)` (or `all{...}`) are unchanged and do not get the
+  function (`all_needs_function` in pico8_prelude.c; a mention in a `--`
+  comment doesn't count). Test: `testing/special/25_pico8_all_value.lua`,
+  its expected values produced by PICO-8's definition under real Lua 5.4.
+- **Headless harness: `V32_SPU_STATE=1`** gives the SPU stand-in a state per
+  channel (`ChannelState`, `ChannelAssignedSound` read back what the selected
+  channel was given; Play / Pause / Stop and the `*All` commands). Sounds
+  never end. Off by default, so existing `-s` logs are unchanged.
+
 - **`-b` builds a Vircon32 BIOS** instead of a cartridge, under the same
   rules as the Vircon32 toolchain's `compile -b`: a `function error_handler()`
   (run by the console on a CPU hardware error), exactly one `--#texture`

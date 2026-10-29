@@ -1230,7 +1230,7 @@ decision:
   of whole SFX would roughly halve that again (about half of Celeste's
   notes repeat), at the cost of a note-level sequencer.
 * PICO-8: `pal`/`palt` (compile to no-ops with a warning), `clip`,
-  real `stat` values (beyond the mouse), fractional `spr` widths, `pget`,
+  `stat` for sound-channel notes and the devkit keyboard, fractional `spr` widths, `pget`,
   multi-cart loading (`reload` from another file, `cstore`);
   writing sprite/sound memory has no effect and reading screen memory
   returns only what was written there (no GPU read-back); the SFX

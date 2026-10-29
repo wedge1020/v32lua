@@ -1341,7 +1341,7 @@ attente d'une décision de conception :
   encore de moitié environ (près de la moitié des notes de Celeste se
   répètent), au prix d'un séquenceur par note.
 * PICO-8 : `pal`/`palt` (compilés en no-op avec un avertissement),
-  `clip`, les vraies valeurs de `stat` (hors souris), les largeurs fractionnaires de
+  `clip`, `stat` pour les notes des canaux sonores et le clavier devkit, les largeurs fractionnaires de
   `spr`, `pget`, le chargement multi-
   cartouche (`reload` depuis un autre fichier, `cstore`) ; écrire dans la
   mémoire des sprites ou du son est sans effet et lire la mémoire écran ne

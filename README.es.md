@@ -1320,7 +1320,7 @@ una decisión de diseño:
   la mitad de las notas de Celeste se repiten), a costa de un secuenciador
   por notas.
 * PICO-8: `pal`/`palt` (compilan a no-ops con una advertencia), `clip`,
-  valores reales de `stat` (aparte del ratón), anchos fraccionarios en `spr`, `pget`,
+  `stat` de las notas de los canales de sonido y del teclado devkit, anchos fraccionarios en `spr`, `pget`,
   la carga multicartucho (`reload` desde
   otro archivo, `cstore`); escribir en la memoria de sprites o de sonido
   no tiene efecto y leer la memoria de pantalla solo devuelve lo escrito

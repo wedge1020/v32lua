@@ -998,15 +998,10 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
             return (emit_string_sub_intrinsic (node, dest_reg));
         }
 
-        // all(t) is only meaningful as a for-in iterator; node_for_generic
-        // lowers `for v in all(t)` itself, so reaching here means all() was
-        // used as a plain value.
-        if (strcmp (func_name, "all") == 0)
-        {
-            compiler_error (ERR_SEMANTIC, node->line_number,
-                "all() is only supported directly in a for-in loop: for v in all(t) do ... end");
-            return false;
-        }
+        // all(t): `for v in all(t)` is lowered inline by node_for_generic
+        // (node/loop.c) and never reaches here. Any other use is a call of
+        // the prelude's all() function (pico8_prelude.c), which returns
+        // PICO-8's iterator closure, so it is an ordinary call.
     }
 
     //////////////////////////////////////////////////////////////////////////

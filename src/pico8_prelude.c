@@ -87,9 +87,31 @@ static const PreludeFunc prelude[] = {
     { "tonum", NULL,
       "function tonum(v) return tonumber(v) end\n", NULL },
     { "stat", NULL,
-      // the devkit mouse (32-34, v32mouse.c) when the cart uses it; no other
-      // system state to report. Carts also use `stat` as a no-op function.
-      "function stat(n) return __p8_stat(n) end\n", NULL },
+      // The ids whose value is a string or nil (or a boolean with nothing
+      // to report) are answered here; every number and the devkit mouse
+      // (32-34, v32mouse.c) by __p8_stat -> pico8.s __builtin_pico8_stat.
+      // A real function, so carts can also use `stat` as a value.
+      "function stat(n)\n"
+      "  if n == 4 or n == 6 or n == 31 then return \"\" end\n"
+      "  if n == 100 or n == 101 then return nil end\n"
+      "  if n == 30 or n == 110 then return false end\n"
+      "  return __p8_stat(n)\n"
+      "end\n", NULL },
+    // all(t) as a VALUE: PICO-8's iterator function. `for v in all(t)` never
+    // gets here -- node/loop.c lowers it inline without allocating (this
+    // closure costs a heap block per call, and nothing is ever freed) -- see
+    // all_needs_function() below for when the prelude includes this at all.
+    { "all", NULL,
+      "function all(c)\n"
+      "  local i, prev = 1, nil\n"
+      "  if c == nil then return function() return nil end end\n"
+      "  return function()\n"
+      "    if c[i] == prev then i = i + 1 end\n"
+      "    while c[i] == nil and i <= #c do i = i + 1 end\n"
+      "    prev = c[i]\n"
+      "    return prev\n"
+      "  end\n"
+      "end\n", NULL },
     { "printh", NULL,
       "function printh(s) end\n", NULL },
     { "ord", NULL,
@@ -283,6 +305,47 @@ static bool mentions (const char *src, const char *name)
     return false;
 }
 
+// Does the program need the prelude's all() function? `for v in all(t) do`
+// is lowered inline by the compiler (node/loop.c) and needs none; every
+// other use of the word all in code -- `local it = all(t)`, `f = all`,
+// `for v in all(t), x do` -- does. Occurrences after a `--` on their line
+// are comments ("all" is a common word in them), not code.
+static bool all_needs_function (const char *src)
+{
+    for (const char *p = strstr (src, "all"); p != NULL; p = strstr (p + 1, "all")) {
+        bool left  = (p == src) || !(isalnum ((unsigned char) p[-1]) || p[-1] == '_');
+        bool right = !(isalnum ((unsigned char) p[3]) || p[3] == '_');
+        if (!left || !right) continue;
+
+        const char *ls = p;                       // start of the line
+        while (ls > src && ls[-1] != '\n') ls--;
+        bool comment = false;
+        for (const char *c = ls; c + 1 < p; c++)
+            if (c[0] == '-' && c[1] == '-') { comment = true; break; }
+        if (comment) continue;
+
+        const char *q = p;                        // is the word preceded by `in`?
+        while (q > src && (q[-1] == ' ' || q[-1] == '\t')) q--;
+        bool after_in = (q - src >= 2) && q[-2] == 'i' && q[-1] == 'n' &&
+                        (q - src == 2 || !(isalnum ((unsigned char) q[-3]) || q[-3] == '_'));
+        if (!after_in) return true;
+
+        const char *a = p + 3;                    // and followed by `(` or `{`
+        while (*a == ' ' || *a == '\t') a++;
+        if (*a != '(' && *a != '{') return true;
+        char open = *a, close = (open == '(') ? ')' : '}';
+        int depth = 0;
+        const char *c = a;
+        for (; *c != '\0'; c++) {
+            if (*c == open) depth++;
+            else if (*c == close && --depth == 0) { c++; break; }
+        }
+        while (*c == ' ' || *c == '\t' || *c == '\r' || *c == '\n') c++;
+        if (*c == ',') return true;               // more iterator expressions follow
+    }
+    return false;
+}
+
 // Does src define `name` itself (function name / name = function)?
 static bool defines (const char *src, const char *name)
 {
@@ -313,6 +376,7 @@ char *pico8_append_prelude (char *src)
     for (int i = 0; i < count; i++) {
         bool used = (prelude[i].name[0] != '_' && mentions (src, prelude[i].name)) ||
                     (prelude[i].trigger != NULL && strstr (src, prelude[i].trigger) != NULL);
+        if (strcmp (prelude[i].name, "all") == 0) used = all_needs_function (src);
         if (used && !defines (src, prelude[i].name)) {
             want[i] = true;
             prelude_builtin[i] = true;

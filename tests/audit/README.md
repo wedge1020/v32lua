@@ -33,6 +33,7 @@ Added 2026-10-02: `assign_order.lua` (a multiple assignment evaluates every
 target's table and key before storing anything: `self.vx, self = 0, 0`,
 `t[i], i = v, i + 1`) and `pico8/line2.lua` (`line(x1, y1 [, c])` and
 `line()`; check the draws with `runlua pico8/line2.lua -f 3 -g`).
+`pico8/stat_audio.p8` (2026-10-29): `stat(46..49)` / `stat(16..19)`, `stat(54)` / `stat(24)` and `stat(57)` against Celeste's real sound data: music pattern 0 on channels 0-1, `sfx()` on a channel taking precedence over the music's sfx there, everything idle after `sfx(-1)` / `music(-1)`. The expected value of each `r_*` is in the comment beside it. Run with the SPU state model on (the stand-in SPU is otherwise a plain latch that never reads "playing"): `V32_SPU_STATE=1 ../../tools/headless/runlua pico8/stat_audio.p8 -f 30 -q -D`.
 `pico8/cursor.lua`: `cursor()`, `print` at the text cursor, `print(s, col)`,
 `print`'s return value, the cursor at 0x5F26/0x5F27.
 `numlocals.lua`: locals that only ever hold numbers skip the numeric-string

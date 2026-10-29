@@ -257,6 +257,8 @@ _pico8_init_rng:
     OUT   GPU_ActiveBlending, GPUBlendingMode_Alpha
     MOV   R0, 1                          ; treat Start as held until first released
     MOV   [PICO8_START_PREV], R0
+    IN    R0, TIM_FrameCounter
+    MOV   [PICO8_TICK_FRAME], R0           ; stat(1) before the first tick
     MOV   R0, 0
     MOV   [PICO8_TICKS], R0                ; time() = 0 until the first frame
     MOV   [PICO8_RAM_PTR], R0              ; peek/poke RAM: created on first use
@@ -3172,6 +3174,252 @@ _pico8_sfx_done:
     POP   R1
     MOV   SP, BP
     POP   BP
+    RET
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; __builtin_pico8_stat(n): [BP+2] = n. PICO-8's stat() for every id whose
+;; value is a number or a boolean (the prelude's stat() answers the string
+;; and nil ones, and the compiler sends the devkit mouse, 32-34, to
+;; v32mouse.s). Returns R0 = value; anything unknown is 0.
+;;
+;;    0      Lua memory in KB: heap words in use / 256
+;;    1      CPU used this tick, 1.0 = the whole tick (15 MHz / 60 fps
+;;           = 250000 cycles per Vircon32 frame, PICO8_FRAME_STEP frames
+;;           per tick), counted from the frame the tick began on
+;;    5      version id (43, what a current PICO-8 saves in a .p8 header)
+;;    7, 8   frame rate: 60 / PICO8_FRAME_STEP (30, or 60 with _update60)
+;;    9      60 (the console always refreshes at 60)
+;;    16-19  sfx index playing on channel 0-3, -1: none. 46-49 are the same
+;;           ids in PICO-8's newer numbering. sfx() plays on SPU channels
+;;           4-7 and music() on 0-3; a channel reports its sfx() sound
+;;           first, else the music's
+;;    20-23  note on a channel: not tracked, always -1. 50-53 likewise
+;;    24     music pattern (-1: none). 54 is the same id
+;;    57     true while music is playing
+;;    80-85  year, month, day, hour, minute, second. 90-95 are the same
+;;           (the console has one clock: no UTC / local split)
+;; 25, 26 (patterns / ticks played) and 55, 56 are not tracked: 0.
+;;
+;; Saves every register it touches except R0.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+__builtin_pico8_stat:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+
+    MOV   R1, [BP+2]
+    MOV   R0, R1
+    AND   R0, NAN_VALUE
+    IEQ   R0, NAN_VALUE
+    JT    R0, _p8stat_zero             ; nil / not a number
+    FLR   R1
+    CFI   R1                           ; R1 = id
+
+    ;; the older ids are aliases of the newer ones: 16-26 -> 46-56 (sfx,
+    ;; notes, pattern, patterns played, ticks), and the local clock 90-95
+    ;; -> 80-85
+    MOV   R0, R1
+    IGE   R0, 16
+    MOV   R2, R1
+    ILE   R2, 26
+    AND   R0, R2
+    JF    R0, _p8stat_alias_clock
+    IADD  R1, 30
+    JMP   _p8stat_dispatch
+_p8stat_alias_clock:
+    MOV   R0, R1
+    IGE   R0, 90
+    MOV   R2, R1
+    ILE   R2, 95
+    AND   R0, R2
+    JF    R0, _p8stat_dispatch
+    ISUB  R1, 10
+
+_p8stat_dispatch:
+    MOV   R0, R1
+    IEQ   R0, 0
+    JT    R0, _p8stat_mem
+    MOV   R0, R1
+    IEQ   R0, 1
+    JT    R0, _p8stat_cpu
+    MOV   R0, R1
+    IEQ   R0, 5
+    JT    R0, _p8stat_version
+    MOV   R0, R1
+    IEQ   R0, 7
+    JT    R0, _p8stat_fps
+    MOV   R0, R1
+    IEQ   R0, 8
+    JT    R0, _p8stat_fps
+    MOV   R0, R1
+    IEQ   R0, 9
+    JT    R0, _p8stat_60
+    MOV   R0, R1
+    IGE   R0, 46
+    MOV   R2, R1
+    ILE   R2, 49
+    AND   R0, R2
+    JT    R0, _p8stat_sfx
+    MOV   R0, R1
+    IGE   R0, 50
+    MOV   R2, R1
+    ILE   R2, 53
+    AND   R0, R2
+    JT    R0, _p8stat_neg1
+    MOV   R0, R1
+    IEQ   R0, 54
+    JT    R0, _p8stat_pattern
+    MOV   R0, R1
+    IEQ   R0, 57
+    JT    R0, _p8stat_music
+    MOV   R0, R1
+    IGE   R0, 80
+    MOV   R2, R1
+    ILE   R2, 85
+    AND   R0, R2
+    JT    R0, _p8stat_clock
+_p8stat_zero:
+    MOV   R0, 0.0
+    JMP   _p8stat_done
+
+_p8stat_mem:
+    MOV   R0, [HEAP_POINTER]
+    ISUB  R0, HEAP_START
+    CIF   R0
+    FDIV  R0, 256.0                    ; words -> KB
+    JMP   _p8stat_done
+
+_p8stat_cpu:
+    IN    R0, TIM_FrameCounter
+    MOV   R2, [PICO8_TICK_FRAME]
+    ISUB  R0, R2                       ; whole frames since the tick began
+    IMUL  R0, 250000
+    IN    R2, TIM_CycleCounter         ; cycles into this frame
+    IADD  R0, R2
+    CIF   R0
+    MOV   R2, PICO8_FRAME_STEP
+    IMUL  R2, 250000
+    CIF   R2
+    FDIV  R0, R2
+    JMP   _p8stat_done
+
+_p8stat_version:
+    MOV   R0, 43.0
+    JMP   _p8stat_done
+
+_p8stat_fps:
+    MOV   R0, 60
+    IDIV  R0, PICO8_FRAME_STEP
+    JMP   _p8stat_int
+_p8stat_60:
+    MOV   R0, 60
+    JMP   _p8stat_int
+
+_p8stat_sfx:
+    ISUB  R1, 46                       ; channel 0-3
+    MOV   R0, PICO8_SFX_BASE
+    ILT   R0, 0
+    JT    R0, _p8stat_neg1             ; the cart plays no synthesized sound
+    MOV   R2, R1
+    IADD  R2, 4                        ; SPU channels 4-7 play sfx()
+    CALL  __pico8_stat_sfx_on
+    MOV   R3, R0
+    ILT   R3, 0
+    JF    R3, _p8stat_int
+    MOV   R2, R1                       ; SPU channels 0-3 play music()
+    CALL  __pico8_stat_sfx_on
+    JMP   _p8stat_int
+
+_p8stat_neg1:
+    MOV   R0, -1
+_p8stat_int:
+    CIF   R0                           ; raw int -> Lua number
+    JMP   _p8stat_done
+
+_p8stat_pattern:
+    MOV   R0, [PICO8_MUSIC_PATTERN]    ; -1: no music
+    JMP   _p8stat_int
+
+_p8stat_music:
+    MOV   R0, [PICO8_MUSIC_PATTERN]
+    IGE   R0, 0
+    IADD  R0, BOXED_FALSE
+    JMP   _p8stat_done
+
+;; 80-82 date (year, month, day), 83-85 time (hour, minute, second). The
+;; unpack builtins take R0-R9 as scratch, so R4-R9 and the index are
+;; saved around them.
+_p8stat_clock:
+    ISUB  R1, 80
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
+    PUSH  R7
+    PUSH  R8
+    PUSH  R9
+    PUSH  R1                           ; index 0-5
+    MOV   R0, R1
+    ILT   R0, 3
+    JF    R0, _p8stat_clock_time
+    IN    R0, TIM_CurrentDate
+    PUSH  R0
+    CALL  __builtin_unpack_date        ; R0 year, R2 month, R3 day
+    IADD  SP, 1
+    JMP   _p8stat_clock_pick
+_p8stat_clock_time:
+    IN    R0, TIM_CurrentTime
+    PUSH  R0
+    CALL  __builtin_unpack_time        ; R0 hour, R2 minute, R3 second
+    IADD  SP, 1
+_p8stat_clock_pick:
+    POP   R1
+    IMOD  R1, 3                        ; 0: R0, 1: R2, 2: R3
+    MOV   R4, R1
+    IEQ   R4, 0
+    JT    R4, _p8stat_clock_out
+    MOV   R4, R1
+    IEQ   R4, 1
+    JF    R4, _p8stat_clock_third
+    MOV   R0, R2
+    JMP   _p8stat_clock_out
+_p8stat_clock_third:
+    MOV   R0, R3
+_p8stat_clock_out:
+    POP   R9
+    POP   R8
+    POP   R7
+    POP   R6
+    POP   R5
+    POP   R4
+
+_p8stat_done:
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; __pico8_stat_sfx_on (internal): R2 = SPU channel -> R0 = the sfx index
+;; (0-63) it is playing, -1 if it is idle or plays something else.
+__pico8_stat_sfx_on:
+    OUT   SPU_SelectedChannel, R2
+    IN    R0, SPU_ChannelState
+    IEQ   R0, 0x42                     ; SPUChannelState_Playing
+    JF    R0, _p8stat_on_none
+    IN    R0, SPU_ChannelAssignedSound
+    ISUB  R0, PICO8_SFX_BASE
+    MOV   R3, R0
+    ILT   R3, 0
+    JT    R3, _p8stat_on_none
+    MOV   R3, R0
+    IGT   R3, 63
+    JT    R3, _p8stat_on_none
+    RET
+_p8stat_on_none:
+    MOV   R0, -1
     RET
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

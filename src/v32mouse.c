@@ -301,17 +301,40 @@ int try_emit_mouse_namespace_intrinsic (ASTNode *node, int dest_reg, const char 
 }
 
 // __p8_stat(n) -- the PICO-8 prelude's stat(): the devkit mouse (32-34)
-// when the program uses it, 0 for everything else
+// when the program uses it (read by v32mouse.s), every other number or
+// boolean id by __builtin_pico8_stat (pico8.s)
 int emit_pico8_stat_intrinsic (ASTNode *node, int dest_reg)
 {
+    emit_asm ("    ;; --- PICO-8 stat(n) ---\n");
+    push_args (node, 1, "stat");
     if (!v32mouse_wanted) {
-        for (ASTNode *a = node->as.call.args_head; a != NULL; a = a->next) {
-            int r = allocate_register ();
-            generate_asm (a, r);
-            unlock_register (r);
-        }
-        if (dest_reg != 0) emit_asm ("MOV R%d, 0.0 ; stat(): no state to report\n", dest_reg);
-        return 1;
+        emit_asm ("CALL __builtin_pico8_stat\n");
+    } else {
+        // 32 <= flr(n) <= 34 -> the mouse decoder; nil and other non-numbers
+        // (NaN-boxed words) never are, and are not compared as floats
+        int label = get_next_label ();
+        int a     = allocate_register ();
+        int b     = allocate_register ();
+        emit_asm ("MOV R%d, [SP] ; stat(): the id\n", a);
+        emit_asm ("MOV R%d, R%d\n", b, a);
+        emit_asm ("AND R%d, NAN_VALUE\n", b);
+        emit_asm ("IEQ R%d, NAN_VALUE\n", b);
+        emit_asm ("JT R%d, __stat_general_%d\n", b, label);
+        emit_asm ("FLR R%d\n", a);
+        emit_asm ("MOV R%d, R%d\n", b, a);
+        emit_asm ("FGE R%d, 32.0\n", b);
+        emit_asm ("FLE R%d, 34.0\n", a);
+        emit_asm ("AND R%d, R%d\n", a, b);
+        emit_asm ("JF R%d, __stat_general_%d\n", a, label);
+        unlock_register (b);
+        unlock_register (a);
+        emit_asm ("CALL __builtin_v32mouse_stat\n");
+        emit_asm ("JMP __stat_done_%d\n", label);
+        emit_asm ("__stat_general_%d:\n", label);
+        emit_asm ("CALL __builtin_pico8_stat\n");
+        emit_asm ("__stat_done_%d:\n", label);
     }
-    return mouse_call (node, dest_reg, 1, "__builtin_v32mouse_stat", "stat", 1);
+    emit_asm ("IADD SP, 1\n");
+    if (dest_reg != 0) emit_asm ("MOV R%d, R0\n", dest_reg);
+    return 1;
 }

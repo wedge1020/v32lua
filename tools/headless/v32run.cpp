@@ -165,13 +165,41 @@ struct LogGPU : VirconControlInterface {
 
 struct LogSPU : VirconControlInterface {
     int32_t P[14] = {0};
-    bool ReadPort(int32_t p, VirconWord& r) override { if (p > 13) return false; r.AsInteger = P[p]; return true; }
+    // V32_SPU_STATE=1: model each of the 16 channels' state and assigned
+    // sound, so ChannelState / ChannelAssignedSound read back what the
+    // SELECTED channel was given (Play -> Playing, Pause, Stop, the *All
+    // commands). Sounds never run out, so a played channel stays Playing
+    // until stopped. Off by default: the port is then a plain latch and the
+    // logs of existing runs don't change.
+    bool model = false;
+    int32_t chState[16], chSound[16];
+    LogSPU() { for (int i = 0; i < 16; i++) { chState[i] = 0x40; chSound[i] = 0; } }
+    bool ReadPort(int32_t p, VirconWord& r) override {
+        if (p > 13) return false;
+        if (model && (p == 8 || p == 9)) { int c = P[3] & 15; r.AsInteger = (p == 8) ? chState[c] : chSound[c]; return true; }
+        r.AsInteger = P[p]; return true;
+    }
+    void command(int32_t cmd) {
+        int c = P[3] & 15;
+        switch (cmd) {
+            case 0x30: chState[c] = 0x42; break;
+            case 0x31: if (chState[c] == 0x42) chState[c] = 0x41; break;
+            case 0x32: chState[c] = 0x40; break;
+            case 0x33: for (int i = 0; i < 16; i++) if (chState[i] == 0x42) chState[i] = 0x41; break;
+            case 0x34: for (int i = 0; i < 16; i++) if (chState[i] == 0x41) chState[i] = 0x42; break;
+            case 0x35: for (int i = 0; i < 16; i++) chState[i] = 0x40; break;
+        }
+    }
     bool WritePort(int32_t p, VirconWord v) override {
         static const char* names[] = {"Command","GlobalVolume","SelectedSound","SelectedChannel","SoundLength",
             "SoundPlayWithLoop","SoundLoopStart","SoundLoopEnd","ChannelState","ChannelAssignedSound",
             "ChannelVolume","ChannelSpeed","ChannelLoopEnabled","ChannelPosition"};
         if (p > 13) return false;
         P[p] = v.AsInteger;
+        if (model) {
+            if (p == 0) command(v.AsInteger);
+            else if (p == 9) chSound[P[3] & 15] = v.AsInteger;
+        }
         if (g_log_spu) {
             if (p == 1 || p == 10 || p == 11) printf("F%d SPU %s = %g\n", g_frame, names[p], v.AsFloat);
             else printf("F%d SPU %s = %d (0x%X)\n", g_frame, names[p], v.AsInteger, v.AsInteger);
@@ -260,6 +288,7 @@ int main(int argc, char** argv)
     RAM.Connect(Constants::RAMSize);
     BIOS.Connect(bios, 16);
     CAR.Connect(prog.data(), prog.size()); CAR.words = prog.size();
+    if (getenv("V32_SPU_STATE") && atoi(getenv("V32_SPU_STATE"))) SPU.model = true;
     if (getenv("V32_NO_MEMCARD") && atoi(getenv("V32_NO_MEMCARD"))) MEMC.present = false;
     else MEMC.Connect(Constants::MemoryCardSize);
     MB.Slaves[0] = &RAM; MB.Slaves[1] = &BIOS; MB.Slaves[2] = &CAR; MB.Slaves[3] = &MEMC;
