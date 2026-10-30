@@ -468,7 +468,14 @@ void  generate_asm (ASTNode *node, int  dest_reg)
     {
         // Automatically synchronize the tracker with the current AST element's source line
         if (g_debug_mode) {
-            g_current_lua_line = node->line_number; // Assumes your parser sets node->line_number
+            // A compound statement's node is made when its parse ends, so it
+            // carries its LAST line; its first instructions belong to the
+            // header, which the children (condition, bounds) set themselves.
+            if (node->type != NODE_WHILE && node->type != NODE_REPEAT &&
+                node->type != NODE_FOR_NUMERIC && node->type != NODE_FOR_GENERIC &&
+                node->type != NODE_IF && node->type != NODE_DO_BLOCK &&
+                node->type != NODE_FUNCTION_DEF)
+                g_current_lua_line = node->line_number;
         }
 
         if (g_verbose_debug && node != NULL) {
@@ -886,6 +893,47 @@ void  show_global_symbol_list (const char *label)
     }
 }
 
+// Scans the finished assembly for ';@src FILE:LINE' markers (';@src -' ends
+// one) and writes FILE.debug.
+static void write_source_map (const char *asm_path)
+{
+    char map_path[1100];
+    snprintf (map_path, sizeof (map_path), "%s.debug", asm_path);
+    FILE *in = fopen (asm_path, "r"), *map = fopen (map_path, "w");
+    if (in == NULL || map == NULL) { if (in) fclose (in); if (map) fclose (map); return; }
+
+    char line[8192], src[1024] = "", func[256] = "", last_func[256] = "";
+    int  src_line = 0, last_line = -1, n = 0;
+    while (fgets (line, sizeof (line), in) != NULL)
+    {
+        n++;
+        const char *p = line;
+        while (*p == ' ' || *p == '\t') p++;
+        if (strncmp (p, ";@src ", 6) == 0) {
+            p += 6;
+            if (p[0] == '-') { src_line = 0; last_line = -1; continue; }
+            const char *c = strrchr (p, ':');
+            if (c == NULL) continue;
+            snprintf (src, sizeof (src), "%.*s", (int) (c - p), p);
+            src_line = atoi (c + 1);
+        } else if (strncmp (p, "__function_", 11) == 0 && strchr (p, ':') != NULL) {
+            size_t len = strcspn (p + 11, ":\r\n");
+            snprintf (func, sizeof (func), "%.*s", (int) len, p + 11);
+        } else if (src_line > 0 && p > line && *p >= 'A' && *p <= 'Z') {   // an instruction
+            if (src_line != last_line || strcmp (func, last_func) != 0) {
+                if (strcmp (func, last_func) != 0)
+                    fprintf (map, "%s,%d,%s,%d,%s\n", asm_path, n, src, src_line, func);
+                else
+                    fprintf (map, "%s,%d,%s,%d\n", asm_path, n, src, src_line);
+                last_line = src_line;
+                snprintf (last_func, sizeof (last_func), "%s", func);
+            }
+        }
+    }
+    fclose (in);
+    fclose (map);
+}
+
 void generate_program (ASTNode *head)
 {
     ASTNode *current             = NULL;
@@ -981,6 +1029,8 @@ void generate_program (ASTNode *head)
 
     FILE *final_out_stream = out();
     set_output_stream(temp_asm_stream);
+    emit_hint (";@hints 1 abi=caller-save lang=lua");
+    src_marker_end ();
     
     // =========================================================================
     // 3. EMIT COMPILED CODE ENTRY VECTOR
@@ -1236,7 +1286,9 @@ void generate_program (ASTNode *head)
         current = current->next;
     }
 
+    src_marker_end ();
     generate_global_setup (head);
+    src_marker_end ();
 
     // Restore output back to the final compilation output file
     set_output_stream (final_out_stream);
@@ -1255,49 +1307,21 @@ void generate_program (ASTNode *head)
     }
     fclose (temp_asm_stream);
 
+    src_marker_end ();
     emit_runtime_library ();
     emit_globals_to_nil ();
     emit_string_data_section ();
 
     // --- GENERATE DEBUG FILE ---
-    if (g_debug_mode && temp_debug_stream != NULL)
+    // FILE.asm.debug, one "asmfile,asmline,srcfile,srcline[,function]" entry
+    // per change of source line, the format v32cc -g writes (v32as -g --map
+    // turns it into the address -> source file v32sim reads). It is made from
+    // the ';@src' markers in the finished assembly, so the line numbers are
+    // those of the file as written, not an estimate.
+    if (g_debug_mode && g_asm_filename != NULL)
     {
-        char debug_filename[1024];
-        snprintf(debug_filename, sizeof(debug_filename), "%s.debug", g_asm_filename);
-        
-        FILE *debug_file = fopen(debug_filename, "w");
-        if (debug_file != NULL)
-        {
-            rewind(temp_debug_stream);
-            char dbg_buffer[512];
-            int last_seen_lua_line = -1; 
-            
-            while (fgets(dbg_buffer, sizeof(dbg_buffer), temp_debug_stream) != NULL)
-            {
-                int rel_line = 0;
-                int lua_line = 0;
-                char label[256] = "";
-                
-                int items = sscanf(dbg_buffer, "%d,%d,%255s", &rel_line, &lua_line, label);
-                if (items >= 2)
-                {
-                    if (lua_line != last_seen_lua_line)
-                    {
-                        last_seen_lua_line = lua_line;
-                        int actual_asm_line = final_line_offset + rel_line;
-                        
-                        if (items == 3) {
-                            label[strcspn(label, "\r\n")] = 0;
-                            fprintf(debug_file, "%s,%d,%s,%d,%s\n", g_asm_filename, actual_asm_line, g_lua_filename, lua_line, label);
-                        } else {
-                            fprintf(debug_file, "%s,%d,%s,%d\n", g_asm_filename, actual_asm_line, g_lua_filename, lua_line);
-                        }
-                    }
-                }
-            }
-            fclose(debug_file);
-        }
-        fclose(temp_debug_stream);
-        temp_debug_stream = NULL; 
+        fflush (out());
+        write_source_map (g_asm_filename);
     }
+    if (temp_debug_stream != NULL) { fclose (temp_debug_stream); temp_debug_stream = NULL; }
 }

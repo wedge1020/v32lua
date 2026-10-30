@@ -47,7 +47,20 @@ void  push_function_scope (void)
     current_scope                      = new_scope;
 }
 
+// ';@var NAME loc=BP-3 type=lua [boxed]' (-g): where a named variable lives
+// from here on. Compiler temporaries (names starting with "__") are left out.
+static void debug_emit_var (const SymbolNode *sym)
+{
+    if (!g_debug_mode || context_stack_head == NULL || sym == NULL || sym->name == NULL) return;
+    if (sym->name[0] == '_' && sym->name[1] == '_') return;
+    if (sym->location > 0)
+        emit_debug_line (";@var %s loc=BP-%d type=lua%s", sym->name, sym->location, sym->is_boxed ? " boxed" : "");
+    else if (sym->location < 0)
+        emit_debug_line (";@var %s loc=BP+%d type=lua%s", sym->name, -sym->location, sym->is_boxed ? " boxed" : "");
+}
+
 void push_scope(void) {
+    if (g_debug_mode && context_stack_head != NULL) emit_debug_line (";@scope {");
     ScopeNode* new_scope = (ScopeNode*)calloc(1, sizeof(ScopeNode));
     new_scope->parent = current_scope;
     
@@ -67,6 +80,9 @@ void pop_scope(void) {
         compiler_error(ERR_INTERNAL, -1, "Scope underflow: tried to pop global scope!");
     }
     
+    // (a function's own scope has no ';@scope {': its variables are the function's)
+    if (g_debug_mode && context_stack_head != NULL && !current_scope->is_function_boundary)
+        emit_debug_line (";@scope }");
     ScopeNode* old_scope = current_scope;
     current_scope = current_scope->parent;
     
@@ -220,6 +236,7 @@ SymbolNode *register_local (const char* name)
     }
     current_scope -> last                = sym;
 
+    debug_emit_var (sym);
     return (sym);
 }
 
@@ -597,6 +614,7 @@ SymbolNode *register_parameter (const char *name, int offset)
     }
     current_scope->last = sym;
 
+    debug_emit_var (sym);
     return sym;
 }
 

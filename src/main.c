@@ -111,6 +111,7 @@ static void  print_usage (const char *prog_name)
     fprintf (stdout, "                   wav2vircon, assemble, packrom, and v32opt when installed) are\n");
     fprintf (stdout, "                   written beside the source file, or in its parent when the source\n");
     fprintf (stdout, "                   is in src/ and the output in a sibling folder such as obj/\n");
+    fprintf (stdout, "  --no-hints   Leave the ';@' compiler hints for v32opt out of the assembly\n");
     fprintf (stdout, "  --no-build-scripts\n");
     fprintf (stdout, "                   do not write Make.sh / Make.bat\n");
     fprintf (stdout, "\nInput files: .lua, .p8 (PICO-8 cart), .tic (TIC-80 cart, Lua only)\n");
@@ -315,6 +316,8 @@ int  main (int  argc, char** argv)
         } else if (strcmp(argv[i], "--no-diff-opt-title") == 0) {
             g_no_diff_opt_title = true;
             RECORD_OPT ("--no-diff-opt-title", NULL, 0);
+        } else if (strcmp(argv[i], "--no-hints") == 0) {
+            g_emit_hints = false;
         } else if (strcmp(argv[i], "--no-build-scripts") == 0) {
             build_scripts = 0;
         } else if ((val = option_value(argc, argv, &i, "--rate")) != NULL ||

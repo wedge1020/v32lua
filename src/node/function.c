@@ -52,6 +52,8 @@ void  node_function_def (ASTNode *node)
         snprintf(g_current_label, sizeof(g_current_label), "func_%s", func_name);
     }
 
+    bool hint_outer_escapes = hints_fn_begin();
+    src_marker_reset();
     emit_asm("__function_%s:\n", func_name);
 
     int num_locals = count_function_locals(node->as.function_def.body);
@@ -282,6 +284,12 @@ void  node_function_def (ASTNode *node)
     }
     emit_asm ("\n");
 
+    {
+        char hint_label[300];
+        snprintf (hint_label, sizeof (hint_label), "__function_%s", func_name);
+        hints_fn_end (hint_outer_escapes, hint_label);
+        src_marker_reset();
+    }
     pop_function_context();
 
     base_spill_frame_offset = saved_base_spill_frame_offset;

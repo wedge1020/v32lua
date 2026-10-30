@@ -312,9 +312,11 @@ void emit_arith_coerce (int reg, ASTNode *e)
     emit_asm ("AND  R0, NAN_VALUE\n");
     emit_asm ("IEQ  R0, NAN_VALUE ; not a number?\n");
     emit_asm ("JF   R0, __%s_num_%d\n", ctx, id);
+    emit_hint (";@cold {");               // an operand that is not a number: rare
     emit_asm ("MOV  R0, R%d\n", reg);
     emit_asm ("CALL __arith_coerce ; a numeric string -> its number\n");
     emit_asm ("MOV  R%d, R0\n", reg);
+    emit_hint (";@cold }");
     emit_asm ("__%s_num_%d:\n", ctx, id);
 }
 

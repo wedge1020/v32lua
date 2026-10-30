@@ -47,6 +47,15 @@ CARTresource *sounds_tail         = NULL;
 int           next_texture_id     = 0;
 int           next_sound_id       = 0;
 
+// A zeroed node that knows its source line (the debug map and the ';@src'
+// markers need one; malloc left the line number uninitialised).
+static ASTNode *ast_alloc (void)
+{
+    ASTNode *n = (ASTNode *) calloc (1, sizeof (ASTNode));
+    n->line_number = yylineno;
+    return n;
+}
+
 ASTNode *make_node (NodeType type)
 {
     ASTNode* n = (ASTNode*)calloc(1, sizeof(ASTNode));
@@ -396,7 +405,7 @@ ASTNode *make_node_method_def (ASTNode *table_expr, const char *method_name, int
 
 ASTNode *make_node_unary (Operator  op, ASTNode *operand)
 {
-    ASTNode* node = malloc(sizeof(ASTNode));
+    ASTNode* node = ast_alloc ();
     node->type = NODE_UNARY;
     node->next = NULL;
     node->as.unary.operator = op;
@@ -435,7 +444,7 @@ void generate_binary_op (ASTNode* node)
 ASTNode *make_node_binary (NodeType  type, ASTNode *left, ASTNode *right)
 {
     // 1. Allocate memory for the new node
-    ASTNode* node = (ASTNode*)malloc(sizeof(ASTNode));
+    ASTNode* node = ast_alloc ();
     if (node == NULL) {
         fprintf(stderr, "Compiler Error: Out of memory during AST node allocation.\n");
         exit(1);
@@ -459,7 +468,7 @@ ASTNode *make_node_binary (NodeType  type, ASTNode *left, ASTNode *right)
 
 ASTNode *make_node_table_constructor (ASTNode *initializers_head)
 {
-    ASTNode *node                                   = (ASTNode *) malloc (sizeof (ASTNode));
+    ASTNode *node                                   = ast_alloc ();
     node -> type                                    = NODE_TABLE_CONSTRUCTOR;
     node -> next                                    = NULL;
     node -> as.table_constructor.initializers_head  = initializers_head;
@@ -468,7 +477,7 @@ ASTNode *make_node_table_constructor (ASTNode *initializers_head)
 
 ASTNode *make_node_table_get (ASTNode *table_expr, ASTNode *key_expr)
 {
-    ASTNode* node = malloc(sizeof(ASTNode));
+    ASTNode* node = ast_alloc ();
     node->type = NODE_TABLE_GET;
     node->next = NULL;
     node->as.table_get.table_expr = table_expr;
@@ -478,7 +487,7 @@ ASTNode *make_node_table_get (ASTNode *table_expr, ASTNode *key_expr)
 
 ASTNode *make_node_table_set (ASTNode *table_expr, ASTNode *key_expr, ASTNode *value_expr)
 {
-    ASTNode* node = malloc(sizeof(ASTNode));
+    ASTNode* node = ast_alloc ();
     node->type = NODE_TABLE_SET;
     node->next = NULL;
     node->as.table_set.table_expr = table_expr;

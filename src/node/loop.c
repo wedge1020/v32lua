@@ -53,6 +53,9 @@ void  node_for_numeric (ASTNode *node)
     // STEP 1: Enter loop scope and allocate stack storage for loop variables
     // -------------------------------------------------------------------------
     push_scope();
+    // the 'for' line: the node knows only where the statement ended
+    int for_header_line = node->as.for_numeric.start_expr != NULL
+                              ? node->as.for_numeric.start_expr->line_number : node->line_number;
 
     // Generate unique names for loop control variables. NOTE: 'control_var'
     // is the loop's own hidden driving counter -- it is what STEP 4 checks
@@ -135,6 +138,24 @@ void  node_for_numeric (ASTNode *node)
     // -------------------------------------------------------------------------
     push_loop(label_id, LOOP_TYPE_FOR_NUMERIC);
 
+    // facts for v32opt: where the loop keeps its bookkeeping, and what is
+    // known at compile time (see doc/HINTS.md)
+    {
+        char facts[256];
+        int  n = snprintf (facts, sizeof (facts), ";@loop kind=for counter=%d limit=%d step=%d",
+                           hint_bp_offset (access_control), hint_bp_offset (access_limit),
+                           hint_bp_offset (access_step));
+        if (is_static_step && static_step_val == (double)(long) static_step_val)
+            n += snprintf (facts + n, sizeof (facts) - n, " stepval=%ld", (long) static_step_val);
+        ASTNode *a = node->as.for_numeric.start_expr, *b = node->as.for_numeric.stop_expr;
+        if (a && b && a->type == NODE_NUMBER && b->type == NODE_NUMBER &&
+            a->as.number.val == (double)(long) a->as.number.val &&
+            b->as.number.val == (double)(long) b->as.number.val)
+            n += snprintf (facts + n, sizeof (facts) - n, " from=%ld to=%ld",
+                           (long) a->as.number.val, (long) b->as.number.val);
+        if (hint_bp_offset (access_control) != 0) emit_hint ("%s", facts);
+    }
+    if (g_debug_mode) g_current_lua_line = for_header_line;   // the test belongs to the 'for' line
     emit_asm("%s:\n", start_label);
 
         // -------------------------------------------------------------------------
@@ -228,6 +249,7 @@ void  node_for_numeric (ASTNode *node)
     ensure_in_register(r_calc);
     ensure_in_register(r_st);
 
+    if (g_debug_mode) g_current_lua_line = for_header_line;   // the increment belongs to the 'for' line
     emit_asm("FADD R%d, R%d ; control += step", r_calc, r_st);
 
     // Plain raw store back into the hidden control slot -- no boxing, no

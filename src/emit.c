@@ -39,6 +39,70 @@ static bool line_is_asm_label (const char *code_start)
  * @param format Printf-style format string for the assembly line
  * @param ...    Variable arguments for the format string
  */
+bool g_emit_hints = true;
+static bool g_fn_escapes   = false;   // the function being emitted forms a frame address
+static int  g_marked_line  = -1;      // last ';@src' line written (-1: none)
+
+void emit_hint (const char *fmt, ...)
+{
+    if (!g_emit_hints) return;
+    va_list ap;
+    va_start (ap, fmt);
+    fputs ("    ", out());
+    vfprintf (out(), fmt, ap);
+    fputc ('\n', out());
+    va_end (ap);
+}
+
+// a debug-info line (';@var', ';@scope'): written only with -g, inside a function
+void emit_debug_line (const char *fmt, ...)
+{
+    if (!g_debug_mode) return;
+    va_list ap;
+    va_start (ap, fmt);
+    fputs ("    ", out());
+    vfprintf (out(), fmt, ap);
+    fputc ('\n', out());
+    va_end (ap);
+}
+
+bool hints_fn_begin (void)
+{
+    bool outer = g_fn_escapes;
+    g_fn_escapes = false;
+    return outer;
+}
+
+// Facts only: escapes=none is written when nothing in the function took the
+// address of a frame word (no LEA, no copy of BP into another operand).
+void hints_fn_end (bool outer, const char *label)
+{
+    if (!g_fn_escapes) emit_hint (";@fn %s escapes=none", label);
+    g_fn_escapes = outer;
+}
+
+void src_marker_reset (void) { g_marked_line = -1; }
+
+void src_marker_end (void)
+{
+    if (g_debug_mode && g_marked_line != 0) {
+        fprintf (out(), ";@src -\n");
+        g_marked_line = 0;
+    }
+}
+
+int hint_bp_offset (const char *access)
+{
+    const char *p = strstr (access, "BP");
+    if (p == NULL || strchr (access, '[') == NULL) return 0;
+    p += 2;
+    while (*p == ' ') p++;
+    int sign = (*p == '-') ? -1 : 1;
+    if (*p == '-' || *p == '+') p++;
+    while (*p == ' ') p++;
+    return sign * atoi (p);
+}
+
 void  emit_asm (const char *format, ...) {
     char raw_buf[EMIT_BUFFER_SIZE];
     va_list args;
@@ -200,6 +264,11 @@ void  emit_asm (const char *format, ...) {
         // =====================================================================
 
         // Apply auto-formatting: 4-space indent, 5-char left-aligned opcode width
+        if (g_debug_mode && g_current_lua_line > 0 && g_current_lua_line != g_marked_line &&
+            g_lua_filename != NULL) {
+            fprintf (out(), ";@src %s:%d\n", g_lua_filename, g_current_lua_line);
+            g_marked_line = g_current_lua_line;
+        }
         fprintf(out(), "    %-5s", opcode);
 
         if (operands != NULL && *operands != '\0') {
@@ -238,6 +307,12 @@ void  emit_asm (const char *format, ...) {
             snprintf (last_emitted_dest, sizeof (last_emitted_dest), "%.*s", (int) sizeof (last_emitted_dest) - 1, dest ? dest : "");
             snprintf (last_emitted_src,  sizeof (last_emitted_src),  "%.*s", (int) sizeof (last_emitted_src) - 1,  src  ? src  : "");
         }
+
+        // frame addresses (for ';@fn escapes=none'): LEA, or BP copied somewhere
+        if (strcmp (opcode, "LEA") == 0 ||
+            (strcmp (opcode, "MOV") == 0 && src != NULL && strcmp (src, "BP") == 0 &&
+             (dest == NULL || strcmp (dest, "SP") != 0)))   // MOV SP, BP is the epilogue
+            g_fn_escapes = true;
 
         // Immediate stderr output in verbose debug mode
         if (g_verbose_debug) {

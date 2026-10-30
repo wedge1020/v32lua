@@ -1,0 +1,115 @@
+# Compiler hints and source markers v32lua writes
+
+v32lua writes `;@` comment lines in its assembly for `v32opt` (optimization facts) and for
+debuggers (source locations). They are comments: the assembled cartridge is identical with
+or without them (`tests/audit/hints/check_hints.py` checks this). `--no-hints` leaves out
+the optimizer hints; the source markers are written only with `-g`.
+The formats are `v32opt`'s `doc/hints.md` plus the proposals in `proposals/` (the
+V32DBG spec). Anything a `v32opt` does not know is ignored by it.
+
+| Line | Written | Meaning |
+|---|---|---|
+| `;@hints 1 abi=caller-save lang=lua` | once, at the top | v32opt's header. `lang=lua` is new (ignored by older v32opt) |
+| `;@fn __function_f escapes=none` | after each function | nothing in the function took a frame address (no `LEA`, no copy of `BP` into an operand; `MOV SP, BP` of the epilogue does not count). Functions that copy `BP` (those using `...`) get no line |
+| `;@loop kind=for counter=-9 limit=-7 step=-8 [stepval=K] [from=A to=B]` | before the start label of a numeric `for` | the three hidden frame words (BP-relative), and the integer constants when known. Facts: the body never writes them, limit and step are written once before the loop |
+| `;@cold` | before the label of a slow-path block | rarely taken. Today the table index slow path (`__F_idx_slow_N`) |
+| `;@cold {` ... `;@cold }` | around the `__arith_coerce` call | an inline block (the code falls into it) that is rarely run: an operand that is not a number |
+| `;@var NAME loc=BP-3 type=lua [boxed]` (`-g`) | where a local or parameter is registered | the variable's frame word (`BP-n` local, `BP+n` parameter); `boxed`: the word holds a box pointer (captured by a closure), not the value. Compiler temporaries (`__...`) are not listed |
+| `;@scope {` / `;@scope }` (`-g`) | around each block | lexical scope, so a debugger shows the variables in scope at a line. A function's own scope has no braces |
+| `;@src FILE:LINE` (`-g`) | before the first instruction of each source line | the following instructions come from that line |
+| `;@src -` (`-g`) | before the runtime, startup and global setup | no Lua source |
+
+## `-g`
+
+`v32lua -g x.lua -o x.asm` writes `x.asm` with the `;@src` markers and `x.asm.debug`
+(`asmfile,asmline,luafile,lualine[,function]`, one entry per change of line, made from
+the markers in the finished file so the line numbers are exact). Then
+`v32as -g --map x.asm.debug x.asm` writes the address -> Lua line file that `v32sim` reads.
+The old map was estimated while generating and was wrong (an entry said line 32720; about 11
+entries for an 11,000-line program); the AST also had nodes with no line number
+(`make_node_*` used `malloc`), which is fixed.
+
+A compound statement (`for`, `while`, `if`, `do`, `function`) is attributed to its header
+line for the first instructions and the loop's test and increment; the body's statements
+have their own lines. The first instructions of a function are attributed to its first body
+line, not the `function` line (the parser knows only where the statement ended).
+
+## Not yet
+
+`clobbers=` on the runtime helpers (it needs a register-discipline check I have not
+written: the helpers' comments say "preserves R1-R13" but nothing verifies it), `;@loop` for
+`while`, `repeat` and generic `for`, `;@fn ... lines=A..B`. See the proposals.
+# Compiler hints and source markers v32lua writes
+
+v32lua writes `;@` comment lines in its assembly for `v32opt` (optimization facts) and for
+debuggers (source locations). They are comments: the assembled cartridge is identical with
+or without them (`tests/audit/hints/check_hints.py` checks this). `--no-hints` leaves out
+the optimizer hints; the source markers are written only with `-g`.
+The formats are `v32opt`'s `doc/hints.md` plus the proposals in `proposals/` (the
+V32DBG spec). Anything a `v32opt` does not know is ignored by it.
+
+| Line | Written | Meaning |
+|---|---|---|
+| `;@hints 1 abi=caller-save lang=lua` | once, at the top | v32opt's header. `lang=lua` is new (ignored by older v32opt) |
+| `;@fn __function_f escapes=none` | after each function | nothing in the function took a frame address (no `LEA`, no copy of `BP` into an operand; `MOV SP, BP` of the epilogue does not count). Functions that copy `BP` (those using `...`) get no line |
+| `;@loop kind=for counter=-9 limit=-7 step=-8 [stepval=K] [from=A to=B]` | before the start label of a numeric `for` | the three hidden frame words (BP-relative), and the integer constants when known. Facts: the body never writes them, limit and step are written once before the loop |
+| `;@cold` | before the label of a slow-path block | rarely taken. Today the table index slow path (`__F_idx_slow_N`) |
+| `;@src FILE:LINE` (`-g`) | before the first instruction of each source line | the following instructions come from that line |
+| `;@src -` (`-g`) | before the runtime, startup and global setup | no Lua source |
+
+## `-g`
+
+`v32lua -g x.lua -o x.asm` writes `x.asm` with the `;@src` markers and `x.asm.debug`
+(`asmfile,asmline,luafile,lualine[,function]`, one entry per change of line, made from
+the markers in the finished file so the line numbers are exact). Then
+`v32as -g --map x.asm.debug x.asm` writes the address -> Lua line file that `v32sim` reads.
+The old map was estimated while generating and was wrong (an entry said line 32720; about 11
+entries for an 11,000-line program); the AST also had nodes with no line number
+(`make_node_*` used `malloc`), which is fixed.
+
+A compound statement (`for`, `while`, `if`, `do`, `function`) is attributed to its header
+line for the first instructions and the loop's test and increment; the body's statements
+have their own lines. The first instructions of a function are attributed to its first body
+line, not the `function` line (the parser knows only where the statement ended).
+
+## Not yet
+
+`;@var` / `;@scope` (locals for a debugger), `clobbers=` on the runtime helpers, `;@cold`
+on the `__arith_coerce` block, `;@loop` for `while` and generic `for`. See the proposals.
+# Compiler hints and source markers v32lua writes
+
+v32lua writes `;@` comment lines in its assembly for `v32opt` (optimization facts) and for
+debuggers (source locations). They are comments: the assembled cartridge is identical with
+or without them (`tests/audit/hints/check_hints.py` checks this). `--no-hints` leaves out
+the optimizer hints; the source markers are written only with `-g`.
+The formats are `v32opt`'s `doc/hints.md` plus the proposals in `proposals/` (the
+V32DBG spec). Anything a `v32opt` does not know is ignored by it.
+
+| Line | Written | Meaning |
+|---|---|---|
+| `;@hints 1 abi=caller-save lang=lua` | once, at the top | v32opt's header. `lang=lua` is new (ignored by older v32opt) |
+| `;@fn __function_f escapes=none` | after each function | nothing in the function took a frame address (no `LEA`, no copy of `BP` into an operand; `MOV SP, BP` of the epilogue does not count). Functions that copy `BP` (those using `...`) get no line |
+| `;@loop kind=for counter=-9 limit=-7 step=-8 [stepval=K] [from=A to=B]` | before the start label of a numeric `for` | the three hidden frame words (BP-relative), and the integer constants when known. Facts: the body never writes them, limit and step are written once before the loop |
+| `;@cold` | before the label of a slow-path block | rarely taken. Today the table index slow path (`__F_idx_slow_N`) |
+| `;@src FILE:LINE` (`-g`) | before the first instruction of each source line | the following instructions come from that line |
+| `;@src -` (`-g`) | before the runtime, startup and global setup | no Lua source |
+
+## `-g`
+
+`v32lua -g x.lua -o x.asm` writes `x.asm` with the `;@src` markers and `x.asm.debug`
+(`asmfile,asmline,luafile,lualine[,function]`, one entry per change of line, made from
+the markers in the finished file so the line numbers are exact). Then
+`v32as -g --map x.asm.debug x.asm` writes the address -> Lua line file that `v32sim` reads.
+The old map was estimated while generating and was wrong (an entry said line 32720; about 11
+entries for an 11,000-line program); the AST also had nodes with no line number
+(`make_node_*` used `malloc`), which is fixed.
+
+A compound statement (`for`, `while`, `if`, `do`, `function`) is attributed to its header
+line for the first instructions and the loop's test and increment; the body's statements
+have their own lines. The first instructions of a function are attributed to its first body
+line, not the `function` line (the parser knows only where the statement ended).
+
+## Not yet
+
+`;@var` / `;@scope` (locals for a debugger), `clobbers=` on the runtime helpers, `;@cold`
+on the `__arith_coerce` block, `;@loop` for `while` and generic `for`. See the proposals.

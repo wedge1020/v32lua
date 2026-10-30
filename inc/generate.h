@@ -18,6 +18,19 @@ extern char  g_current_label[256]; // Captures a label for the current line
 extern FILE *temp_debug_stream; // Temporary buffer for tracking debug lines
 extern FILE *active_out_stream;
 
+// Compiler hints for v32opt (comments only; see doc/HINTS.md) and the source
+// markers of -g. Both are ';@' comment lines, so the assembled cartridge is
+// the same with or without them.
+extern bool g_emit_hints;                       // --no-hints turns them off
+void   emit_hint          (const char *fmt, ...);   // one ';@' line, as given
+bool   hints_fn_begin     (void);               // start tracking frame addresses; returns the outer state
+void   hints_fn_end       (bool outer, const char *label);  // writes ';@fn' and restores
+void   emit_debug_line    (const char *fmt, ...);   // ';@var' / ';@scope' (-g only)
+void   src_marker_reset   (void);               // forget the last marker (function start / end)
+void   src_marker_end     (void);               // ';@src -': what follows has no Lua source
+int    hint_bp_offset     (const char *access); // "[BP - 9]" -> -9 (0 if not a BP slot)
+
+
 ////////////////////////////////////////////////////////////////////////////////////////
 //
 // node type function prototypes

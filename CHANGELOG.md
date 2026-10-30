@@ -9,6 +9,12 @@ or speakers.
 
 ### Fixed
 
+- **`-g` wrote a wrong source map.** The map was estimated while generating (an entry said
+  line 32720, 11 entries for an 11,000-line program) and several AST nodes (`make_node_*`)
+  had an uninitialised line number. The assembly now carries `;@src FILE:LINE` markers and
+  `FILE.asm.debug` is made from them, so the lines are exact and survive a tool that
+  rewrites the file. `doc/HINTS.md`; test `tests/audit/hints/check_hints.py`.
+
 - **PICO-8 `stat(1)` counted the idle wait as CPU.** To keep a half-drawn
   frame off the screen the runtime starts `_draw()` on a fresh frame when it
   would not fit in the rest of this one, and that wait (up to a whole frame)
@@ -17,6 +23,14 @@ or speakers.
   and `flip()` starts the count again. Test: `testing/special/28_pico8_stat_cpu.lua`.
 
 ### New
+
+- **Compiler hints for `v32opt`, as comments**: `;@hints 1 abi=caller-save lang=lua`,
+  `;@fn ... escapes=none`, `;@loop kind=for counter= limit= step= [stepval= from= to=]` and
+  `;@cold` on slow paths. Nothing changes in the cartridge (`--no-hints` leaves them out).
+  An inline `;@cold {` ... `;@cold }` region marks the `__arith_coerce` call. With `-g`
+  also `;@var NAME loc=BP-n type=lua [boxed]` for locals and parameters and balanced
+  `;@scope {` / `;@scope }` per block, for a source-level debugger. v32opt does not use the
+  loop/cold facts yet; the proposals for it, `v32sim` and `v32as` are in `proposals/`.
 
 - **PICO-8 `stat(30)` / `stat(31)` read the keyboard** (a v32kbd device,
   `--#keyboard N`): a typed-character queue, `stat(30)` true while one waits

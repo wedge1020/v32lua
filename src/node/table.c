@@ -610,6 +610,7 @@ void emit_index_lookup (int table_reg, int key_reg, ASTNode *key, int dest_reg)
         emit_asm ("JMP  __%s_idx_done_%d\n", ctx, id);
         unlock_register (a);
     }
+    emit_hint (";@cold");                 // the generic path: rarely taken
     emit_asm ("__%s_idx_slow_%d:\n", ctx, id);
 general:
     emit_asm ("PUSH R%d\n", table_reg);
