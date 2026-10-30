@@ -7,7 +7,19 @@ CPU core in a headless harness (`tools/headless/`). Rendering and audio
 were not run: GPU and SPU commands were checked from logs, not on screen
 or speakers.
 
+### Added
+
+- `;@fn LABEL clobbers=...` for 214 runtime routines, from `tools/check_clobbers.py`
+  (`src/runtime_clobbers.h`, checked by `tests/audit/hints/check_hints.py`). `doc/HINTS.md`.
+- `tools/v32srcmark.py`: source markers and an exact `-g` side file for the output of the
+  unmodified stock Vircon32 C compiler. Test `tests/audit/srcmark/check_srcmark.py`.
+
 ### Fixed
+
+- **Stale register comments in the runtime.** `__table_metamethod`, `__table_rawget_rk`,
+  `__table_newindex`, `__table_index_miss` and `__table_unary_meta` said they preserve
+  R1-R13 but call `__builtin_table_get` (R6-R13); `__pico8_poke_w` said it preserves R0;
+  `__builtin_random` listed R0-R5 in one place, R0-R6 in another. Comments only; no code changed.
 
 - **`-g` wrote a wrong source map.** The map was estimated while generating (an entry said
   line 32720, 11 entries for an 11,000-line program) and several AST nodes (`make_node_*`)

@@ -1,0 +1,69 @@
+; program start section
+  call __global_scope_initialization
+  call __function_main
+  hlt
+
+; location of global variables
+
+__global_scope_initialization:
+  push BP
+  mov BP, SP
+  mov SP, BP
+  pop BP
+  ret
+
+__function_add:
+  push BP
+  mov BP, SP
+  isub SP, 1
+  push R1
+  mov R0, [BP+2]
+  mov R1, [BP+3]
+  imul R0, R1
+  mov [BP-1], R0
+  mov R0, [BP-1]
+  iadd R0, 1
+__function_add_return:
+  pop R1
+  mov SP, BP
+  pop BP
+  ret
+
+__function_main:
+  push BP
+  mov BP, SP
+  isub SP, 4
+  mov R0, 0
+  mov [BP-1], R0
+  mov R0, 0
+  mov [BP-2], R0
+__for_17_start:
+  mov R0, [BP-2]
+  ilt R0, 10
+  jf R0, __for_17_end
+  mov R1, [BP-1]
+  mov R3, [BP-2]
+  mov [SP], R3
+  mov R3, 3
+  mov [SP+1], R3
+  call __function_add
+  mov R2, R0
+  iadd R1, R2
+  mov [BP-1], R1
+  mov R0, R1
+__for_17_continue:
+  mov R0, [BP-2]
+  mov R1, R0
+  iadd R1, 1
+  mov [BP-2], R1
+  jmp __for_17_start
+__for_17_end:
+  mov R0, R0
+  mov R0, [BP-1]
+  iadd R0, 1
+  mov [BP-1], R0
+__function_main_return:
+  mov SP, BP
+  pop BP
+  ret
+

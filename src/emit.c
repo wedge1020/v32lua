@@ -1047,6 +1047,23 @@ void  emit_string_data_section (void)
 //
 // Helper: emit contents of a binary blob through emit_asm() for consistent formatting
 //
+#include "runtime_clobbers.h"
+
+// ';@fn LABEL clobbers=...' for a runtime routine defined by this line
+static void emit_runtime_clobbers_hint (const char *line)
+{
+    if (!g_emit_hints || line[0] != '_') return;
+    size_t n = strcspn (line, ":\n \t;");
+    if (line[n] != ':') return;
+    for (size_t i = 0; runtime_clobbers[i].label != NULL; i++) {
+        const char *l = runtime_clobbers[i].label;
+        if (strlen (l) == n && strncmp (l, line, n) == 0) {
+            fprintf (out(), "    ;@fn %s clobbers=%s\n", l, runtime_clobbers[i].regs);
+            return;
+        }
+    }
+}
+
 static void emit_embedded_asm (const char *start)
 {
     const char *cursor = start;
@@ -1061,6 +1078,7 @@ static void emit_embedded_asm (const char *start)
             line[i++] = *cursor++;
         }
         line[i] = '\0';
+        emit_runtime_clobbers_hint (line);
         emit_asm ("%s", line);  // Preserves formatting, comments
     }
 }

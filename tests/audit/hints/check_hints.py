@@ -44,6 +44,13 @@ check("each ;@loop is followed by its start label",
 check(";@cold precedes the table slow path label", re.search(r"^\s*;@cold\n__main_idx_slow_\d+:", asm, re.M) is not None)
 check("main: ;@fn escapes=none (no LEA, no BP copy)", re.search(r";@fn __function_main escapes=none", asm) is not None)
 check(";@cold { } regions are balanced and inline", len(re.findall(r"^\s*;@cold \{$", asm, re.M)) == len(re.findall(r"^\s*;@cold \}$", asm, re.M)) >= 1)
+cl = dict(re.findall(r"^\s*;@fn (\w+) clobbers=(\S+)$", asm, re.M))
+check("runtime: ;@fn LABEL clobbers= for helpers in the output", len(cl) > 20, len(cl))
+check("runtime: only for labels the output defines",
+      all(re.search(r"^" + k + ":", asm, re.M) for k in cl))
+check("runtime: __arith_coerce clobbers=R0 (carries its own saves)", cl.get("__arith_coerce") == "R0", cl.get("__arith_coerce"))
+check("runtime: each hint sits directly above its label",
+      all(re.search(r";@fn " + k + r" clobbers=\S+\n" + k + ":", asm) for k in cl))
 lines = [int(x) for x in re.findall(r"^;@src h\.lua:(\d+)$", asm, re.M)]
 check(";@src markers present, only Lua lines 1..9", lines and min(lines) >= 1 and max(lines) <= 9, lines[:5])
 check(";@src - ends the program before the runtime", ";@src -" in asm)
@@ -63,6 +70,8 @@ vars_ = re.findall(r"^\s*;@var (\w+) loc=BP([-+]\d+) type=lua", asm, re.M)
 check(";@var: locals s, t, i, r with frame slots", {"s", "t", "i", "r"} <= {v[0] for v in vars_}, vars_)
 check(";@var: no compiler temporaries (__limit_N ...)", not any(v[0].startswith("__") for v in vars_))
 check(";@scope { } balanced", len(re.findall(r"^\s*;@scope \{$", asm, re.M)) == len(re.findall(r"^\s*;@scope \}$", asm, re.M)) >= 1)
+r = run([sys.executable, os.path.join(ROOT, "tools", "check_clobbers.py"), "--check"])
+check("tools/check_clobbers.py --check: src/runtime_clobbers.h is current", r.returncode == 0, r.stdout[-300:] + r.stderr[-200:])
 r = run([V32LUA, "--no-hints", "-w", "--no-build-scripts", "h.lua", "-o", "n.asm"], cwd=d)
 check("--no-hints leaves no ;@ lines", ";@" not in open(os.path.join(d, "n.asm")).read())
 strip = lambda t: "\n".join(l for l in t.splitlines() if ";@" not in l)

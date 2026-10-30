@@ -2508,7 +2508,7 @@ __mm_str_metatable:
     string "__metatable"
 
 ;; __table_rawget_rk (internal): R0 = boxed table, R1 = key -> R0 = t[k]
-;; without its metatable. Preserves R1-R13.
+;; without its metatable. Preserves R1-R5; R6-R13 may change.
 __table_rawget_rk:
     PUSH R2
     PUSH R3
@@ -2532,7 +2532,7 @@ __table_rawget_rk:
 
 ;; __table_metamethod (internal): R0 = boxed table, R1 = event name (boxed
 ;; ROM string) -> R0 = the table's metatable's handler, or nil.
-;; Preserves R1-R13.
+;; Preserves R1-R5; R6-R13 may change (see __builtin_table_get).
 __table_metamethod:
     PUSH R2
     MOV  R2, R0
@@ -2602,7 +2602,8 @@ __table_call_handler_go:
 ;; __table_index_miss (internal): R0 = boxed table, R1 = key, absent from
 ;; it -> R0 = nil, or what the metatable's __index gives: __index is a
 ;; table -> that table's [key] (its own metatable included, so chains
-;; work), a function -> __index(t, key). Preserves R1-R13.
+;; work), a function -> __index(t, key). Preserves R1-R3; R4-R13 may change
+;; (the lookups it makes go through __builtin_table_get).
 __table_index_miss:
     PUSH R2
     PUSH R3
@@ -2648,7 +2649,7 @@ __table_index_miss_done:
 ;; table having a metatable -> R0 = 1 if its __newindex took the store (the
 ;; key is absent from the table and __newindex is set: a table -> stored
 ;; there, with its own metatable; a function -> __newindex(t, key, value)),
-;; 0 for an ordinary store. Preserves R1-R13.
+;; 0 for an ordinary store. Preserves R1, R4; R2-R3, R5-R13 may change.
 __table_newindex:
     PUSH R1
     PUSH R4
@@ -2695,7 +2696,7 @@ __table_newindex_no:
 
 ;; __table_unary_meta (internal): R0 = a value, R1 = event name -> if R0 is
 ;; a table whose metatable has a function for the event: R0 = handler(t),
-;; R1 = 1; else R1 = 0 and R0 unchanged. Preserves R2-R13.
+;; R1 = 1; else R1 = 0 and R0 unchanged. Preserves R2; R3-R13 may change.
 __table_unary_meta:
     PUSH R2
     MOV  R2, R0

@@ -4360,7 +4360,7 @@ _pico8_peek_w_done:
     RET
 
 ;; __pico8_poke_w (internal): R1 = address (int), R2 = width (1, 2, 4),
-;; R3 = Lua number. Preserves R0-R13.
+;; R3 = Lua number. Clobbers R0 only.
 __pico8_poke_w:
     PUSH  R1
     PUSH  R2
@@ -4809,7 +4809,7 @@ _pico8_sset_done:
 
 ;; __pico8_sheet_addr (internal, uses the caller's frame): [BP+2] = x,
 ;; [BP+3] = y -> R0 = 1 and R1 = byte address, R3 = 1 for the high nibble;
-;; R0 = 0 off the 128x128 sheet. Clobbers R2.
+;; R0 = 0 off the 128x128 sheet. Clobbers R0-R3 (all results/scratch).
 __pico8_sheet_addr:
     MOV   R1, [BP+3]
     CALL  __pico8_to_int

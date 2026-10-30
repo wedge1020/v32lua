@@ -250,7 +250,7 @@ context:
 put: context
 	@rm -f put/*
 	#@cp src/parser.output put/parser.output.txt
-	@cp inc/*.h src/*.c src/*.txt src/runtime/*.txt README.md doc/*.md put/
+	@cp inc/*.h src/runtime_clobbers.h src/*.c src/*.txt src/runtime/*.txt README.md doc/*.md put/
 	@for file in src/intrinsics/*.c; do \
 		cp "$$file" "put/intrinsics_$$(basename "$$file")"; \
 	done
