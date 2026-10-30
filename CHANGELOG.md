@@ -11,8 +11,6 @@ or speakers.
 
 - `;@fn LABEL clobbers=...` for 214 runtime routines, from `tools/check_clobbers.py`
   (`src/runtime_clobbers.h`, checked by `tests/audit/hints/check_hints.py`). `doc/HINTS.md`.
-- `tools/v32srcmark.py`: source markers and an exact `-g` side file for the output of the
-  unmodified stock Vircon32 C compiler. Test `tests/audit/srcmark/check_srcmark.py`.
 
 ### Fixed
 
