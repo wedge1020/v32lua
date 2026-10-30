@@ -16,15 +16,15 @@ ignores any `;@` line it does not know.
 | `;@loop kind=for counter=-9 limit=-7 step=-8 [stepval=K] [from=A to=B]` | before the start label of a numeric `for` | the three hidden frame words (BP-relative), and the integer constants when known. Facts: the body never writes them, limit and step are written once before the loop |
 | `;@cold` | before the label of a slow-path block | rarely taken. Today the table index slow path (`__F_idx_slow_N`) |
 | `;@cold {` ... `;@cold }` | around the `__arith_coerce` call | an inline block (the code falls into it) that is rarely run: an operand that is not a number |
-| `;@var NAME loc=BP-3 type=lua [boxed]` (`-g`) | where a local or parameter is registered | the variable's frame word (`BP-n` local, `BP+n` parameter); `boxed`: the word holds a box pointer (captured by a closure), not the value. Compiler temporaries (`__...`) are not listed |
-| `;@scope {` / `;@scope }` (`-g`) | around each block | lexical scope, so a debugger shows the variables in scope at a line. A function's own scope has no braces |
+| `;@var NAME loc=BP-3 type=lua [boxed]` (`-g`) | where a local or parameter is registered | the variable's frame word (`BP-n` local, `BP+n` parameter); `boxed`: the word holds a box pointer (captured by a closure), not the value. Compiler temporaries (`__...`) are not listed. In the main chunk (`__global_scope_initialization`) the locals of nested blocks are listed; a chunk-level `local` lives in a RAM word (`var_NAME`), not a frame slot, and has no `;@var` yet |
+| `;@scope {` / `;@scope }` (`-g`) | around each block | lexical scope, so a debugger shows the variables in scope at a line. A function's own scope has no braces. The main chunk's blocks are bracketed too |
 | `;@src FILE:LINE` (`-g`) | before the first instruction of each source line | the following instructions come from that line |
 | `;@src -` (`-g`) | before the runtime, startup and global setup | no Lua source |
 
 ## `-g`
 
 `v32lua -g x.lua -o x.asm` writes `x.asm` with the `;@src` markers and `x.asm.debug`
-(`asmfile,asmline,luafile,lualine[,function]`, one entry per change of line, made from
+(`asmfile,asmline,luafile,lualine,function`, one entry per change of line or function, the function on every row; code outside any function, such as the main chunk and the start-up code, is `__chunk`; made from
 the markers in the finished file so the line numbers are exact). Then
 `v32as -g --map x.asm.debug x.asm` writes the address -> Lua line file that `v32sim` reads.
 The old map was estimated while generating and was wrong (an entry said line 32720; about 11

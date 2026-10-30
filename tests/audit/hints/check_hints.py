@@ -70,6 +70,21 @@ vars_ = re.findall(r"^\s*;@var (\w+) loc=BP([-+]\d+) type=lua", asm, re.M)
 check(";@var: locals s, t, i, r with frame slots", {"s", "t", "i", "r"} <= {v[0] for v in vars_}, vars_)
 check(";@var: no compiler temporaries (__limit_N ...)", not any(v[0].startswith("__") for v in vars_))
 check(";@scope { } balanced", len(re.findall(r"^\s*;@scope \{$", asm, re.M)) == len(re.findall(r"^\s*;@scope \}$", asm, re.M)) >= 1)
+# main chunk: block locals (BP slots) get ;@var / ;@scope too; chunk-level locals are RAM words and get none
+CHUNK = "local top = 1\nfor i = 1, 2 do local sq = i end\ndo local x, y = 1, 2 end\nfunction main() end\n"
+open(os.path.join(d, "c.lua"), "w").write(CHUNK)
+r = run([V32LUA, "-g", "-w", "--no-build-scripts", "c.lua", "-o", "c.asm"], cwd=d)
+casm = open(os.path.join(d, "c.asm")).read()
+init = casm.split("__global_scope_initialization:")[1].split("\n    RET")[0]
+cv = {v for v in re.findall(r"^\s*;@var (\w+) loc=BP", init, re.M)}
+check("main chunk: ;@var for block locals i, sq, x, y", {"i", "sq", "x", "y"} <= cv, cv)
+check("main chunk: no ;@var for the RAM local 'top'", "top" not in cv)
+check("main chunk: ;@scope { } balanced and >= 2", len(re.findall(r"^\s*;@scope \{$", init, re.M)) == len(re.findall(r"^\s*;@scope \}$", init, re.M)) >= 2)
+# side file: the function is on EVERY row; code outside any function is "__chunk"
+mrows = [l.split(",") for l in open(os.path.join(d, "c.asm.debug")).read().splitlines()]
+check("c.asm.debug: every row has 5 fields (function on every row)", mrows and all(len(x) == 5 for x in mrows), mrows[:3])
+check("c.asm.debug: chunk rows are named __chunk, 'main' only for main's own", {x[4] for x in mrows} <= {"__chunk", "main"} and "__chunk" in {x[4] for x in mrows}, {x[4] for x in mrows})
+check("h.asm.debug: every row has 5 fields", all(len(e.split(",")) == 5 for e in dbg), dbg[:3])
 r = run([sys.executable, os.path.join(ROOT, "tools", "check_clobbers.py"), "--check"])
 check("tools/check_clobbers.py --check: src/runtime_clobbers.h is current", r.returncode == 0, r.stdout[-300:] + r.stderr[-200:])
 r = run([V32LUA, "--no-hints", "-w", "--no-build-scripts", "h.lua", "-o", "n.asm"], cwd=d)

@@ -833,6 +833,7 @@ void generate_global_setup (ASTNode *node)
     {
         ASTNode *current = node;
         int top_label_mark = push_label_scope (node);   // file-scope ::labels::
+        g_debug_in_chunk = true;   // -g: ;@var / ;@scope for block locals of the main chunk
 
         while (current != NULL)
         {
@@ -854,6 +855,7 @@ void generate_global_setup (ASTNode *node)
             // Move to the next statement in the AST chain
             current = current -> next;
         }
+        g_debug_in_chunk = false;
         pop_label_scope (top_label_mark);
     }
 
@@ -902,7 +904,7 @@ static void write_source_map (const char *asm_path)
     FILE *in = fopen (asm_path, "r"), *map = fopen (map_path, "w");
     if (in == NULL || map == NULL) { if (in) fclose (in); if (map) fclose (map); return; }
 
-    char line[8192], src[1024] = "", func[256] = "", last_func[256] = "";
+    char line[8192], src[1024] = "", func[256] = "__chunk", last_func[256] = "";   // "__chunk": code outside any function (V32DBG-SPEC)
     int  src_line = 0, last_line = -1, n = 0;
     while (fgets (line, sizeof (line), in) != NULL)
     {
@@ -911,20 +913,19 @@ static void write_source_map (const char *asm_path)
         while (*p == ' ' || *p == '\t') p++;
         if (strncmp (p, ";@src ", 6) == 0) {
             p += 6;
-            if (p[0] == '-') { src_line = 0; last_line = -1; continue; }
+            if (p[0] == '-') { src_line = 0; last_line = -1; snprintf (func, sizeof (func), "__chunk"); continue; }
             const char *c = strrchr (p, ':');
             if (c == NULL) continue;
             snprintf (src, sizeof (src), "%.*s", (int) (c - p), p);
             src_line = atoi (c + 1);
+        } else if (strncmp (p, "__global_scope_initialization:", 30) == 0) {
+            snprintf (func, sizeof (func), "__chunk");   // the main chunk is not a function: its own name
         } else if (strncmp (p, "__function_", 11) == 0 && strchr (p, ':') != NULL) {
             size_t len = strcspn (p + 11, ":\r\n");
             snprintf (func, sizeof (func), "%.*s", (int) len, p + 11);
         } else if (src_line > 0 && p > line && *p >= 'A' && *p <= 'Z') {   // an instruction
             if (src_line != last_line || strcmp (func, last_func) != 0) {
-                if (strcmp (func, last_func) != 0)
-                    fprintf (map, "%s,%d,%s,%d,%s\n", asm_path, n, src, src_line, func);
-                else
-                    fprintf (map, "%s,%d,%s,%d\n", asm_path, n, src, src_line);
+                fprintf (map, "%s,%d,%s,%d,%s\n", asm_path, n, src, src_line, func);   // function on every row
                 last_line = src_line;
                 snprintf (last_func, sizeof (last_func), "%s", func);
             }

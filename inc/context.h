@@ -131,6 +131,7 @@ extern ScopeNode *current_scope;
 extern ScopeNode *global_scope;
 extern int        next_ram_address;
 extern FunctionContextNode *context_stack_head;
+extern bool g_debug_in_chunk;   // -g: inside the main chunk (see context.c)
 extern int global_label_counter; 
   
 int         get_next_label               (void);
