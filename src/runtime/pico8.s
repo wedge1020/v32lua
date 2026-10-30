@@ -260,6 +260,8 @@ _pico8_init_rng:
     IN    R0, TIM_FrameCounter
     MOV   [PICO8_TICK_FRAME], R0           ; stat(1) before the first tick
     MOV   R0, 0
+    MOV   [PICO8_IDLE], R0
+    MOV   R0, 0
     MOV   [PICO8_TICKS], R0                ; time() = 0 until the first frame
     MOV   [PICO8_RAM_PTR], R0              ; peek/poke RAM: created on first use
     MOV   [PICO8_CARTDATA], R0             ; no cartdata() yet
@@ -3298,6 +3300,8 @@ _p8stat_cpu:
     IMUL  R0, 250000
     IN    R2, TIM_CycleCounter         ; cycles into this frame
     IADD  R0, R2
+    MOV   R2, [PICO8_IDLE]
+    ISUB  R0, R2                       ; minus the cycles spent waiting
     CIF   R0
     MOV   R2, PICO8_FRAME_STEP
     IMUL  R2, 250000
@@ -3618,6 +3622,10 @@ _pico8_flip_wait:
     MOV   R0, R1
     IGT   R0, 0
     JT    R0, _pico8_flip_wait
+    IN    R0, TIM_FrameCounter           ; flip() starts a new frame: stat(1)
+    MOV   [PICO8_TICK_FRAME], R0         ; counts from here
+    MOV   R0, 0
+    MOV   [PICO8_IDLE], R0
     MOV   R0, BOXED_NIL
     POP   R1
     RET
@@ -3776,6 +3784,9 @@ _pico8_pause_done:
     IN    R0, TIM_FrameCounter
     POP   R2                             ; frame the pause began
     ISUB  R0, R2                         ; frames spent paused
+    MOV   R2, [PICO8_TICK_FRAME]
+    IADD  R2, R0
+    MOV   [PICO8_TICK_FRAME], R2         ; a pause is not CPU either
     MOV   R2, [PICO8_MUSIC_END]
     IADD  R2, R0
     MOV   [PICO8_MUSIC_END], R2

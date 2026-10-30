@@ -7,7 +7,23 @@ CPU core in a headless harness (`tools/headless/`). Rendering and audio
 were not run: GPU and SPU commands were checked from logs, not on screen
 or speakers.
 
+### Fixed
+
+- **PICO-8 `stat(1)` counted the idle wait as CPU.** To keep a half-drawn
+  frame off the screen the runtime starts `_draw()` on a fresh frame when it
+  would not fit in the rest of this one, and that wait (up to a whole frame)
+  was read as CPU: a light cart showed 1.5 where the work was ~0.6. Idle
+  cycles are now accumulated (`PICO8_IDLE`) and left out; a pause is skipped
+  and `flip()` starts the count again. Test: `testing/special/28_pico8_stat_cpu.lua`.
+
 ### New
+
+- **PICO-8 `stat(30)` / `stat(31)` read the keyboard** (a v32kbd device,
+  `--#keyboard N`): a typed-character queue, `stat(30)` true while one waits
+  (without consuming it) and `stat(31)` taking it. Switched on by a literal
+  `stat(30)` / `stat(31)` or `poke(0x5f2d, …)`; other carts pay nothing.
+  Test: `tests/audit/kbd/p8_stat_keys.py`. `stat(28, scancode)` and `stat(2)`
+  are not implemented.
 
 - **PICO-8 `stat()` reports real values.** `stat(n)` was a stub that knew
   only the devkit mouse (32-34). It now answers Lua memory in KB (0), CPU

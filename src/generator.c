@@ -1042,6 +1042,8 @@ void generate_program (ASTNode *head)
         emit_asm ("MOV  [PICO8_TICKS], R0 ; one more PICO-8 frame for time()\n");
         emit_asm ("IN   R0, TIM_FrameCounter\n");
         emit_asm ("MOV  [PICO8_TICK_FRAME], R0 ; frame this tick started on\n");
+        emit_asm ("MOV  R0, 0\n");
+        emit_asm ("MOV  [PICO8_IDLE], R0 ; no idle cycles yet (stat(1))\n");
         if (has_update)
         {
             emit_asm ("CALL %s ; Execute %s()\n",
@@ -1072,6 +1074,19 @@ void generate_program (ASTNode *head)
                 emit_asm ("IGT  R0, 250000 ; would the draw run past the frame?\n");
                 emit_asm ("JF   R0, __pico8_draw_now\n");
                 v32io_emit_frame_end_hooks ();
+                // the rest of this frame is spent waiting, not computing:
+                // stat(1) must not count it
+                emit_asm ("IN   R0, TIM_CycleCounter\n");
+                emit_asm ("MOV  R1, 250000\n");
+                emit_asm ("ISUB R1, R0 ; cycles left in this frame\n");
+                emit_asm ("MOV  R0, R1\n");
+                emit_asm ("ILT  R0, 0\n");
+                emit_asm ("JF   R0, __pico8_idle_ok\n");
+                emit_asm ("MOV  R1, 0\n");
+                emit_asm ("__pico8_idle_ok:\n");
+                emit_asm ("MOV  R0, [PICO8_IDLE]\n");
+                emit_asm ("IADD R0, R1\n");
+                emit_asm ("MOV  [PICO8_IDLE], R0\n");
                 emit_asm ("WAIT ; start _draw() on a fresh frame\n");
                 emit_asm ("CALL __builtin_pico8_music_tick\n");
                 emit_asm ("__pico8_draw_now:\n");

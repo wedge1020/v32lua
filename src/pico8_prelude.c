@@ -293,6 +293,60 @@ static const PreludeFunc prelude[] = {
     { NULL, NULL, NULL, NULL }
 };
 
+
+// stat() when the cart reads the devkit keyboard (stat(30) / stat(31), or it
+// enables devkit input with poke(0x5f2d, ...)): the same function plus the
+// typed-character queue, from the v32kbd layer (kbd.read()). Included only
+// then, because mentioning kbd.* turns the keyboard decoder on, and with it
+// a device poll on every frame. One character of lookahead is kept in
+// __p8_kc so stat(30) can answer without consuming it.
+static const char *stat_keys_code =
+      "local __p8_kc\n"
+      "function __p8_kchar()\n"
+      "  while __p8_kc == nil do\n"
+      "    local c = kbd.read()\n"
+      "    if c == nil then return nil end\n"
+      "    local glyph = c >= 256\n"
+      "    if glyph then c = c - 256 end\n"
+      // typed text: printable characters, and the control characters a text
+      // box needs (backspace, tab, enter). Arrows, F-keys, shifts... are keys,
+      // not characters.
+      "    if glyph or (c >= 32 and c < 127) or c == 8 or c == 9 or c == 13 then\n"
+      "      __p8_kc = string.char(c)\n"
+      "    end\n"
+      "  end\n"
+      "  return __p8_kc\n"
+      "end\n"
+      "function stat(n)\n"
+      "  if n == 30 then return __p8_kchar() ~= nil end\n"
+      "  if n == 31 then\n"
+      "    local c = __p8_kchar()\n"
+      "    __p8_kc = nil\n"
+      "    if c == nil then return \"\" end\n"
+      "    return c\n"
+      "  end\n"
+      "  if n == 4 or n == 6 then return \"\" end\n"
+      "  if n == 100 or n == 101 then return nil end\n"
+      "  if n == 110 then return false end\n"
+      "  return __p8_stat(n)\n"
+      "end\n";
+
+// Does the cart read the keyboard? (stat(30), stat(31), poke(0x5f2d...))
+static bool stat_keys_wanted (const char *src)
+{
+    for (const char *p = strstr (src, "stat"); p != NULL; p = strstr (p + 1, "stat")) {
+        if (p > src && (isalnum ((unsigned char) p[-1]) || p[-1] == '_' || p[-1] == '.')) continue;
+        const char *a = p + 4;
+        while (*a == ' ' || *a == '\t') a++;
+        if (*a != '(') continue;
+        a++;
+        while (*a == ' ' || *a == '\t') a++;
+        if (a[0] == '3' && (a[1] == '0' || a[1] == '1') &&
+            !isalnum ((unsigned char) a[2]) && a[2] != '.') return true;
+    }
+    return strcasestr (src, "0x5f2d") != NULL;
+}
+
 // Is `name` used as a whole identifier in src?
 static bool mentions (const char *src, const char *name)
 {
@@ -386,8 +440,14 @@ char *pico8_append_prelude (char *src)
         }
     }
 
+    // the keyboard variant of stat() (see stat_keys_code)
+    int stat_idx = -1;
+    for (int i = 0; i < count; i++) if (strcmp (prelude[i].name, "stat") == 0) stat_idx = i;
+    bool stat_keys = stat_idx >= 0 && want[stat_idx] && stat_keys_wanted (src);
+
     size_t extra = 64;
     for (int i = 0; i < count; i++) if (want[i]) extra += strlen (prelude[i].code) + 1;
+    if (stat_keys) extra += strlen (stat_keys_code) + 1;
     if (extra == 64) return src;
 
     size_t len = strlen (src);
@@ -397,7 +457,7 @@ char *pico8_append_prelude (char *src)
     char *o = out + len;
     o += sprintf (o, "\n-- v32lua PICO-8 prelude\n");
     for (int i = 0; i < count; i++) {
-        if (want[i]) o += sprintf (o, "%s", prelude[i].code);
+        if (want[i]) o += sprintf (o, "%s", (stat_keys && i == stat_idx) ? stat_keys_code : prelude[i].code);
     }
     *o = '\0';
     free (src);
