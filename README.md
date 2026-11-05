@@ -241,6 +241,10 @@ built. Without `v32opt` the optimized build is skipped with a note; force
 it off with `make HAVE_OPTIMIZER=`, or change the flags with
 `make OPTIMIZER="v32opt -O2"`.
 
+`demos/api_spu` keeps its music as `music.mp3`; `make` converts it with `ffmpeg` to `music.wav` (48 kHz,
+16-bit stereo) before `wav2vircon`, and `make clean` removes the WAV, so the sources carry 3 MB instead of 27 MB.
+`ffmpeg` is needed only for that demo.
+
 **Your First Cartridge**
 
 ```lua

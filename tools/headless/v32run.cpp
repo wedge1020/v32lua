@@ -22,12 +22,15 @@
 //   env V32_CFI=arm  CFI of NaN/out-of-range floats as on ARM64 hosts
 //                    (default: x86-64 behaviour); V32_CFI_LOG=1 reports them
 
-#include "VirconCPU.hpp"
-#include "VirconMemory.hpp"
-#include "VirconTimer.hpp"
-#include "VirconRNG.hpp"
-#include "VirconNullController.hpp"
-#include "../VirconDefinitions/VirconDefinitions.hpp"
+// ConsoleLogic of the DesktopEmulator (the SimplifiedEmulator of earlier ComputerSoftware is gone).
+#include "V32CPU.hpp"
+#include "V32Memory.hpp"
+#include "V32Timer.hpp"
+#include "V32RNG.hpp"
+#include "V32NullController.hpp"
+#include "ExternalInterfaces.hpp"
+#include "../../VirconDefinitions/Constants.hpp"
+#include "../../VirconDefinitions/DataStructures.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -38,6 +41,13 @@
 #include <vector>
 #include <sstream>
 using namespace std;
+using namespace V32;
+// names of the older emulator sources, kept so the runner body below is unchanged
+typedef V32Word VirconWord;           typedef V32MemoryBus VirconMemoryBus;
+typedef V32ControlBus VirconControlBus; typedef V32CPU VirconCPU;
+typedef V32RAM VirconRAM;             typedef V32ROM VirconROM;
+typedef V32Timer VirconTimer;         typedef V32RNG VirconRNG;
+typedef V32NullController VirconNullController;
 
 static int  g_frame = 0;
 static int  g_overruns = 0;
@@ -250,8 +260,11 @@ static vector<uint32_t> load_vbin(const char* path)
     return w;
 }
 
+static void NoLog(const std::string&) {}
 int main(int argc, char** argv)
 {
+    V32::Callbacks::LogLine = NoLog;        // ProcessHLT logs "CPU halted"; the STATUS line says it
+    V32::Callbacks::ThrowException = NoLog;
     bool dirty = false;
     const char* vbin = nullptr; const char* asmf = nullptr; string dump; string padscript;
     int frames = 10; bool quiet = false; long long maxcycles = -1; bool canon = false;

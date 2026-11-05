@@ -55,10 +55,12 @@ static void debug_emit_var (const SymbolNode *sym)
 {
     if (!DEBUG_INFO_HERE() || sym == NULL || sym->name == NULL) return;
     if (sym->name[0] == '_' && sym->name[1] == '_') return;
+    // an upvalue is a hidden parameter holding the box it shares with the enclosing function
+    const char *up = (sym->type == SYM_UPVALUE) ? " upvalue" : "";
     if (sym->location > 0)
-        emit_debug_line (";@var %s loc=BP-%d type=lua%s", sym->name, sym->location, sym->is_boxed ? " boxed" : "");
+        emit_debug_line (";@var %s loc=BP-%d type=lua%s%s", sym->name, sym->location, sym->is_boxed ? " boxed" : "", up);
     else if (sym->location < 0)
-        emit_debug_line (";@var %s loc=BP+%d type=lua%s", sym->name, -sym->location, sym->is_boxed ? " boxed" : "");
+        emit_debug_line (";@var %s loc=BP+%d type=lua%s%s", sym->name, -sym->location, sym->is_boxed ? " boxed" : "", up);
 }
 
 void push_scope(void) {
@@ -861,6 +863,7 @@ SymbolNode *register_upvalue (const char *name, int offset)
     }
     current_scope->last = sym;
 
+    debug_emit_var (sym);   // -g: ';@var NAME loc=BP+N type=lua boxed upvalue'
     return sym;
 }
 

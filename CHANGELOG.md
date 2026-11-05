@@ -1,5 +1,17 @@
 # Changelog
 
+## 20261105-dev
+
+- **`-g`: `;@var` for upvalues.** Inside a closure the captured variable is listed:
+  `;@var n loc=BP+2 type=lua boxed upvalue` (the hidden leading parameter holding the shared box).
+- **`-g`: `;@var` for globals and chunk-level locals**, one per name before the code:
+  `;@var counter loc=@0x00000075 type=lua global`. With `v32as -g` they reach `.vbin.vars`/`.vbin.sym`.
+- **Headless runner builds again**: `tools/headless/build.sh` uses ComputerSoftware's
+  `DesktopEmulator/ConsoleLogic` instead of the removed `SimplifiedEmulator`. Same options and log format.
+- **`demos/api_spu`**: `music.wav` (27 MB) is made from `music.mp3` (3 MB) with `ffmpeg` at build time and removed by
+  `make clean`; the source tree shrinks by 24 MB.
+- Version `20261105-dev`.
+
 ## Unreleased (2026-09 audit)
 
 All fixes below were found by running programs on the official Vircon32

@@ -70,7 +70,7 @@ vars_ = re.findall(r"^\s*;@var (\w+) loc=BP([-+]\d+) type=lua", asm, re.M)
 check(";@var: locals s, t, i, r with frame slots", {"s", "t", "i", "r"} <= {v[0] for v in vars_}, vars_)
 check(";@var: no compiler temporaries (__limit_N ...)", not any(v[0].startswith("__") for v in vars_))
 check(";@scope { } balanced", len(re.findall(r"^\s*;@scope \{$", asm, re.M)) == len(re.findall(r"^\s*;@scope \}$", asm, re.M)) >= 1)
-# main chunk: block locals (BP slots) get ;@var / ;@scope too; chunk-level locals are RAM words and get none
+# main chunk: block locals (BP slots) get ;@var / ;@scope too; chunk-level locals are RAM words (global ';@var loc=@ADDR', below)
 CHUNK = "local top = 1\nfor i = 1, 2 do local sq = i end\ndo local x, y = 1, 2 end\nfunction main() end\n"
 open(os.path.join(d, "c.lua"), "w").write(CHUNK)
 r = run([V32LUA, "-g", "-w", "--no-build-scripts", "c.lua", "-o", "c.asm"], cwd=d)
@@ -80,6 +80,25 @@ cv = {v for v in re.findall(r"^\s*;@var (\w+) loc=BP", init, re.M)}
 check("main chunk: ;@var for block locals i, sq, x, y", {"i", "sq", "x", "y"} <= cv, cv)
 check("main chunk: no ;@var for the RAM local 'top'", "top" not in cv)
 check("main chunk: ;@scope { } balanced and >= 2", len(re.findall(r"^\s*;@scope \{$", init, re.M)) == len(re.findall(r"^\s*;@scope \}$", init, re.M)) >= 2)
+# globals and chunk-level locals: one ';@var NAME loc=@0xADDR type=lua global' each, before the code
+check("globals: top (chunk-level local) and counter at the top of the program, with their RAM word",
+      re.search(r"^;@var top loc=@0x[0-9A-F]{8} type=lua global$", casm, re.M) is not None)
+UP = "counter = 5\nlocal function mk(start) local n = start; return function() n = n + 1; return n end end\nfunction main() counter = counter + mk(1)() end\n"
+open(os.path.join(d, "u.lua"), "w").write(UP)
+run([V32LUA, "-g", "-w", "--no-build-scripts", "u.lua", "-o", "u.asm"], cwd=d)
+uasm = open(os.path.join(d, "u.asm")).read()
+gl = re.findall(r"^;@var (\w+) loc=@0x([0-9A-F]{8}) type=lua global$", uasm, re.M)
+check("globals: counter listed once", [g[0] for g in gl].count("counter") == 1, gl)
+check("globals: the records come before the first function", uasm.index(";@var counter") < uasm.index("__function_main:"))
+define = dict(re.findall(r"%define\s+var_(\w+)\s+0x([0-9A-F]{8})", uasm))
+check("globals: loc= is the var_NAME address", all(define.get(n) == a for n, a in gl), (gl, define))
+check("globals: functions and compiler names are not listed", not any(n.startswith("__") or n in ("mk", "main") for n, _ in gl), gl)
+check("upvalue: ';@var n loc=BP+N type=lua boxed upvalue' inside the closure",
+      re.search(r"^\s*;@var n loc=BP\+2 type=lua boxed upvalue$", uasm, re.M) is not None)
+check("upvalue: the creating function lists n as an ordinary boxed local",
+      re.search(r"^\s*;@var n loc=BP-\d+ type=lua boxed$", uasm, re.M) is not None)
+r = run([V32LUA, "-w", "--no-build-scripts", "u.lua", "-o", "u0.asm"], cwd=d)
+check("without -g: no ';@var' at all", ";@var" not in open(os.path.join(d, "u0.asm")).read())
 # side file: the function is on EVERY row; code outside any function is "__chunk"
 mrows = [l.split(",") for l in open(os.path.join(d, "c.asm.debug")).read().splitlines()]
 check("c.asm.debug: every row has 5 fields (function on every row)", mrows and all(len(x) == 5 for x in mrows), mrows[:3])

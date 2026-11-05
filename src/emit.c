@@ -968,6 +968,20 @@ int   emit_variable_map (void)
         lines_printed    = lines_printed + 1;
     }
 
+    // -g: a ';@var' for every global and chunk-level 'local' (a chunk-level local is a global RAM
+    // word, see prepass_walk()), at the top of the program, so a debugger can 'print NAME'.
+    // 'global' marks the kind; all that can be said of the type is 'lua' (a global can hold anything).
+    if (g_debug_mode)
+    {
+        for (SymbolNode *g = global_scope ? global_scope->symbols : NULL; g != NULL; g = g->next)
+        {
+            if (g->type != SYM_GLOBAL || g->is_function || g->name == NULL) continue;
+            if (g->name[0] == '_' && g->name[1] == '_') continue;
+            fprintf (out(), ";@var %s loc=@0x%.8X type=lua global\n", g->name, g->location);
+            lines_printed    = lines_printed + 1;
+        }
+    }
+
     fprintf(out(), "\n;; Highest used global RAM address: 0x%.8X\n", next_ram_address - 1);
     fprintf(out(), ";; Dynamic heap will start at runtime address: 0x%.8X\n\n", next_ram_address);
     lines_printed    = lines_printed + 2;

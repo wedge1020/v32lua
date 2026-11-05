@@ -1,7 +1,7 @@
 # Headless test harness
 
 Runs a compiled cart on the **official Vircon32 CPU, memory, bus, timer
-and RNG cores** (from the SimplifiedEmulator in
+and RNG cores** (the `ConsoleLogic` of the DesktopEmulator in
 [vircon32/ComputerSoftware](https://github.com/vircon32/ComputerSoftware)),
 with logging stand-ins for the GPU, SPU, gamepad, cartridge and memory
 card. Nothing is drawn or played: GPU and SPU port writes are logged
@@ -13,7 +13,11 @@ checked on the real CPU, but rendering and audio are not.
     ./build.sh /path/to/ComputerSoftware
 
 builds `v32run` and the official `Assembler` (SDL isn't needed; `sdlshim/`
-stands in for it).
+stands in for it). `v32run` compiles `DesktopEmulator/ConsoleLogic` (CPU, memory, buses, timer, RNG,
+null controller) with its own logging GPU, SPU, gamepad, cartridge and memory-card stand-ins; it used to
+use the `SimplifiedEmulator/Emulator` sources, which current ComputerSoftware no longer has (the log
+format and every option are unchanged). Checked against the supplied ComputerSoftware: the `testing/`
+unit tests give 1811/1826 (the 15 are the SPU/RNG tests named under `unittest.py`).
 
 ## Tools
 

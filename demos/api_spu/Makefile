@@ -4,6 +4,7 @@ LUA_COMPILER  = ../../bin/v32lua
 ASSEMBLER     = assemble
 TEXTURE_TOOL  = png2vircon
 SOUND_TOOL    = wav2vircon
+FFMPEG_TOOL   = ffmpeg
 PACKER        = packrom
 
 # This variable is empty by default, but is set to -g during a debug build
@@ -38,6 +39,11 @@ vsnd: obj/blip.vsnd obj/music.vsnd
 obj/blip.vsnd: blip.wav | prep
 	$(SOUND_TOOL) -o obj/blip.vsnd blip.wav
 
+# music.wav is made from music.mp3 at build time (48 kHz, 16-bit stereo) and removed by 'make clean',
+# so the source tree only carries the 3 MB mp3 and not a 27 MB wav.
+music.wav: music.mp3
+	$(FFMPEG_TOOL) -y -loglevel error -i music.mp3 -ar 48000 -ac 2 -c:a pcm_s16le music.wav
+
 obj/music.vsnd: music.wav | prep
 	$(SOUND_TOOL) -o obj/music.vsnd music.wav
 
@@ -61,4 +67,4 @@ bin/$(DEMO).v32: obj/$(DEMO).vbin obj/blip.vsnd obj/music.vsnd
 
 # --- Clean Up ---
 clean:
-	rm -f bin/*.v32 obj/*
+	rm -f bin/*.v32 obj/* music.wav
