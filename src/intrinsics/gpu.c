@@ -241,6 +241,8 @@ bool rgba_static_word (ASTNode **args, int argc, unsigned int *word)
     return true;
 }
 
+static int rgba_pop_pack (void);
+
 // Packs (r, g, b [, a]) into the GPU's 0xAABBGGRR word: folded at compile
 // time when every component is a literal, else each component is clamped
 // to 0..255, truncated and combined with SHL/OR at run time. A missing or
@@ -291,6 +293,14 @@ int emit_pack_rgba (const char *fname, ASTNode **args, int argc, int line)
         emit_asm ("PUSH R0\n");
     }
 
+    return rgba_pop_pack ();
+}
+
+// Pops alpha, blue, green, red (pushed in the order r, g, b, a) and packs
+// them into 0xAABBGGRR. Returns the register that holds the word (allocated
+// here; the caller unlocks it).
+static int rgba_pop_pack (void)
+{
     int acc = allocate_register ();
     register_pinned[acc] = 1;
     int tmp = allocate_register ();
@@ -311,6 +321,53 @@ int emit_pack_rgba (const char *fname, ASTNode **args, int argc, int line)
     unlock_register (tmp);
     register_pinned[acc] = 0;
     return acc;
+}
+
+// rgba(f()) where f() yields several values (a multi-value tail such as
+// `rgba(convert_pico8(c))`): like Lua's argument-list rule, the last (here
+// the only) argument expands to all of its values. They arrive in
+// MV_BUF[0 .. n-1] with n in [RET_COUNT]. Each of r, g, b, a is taken from
+// the list when present: a missing or nil r/g/b is 0 and a missing or nil
+// alpha is 255 (opaque), the same defaults as the plain rgba(r, g, b [, a]).
+// Values past the fourth are ignored, as Lua drops surplus arguments.
+static int emit_pack_rgba_from_mv (ASTNode *tail)
+{
+    static const char *deflt[4] = { "0.0", "0.0", "0.0", "255.0" };
+    const char *ctx = get_current_function_name ();
+
+    emit_mv_to_buf (tail);          // clobbers every register, like a call
+
+    for (int i = 0; i < 4; i++) {
+        int id    = get_next_label ();
+        int reg   = allocate_register ();
+        register_pinned[reg] = 1;
+        int bound = allocate_register ();
+        register_pinned[bound] = 1;
+
+        emit_asm ("MOV R%d, BOXED_NIL ; rgba(): %s from the list (if present)\n", reg, rgba_names[i]);
+        emit_asm ("MOV R%d, [RET_COUNT]\n", bound);
+        emit_asm ("IGT R%d, %d\n", bound, i);
+        emit_asm ("JF  R%d, __%s_rgbamv_%d\n", bound, ctx, id);
+        emit_asm ("MOV R%d, [0x%08X] ; value %d of the list\n", reg, mv_buf_base + i, i);
+        emit_asm ("__%s_rgbamv_%d:\n", ctx, id);
+        emit_asm ("MOV R%d, R%d\n", bound, reg);
+        emit_asm ("IEQ R%d, BOXED_NIL\n", bound);
+        emit_asm ("JF  R%d, __%s_rgbamv_ok_%d\n", bound, ctx, id);
+        emit_asm ("MOV R%d, %s ; missing/nil %s\n", reg, deflt[i], rgba_names[i]);
+        emit_asm ("__%s_rgbamv_ok_%d:\n", ctx, id);
+        emit_asm ("MOV R%d, 0.0\n", bound);
+        emit_asm ("FMAX R%d, R%d ; rgba(): %s >= 0\n", reg, bound, rgba_names[i]);
+        emit_asm ("MOV R%d, 255.0\n", bound);
+        emit_asm ("FMIN R%d, R%d ; rgba(): %s <= 255\n", reg, bound, rgba_names[i]);
+        emit_asm ("CFI R%d\n", reg);
+        emit_asm ("PUSH R%d ; rgba(): %s component\n", reg, rgba_names[i]);
+
+        register_pinned[bound] = 0;
+        unlock_register (bound);
+        register_pinned[reg] = 0;
+        unlock_register (reg);
+    }
+    return rgba_pop_pack ();
 }
 
 /**
@@ -334,13 +391,16 @@ bool emit_rgba_intrinsic (ASTNode *node, int dest_reg)
         if (argc < 5) args[argc] = a;
         argc++;
     }
-    if (argc != 3 && argc != 4) {
+    // rgba(f()): one argument that expands to several values
+    bool from_mv = (argc == 1 && mv_is_tail (args[0]));
+    if (!from_mv && argc != 3 && argc != 4) {
         compiler_error (ERR_SEMANTIC, node->line_number,
             "rgba(): expected 3 or 4 arguments (rgba(r, g, b [, a])), got %d", argc);
         return false;
     }
     emit_asm ("    ;; --- Intrinsic: rgba() -> raw packed 0xAABBGGRR ---\n");
-    int reg = emit_pack_rgba ("rgba()", args, argc, node->line_number);
+    int reg = from_mv ? emit_pack_rgba_from_mv (args[0])
+                      : emit_pack_rgba ("rgba()", args, argc, node->line_number);
     if (reg < 0) return false;
     if (dest_reg != 0 && dest_reg != reg)
         emit_asm ("MOV R%d, R%d ; rgba() result (a raw word, not a number)\n", dest_reg, reg);
