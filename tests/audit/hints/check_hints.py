@@ -3,7 +3,7 @@
 # debugging (doc/HINTS.md). Compiles a small program with -g and checks the
 # assembly and FILE.asm.debug; with V32OPT set (path to v32opt) also checks that
 # the optimized program still assembles and gives the same result.
-#   ./check_hints.py            (needs bin/v32lua; tools/headless built)
+#   ./check_hints.py            (needs bin/v32lua; for the V32OPT part, v32sim's v32orun and assemble, see tools/headless/oracle.py)
 import os, re, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.join(HERE, "..", "..", "..")
@@ -115,10 +115,11 @@ check("hints and markers are comments: same instructions as --no-hints",
 
 vo = os.environ.get("V32OPT")
 if vo:
+    sys.path.insert(0, H); import oracle; ORUN, ASM = oracle.find()     # v32sim's v32orun and the stock assembler
     run([vo, "h.asm", "-o", "ho.asm", "-O3", "-L", "lua"], cwd=d)
     for nm in ("h", "ho"):
-        run([os.path.join(H, "Assembler"), nm + ".asm", "-o", nm + ".vbin"], cwd=d)
-    outs = [run([os.path.join(H, "v32run"), os.path.join(d, nm + ".vbin"), "-f", "20", "-q", "-a", os.path.join(d, nm + ".asm"),
+        run([ASM, nm + ".asm", "-o", nm + ".vbin"], cwd=d)
+    outs = [run([ORUN, os.path.join(d, nm + ".vbin"), "-f", "20", "-q", "-a", os.path.join(d, nm + ".asm"),
                  "-D"], cwd=d).stdout for nm in ("h", "ho")]
     outs = [re.findall(r"CANON result_number num (\S+)", o) for o in outs]
     check("v32opt -O3 -L lua: still assembles and gives the same result",

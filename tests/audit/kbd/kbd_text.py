@@ -3,7 +3,7 @@
 # headless harness. Compiles read.lua / event.lua, plays a scripted v32kbd
 # event stream (tools/headless/kbdscript.py) through gamepad 0 and checks what
 # kbd.read() / kbd.glyph() / kbd.event() / key() report.
-#   ./kbd_text.py            (needs bin/v32lua and tools/headless built)
+#   ./kbd_text.py            (needs bin/v32lua and v32sim's v32orun built, see tools/headless/README.md)
 import os, re, subprocess, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 H = os.path.join(HERE, "..", "..", "..", "tools", "headless")

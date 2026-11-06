@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# profile.py prog.vbin.debug prof.txt [N]  -- cycles per routine from v32run -P
+# profile.py prog.vbin.debug prof.txt [N]  -- cycles per routine from v32orun -P
 # A "routine" is the nearest preceding label that starts a function body
 # (a label followed by PUSH BP), so loop/branch labels roll up into it.
 import sys, bisect, collections

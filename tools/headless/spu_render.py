@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # spu_render.py prog.run prog.xml out.wav [first_frame [last_frame]]
 #
-# Rebuilds the audio a cart produced from a v32run -s log: every SPU port
+# Rebuilds the audio a cart produced from a v32orun -s log: every SPU port
 # write of a frame is applied, then that frame's 735 samples are mixed the
 # way the Vircon32 SPU does it (nearest sample, per-channel speed and
 # volume, per-sound loop points, global volume, clamp). Sounds are read

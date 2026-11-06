@@ -3,7 +3,7 @@
 Take PNG screenshots of built carts, headless.
 
 Each cart that has a ROM in v32/ (or every cart with -all) is rebuilt in its own
-work folder (like test_v32.py) and run once on v32run with GPU logging (-g):
+work folder (like test_v32.py) and run once on v32orun with GPU logging (-g):
 
   frame -title (default 180 = 3 s)  title screen shot, no button pressed yet
   frame -press (default 240)        the usual start buttons are pressed once:
@@ -21,7 +21,7 @@ from the last full clear before the chosen frame. A shot that comes out as one
 flat colour (a fade-in, say) is retried: the title shot at other frames before
 the press, the game shot 2 s later, up to -blankretries times. A cart that
 crashes shows its panic / error screen (the blue CPU error screen is redrawn
-with the BIOS's own texts, since v32run has no BIOS to show it).
+with the BIOS's own texts, since v32orun has no BIOS to show it).
 
 Output, named like the ROM (<name>.v32):
   v32/screenshots/title/<name>.png
@@ -348,7 +348,7 @@ def draw_text(canvas, bios, x, y, text, color):
 
 
 def bios_error_screen(bios, code, ip, instr, imm):
-    """The blue hardware error screen the Vircon32 BIOS shows (v32run has no BIOS to draw it)."""
+    """The blue hardware error screen the Vircon32 BIOS shows (v32orun has no BIOS to draw it)."""
     blue, yellow, white, red = (47, 63, 141), (255, 255, 64), (255, 255, 255), (255, 120, 120)
     canvas = Image.new("RGBA", (SCREEN_W, SCREEN_H), blue + (255,))
     title, line1, line2 = BIOS_ERRORS[code] if 0 <= code < len(BIOS_ERRORS) else (
@@ -401,7 +401,7 @@ def shoot_cart(full, name, work_dir, tools, bios, args, out_dir):
     texs = cart_textures(work_dir)
     plan = shot_plan(args)
     last_frame = max(f for _, cands in plan for f in cands) + 1
-    cmd = [tools["v32run"], "cart.vbin", "-f", str(last_frame), "-q", "-g"]
+    cmd = [tools["v32orun"], "cart.vbin", "-f", str(last_frame), "-q", "-g"]
     if not args.nogame:
         cmd += ["-p", press_script(args)]
     env = dict(os.environ, V32_FIXED_TIME="1")
@@ -411,7 +411,7 @@ def shoot_cart(full, name, work_dir, tools, bios, args, out_dir):
             subprocess.run(cmd, cwd=work_dir, stdout=fh, stderr=subprocess.STDOUT, timeout=args.timeout_sec,
                            env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except subprocess.TimeoutExpired:
-        return "TIMEOUT", "v32run took over %d s" % args.timeout_sec
+        return "TIMEOUT", "v32orun took over %d s" % args.timeout_sec
 
     frames = {}
     status, hwerror = "", None
@@ -514,7 +514,7 @@ def main():
                     help="default: v32/screenshots (with title/ and game/ subfolders)")
     ap.add_argument("-v32lua", "--v32lua", default=r"C:\github\v32lua\bin\v32lua.exe" if b.IS_WINDOWS else None)
     ap.add_argument("-devtools", "--devtools", default=r"C:\utils\vircon32\devtools" if b.IS_WINDOWS else None)
-    ap.add_argument("-v32run", "--v32run", default=r"C:\github\v32lua\tools\headless\v32run.exe" if b.IS_WINDOWS else None)
+    ap.add_argument("-v32orun", "--v32orun", default=r"C:\github\v32sim\tools\oracle\bin\v32orun.exe" if b.IS_WINDOWS else None)
     ap.add_argument("-bios", "--bios", default=r"C:\github\ComputerSoftware\SimplifiedEmulator\Data\Bios\StandardBios.v32"
                     if b.IS_WINDOWS else None, help="StandardBios.v32, for text drawn with the BIOS font")
     args = ap.parse_args()
@@ -532,10 +532,10 @@ def main():
 
     tools = {"v32lua": b.find_tool("v32lua", path=args.v32lua),
              "assemble": b.find_tool("assemble", folder=args.devtools)}
-    v32run = b.find_tool("v32run", path=args.v32run) if args.v32run else b.find_tool("v32run")
-    if not v32run and tools["v32lua"]:
-        v32run = b.find_tool("v32run", folder=os.path.join(os.path.dirname(tools["v32lua"]), "..", "tools", "headless"))
-    tools["v32run"] = v32run
+    v32orun = b.find_tool("v32orun", path=args.v32orun) if args.v32orun else b.find_tool("v32orun")
+    if not v32orun and tools["v32lua"]:
+        v32orun = next((p for p in (b.find_tool("v32orun", folder=os.path.join(os.path.dirname(tools["v32lua"]), "..", "..", d, "tools", "oracle", "bin")) for d in ("v32sim", "v32sim-project")) if p), None)
+    tools["v32orun"] = v32orun
     for name, exe in tools.items():
         if not exe:
             sys.exit("Tool not found: %s" % name)

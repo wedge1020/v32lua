@@ -1,6 +1,7 @@
 #!/bin/bash
 # Runs the audit suite with the headless harness (tools/headless).
-# Needs: bin/v32lua built, tools/headless/build.sh run once, and a
+# Needs: bin/v32lua built, v32sim's oracle tools built (v32orun + assemble: make oracle in v32sim,
+# V32SIM_HOME pointing at it; tools/headless/oracle.sh), and a
 # reference Lua 5.4 as $LUA54 (default: lua5.4 on PATH).
 cd "$(dirname "$0")"
 H=../../tools/headless

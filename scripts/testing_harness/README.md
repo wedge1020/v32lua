@@ -24,7 +24,7 @@ TIC-80 (`.tic`) carts; this README describes them for TIC-80.
 
 ```
 pip install -r requirements.txt         # Pillow (screenshots, covers)
-python build_tools.py                    # compile v32lua, v32run, v32bench + smoke test
+python build_tools.py                    # compile v32lua, v32orun + smoke test
 python build_v32.py -filter "*.tic"      # -> v32/*.v32
 python test_v32.py -filter "*.tic" -blank
 python bench_v32.py -filter "*.tic"
@@ -45,7 +45,7 @@ python -m http.server 8000 --directory site      # then open http://localhost:80
 | Python 3.8+ | all scripts | |
 | Pillow (`pip install -r requirements.txt`) | `screenshot_v32.py` (required), `test_v32.py -blank`, `make_site_v32.py` covers | |
 | MSYS2 (`C:\msys64`) with mingw64 gcc, g++ and make | compiling the tools below | `pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-make` in an MSYS2 shell |
-| Git checkouts in `C:\github` | the tools below | `v32lua`, `v32bench`, `ComputerSoftware` (official Vircon32 sources), `vircon32_games` (web emulator) |
+| Git checkouts in `C:\github` | the tools below | `v32lua`, `v32sim`, `ComputerSoftware` (official Vircon32 sources), `vircon32_games` (web emulator) |
 
 ### Prebuilt tools
 
@@ -57,12 +57,11 @@ pass with the option in the last column.
 |---|---|---|---|---|
 | `v32lua` | **yes** | build, test, bench, screenshot (they all compile the cart) | `C:\github\v32lua\bin\v32lua.exe` | `-v32lua PATH` |
 | `assemble`, `packrom` | **yes** | build (assemble + pack); test, bench and screenshot (assemble) | `C:\utils\vircon32\devtools` | `-devtools DIR` |
-| `v32run` | for test / screenshot | official Vircon32 CPU core, headless | `C:\github\v32lua\tools\headless\v32run.exe` | `-v32run PATH` |
-| `v32bench` | for bench | v32run plus per-frame cycle counts | `C:\github\v32bench\v32bench.exe` | `-v32bench PATH` |
+| `v32orun` | for test / screenshot / bench | v32sim's headless runner on the official Vircon32 CPU core | `C:\github\v32sim\tools\oracle\bin\v32orun.exe` | `-v32orun PATH` |
 | `StandardBios.v32` | screenshot (recommended), `test -blank` | The BIOS font, for text a cart prints with it | `C:\github\ComputerSoftware\SimplifiedEmulator\Data\Bios\StandardBios.v32` | `-bios PATH` |
 | Vircon32 web emulator | site | Play button: `Vircon32Web.html/.js/.wasm/.data`, `favicon.ico`, `icons/` | `C:\github\vircon32_games` | `-emulator DIR` |
 
-Test and screenshot need v32run, and bench needs v32bench.               
+Test, screenshot and bench need v32orun.               
 
 **The DevTools  are not compiled  here.** Download the  official Windows 
 **DevTools**  from https://github.com/vircon32/ComputerSoftware/releases 
@@ -75,24 +74,24 @@ to the exes. Only `assemble.exe` and `packrom.exe` are used.
 `any shell and finds C:\msys64` by itself:                               
 
 ```
-python build_tools.py                   # v32lua, v32run, v32bench, then the smoke test
+python build_tools.py                   # v32lua, v32orun, then the smoke test
 python build_tools.py -check            # only report what's found / missing
-python build_tools.py -only v32lua      # only some: v32lua v32run v32bench
+python build_tools.py -only v32lua      # only some: v32lua v32orun
 python build_tools.py -clone            # also git clone ComputerSoftware (sources + BIOS) if missing
 ```
 
 | Option | Default | Meaning |
 |---|---|---|
 | `-v32lua DIR` | `C:\github\v32lua` | v32lua checkout |
-| `-v32bench DIR` | `C:\github\v32bench` | Where `v32bench.exe` is built (created if needed) |
-| `-cs DIR` | `C:\github\ComputerSoftware` | Official Vircon32 sources, from https://github.com/vircon32/ComputerSoftware (needed for v32run, v32bench and the BIOS) |
+| `-v32sim DIR` | `C:\github\v32sim` | v32sim checkout; `v32orun.exe` is built into its `tools\oracle\bin` |
+| `-cs DIR` | `C:\github\ComputerSoftware` | Official Vircon32 sources, from https://github.com/vircon32/ComputerSoftware (needed for v32orun and the BIOS) |
 | `-devtools DIR` | `C:\utils\vircon32\devtools` | DevTools (only checked) |
 | `-bios FILE` | `<cs>\SimplifiedEmulator\Data\Bios\StandardBios.v32` | BIOS (only checked) |
 | `-emulator DIR` | `C:\github\vircon32_games` | Web emulator (only checked) |
 | `-notest` | | Skip the smoke test |
 
 The smoke  test compiles a tiny  PICO-8 cart with v32lua,  assembles and 
-packs it with the DevTools, and runs  it 30 frames on v32run. That's the 
+packs it with the DevTools, and runs  it 30 frames on v32orun. That's the 
 same chain `build_v32.py` and `test_v32.py` use.                         
 
 > **Close running  scripts first.** Windows  locks a running  `.exe`, so 
@@ -117,25 +116,12 @@ mingw32-make CC=gcc            # -> bin/v32lua.exe
 From cmd or  PowerShell, put both MSYS2 folders on  the PATH first: `set 
 PATH=C:\msys64\mingw64\bin;C:\msys64\usr\bin;%PATH%`.                    
 
-**v32run**, in an  MSYS2 MinGW64 shell. It needs `python3`  on the PATH, 
-and the exe isn't linked statically, so it needs `C:\msys64\mingw64\bin` 
-on the PATH to run:                                                      
-
-```
-cd /c/github/v32lua/tools/headless
-./build.sh /c/github/ComputerSoftware          # -> v32run.exe (+ Assembler.exe)
-```
-
-**v32bench** is v32run plus a `-b`  option that prints the CPU cycles of 
-every frame  (`FC <frame> <cycles> <overrun>`).  `build_tools.py` builds 
-it  itself, from  the same  `v32run.cpp` and  `ComputerSoftware` sources 
-with  that option  patched  in;  nothing else  is  needed.  If you  have 
-`C:\github\v32bench\build_v32bench.py`, it  does the same by  hand, from 
-any shell:                                                               
-
-```
-python C:\github\v32bench\build_v32bench.py C:\github\v32lua C:\github\ComputerSoftware
-```
+**v32orun** is v32sim's headless runner (the one runner for tests, profiling and headless
+runs; v32lua no longer has its own `v32run`, and `v32bench` is its `-b` option, which prints the
+CPU cycles of every frame: `FC <frame> <cycles> <overrun>`). `build_tools.py` builds it from a v32sim
+checkout (`tools/oracle/orun.cpp`, default `C:\github\v32sim`) and the `ComputerSoftware` sources,
+linked statically; nothing else is needed. In a v32sim checkout on Linux or MSYS2 it is
+`make oracle COMPUTERSOFTWARE=/c/github/ComputerSoftware` (it lands in `tools/oracle/bin`).
 
 ## Folders and files
 
@@ -204,7 +190,7 @@ python build_v32.py -start "8 bit panda" -max 20 -jobs 4
 ## test_v32.py — headless crash test
 
 Each cart is rebuilt with debug info and run `-runs` times for `-frames` 
-frames on v32run,  each run with a different random  button pattern. All 
+frames on v32orun,  each run with a different random  button pattern. All 
 buttons except  Start are  pressed, because  Start opens  v32lua's pause 
 screen. The first  failure is reported, along with the  Lua function and 
 source line it happened in:                                              
@@ -215,7 +201,7 @@ source line it happened in:
 | `PANIC` | The red "V32LUA PANIC" screen: a runtime error (calling a non-function, indexing a non-table, out of memory, ...) |
 | `CPU_ERROR` | The blue Vircon32 hardware error screen (invalid memory access, stack overflow, division error, ...) |
 | `HALT` | The program stopped without an error |
-| `TIMEOUT` | v32run took longer than `-timeoutsec` |
+| `TIMEOUT` | v32orun took longer than `-timeoutsec` |
 | `BUILD_FAILED` | The cart no longer compiles or assembles with the current tools |
 | `BLACK_SCREEN` | With `-blank`: no crash, but the game area stayed black (or one flat colour) in every checked frame of run 1 |
 
@@ -226,7 +212,7 @@ source line it happened in:
 | `-blank` | | Also check for black screens (needs Pillow and `screenshot_v32.py`) |
 | `-blankstep N` | 60 | `-blank`: check one frame every N frames |
 | `-bios FILE` | `StandardBios.v32` path | `-blank`: so that text in the BIOS font counts as shown |
-| `-v32run PATH` | `C:\github\v32lua\tools\headless\v32run.exe` | |
+| `-v32orun PATH` | `C:\github\v32sim\tools\oracle\bin\v32orun.exe` | |
 | `-all` | | Also test carts without a ROM |
 
 Output: `v32/test_results.csv` (Cart, Format, Result, Error, Frame, Run, 
@@ -236,7 +222,7 @@ OFunction, Line, Code, verruns) and `v32/test_logs/<name>.log`.
 
 The Vircon32 CPU  has 250,000 cycles per frame. A  frame that needs more 
 is an  **overrun**: the game slows  down on real hardware.  Each cart is 
-rebuilt with  debug info  and run  on v32bench.  With the  default fixed 
+rebuilt with  debug info  and run  on v32orun.  With the  default fixed 
 input, every  cart gets  the same  presses: A then  B at  4 s,  then all 
 buttons in turn. The first `-warmup` frames are left out.                
 
@@ -257,12 +243,12 @@ the routines worth optimising in v32lua.
 | `-seed N` | 1 | Pattern for `-input random` |
 | `-top N` | 15 | Heaviest carts listed |
 | `-routines N` | 20 | Runtime routines listed |
-| `-v32bench PATH` | `C:\github\v32bench\v32bench.exe` | |
+| `-v32orun PATH` | `C:\github\v32sim\tools\oracle\bin\v32orun.exe` | |
 | `-all` | | Also carts without a ROM |
 
 ## screenshot_v32.py — screenshots
 
-Each cart is rebuilt and run once on v32run with GPU logging. The logged 
+Each cart is rebuilt and run once on v32orun with GPU logging. The logged 
 draws are redrawn  into 640×360 PNGs using the cart's  textures and the 
 BIOS font.  The result  is close  for normal sprites  and text,  but not 
 pixel-exact.                                                             
@@ -286,7 +272,7 @@ retried at other  frames Output: `v32/screenshots/title/<name>.png` and.
 | `-list FILE` | | Only the carts named in this file (one file name per line) |
 | `-skipexisting` | | Skip carts that already have screenshots |
 | `-outdir DIR` | `v32/screenshots` | |
-| `-v32run PATH`, `-bios FILE` | see above | |
+| `-v32orun PATH`, `-bios FILE` | see above | |
 | `-all` | | Also carts without a ROM |
 
 ## sort_v32.py — sort ROMs into folders

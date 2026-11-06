@@ -5,21 +5,21 @@ Compile (or just check) the tools the *_v32.py scripts need.
   v32lua             required: C:\\github\\v32lua\\bin\\v32lua.exe   (the Lua -> Vircon32 compiler)
   assemble, packrom  required: C:\\utils\\vircon32\\devtools        (official Vircon32 DevTools;
                      download, not built here -- see below)
-  v32run             test_v32.py / screenshot_v32.py: C:\\github\\v32lua\\tools\\headless\\v32run.exe
-                     (the official Vircon32 CPU core, headless)
-  v32bench           bench_v32.py: C:\\github\\v32bench\\v32bench.exe  (v32run + per-frame cycle counts)
+  v32orun            test_v32.py / screenshot_v32.py / bench_v32.py: C:\\github\\v32sim\\tools\\oracle\\bin\\v32orun.exe
+                     (v32sim's headless runner on the official Vircon32 CPU core; v32lua no longer carries one,
+                     and v32bench is now its -b option)
   StandardBios.v32   screenshot_v32.py / test_v32.py -blank (BIOS font), from ComputerSoftware
   Pillow             screenshot_v32.py, test_v32.py -blank, make_site_v32.py covers
   emulator           make_site_v32.py: C:\\github\\vircon32_games (Vircon32Web.*)
 
-v32run, v32bench and the BIOS come from the official Vircon32 sources (ComputerSoftware);
+v32orun is built from v32sim (tools/oracle/orun.cpp) and the official Vircon32 sources (ComputerSoftware), the BIOS comes from those;
 -clone fetches them from https://github.com/vircon32/ComputerSoftware when they're missing.
 The DevTools (assemble.exe, packrom.exe and their DLLs) are the prebuilt Windows download
 from https://github.com/vircon32/ComputerSoftware/releases ("DevTools"), unzipped into
 C:\\utils\\vircon32\\devtools.
 
 After building, a smoke test compiles a tiny PICO-8 cart with v32lua, assembles and packs
-it with the DevTools, and runs it on v32run.
+it with the DevTools, and runs it on v32orun.
 
 Needs MSYS2 (C:\\msys64) with the mingw64 gcc/g++/make:
   pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-make
@@ -28,7 +28,7 @@ v32lua's Makefile also uses sed / uname, which come from MSYS2's own C:\\msys64\
 Usage:
   python build_tools.py                 # build everything that can be built, then smoke test
   python build_tools.py -check          # only report which tools are found
-  python build_tools.py -only v32lua    # only these: v32lua v32run v32bench
+  python build_tools.py -only v32lua    # only these: v32lua v32orun
   python build_tools.py -clone          # also git clone ComputerSoftware if it's missing
 """
 
@@ -133,7 +133,7 @@ def build_v32lua(args, env):
 
 def computer_software(args, env):
     cs = args.cs
-    if os.path.isdir(os.path.join(cs, "SimplifiedEmulator", "Emulator")):
+    if os.path.isdir(os.path.join(cs, "DesktopEmulator", "ConsoleLogic")):
         return cs
     if not args.clone:
         bad("Vircon32 sources not found in %s (-cs); run with -clone to fetch %s" % (cs, CS_URL))
@@ -150,77 +150,50 @@ def computer_software(args, env):
     return cs
 
 
-BENCH_PATCHES = [   # v32run -> v32bench (as C:/github/v32bench/build_v32bench.py): -b prints per frame
-    ("static bool g_log_gpu = false, g_log_spu = false;",       #   FC <frame> <cycles> <overrun 0/1>
-     "static bool g_log_gpu = false, g_log_spu = false;\nstatic bool g_bench = false;  // v32bench: -b"),
-    ("        else vbin = argv[i];",
-     "        else if (a == \"-b\") g_bench = true;\n        else vbin = argv[i];"),
-    ("        TIM.ChangeFrame(); CPU.ChangeFrame();",
-     "        TIM.ChangeFrame(); CPU.ChangeFrame();\n        long long frame_start = cyc;"),
-    ("        if (CPU.Halted) break;\n",
-     "        if (g_bench) printf(\"FC %d %lld %d\\n\", g_frame, cyc - frame_start, "
-     "(!CPU.Waiting && !CPU.Halted) ? 1 : 0);\n        if (CPU.Halted) break;\n"),
-]
-
-
-def build_runner(args, env, cs, bench):
-    """v32run (v32lua's tools/headless/build.sh, without needing bash/python3) or v32bench
-    (the same source with BENCH_PATCHES), from v32lua's v32run.cpp and the official
-    Vircon32 CPU core in ComputerSoftware. Linked statically: runs without MSYS2 on the PATH."""
-    name = "v32bench" if bench else "v32run"
-    headless = os.path.join(args.v32lua, "tools", "headless")
-    src = os.path.join(headless, "v32run.cpp")
+def build_runner(args, env, cs):
+    """v32orun, from v32sim's tools/oracle/orun.cpp and the official ConsoleLogic in ComputerSoftware
+    (what v32sim's tools/oracle/build.sh does, without needing bash). The one change to the official
+    sources: V32CPUProcessors.cpp is compiled from a copy whose float -> int conversion calls
+    v32orun_cfi() (--cfi=arm, --cfi-log). Linked statically on Windows: runs without MSYS2 on the PATH."""
+    src = os.path.join(args.v32sim, "tools", "oracle", "orun.cpp")
     if not os.path.isfile(src):
-        bad("v32run.cpp not found in %s (-v32lua)" % headless)
+        bad("orun.cpp not found in %s (-v32sim: a v32sim checkout)" % args.v32sim)
         return False
-    out_dir = args.v32bench if bench else headless
+    out_dir = os.path.join(args.v32sim, "tools", "oracle", "bin")
     os.makedirs(out_dir, exist_ok=True)
-    out_exe = os.path.join(out_dir, name + EXE)
+    out_exe = os.path.join(out_dir, "v32orun" + EXE)
     if locked(out_exe):
         bad("%s is in use (is a test / bench / screenshot script running?)" % out_exe)
         return False
     gen = os.path.join(out_dir, ".gen")
     os.makedirs(gen, exist_ok=True)
-    if bench:
-        with open(src, encoding="utf-8") as fh:
-            s = fh.read()
-        for old, new in BENCH_PATCHES:
-            if s.count(old) != 1:
-                bad("v32run.cpp changed upstream; v32bench patch anchor not found: %r" % old.strip())
-                return False
-            s = s.replace(old, new)
-        src = os.path.join(gen, "v32bench.cpp")
-        with open(src, "w", encoding="utf-8") as fh:
-            fh.write(s)
-    emu = os.path.join(cs, "SimplifiedEmulator", "Emulator")
-    # same CPU patch as build.sh: host-independent float -> int conversion
-    with open(os.path.join(emu, "VirconCPUProcessors.cpp"), encoding="utf-8") as fh:
+    cl = os.path.join(cs, "DesktopEmulator", "ConsoleLogic")
+    with open(os.path.join(cl, "V32CPUProcessors.cpp"), encoding="utf-8") as fh:
         cpu = fh.read()
-    old = "    Register->AsInteger = (int32_t)Register->AsFloat;\n}"
+    old = "Register->AsInteger = (int32_t)Register->AsFloat;"
     if cpu.count(old) != 1:
-        bad("VirconCPUProcessors.cpp changed upstream; can't apply build.sh's patch")
+        bad("V32CPUProcessors.cpp changed upstream; can't apply the CFI patch")
         return False
-    cpu = cpu.replace(old, "    extern int32_t v32run_cfi(float f, int32_t ip);\n"
-                           "    Register->AsInteger = v32run_cfi(Register->AsFloat, CPU.InstructionPointer.AsInteger);\n}")
-    with open(os.path.join(gen, "VirconCPUProcessors.cpp"), "w", encoding="utf-8") as fh:
+    cpu = "#include <cstdint>\nextern int32_t v32orun_cfi(float f, int32_t ip);\n" + \
+          cpu.replace(old, "Register->AsInteger = ::v32orun_cfi(Register->AsFloat, CPU.InstructionPointer.AsInteger);")
+    with open(os.path.join(gen, "V32CPUProcessors.cpp"), "w", encoding="utf-8") as fh:
         fh.write(cpu)
     gxx = shutil.which("g++", path=env["PATH"])
     if not gxx:
         bad("g++ not found (pacman -S mingw-w64-x86_64-gcc)")
         return False
-    cmd = [gxx, "-std=c++17", "-O2", "-w", "-I" + headless, "-I" + emu,
-           "-I" + os.path.join(cs, "SimplifiedEmulator"), "-I" + cs,
-           src, os.path.join(emu, "VirconCPU.cpp"), os.path.join(gen, "VirconCPUProcessors.cpp")] + \
-          [os.path.join(emu, f) for f in ("VirconMemory.cpp", "VirconBuses.cpp", "VirconTimer.cpp",
-                                          "VirconRNG.cpp", "VirconNullController.cpp")] + ["-o", out_exe]
+    others = sorted(os.path.join(cl, f) for f in os.listdir(cl) if f.endswith(".cpp") and f != "V32CPUProcessors.cpp")
+    cmd = [gxx, "-std=c++17", "-O2", "-w", "-I" + cl, "-I" + os.path.join(cs, "DesktopEmulator"),
+           "-I" + os.path.join(cs, "VirconDefinitions"), src, os.path.join(gen, "V32CPUProcessors.cpp")] + others + ["-o", out_exe]
     if IS_WINDOWS:
         cmd.insert(1, "-static")
     code, out = run(cmd, out_dir, env)
+    shutil.rmtree(gen, ignore_errors=True)
     if code != 0:
         print(out[-2000:])
-        bad("%s build" % name)
+        bad("v32orun build")
         return False
-    ok("%s built: %s" % (name, out_exe))
+    ok("v32orun built: %s" % out_exe)
     return True
 
 
@@ -253,16 +226,16 @@ def smoke_test(args, env):
                 print(out[-1500:])
                 bad("smoke test: %s" % os.path.basename(exe))
                 return False
-        v32run = os.path.join(args.v32lua, "tools", "headless", "v32run" + EXE)
+        v32run = os.path.join(args.v32sim, "tools", "oracle", "bin", "v32orun" + EXE)
         if os.path.isfile(v32run):
             code, out = run([v32run, "cart.vbin", "-f", "30", "-q"], tmp, env)
             if "STATUS FRAMES_EXHAUSTED" not in out:
                 print(out[-1500:])
-                bad("smoke test: the cart didn't run 30 frames on v32run")
+                bad("smoke test: the cart didn't run 30 frames on v32orun")
                 return False
-            ok("smoke test: .p8 -> v32lua -> assemble -> packrom -> 30 frames on v32run")
+            ok("smoke test: .p8 -> v32lua -> assemble -> packrom -> 30 frames on v32orun")
         else:
-            ok("smoke test: .p8 -> v32lua -> assemble -> packrom (v32run not built: not run)")
+            ok("smoke test: .p8 -> v32lua -> assemble -> packrom (v32orun not built: not run)")
         return True
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -283,9 +256,8 @@ def check(args):
              "required: download the DevTools from " + DEVTOOLS_URL),
             ("packrom", devtool(args, "packrom") or os.path.join(args.devtools, "packrom" + EXE),
              "required: download the DevTools from " + DEVTOOLS_URL),
-            ("v32run", os.path.join(args.v32lua, "tools", "headless", "v32run" + EXE),
-             "test_v32.py / screenshot_v32.py / make_site_v32.py screenshots"),
-            ("v32bench", os.path.join(args.v32bench, "v32bench" + EXE), "bench_v32.py"),
+            ("v32orun", os.path.join(args.v32sim, "tools", "oracle", "bin", "v32orun" + EXE),
+             "test_v32.py / screenshot_v32.py / bench_v32.py / make_site_v32.py screenshots"),
             ("StandardBios.v32", args.bios, "screenshot_v32.py BIOS-font text; -clone fetches it")]
     for name, path, note in rows:
         found = os.path.isfile(path)
@@ -306,27 +278,27 @@ def main():
     ap = argparse.ArgumentParser(description="Compile / check the tools the *_v32.py scripts need.",
                                  allow_abbrev=False)
     ap.add_argument("-check", "--check", action="store_true", help="only report which tools are found")
-    ap.add_argument("-only", "--only", nargs="+", choices=("v32lua", "v32run", "v32bench"),
+    ap.add_argument("-only", "--only", nargs="+", choices=("v32lua", "v32orun"),
                     help="build only these (default: all)")
     ap.add_argument("-clone", "--clone", action="store_true",
                     help="git clone ComputerSoftware (Vircon32 sources + BIOS) when -cs is missing")
     ap.add_argument("-notest", "--no-test", action="store_true", help="skip the smoke test")
     ap.add_argument("-v32lua", "--v32lua", default=os.path.join(BASE, "v32lua"), help="v32lua checkout")
-    ap.add_argument("-v32bench", "--v32bench", default=os.path.join(BASE, "v32bench"),
-                    help="where v32bench.exe is built")
+    ap.add_argument("-v32sim", "--v32sim", default=os.path.join(BASE, "v32sim"),
+                    help="v32sim checkout (v32orun is built from its tools/oracle/orun.cpp into tools/oracle/bin)")
     ap.add_argument("-cs", "--cs", default=os.path.join(BASE, "ComputerSoftware"),
-                    help="checkout of %s (for v32run / v32bench / the BIOS)" % CS_URL)
+                    help="checkout of %s (for v32orun / the BIOS)" % CS_URL)
     ap.add_argument("-devtools", "--devtools", default=r"C:\utils\vircon32\devtools" if IS_WINDOWS
                     else os.path.expanduser("~/vircon32/devtools"), help="Vircon32 DevTools folder (checked only)")
     ap.add_argument("-bios", "--bios", default=None,
-                    help="StandardBios.v32 (default: <cs>/SimplifiedEmulator/Data/Bios/StandardBios.v32)")
+                    help="StandardBios.v32 (default: <cs>/DesktopEmulator/Data/Bios/StandardBios.v32)")
     ap.add_argument("-emulator", "--emulator", default=os.path.join(BASE, "vircon32_games"),
                     help="web emulator files (checked only)")
     args = ap.parse_args()
-    for k in ("v32lua", "v32bench", "cs", "devtools", "emulator"):
+    for k in ("v32lua", "v32sim", "cs", "devtools", "emulator"):
         setattr(args, k, os.path.abspath(os.path.expanduser(getattr(args, k))))
     args.bios = os.path.abspath(args.bios) if args.bios else \
-        os.path.join(args.cs, "SimplifiedEmulator", "Data", "Bios", "StandardBios.v32")
+        os.path.join(args.cs, "DesktopEmulator", "Data", "Bios", "StandardBios.v32")
     if IS_WINDOWS:
         os.system("")  # ANSI colours
 
@@ -339,15 +311,13 @@ def main():
             "pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-make")
         return 1
     env = tool_env(paths)
-    want = args.only or ["v32lua", "v32run", "v32bench"]
+    want = args.only or ["v32lua", "v32orun"]
     results = {}
     if "v32lua" in want:
         results["v32lua"] = build_v32lua(args, env)
-    if "v32run" in want or "v32bench" in want:
+    if "v32orun" in want:
         cs = computer_software(args, env)
-        for name in ("v32run", "v32bench"):
-            if name in want:
-                results[name] = build_runner(args, env, cs, name == "v32bench") if cs else False
+        results["v32orun"] = build_runner(args, env, cs) if cs else False
     tested = None if args.no_test else smoke_test(args, env)
     required_ok = check(args)
     if results.get("v32lua") is False or tested is False or not required_ok:

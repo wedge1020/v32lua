@@ -6,8 +6,14 @@
   `;@var n loc=BP+2 type=lua boxed upvalue` (the hidden leading parameter holding the shared box).
 - **`-g`: `;@var` for globals and chunk-level locals**, one per name before the code:
   `;@var counter loc=@0x00000075 type=lua global`. With `v32as -g` they reach `.vbin.vars`/`.vbin.sym`.
-- **Headless runner builds again**: `tools/headless/build.sh` uses ComputerSoftware's
-  `DesktopEmulator/ConsoleLogic` instead of the removed `SimplifiedEmulator`. Same options and log format.
+- **No private runner any more: v32sim's `v32orun`.** `tools/headless/v32run.cpp`, `build.sh` and `sdlshim/` are gone;
+  the same runner (same options, same log format, byte-identical output on the test carts) lives in v32sim
+  (`tools/oracle/orun.cpp`, `make oracle COMPUTERSOFTWARE=...`), built on ComputerSoftware's `DesktopEmulator/ConsoleLogic`,
+  and also runs a real BIOS + cartridge with `-g -s -t -B -P`. `runlua`, `trap`, `unittest.py`, `circles.py`, `difftest.py`
+  and `tests/audit/hints` find it through `tools/headless/oracle.sh` / `oracle.py` (`$V32ORUN`, `$V32SIM_HOME`, a
+  v32sim checkout next to this one, `$PATH`). `scripts/testing_harness`: `-v32orun` replaces `-v32run` and `-v32bench`
+  (`-b` is v32bench's per-frame cycle counts); `build_tools.py -only v32orun` builds it from a v32sim checkout.
+  `unittest.py`: 1811/1826 as before.
 - **`demos/api_spu`**: `music.wav` (27 MB) is made from `music.mp3` (3 MB) with `ffmpeg` at build time and removed by
   `make clean`; the source tree shrinks by 24 MB.
 - Version `20261105-dev`.

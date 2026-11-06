@@ -4,7 +4,7 @@ Smoke-test built carts for runtime crashes, headless, with random button mashing
 
 For each cart that has a ROM in v32/ (or every cart with -all), the cart is
 rebuilt in its own work folder with debug info (v32lua -g, assemble -g program)
-and run on v32run -- the official Vircon32 CPU core with logging stand-ins for
+and run on v32orun -- the official Vircon32 CPU core with logging stand-ins for
 the GPU, SPU and gamepad (tools/headless in the v32lua repo). Each cart gets
 -runs runs of -frames frames with a different random pad script (every button
 but Start, which opens v32lua's PICO-8 pause screen), and the first failure is
@@ -15,7 +15,7 @@ reported:
   CPU_ERROR   the blue Vircon32 hardware error screen (invalid port write,
               invalid memory read, division error, stack overflow, ...)
   HALT        the program stopped (HLT) without an error
-  TIMEOUT     v32run itself took longer than -timeoutsec
+  TIMEOUT     v32orun itself took longer than -timeoutsec
   BUILD_FAILED  the cart no longer compiles/assembles with the current tools
   BLACK_SCREEN  (with -blank) no crash, but the game area stayed black -- or one
               flat colour -- in every sampled frame of run 1
@@ -43,10 +43,9 @@ Usage:
   python test_v32.py -all                    # also carts without a ROM
   python test_v32.py -blank                  # also detect carts that only show a black screen
 
-Needs build_v32.py in the same folder, and v32run (build it with
-tools/headless/build.sh from the v32lua repo). On Windows it defaults to
-C:\\github\\v32lua\\tools\\headless\\v32run.exe; elsewhere v32run on the PATH,
-or next to v32lua in ../tools/headless/.
+Needs build_v32.py in the same folder, and v32orun, v32sim's headless runner (build_tools.py -only v32orun,
+or `make oracle` in v32sim). On Windows it defaults to C:\\github\\v32sim\\tools\\oracle\\bin\\v32orun.exe;
+elsewhere v32orun on the PATH, or in a v32sim checkout next to v32lua.
 """
 
 import argparse
@@ -226,7 +225,7 @@ GAME_AREA = {"pico8": (144, 4, 144 + 352, 4 + 352), "tic80": (0, 0, 630, 357)}
 
 
 class BlankChecker:
-    """-blank: fed the GPU log of a run line by line while v32run is still running, it
+    """-blank: fed the GPU log of a run line by line while v32orun is still running, it
     keeps the picture on one canvas -- every frame's commands are drawn onto it once, as
     the frame completes -- and every -blankstep frames looks only at the game area.
     Memory and time stay small: the log is never stored, nothing is replayed, and once
@@ -270,7 +269,7 @@ class BlankChecker:
         self.canvas, self.pending = None, []
 
     def feed(self, line):
-        """One 'F<n> GPU ...' line of v32run -g output. Never raises: an error in the
+        """One 'F<n> GPU ...' line of v32orun -g output. Never raises: an error in the
         check (e.g. an odd GPU log) only disables the check for this cart."""
         if self.shown or self.error:
             return
@@ -315,7 +314,7 @@ class BlankChecker:
 
 
 def run_streaming(cmd, work_dir, env, timeout, checker):
-    """Runs v32run, handing GPU lines to checker.feed() as they arrive instead of keeping
+    """Runs v32orun, handing GPU lines to checker.feed() as they arrive instead of keeping
     them. -> (the other output lines as text, timed out?)"""
     p = subprocess.Popen(cmd, cwd=work_dir, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
@@ -337,7 +336,7 @@ def run_streaming(cmd, work_dir, env, timeout, checker):
         p.wait()
     finally:
         timer.cancel()
-        # whatever happened, never leave v32run behind: a process nobody reads from any
+        # whatever happened, never leave v32orun behind: a process nobody reads from any
         # more blocks on its full output pipe forever (and so did the whole test run)
         if p.poll() is None:
             p.kill()
@@ -364,7 +363,7 @@ def test_cart(full, name, work_dir, tools, args, blank=None):
     checker = None
     for run in range(1, args.runs + 1):
         pad = pad_script(run, args.frames)
-        cmd = [tools["v32run"], "cart.vbin", "-f", str(args.frames), "-q", "-p", pad]
+        cmd = [tools["v32orun"], "cart.vbin", "-f", str(args.frames), "-q", "-p", pad]
         if traps:
             cmd += ["-t", traps]
         if blank and run == 1:
@@ -381,7 +380,7 @@ def test_cart(full, name, work_dir, tools, args, blank=None):
             except subprocess.TimeoutExpired:
                 timed_out = True
         if timed_out:
-            res.update(Result="TIMEOUT", Error="v32run took over %d s" % args.timeout_sec, Run=run)
+            res.update(Result="TIMEOUT", Error="v32orun took over %d s" % args.timeout_sec, Run=run)
             log.append("run %d (seed %d): TIMEOUT" % (run, run))
             checker = None
             break
@@ -492,7 +491,7 @@ def main():
                     if b.IS_WINDOWS else None, help="-blank: StandardBios.v32, so BIOS-font text counts as shown")
     ap.add_argument("-v32lua", "--v32lua", default=r"C:\github\v32lua\bin\v32lua.exe" if b.IS_WINDOWS else None)
     ap.add_argument("-devtools", "--devtools", default=r"C:\utils\vircon32\devtools" if b.IS_WINDOWS else None)
-    ap.add_argument("-v32run", "--v32run", default=r"C:\github\v32lua\tools\headless\v32run.exe" if b.IS_WINDOWS else None)
+    ap.add_argument("-v32orun", "--v32orun", default=r"C:\github\v32sim\tools\oracle\bin\v32orun.exe" if b.IS_WINDOWS else None)
     args = ap.parse_args()
 
     if b.IS_WINDOWS:
@@ -502,10 +501,10 @@ def main():
 
     tools = {"v32lua": b.find_tool("v32lua", path=args.v32lua),
              "assemble": b.find_tool("assemble", folder=args.devtools)}
-    v32run = b.find_tool("v32run", path=args.v32run) if args.v32run else b.find_tool("v32run")
-    if not v32run and tools["v32lua"]:   # repo layout: bin/v32lua -> tools/headless/v32run
-        v32run = b.find_tool("v32run", folder=os.path.join(os.path.dirname(tools["v32lua"]), "..", "tools", "headless"))
-    tools["v32run"] = v32run
+    v32orun = b.find_tool("v32orun", path=args.v32orun) if args.v32orun else b.find_tool("v32orun")
+    if not v32orun and tools["v32lua"]:   # a v32sim checkout next to v32lua
+        v32orun = next((p for p in (b.find_tool("v32orun", folder=os.path.join(os.path.dirname(tools["v32lua"]), "..", "..", d, "tools", "oracle", "bin")) for d in ("v32sim", "v32sim-project")) if p), None)
+    tools["v32orun"] = v32orun
     for name, exe in tools.items():
         if not exe:
             sys.exit("Tool not found: %s" % name)

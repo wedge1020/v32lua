@@ -142,9 +142,9 @@ Both layers' known gaps are listed in the README roadmap and `doc/PICO8.md`,
   `tests/xml/bios.sh bin/v32lua` (`xml/bios`) for `-b`.
   `make asmcheck` / `make v32check` only assemble / pack. Passing a bare
   compile proves little.
-- Without those: `tools/headless/` runs carts on the official CPU cores
-  (`build.sh /path/to/ComputerSoftware` once; then `runlua prog.lua`,
-  `unittest.py`). GPU/SPU are logging stand-ins, so rendering and audio are
+- Without those: `tools/headless/` runs carts on the official CPU cores through v32sim's
+  `v32orun` (`make oracle COMPUTERSOFTWARE=...` in v32sim once, `V32SIM_HOME` pointing at it;
+  then `runlua prog.lua`, `unittest.py`). v32lua has no runner of its own. GPU/SPU are logging stand-ins, so rendering and audio are
   not checked. `tests/audit/run_all.sh` diffs plain-Lua programs against a
   reference Lua 5.4 (`$LUA54`); `R_*` globals are compared.
 - Fix the compiler, don't bend test or demo source to dodge a bug.

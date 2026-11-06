@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# padrand.py SEED FRAMES -> a random v32run -p pad script (A at frame 60, then
+# padrand.py SEED FRAMES -> a random v32orun -p pad script (A at frame 60, then
 # random presses). Long random-input runs found bugs fixed-input runs missed:
 #   runlua celeste.lua -f 3000 -q -p "$(padrand.py 1 3000)"
 import random,sys; random.seed(int(sys.argv[1])); N=int(sys.argv[2])

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# kbdscript.py [--start N] TOKEN... -> a v32run -p script that plays a v32kbd
+# kbdscript.py [--start N] TOKEN... -> a v32orun -p script that plays a v32kbd
 # keyboard on gamepad 0, one event per frame, the way the v32io adapter
 # shows it (strobe on Left/Right, Up = pressed, Down = released, key code on
 # Start A B X Y L R, bit 0 first). Use it with a program that has

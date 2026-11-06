@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # render.py prog.run FRAME out.png [texture0.vtex [texture1.vtex ...]]
-# Rebuild one frame from a v32run -g GPU log: clears and region draws (with
+# Rebuild one frame from a v32orun -g GPU log: clears and region draws (with
 # scale/mirroring, multiply color, alpha/add/subtract blending). Rotation is
 # ignored. Textures are given in cartridge order (texture 0 first); the BIOS
 # texture (-1) is drawn as a magenta box. For looking at layout problems,

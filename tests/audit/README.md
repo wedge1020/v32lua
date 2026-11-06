@@ -50,4 +50,4 @@ be lost across the call) and table constructors passed as call arguments.
 `Conn` support) against `kbd/read.lua` and `kbd/event.lua`, checking
 `kbd.read()`, `kbd.glyph()`, `kbd.event()` and `key()`: accented and
 box-drawing characters, the 30-frame prefix timeout and the plug-in reset.
-Run `./kbd/kbd_text.py` (it needs `bin/v32lua` and the headless tools built).
+Run `./kbd/kbd_text.py` (it needs `bin/v32lua` and v32sim's `v32orun` built, see tools/headless/README.md).

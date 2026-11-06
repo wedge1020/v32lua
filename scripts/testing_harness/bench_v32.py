@@ -8,8 +8,8 @@ the WAIT are its CPU load for that frame. A frame that never reaches WAIT used
 the whole budget: an overrun, where the game slows down on real hardware.
 
 Each cart that has a ROM in v32/ (or every cart with -all) is rebuilt with debug
-info (like test_v32.py) and run on v32bench (v32run plus per-frame cycle counts;
-build it with C:/github/v32bench/build_v32bench.py) for -frames frames. Input is
+info (like test_v32.py) and run on v32orun (v32sim's headless runner; -b prints the per-frame cycle counts that
+v32bench used to) for -frames frames. Input is
 the same for every cart, so results compare fairly (-input fixed, the default):
 A then B once at 4 s (the usual start buttons, like screenshot_v32.py), then from
 6 s cycling through every button in a fixed order: Right, Left, Up, Down (held
@@ -20,7 +20,7 @@ The first -warmup frames (loading) are left out.
 
 Per cart: average, median, 95th percentile and maximum CPU load, the number of
 overrun frames, and the 3 routines that used the most cycles (Lua functions by
-name, v32lua runtime routines as __builtin_...), from v32run's cycle profiler.
+name, v32lua runtime routines as __builtin_...), from v32orun's cycle profiler.
 Cycle counts come from the emulated CPU, so results don't depend on how fast
 this PC is, and runs in parallel don't disturb each other.
 
@@ -107,7 +107,7 @@ def routine_map(work_dir):
 
 
 def profile_routines(work_dir, prof_path):
-    """Cycles per routine from v32run's profile (-P). -> Counter {routine: cycles}"""
+    """Cycles per routine from v32orun's profile (-P). -> Counter {routine: cycles}"""
     per = Counter()
     if not os.path.exists(prof_path):
         return per
@@ -225,7 +225,7 @@ def bench_cart(full, name, work_dir, tools, args):
     dbg = t.DebugInfo(work_dir, cart_file)
     traps = ",".join("%X" % dbg.label_addr[l] for l in t.PANIC_LABELS if l in dbg.label_addr)
     prof = os.path.join(work_dir, "cart.prof")
-    cmd = [tools["v32bench"], "cart.vbin", "-f", str(args.frames), "-q", "-b", "-P", prof, str(args.warmup)]
+    cmd = [tools["v32orun"], "cart.vbin", "-f", str(args.frames), "-q", "-b", "-P", prof, str(args.warmup)]
     if traps:
         cmd += ["-t", traps]
     pad = pad_for(args)
@@ -238,7 +238,7 @@ def bench_cart(full, name, work_dir, tools, args):
         out = p.stdout.decode("utf-8", "replace")
     except subprocess.TimeoutExpired:
         res.update(Result="TIMEOUT")
-        return res, "v32bench took over %d s" % args.timeout_sec
+        return res, "v32orun took over %d s" % args.timeout_sec
 
     loads, overruns = [], 0
     for m in re.finditer(r"^FC (\d+) (\d+) (\d)", out, re.M):
@@ -290,7 +290,7 @@ def main():
     b.add_cart_options(ap)   # -fastcircles / -nobezel: benchmark the same build as the ROMs
     ap.add_argument("-v32lua", "--v32lua", default=r"C:\github\v32lua\bin\v32lua.exe" if b.IS_WINDOWS else None)
     ap.add_argument("-devtools", "--devtools", default=r"C:\utils\vircon32\devtools" if b.IS_WINDOWS else None)
-    ap.add_argument("-v32bench", "--v32bench", default=r"C:\github\v32bench\v32bench.exe" if b.IS_WINDOWS else None)
+    ap.add_argument("-v32orun", "--v32orun", default=r"C:\github\v32sim\tools\oracle\bin\v32orun.exe" if b.IS_WINDOWS else None)
     args = ap.parse_args()
     if args.warmup >= args.frames:
         ap.error("-warmup must be smaller than -frames")
@@ -302,10 +302,10 @@ def main():
 
     tools = {"v32lua": b.find_tool("v32lua", path=args.v32lua),
              "assemble": b.find_tool("assemble", folder=args.devtools),
-             "v32bench": b.find_tool("v32bench", path=args.v32bench) if args.v32bench else b.find_tool("v32bench")}
+             "v32orun": b.find_tool("v32orun", path=args.v32orun) if args.v32orun else b.find_tool("v32orun")}
     for name, exe in tools.items():
         if not exe:
-            sys.exit("Tool not found: %s%s" % (name, " (build it with build_v32bench.py)" if name == "v32bench" else ""))
+            sys.exit("Tool not found: %s%s" % (name, " (build it with build_tools.py -only v32orun, or make oracle in v32sim)" if name == "v32orun" else ""))
 
     source_dir = b.full_path(args.source_dir)
     out_dir = os.path.join(source_dir, "v32")
