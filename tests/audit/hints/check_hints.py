@@ -93,6 +93,12 @@ check("globals: the records come before the first function", uasm.index(";@var c
 define = dict(re.findall(r"%define\s+var_(\w+)\s+0x([0-9A-F]{8})", uasm))
 check("globals: loc= is the var_NAME address", all(define.get(n) == a for n, a in gl), (gl, define))
 check("globals: functions and compiler names are not listed", not any(n.startswith("__") or n in ("mk", "main") for n, _ in gl), gl)
+SH = "local function f(a) local sum = a + 1; sum = sum + 1; return sum end\nfunction main() local r = f(3); r = r + 1 end\n"
+open(os.path.join(d, "sh.lua"), "w").write(SH)
+run([V32LUA, "-g", "-w", "--no-build-scripts", "sh.lua", "-o", "sh.asm"], cwd=d)
+shasm = open(os.path.join(d, "sh.asm")).read()
+shg = re.findall(r"^;@var (\w+) loc=@0x[0-9A-F]{8} type=lua global$", shasm, re.M)
+check("globals: a name only assigned inside a function that declares it local is not listed as a global", "sum" not in shg and "r" not in shg and "f" not in shg, shg)
 check("upvalue: ';@var n loc=BP+N type=lua boxed upvalue' inside the closure",
       re.search(r"^\s*;@var n loc=BP\+2 type=lua boxed upvalue$", uasm, re.M) is not None)
 check("upvalue: the creating function lists n as an ordinary boxed local",

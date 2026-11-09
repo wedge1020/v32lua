@@ -977,6 +977,7 @@ int   emit_variable_map (void)
         {
             if (g->type != SYM_GLOBAL || g->is_function || g->name == NULL) continue;
             if (g->name[0] == '_' && g->name[1] == '_') continue;
+            if (!g->dbg_global) continue;      // only registered by the prepass for a plain assignment to a local of some function
             fprintf (out(), ";@var %s loc=@0x%.8X type=lua global\n", g->name, g->location);
             lines_printed    = lines_printed + 1;
         }

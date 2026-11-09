@@ -22,6 +22,9 @@ typedef struct SymbolNode
                               // call of unknown count: RET_COUNT says how
                               // many values came back (node/multivalue.c)
     bool        is_boxed;     // slot holds a box pointer, not the value
+    bool        dbg_global;   // -g: some code reads or writes this name as a global (or it is a chunk-level `local`); the
+                              // prepass also registers the targets of plain assignments to names a function declares local,
+                              // and those are not globals worth a ";@var"
     ASTNode    *def_node;     // for is_function symbols
     char       *fn_alias;     // local/upvalue bound to a `local function`
                               // (or `local f = function ...`): the mangled

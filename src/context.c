@@ -399,6 +399,7 @@ void get_variable_access_string(const char *name, char *output_buffer) {
     }
 
     if (sym->type == SYM_GLOBAL) {
+        sym->dbg_global = true;
         if (sym->is_function == 1) {
             sprintf(output_buffer, "[func_%s]", sym->name);  // ← Keep brackets
         } else {
@@ -697,6 +698,7 @@ static void  prepass_walk (ASTNode *node, int is_chunk_top_level)
                     while (tgt != NULL) {
                         if (tgt->type == NODE_IDENTIFIER) {
                             SymbolNode *sym = register_global(tgt->as.id.name);
+                            if (node->as.mult_assign.is_local) sym->dbg_global = true;    // a chunk-level `local`
 
                             // Reverse of the guard in
                             // mark_global_as_function(): the name is

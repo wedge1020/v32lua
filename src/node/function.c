@@ -54,6 +54,10 @@ void  node_function_def (ASTNode *node)
 
     bool hint_outer_escapes = hints_fn_begin();
     src_marker_reset();
+    // -g: the prologue belongs to the line of the 'function' keyword. Without this the first instructions of a function that
+    // has no earlier statement carry no ';@src' at all, v32opt gives them ';@src -' right after the label, and v32as takes that
+    // for the end of the function (its variables end up with no function and no range).
+    if (g_debug_mode && node->line_number > 0) g_current_lua_line = node->line_number;
     emit_asm("__function_%s:\n", func_name);
 
     int num_locals = count_function_locals(node->as.function_def.body);

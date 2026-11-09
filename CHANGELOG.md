@@ -1,5 +1,11 @@
 # Changelog
 
+## 20261109-dev
+
+- **`-g` cleanup.** `;@var ... global` is written only for names that really are globals (a name assigned only inside a function
+  that declares it `local` is no longer listed). A function's prologue carries the `function` line, so `v32opt` no longer
+  leaves `;@src -` straight after the label (which ended the function early in `v32as`).
+
 ## 20261105-dev
 
 - **`-g`: `;@var` for upvalues.** Inside a closure the captured variable is listed:
