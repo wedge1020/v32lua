@@ -405,6 +405,16 @@ ASTNode *make_node_method_def (ASTNode *table_expr, const char *method_name, int
 
 ASTNode *make_node_unary (Operator  op, ASTNode *operand)
 {
+    // -<number literal> is just the negated literal: `-1`, `-(2)`, `- -3`. The
+    // result is the same bit pattern __builtin_unm returned (it flips the sign
+    // bit, and so does negating the float, 0 -> -0 included), and a literal
+    // step, start or limit then reaches the numeric `for` as a constant.
+    // (-"2" and -x are not literals and still call __builtin_unm.)
+    if (op == OP_UNM && operand != NULL && operand->type == NODE_NUMBER) {
+        operand->as.number.val = -operand->as.number.val;
+        return operand;
+    }
+
     ASTNode* node = ast_alloc ();
     node->type = NODE_UNARY;
     node->next = NULL;

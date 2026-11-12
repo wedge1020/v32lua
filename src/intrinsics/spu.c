@@ -339,8 +339,8 @@ static const Vircon32SPUChannelCmd vircon32_spu_channel_cmds[] = {
 // Compile-time argument classification
 // ============================================================================
 
-// A numeric literal, including a negated one ("-1" parses as OP_UNM around
-// a NODE_NUMBER, not as a negative NODE_NUMBER).
+// A numeric literal, including a negated one (make_node_unary folds "-1"
+// into a NODE_NUMBER; the OP_UNM case below is for any other route).
 bool spu_static_number (ASTNode *node, double *out_value)
 {
     if (node == NULL) {

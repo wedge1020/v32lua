@@ -779,7 +779,8 @@ hardware I/O instructions:
 * **Built-in   Fast  Paths**:   Standard  Lua   operations  like   string
   concatenation (`..`), length (`#`), and  unary minus (`-`) map directly
   to optimized runtime  subroutines (`__builtin_strcat`, `__builtin_len`,
-  `__builtin_unm`).
+  `__builtin_unm`). A minus sign in front of a number literal (`-1`) is
+  folded into the constant at compile time.
 
 See  [doc/API.md](doc/API.md) for  the complete,  authoritative reference
 — this README highlights the ideas, the API doc covers every call.

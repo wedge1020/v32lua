@@ -824,7 +824,9 @@ hardware:
 * **Rutas Rápidas Integradas**: Las operaciones estándar de Lua como la
   concatenación de cadenas (`..`), la longitud (`#`) y el menos unario
   (`-`) se mapean directamente a subrutinas optimizadas en tiempo de
-  ejecución (`__builtin_strcat`, `__builtin_len`, `__builtin_unm`).
+  ejecución (`__builtin_strcat`, `__builtin_len`, `__builtin_unm`). Un
+  signo menos delante de un literal numérico (`-1`) se pliega en la
+  constante durante la compilación.
 
 Consulta [doc/API.es.md](doc/API.es.md) para la referencia completa y
 autoritativa — este README resalta las ideas, el documento de la API cubre

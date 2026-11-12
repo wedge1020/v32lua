@@ -22,6 +22,55 @@ void  node_while (ASTNode *node)
     pop_loop ();
 }
 
+// Could a statement list write the variable `name`, or is it something this
+// scan does not look into? (for ';@loop ... var=': a "yes" only costs the hint.)
+// Anything that assigns or binds the same name counts, so shadowing and a
+// nested loop with the same variable name are "yes"; so is inline assembly.
+// Function bodies are not entered: a write from a closure needs the variable
+// boxed, which the caller checks.
+static bool body_may_write (ASTNode *n, const char *name)
+{
+    for (; n != NULL; n = n->next) {
+        switch (n->type) {
+            case NODE_MULTIPLE_ASSIGNMENT:
+                for (ASTNode *t = n->as.mult_assign.targets_head; t; t = t->next)
+                    if (t->type == NODE_IDENTIFIER && strcmp (t->as.id.name, name) == 0) return true;
+                break;
+            case NODE_IF:
+                if (body_may_write (n->as.if_stmt.if_body, name) ||
+                    body_may_write (n->as.if_stmt.else_body, name)) return true;
+                break;
+            case NODE_DO_BLOCK:
+                if (body_may_write (n->as.do_block.body, name)) return true;
+                break;
+            case NODE_WHILE:
+                if (body_may_write (n->as.while_loop.body, name)) return true;
+                break;
+            case NODE_REPEAT:
+                if (body_may_write (n->as.repeat_loop.body, name)) return true;
+                break;
+            case NODE_FOR_NUMERIC:
+                if (strcmp (n->as.for_numeric.index_name, name) == 0 ||
+                    body_may_write (n->as.for_numeric.body, name)) return true;
+                break;
+            case NODE_FOR_GENERIC:
+                for (ASTNode *v = n->as.for_generic.var_list; v; v = v->next)
+                    if (v->type != NODE_IDENTIFIER || strcmp (v->as.id.name, name) == 0) return true;
+                if (body_may_write (n->as.for_generic.body, name)) return true;
+                break;
+            case NODE_FUNCTION_DEF:
+                if (n->as.function_def.name != NULL && strcmp (n->as.function_def.name, name) == 0) return true;
+                break;
+            case NODE_FUNCTION_CALL: case NODE_RETURN: case NODE_BREAK: case NODE_GOTO:
+            case NODE_LABEL: case NODE_TABLE_SET: case NODE_COMMENT_LINE: case NODE_COMMENT_BLOCK:
+                break;
+            default:                      // inline assembly, anything new: do not promise
+                return true;
+        }
+    }
+    return false;
+}
+
 // ===========================================================================
 // NUMERIC FOR LOOP: for index = start, limit, step do ... end
 //
@@ -105,7 +154,7 @@ void  node_for_numeric (ASTNode *node)
     } else if (node->as.for_numeric.step_expr->type == NODE_NUMBER) {
         is_static_step = 1;
         static_step_val = node->as.for_numeric.step_expr->as.number.val;
-        emit_asm("MOV R%d, %f ; Static step value", scratch, static_step_val);
+        generate_asm(node->as.for_numeric.step_expr, scratch);   // the literal's exact bits ("%f" kept 6 decimals)
     } else {
         generate_asm(node->as.for_numeric.step_expr, scratch);
     }
@@ -145,6 +194,17 @@ void  node_for_numeric (ASTNode *node)
         int  n = snprintf (facts, sizeof (facts), ";@loop kind=for counter=%d limit=%d step=%d",
                            hint_bp_offset (access_control), hint_bp_offset (access_limit),
                            hint_bp_offset (access_step));
+        // var=N: the visible variable's frame word, a copy of the counter. Only said when nothing else
+        // writes it while the loop runs (the body does not assign it, no closure captured it so it
+        // holds no box, no inline assembly) and no frame address is formed (a variadic function copies BP).
+        // After the loop's end label the word is free for the next local.
+        char access_index[128];
+        get_variable_access_string (index_var, access_index);
+        int  var_off = hint_bp_offset (access_index);
+        bool variadic = context_stack_head != NULL && context_stack_head->vararg_count_offset != -1;
+        if (var_off != 0 && !index_sym->is_boxed && !variadic &&
+            !body_may_write (node->as.for_numeric.body, index_var))
+            n += snprintf (facts + n, sizeof (facts) - n, " var=%d", var_off);
         if (is_static_step && static_step_val == (double)(long) static_step_val)
             n += snprintf (facts + n, sizeof (facts) - n, " stepval=%ld", (long) static_step_val);
         ASTNode *a = node->as.for_numeric.start_expr, *b = node->as.for_numeric.stop_expr;

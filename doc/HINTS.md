@@ -13,7 +13,7 @@ ignores any `;@` line it does not know.
 | `;@hints 1 abi=caller-save lang=lua` | once, at the top | v32opt's header. `lang=lua` is new (ignored by older v32opt) |
 | `;@fn __function_f escapes=none` | after each function | nothing in the function took a frame address (no `LEA`, no copy of `BP` into an operand; `MOV SP, BP` of the epilogue does not count). Functions that copy `BP` (those using `...`) get no line |
 | `;@fn LABEL clobbers=R0,R6-R13` | directly above the label of a runtime routine | registers the routine or anything it calls may change (see below) |
-| `;@loop kind=for counter=-9 limit=-7 step=-8 [stepval=K] [from=A to=B]` | before the start label of a numeric `for` | the three hidden frame words (BP-relative), and the integer constants when known. Facts: the body never writes them, limit and step are written once before the loop |
+| `;@loop kind=for counter=-9 limit=-7 step=-8 [stepval=K] [from=A to=B]` | before the start label of a numeric `for` | the three hidden frame words (BP-relative), and the integer constants when known (`-1` is a constant: `stepval=-1`). Facts: the body never writes them, limit and step are written once before the loop |
 | `;@cold` | before the label of a slow-path block | rarely taken. Today the table index slow path (`__F_idx_slow_N`) |
 | `;@cold {` ... `;@cold }` | around the `__arith_coerce` call | an inline block (the code falls into it) that is rarely run: an operand that is not a number |
 | `;@var NAME loc=BP-3 type=lua [boxed]` (`-g`) | where a local or parameter is registered | the variable's frame word (`BP-n` local, `BP+n` parameter); `boxed`: the word holds a box pointer (captured by a closure), not the value. Compiler temporaries (`__...`) are not listed. In the main chunk (`__global_scope_initialization`) the locals of nested blocks are listed; a chunk-level `local` lives in a RAM word (`var_NAME`), not a frame slot, and is listed with the globals (next row) |
@@ -52,6 +52,19 @@ listed; `SP`/`BP` never are). The table is `src/runtime_clobbers.h`, generated b
 `Clobbers:` / `Preserves` line in its comment and prints the differences (the comments of
 the table routines were wrong and are fixed; remaining differences are results in R0/R1
 that a comment calls "output" rather than "clobbered").
+
+## `var=` on `;@loop`
+
+The numeric `for` keeps the visible variable (`i`) in its own frame word and copies the hidden counter into it at
+the top of every iteration (so an assignment to `i` in the body cannot change the loop). `var=N` names that word; it is written after `step=N` and before `stepval=`, e.g. `;@loop kind=for counter=-4 limit=-2 step=-3 var=-5 stepval=1 from=1 to=10`.
+It means: **between the loop's start label and its end label the word holds a copy of the counter**: it is
+stored with the start value before the loop and with the counter at the top of each iteration, and nothing else
+writes it. It is written only when v32lua can see that: the body has no assignment to a variable of that name
+(a nested block, a shadowing `local i` and a nested loop on `i` all count), no closure captured the variable (it
+would hold a box pointer, not the value), the body has no inline assembly, and the function is not variadic (it
+copies `BP`). Otherwise the attribute is left out. Nothing is promised after the end label: the word is free for
+the next local of the enclosing block, and the variable is out of scope there. An older `v32opt` skips the
+attribute and keeps the rest of the line.
 
 ## Contract
 

@@ -37,7 +37,7 @@ dbg = open(os.path.join(d, "h.asm.debug")).read().splitlines()
 check("compiles", r.returncode == 0, r.stderr[-200:])
 check("header: ;@hints 1 abi=caller-save lang=lua", re.search(r"^\s*;@hints 1 abi=caller-save lang=lua$", asm, re.M) is not None)
 check("numeric for: 3 ;@loop kind=for lines", len(re.findall(r"^\s*;@loop kind=for ", asm, re.M)) == 3)
-check("for facts: stepval/from/to", re.search(r";@loop kind=for counter=-\d+ limit=-\d+ step=-\d+ stepval=1 from=1 to=20$", asm, re.M) is not None)
+check("for facts: stepval/from/to", re.search(r";@loop kind=for counter=-\d+ limit=-\d+ step=-\d+ var=-\d+ stepval=1 from=1 to=20$", asm, re.M) is not None)
 check("each ;@loop is followed by its start label",
       all(re.search(r"^\s*;@loop[^\n]*\n__main_for_start_\d+:", asm, re.M) for _ in [0]) and
       len(re.findall(r"^\s*;@loop[^\n]*\n__main_for_start_\d+:", asm, re.M)) == 3)
@@ -65,6 +65,17 @@ check("FILE.asm.debug: entries point at instructions of lines 1-9", ok)
 check("FILE.asm.debug: names main", any(e.endswith(",main") for e in dbg))
 seen = [int(e.split(",")[3]) for e in dbg]
 check("stepping order covers lines 2,3,4,5,6,8 (line 7 is an `end`)", all(x in seen for x in (2, 3, 4, 5, 6, 8)), seen)
+# a negative literal step is a constant: `-1` is folded, so the loop gets stepval=-1 and the short header
+NEG = "function main()\nlocal s, x = 0, 3\nfor i = 10, 1, -1 do s = s + i end\nfor i = -2, 2 do s = s + i end\nfor i = x, 1, -x do s = s + i end\nresult_number = s + -0\nend\n"
+open(os.path.join(d, "n.lua"), "w").write(NEG)
+run([V32LUA, "-g", "-w", "--no-build-scripts", "n.lua", "-o", "n.asm"], cwd=d)
+nasm = open(os.path.join(d, "n.asm")).read()
+check("negative step: ;@loop ... stepval=-1 from=10 to=1", re.search(r";@loop kind=for counter=-\d+ limit=-\d+ step=-\d+(?: var=-\d+)? stepval=-1 from=10 to=1$", nasm, re.M) is not None)
+check("negative limit/start: from=-2 to=2", re.search(r";@loop kind=for [^\n]*stepval=1 from=-2 to=2$", nasm, re.M) is not None)
+check("a variable step has no stepval", re.search(r";@loop kind=for counter=-\d+ limit=-\d+ step=-\d+(?: var=-\d+)?$", nasm, re.M) is not None)
+check("negative step: short header, exit when control < limit", "FLT" in nasm and nasm.count("__main_for_pos_") == 2 * 1 and "Check if control < limit (exit condition)" in nasm)
+check("-<literal> is not a __builtin_unm call (only -x is)", nasm.count("CALL  __builtin_unm") == 1, nasm.count("CALL  __builtin_unm"))
+check("-0 keeps its sign bit as a constant", re.search(r"MOV\s+R\d+, 0x80000000 ; -0$", nasm, re.M) is not None)
 # debug info for locals: ;@var and balanced ;@scope per function
 vars_ = re.findall(r"^\s*;@var (\w+) loc=BP([-+]\d+) type=lua", asm, re.M)
 check(";@var: locals s, t, i, r with frame slots", {"s", "t", "i", "r"} <= {v[0] for v in vars_}, vars_)
@@ -80,6 +91,41 @@ cv = {v for v in re.findall(r"^\s*;@var (\w+) loc=BP", init, re.M)}
 check("main chunk: ;@var for block locals i, sq, x, y", {"i", "sq", "x", "y"} <= cv, cv)
 check("main chunk: no ;@var for the RAM local 'top'", "top" not in cv)
 check("main chunk: ;@scope { } balanced and >= 2", len(re.findall(r"^\s*;@scope \{$", init, re.M)) == len(re.findall(r"^\s*;@scope \}$", init, re.M)) >= 2)
+# var=N: the frame word of the visible loop variable, only when nothing else can write it
+VARSRC = ("local f\nfunction v(...)\nfor i = 1, 3 do end\nend\nfunction main()\nlocal s = 0\n"
+          "for i = 1, 3 do s = s + i end\n"                                  # 1: var
+          "for i = 1, 3 do i = i + 1; s = s + i end\n"                       # 2: assigned
+          "for i = 1, 3 do if s > 0 then do i = 0 end end end\n"             # 3: assigned in a nested block
+          "for k = 1, 3 do f = function() return k end end\n"                # 4: captured by a closure (boxing is by name: not `i`)
+          "for i = 1, 3 do for i = 1, 2 do s = s + i end end\n"              # 5: outer shadowed (none), inner var
+          "for i = 1, 3 do __asm__(\"NOP\") end\n"                            # 6: inline assembly
+          "for i = 1, 3 do local i = 7; s = s + i end\n"                     # 7: shadowed by a local
+          "for i = 1, 3 do local g = function(i) return i end; s = s + g(i) end\nend\n")   # 8: a parameter of that name is not ours: var
+open(os.path.join(d, "v.lua"), "w").write(VARSRC)
+run([V32LUA, "-g", "-w", "--no-build-scripts", "v.lua", "-o", "v.asm"], cwd=d)
+vasm = open(os.path.join(d, "v.asm")).read()
+vl = re.findall(r"^\s*;@loop kind=for ([^\n]*)$", vasm, re.M)
+vv = [bool(re.search(r" var=-\d+", x)) for x in vl]
+check("var=: variadic function none; then main's loops 1..8 = yes no no no (outer no, inner yes) no no yes",
+      vv == [False, True, False, False, False, False, True, False, False, True], vv)
+check("var=: placed after step= and before stepval=", all(re.search(r"step=-\d+ var=-\d+( stepval|$)", x) for x in vl if "var=" in x), vl)
+check("var=: names the word the loop stores the variable in (init local 'i' just before the hint)",
+      all(re.search(r"MOV\s+\[BP - " + re.search(r"var=-(\d+)", x).group(1) + r"\], R\d+ ; init local 'i'\n\s*;@loop kind=for " + re.escape(x) + "$", vasm, re.M)
+         for x in vl if "var=" in x))
+def only_copy_writes(text):
+    # between a loop's start and end label, the only store to its var= word is the per-iteration copy
+    lines = text.split("\n"); ok = True
+    for n, l in enumerate(lines):
+        m = re.match(r"\s*;@loop kind=for .* var=-(\d+)", l)
+        if not m: continue
+        end = lines[n + 1].strip().replace("_start_", "_end_")
+        k = n + 2; stores = 0
+        while lines[k].strip() != end:
+            if re.match(r"\s*\w+\s+\[BP - %s\]," % m.group(1), lines[k]): stores += 1
+            k += 1
+        ok = ok and stores == 1
+    return ok
+check("var=: the only store to the word inside the loop is the per-iteration copy", only_copy_writes(vasm))
 # globals and chunk-level locals: one ';@var NAME loc=@0xADDR type=lua global' each, before the code
 check("globals: top (chunk-level local) and counter at the top of the program, with their RAM word",
       re.search(r"^;@var top loc=@0x[0-9A-F]{8} type=lua global$", casm, re.M) is not None)

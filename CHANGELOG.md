@@ -2,9 +2,21 @@
 
 ## 20261109-dev
 
+- **A minus sign before a number literal is folded.** `-1`, `-(2)`, `- -3` and `-0` are compiled as the negated constant
+  (`MOV R1, 0xBF800000 ; -1`) instead of `MOV` / `PUSH` / `CALL __builtin_unm` / `IADD SP` / `MOV`: same bits as the call
+  returned (`-0` is still negative zero), fewer instructions. `-x`, `-"2"` and `-(a + b)` are unchanged. The numeric `for` then
+  sees a constant step: `for i = 10, 1, -1` gets the short loop header (`control < limit` exits) and
+  `;@loop ... stepval=-1 from=10 to=1`, where it used to test the sign of the step on every iteration and write no `stepval=`.
+  A constant step is now loaded with its exact float bits (it went through `%f`, six decimals, so a step like `-0.0000004`
+  would have become zero). Tests: `testing/loops/06_negative_step_loops.lua`, `testing/math/08_unary_minus_literals.lua`,
+  `tests/audit/hints/check_hints.py`.
 - **`-g` cleanup.** `;@var ... global` is written only for names that really are globals (a name assigned only inside a function
   that declares it `local` is no longer listed). A function's prologue carries the `function` line, so `v32opt` no longer
   leaves `;@src -` straight after the label (which ended the function early in `v32as`).
+- **`;@loop ... var=N`.** A numeric `for` says which frame word holds the visible loop variable (a copy of the counter,
+  refreshed at the top of each iteration), after `step=`: `;@loop kind=for counter=-4 limit=-2 step=-3 var=-5 stepval=1 from=1 to=10`.
+  Left out when the body assigns a variable of that name, a closure captured it, the body has inline assembly or the
+  function is variadic. `doc/HINTS.md`; tests in `tests/audit/hints/check_hints.py` and `testing/loops/07_loop_variable_copy.lua`. An older `v32opt` ignores the attribute.
 
 ## 20261105-dev
 

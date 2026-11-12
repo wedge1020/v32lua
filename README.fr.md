@@ -837,7 +837,8 @@ instructions d'E/S matérielle natives :
   la concaténation de chaînes (`..`), la longueur (`#`), et le moins
   unaire (`-`) sont mappées directement vers des sous-routines
   d'exécution optimisées (`__builtin_strcat`, `__builtin_len`,
-  `__builtin_unm`).
+  `__builtin_unm`). Un signe moins devant un littéral numérique (`-1`) est
+  replié en constante à la compilation.
 
 Consultez [doc/API.fr.md](doc/API.fr.md) pour la référence complète et
 faisant autorité — ce README met en avant les idées, le document d'API
