@@ -911,6 +911,11 @@ Player:move(5, -2)
   (floor division), and unary minus. A string that holds a number is
   converted in arithmetic, as in Lua (`"5" + 1` is 6). There is no error
   for other operands (`"abc" + 1`, `nil + 1`): the result is meaningless.
+  The one exception is the numeric `for`: a start, limit or step that is
+  not a number (or a numeric string) stops the program with the runtime
+  error `'FOR' LIMIT MUST BE A NUMBER` (`'FOR' INITIAL VALUE ...`,
+  `'FOR' STEP ...`) when the loop is entered, as in Lua. A step of 0 is
+  not an error here.
 
 * **Relational:** `==`, `~=` (via `__builtin_eq` with NaN unboxing), `<`,
   `>`, `<=`, `>=` (via hardware `FLT`, `FLE`, `FGT`, `FGE`).

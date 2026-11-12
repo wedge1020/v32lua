@@ -46,7 +46,10 @@ PICO-8's extras in that mode); `__asm__("...{var}...")` / `__rawasm__`.
   allocator: build tables once, not per frame; `s = s .. c` in a loop is
   quadratic).
 - Arithmetic on non-numbers (`nil + 1`, `"abc" + 1`) raises nothing; the
-  result is meaningless. Division by zero / `log(0)` give finite answers.
+  result is meaningless. A numeric `for` whose start, limit or step is not a
+  number (a numeric string is converted) panics when the loop is entered
+  (`__for_number_*` in `runtime/exec.s`); a step of 0 still loops (a test
+  relies on it). Division by zero / `log(0)` give finite answers.
 - **Keyboard and mouse need extra hardware** (v32io adapter or the modified
   emulator); the console has only gamepads. Everything compiles and runs
   without them, but no key is ever down, so neither `make tests` nor the

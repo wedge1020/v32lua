@@ -1,5 +1,12 @@
 # Changelog
 
+## 20261112-dev
+
+- **A numeric `for` whose start, limit or step is not a number is a runtime error.** `for i = 1, nil do` used to loop forever and
+  a nil step ran zero iterations; now the loop entry panics with `RUNTIME ERROR: 'FOR' LIMIT MUST BE A NUMBER` (`INITIAL VALUE`,
+  `STEP`). A numeric string is converted, as in Lua 5.4; a step of 0 is still not an error. Nothing is added for a value the
+  compiler sees is a number. Tests: `testing/loops/08_for_variable_bounds.lua`, `tests/loops/for_errors.sh`.
+
 ## 20261109-dev
 
 - **A minus sign before a number literal is folded.** `-1`, `-(2)`, `- -3` and `-0` are compiled as the negated constant

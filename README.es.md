@@ -968,7 +968,12 @@ Player:move(5, -2)
   `%`, `^`, `//` (división entera hacia abajo) y menos unario. Una cadena
   que contiene un número se convierte en la aritmética, como en Lua
   (`"5" + 1` es 6). No hay error para otros operandos (`"abc" + 1`,
-  `nil + 1`): el resultado no tiene sentido.
+  `nil + 1`): el resultado no tiene sentido. La única excepción es el
+  `for` numérico: un valor inicial, un límite o un paso que no es un número
+  (ni una cadena numérica) detiene el programa con el error en tiempo de
+  ejecución `'FOR' LIMIT MUST BE A NUMBER` (`'FOR' INITIAL VALUE ...`,
+  `'FOR' STEP ...`) al entrar en el bucle, como en Lua. Un paso 0 no es
+  un error aquí.
 
 * **Relacionales:** `==`, `~=` (mediante `__builtin_eq` con desempaquetado
   de NaN), `<`, `>`, `<=`, `>=` (mediante hardware `FLT`, `FLE`, `FGT`,

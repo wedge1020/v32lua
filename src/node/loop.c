@@ -139,6 +139,7 @@ void  node_for_numeric (ASTNode *node)
 
     // Evaluate and store LIMIT
     generate_asm(node->as.for_numeric.stop_expr, scratch);
+    emit_for_number(scratch, node->as.for_numeric.stop_expr, "limit");
     register_local(limit_var);
     get_variable_access_string(limit_var, access_limit);
     emit_asm("MOV %s, R%d ; Save loop limit to stack", access_limit, scratch);
@@ -157,6 +158,7 @@ void  node_for_numeric (ASTNode *node)
         generate_asm(node->as.for_numeric.step_expr, scratch);   // the literal's exact bits ("%f" kept 6 decimals)
     } else {
         generate_asm(node->as.for_numeric.step_expr, scratch);
+        emit_for_number(scratch, node->as.for_numeric.step_expr, "step");
     }
 
     register_local(step_var);
@@ -167,6 +169,7 @@ void  node_for_numeric (ASTNode *node)
     // the loop's real driver -- raw stack slot, never boxed, never touched
     // by anything the Lua body can name.
     generate_asm(node->as.for_numeric.start_expr, scratch);
+    emit_for_number(scratch, node->as.for_numeric.start_expr, "initial");
     register_local(control_var);
     get_variable_access_string(control_var, access_control);
     emit_asm("MOV %s, R%d ; Save loop control counter to stack", access_control, scratch);

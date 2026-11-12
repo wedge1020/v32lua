@@ -980,7 +980,12 @@ Player:move(5, -2)
   `FDIV`), `%`, `^`, `//` (division entière) et le moins unaire. Une
   chaîne contenant un nombre est convertie dans les calculs, comme en Lua
   (`"5" + 1` vaut 6). Il n'y a pas d'erreur pour les autres opérandes
-  (`"abc" + 1`, `nil + 1`) : le résultat n'a pas de sens.
+  (`"abc" + 1`, `nil + 1`) : le résultat n'a pas de sens. La seule
+  exception est le `for` numérique : une valeur initiale, une limite ou un
+  pas qui n'est pas un nombre (ni une chaîne numérique) arrête le programme
+  avec l'erreur d'exécution `'FOR' LIMIT MUST BE A NUMBER` (`'FOR' INITIAL
+  VALUE ...`, `'FOR' STEP ...`) à l'entrée de la boucle, comme en Lua. Un
+  pas de 0 n'est pas une erreur ici.
 
 * **Relationnels :** `==`, `~=` (via `__builtin_eq` avec désencapsulation
   de NaN), `<`, `>`, `<=`, `>=` (via le matériel `FLT`, `FLE`, `FGT`,

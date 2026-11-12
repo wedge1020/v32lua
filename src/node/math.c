@@ -320,6 +320,27 @@ void emit_arith_coerce (int reg, ASTNode *e)
     emit_asm ("__%s_num_%d:\n", ctx, id);
 }
 
+// A value of a numeric `for` (start, limit or step) in `reg`: a number passes, a numeric string becomes its
+// number (as in Lua 5.4), anything else is the runtime error "'for' <what> must be a number" (__for_number_*,
+// `entry` is "initial", "limit" or "step"). Nothing is emitted for a value that is known to be a number.
+void emit_for_number (int reg, ASTNode *e, const char *entry)
+{
+    if (is_static_number (e)) return;
+    ensure_in_register (reg);
+    int id = get_next_label ();
+    const char *ctx = get_current_function_name ();
+    emit_asm ("MOV  R0, R%d\n", reg);
+    emit_asm ("AND  R0, NAN_VALUE\n");
+    emit_asm ("IEQ  R0, NAN_VALUE ; not a number?\n");
+    emit_asm ("JF   R0, __%s_num_%d\n", ctx, id);
+    emit_hint (";@cold {");               // the value is not a number: a numeric string, or the error
+    emit_asm ("MOV  R0, R%d\n", reg);
+    emit_asm ("CALL __for_number_%s\n", entry);
+    emit_asm ("MOV  R%d, R0\n", reg);
+    emit_hint (";@cold }");
+    emit_asm ("__%s_num_%d:\n", ctx, id);
+}
+
 void  node_add (ASTNode *node, int  dest_reg)
 {
     generate_asm (node -> as.binary.left, dest_reg);

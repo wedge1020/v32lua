@@ -168,6 +168,74 @@ __runtime_error_not_callable:
 
     JMP __panic_halt
 
+;; ---------------------------------------------------------------------------
+;; A value of a numeric `for` that is not a number (the loop's start, limit or step).
+;; R0 = the value; a numeric string becomes its number (as in Lua 5.4), anything
+;; else is the runtime error "'for' ... must be a number". Preserves R1-R13.
+;; The entry says which value it is (R1 = the message, kept for the panic).
+;; ---------------------------------------------------------------------------
+__for_number_initial:
+    PUSH R1
+    MOV  R1, __const_str_err_for_initial
+    JMP  __for_number
+__for_number_limit:
+    PUSH R1
+    MOV  R1, __const_str_err_for_limit
+    JMP  __for_number
+__for_number_step:
+    PUSH R1
+    MOV  R1, __const_str_err_for_step
+__for_number:
+    PUSH R2
+    PUSH R3
+    MOV  R2, R0                    ; the value, for the panic screen
+    CALL __arith_coerce
+    MOV  R3, R0
+    AND  R3, NAN_VALUE
+    IEQ  R3, NAN_VALUE
+    JT   R3, __runtime_error_for
+    POP  R3
+    POP  R2
+    POP  R1
+    RET
+
+__runtime_error_for:
+    PUSH BP
+    MOV  BP, SP
+    ISUB SP, 1
+    MOV  [BP-1], R2                ; the value that wasn't a number
+
+    MOV   R0, 0xFF000080
+    OUT   GPU_ClearColor, R0
+    OUT   GPU_Command, GPUCommand_ClearScreen
+
+    MOV   R0, 20
+    PUSH  R0
+    MOV   R0, 0
+    PUSH  R0
+    MOV   R0, __const_str_panic_banner
+    OR    R0, BOXED_ROMSTRING
+    PUSH  R0
+    CALL __builtin_print
+
+    MOV   R0, 20
+    PUSH  R0
+    MOV   R0, 20
+    PUSH  R0
+    OR    R1, BOXED_ROMSTRING      ; R1 = the message
+    PUSH  R1
+    CALL __builtin_print
+
+    MOV   R0, 20
+    PUSH  R0
+    MOV   R0, 40
+    PUSH  R0
+    MOV   R0, [BP-1]
+    PUSH  R0
+    CALL __builtin_print
+
+    JMP __panic_halt
+
 __panic_halt:
     WAIT                        ; Yield CPU frame to prevent runaway execution
     JMP __panic_halt            ; Trap CPU in an infinite loop

@@ -126,6 +126,18 @@ def only_copy_writes(text):
         ok = ok and stores == 1
     return ok
 check("var=: the only store to the word inside the loop is the per-iteration copy", only_copy_writes(vasm))
+# a numeric `for` value that is not provably a number is checked once, before the ;@loop line; literals are not
+FCHK = ("local g = 4\nfunction main()\nlocal s, n = 0, g\nfor i = 1, 10 do s = s + i end\nfor i = 10, 1, -1 do s = s + i end\n"
+        "for i = 1, n do s = s + i end\nfor i = g, 9, g do s = s + i end\nend\n")
+open(os.path.join(d, "fc.lua"), "w").write(FCHK)
+run([V32LUA, "-g", "-w", "--no-build-scripts", "fc.lua", "-o", "fc.asm"], cwd=d)
+fasm = open(os.path.join(d, "fc.asm")).read()
+check("for check: limit, initial and step are each checked once (no check for literals)",
+      [fasm.count("CALL  __for_number_" + k) for k in ("limit", "initial", "step")] == [1, 1, 1], fasm.count("__for_number_"))
+check("for check: sits before the ;@loop line (the loop's shape is unchanged)",
+      re.search(r"CALL  __for_number_limit\n(?:(?!;@loop)[^\n]*\n)*?\s*;@loop[^\n]*stepval=1\n", fasm) is not None)
+check("for check: the first two loops (literals) have no check between their ;@loop lines",
+      re.search(r";@loop[^\n]*from=1 to=10\n(?:(?!__for_number_)[^\n]*\n)*?[^\n]*;@loop[^\n]*from=10 to=1", fasm) is not None)
 # globals and chunk-level locals: one ';@var NAME loc=@0xADDR type=lua global' each, before the code
 check("globals: top (chunk-level local) and counter at the top of the program, with their RAM word",
       re.search(r"^;@var top loc=@0x[0-9A-F]{8} type=lua global$", casm, re.M) is not None)

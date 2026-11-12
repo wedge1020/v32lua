@@ -37,6 +37,15 @@ __const_str_err_call_nil:
 __const_str_err_not_table:
     string "RUNTIME ERROR: ATTEMPT TO INDEX A NON-TABLE VALUE"
 
+__const_str_err_for_initial:
+    string "RUNTIME ERROR: 'FOR' INITIAL VALUE MUST BE A NUMBER"
+
+__const_str_err_for_limit:
+    string "RUNTIME ERROR: 'FOR' LIMIT MUST BE A NUMBER"
+
+__const_str_err_for_step:
+    string "RUNTIME ERROR: 'FOR' STEP MUST BE A NUMBER"
+
 __const_str_err_oom:
     string "RUNTIME ERROR: OUT OF MEMORY -- HEAP WORDS USED:"
 

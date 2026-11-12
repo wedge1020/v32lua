@@ -84,6 +84,7 @@ void  node_table_constructor   (ASTNode *, int);
 
 // node/math.c: a numeric-string operand becomes its number
 void  emit_arith_coerce        (int, ASTNode *);
+void  emit_for_number          (int, ASTNode *, const char *);
 void  numlocals_enter          (ASTNode *);
 void  numlocals_leave          (void);
 
