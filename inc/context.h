@@ -171,6 +171,7 @@ bool        name_list_add                (NameList  **, const char *);
 int         name_list_length             (NameList   *);
 SymbolNode *register_upvalue             (const char *, int);
 int         count_max_return_values      (ASTNode *);
+int         static_return_bound          (ASTNode *);   // most values any return of a body produces, -1 if not known
 
 // A call target's function metadata (arity, return_count, is_variadic):
 // the symbol itself for a named function, or -- for a local bound to a

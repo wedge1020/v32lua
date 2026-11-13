@@ -112,14 +112,22 @@ def written(op, ops):
     return w
 
 class State:
-    __slots__ = ("orig", "stack", "bp")
-    def __init__(s, orig, stack, bp): s.orig, s.stack, s.bp = orig, stack, bp
-    def key(s): return (s.orig, s.stack, s.bp)
+    # dirty: paths with different stack depths met here, so the words above the frame (index >= bp) are of
+    # unknown number; only the frame prefix stack[:bp] is known. Pushing is still fine, `MOV SP, BP` makes the
+    # state exact again, anything that depends on the depth (POP, IADD/ISUB SP that drops, RET) is refused.
+    __slots__ = ("orig", "stack", "bp", "dirty")
+    def __init__(s, orig, stack, bp, dirty=False): s.orig, s.stack, s.bp, s.dirty = orig, stack, bp, dirty
+    def key(s): return (s.orig, s.stack, s.bp, s.dirty)
 
 def join(a, b):
-    if len(a.stack) != len(b.stack): raise Unanalyzable("stack depth differs at a join")
     if a.bp != b.bp: raise Unanalyzable("frame pointer depth differs at a join")
     orig = tuple(x and y for x, y in zip(a.orig, b.orig))
+    if len(a.stack) != len(b.stack) or a.dirty or b.dirty:
+        bp = a.bp
+        if bp is None or len(a.stack) < bp or len(b.stack) < bp:
+            raise Unanalyzable("stack depth differs at a join")
+        stack = tuple(x if x == y else "?" for x, y in zip(a.stack[:bp], b.stack[:bp]))
+        return State(orig, stack, bp, True)
     stack = tuple(x if x == y else "?" for x, y in zip(a.stack, b.stack))
     return State(orig, stack, a.bp)
 
@@ -170,7 +178,7 @@ def analyze(entry, instrs, labels, summaries, entries):
         if i >= len(instrs): raise Unanalyzable("falls off the end")
         op, ops, fil, ln = instrs[i]
         where = "%s:%d" % (fil, ln)
-        orig, stack, bp = list(st.orig), list(st.stack), st.bp
+        orig, stack, bp, dirty = list(st.orig), list(st.stack), st.bp, st.dirty
         succ = [i + 1]
 
         def other_sp(): raise Unanalyzable("%s: stack pointer changed by %s %s" % (where, op, ",".join(ops)))
@@ -181,6 +189,7 @@ def analyze(entry, instrs, labels, summaries, entries):
             elif dst == "BP": stack.append("BP" if orig[NREG] else "?")
             else: stack.append("?")
         elif op == "POP":
+            if dirty: raise Unanalyzable("%s: POP after paths of different stack depth" % where)
             if not stack: raise Unanalyzable("%s: POP below the entry stack" % where)
             tag = stack.pop()
             r = reg_index(ops[0])
@@ -193,6 +202,7 @@ def analyze(entry, instrs, labels, summaries, entries):
             k = int(ops[1]) * (1 if op == "ISUB" else -1)
             if k >= 0: stack.extend(["?"] * k)
             else:
+                if dirty: raise Unanalyzable("%s: stack drop after paths of different stack depth" % where)
                 if -k > len(stack): raise Unanalyzable("%s: drops more than it pushed" % where)
                 del stack[len(stack) + k:]
         elif op == "MOV" and dst == "BP" and ops[1].strip().upper() == "SP":
@@ -200,6 +210,7 @@ def analyze(entry, instrs, labels, summaries, entries):
         elif op == "MOV" and dst == "SP" and ops[1].strip().upper() == "BP":
             if bp is None: raise Unanalyzable("%s: MOV SP,BP without a frame" % where)
             del stack[bp:]
+            dirty = False
         elif dst == "SP" or dst in ("IP", "IR", "IV"):
             other_sp()
         elif op == "MOV" and dst == "BP":
@@ -221,6 +232,7 @@ def analyze(entry, instrs, labels, summaries, entries):
             if reg_index(tgt) is not None or tgt.startswith("["): raise Unanalyzable("%s: indirect jump" % where)
             if tgt not in labels: raise Unanalyzable("%s: jumps to unknown %s" % (where, tgt))
             if tgt in entries and tgt != entry:             # tail call
+                if dirty: raise Unanalyzable("%s: tail call after paths of different stack depth" % where)
                 for r in summaries.get(tgt, ()): orig[r] = False
                 ret_states.append(State(tuple(orig), tuple(stack), bp)); succ = []
             else:
@@ -229,15 +241,22 @@ def analyze(entry, instrs, labels, summaries, entries):
             tgt = ops[1]
             if tgt not in labels: raise Unanalyzable("%s: jumps to unknown %s" % (where, tgt))
             if tgt in entries and tgt != entry:
-                raise Unanalyzable("%s: conditional tail call to %s" % (where, tgt))
-            succ = [i + 1, labels[tgt]]
+                # a conditional tail call: the taken path is a tail call (the fall-through goes on)
+                if dirty: raise Unanalyzable("%s: tail call after paths of different stack depth" % where)
+                tail = list(orig)
+                for r in summaries.get(tgt, ()): tail[r] = False
+                ret_states.append(State(tuple(tail), tuple(stack), bp))
+                succ = [i + 1]
+            else:
+                succ = [i + 1, labels[tgt]]
         elif op == "RET":
+            if dirty: raise Unanalyzable("%s: RET after paths of different stack depth" % where)
             ret_states.append(State(tuple(orig), tuple(stack), bp)); succ = []
         elif op == "HLT":
             succ = []
         else:
             for r in written(op, ops): orig[r] = False
-        ns = State(tuple(orig), tuple(stack), bp)
+        ns = State(tuple(orig), tuple(stack), bp, dirty)
         for j in succ:
             if j in states:
                 m = join(states[j], ns)

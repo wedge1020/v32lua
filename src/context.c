@@ -985,6 +985,48 @@ int count_max_return_values (ASTNode *node)
 }
 
 // ============================================================================
+// static_return_bound: an upper bound on [RET_COUNT] for a function body, for ';@fn F returns=N'.
+// count_max_return_values() is only what the callers need to read statically: `return f()` and `return ...`
+// forward however many values the callee or the call gave, so it can undercount. Here those, and a body with
+// inline assembly (which can return anything), give -1: no bound. Nested function definitions are not entered.
+// Falling off the end, or a bare `return`, is 0 values.
+// ============================================================================
+static int return_bound_walk (ASTNode *node, int *max)
+{
+    for (; node != NULL; node = node->next) {
+        switch (node->type) {
+            case NODE_RETURN: {
+                int count = 0;
+                ASTNode *last = NULL;
+                for (ASTNode *e = node->as.return_stmt.expressions_head; e != NULL; e = e->next) { count++; last = e; }
+                if (last != NULL && (last->type == NODE_FUNCTION_CALL || last->type == NODE_VARIADIC_EXPR)) return 0;
+                if (count > *max) *max = count;
+                break;
+            }
+            case NODE_ASM: case NODE_RAWASM:
+                return 0;
+            case NODE_IF:
+                if (!return_bound_walk (node->as.if_stmt.if_body, max))   return 0;
+                if (!return_bound_walk (node->as.if_stmt.else_body, max)) return 0;
+                break;
+            case NODE_WHILE:       if (!return_bound_walk (node->as.while_loop.body, max))   return 0; break;
+            case NODE_REPEAT:      if (!return_bound_walk (node->as.repeat_loop.body, max))  return 0; break;
+            case NODE_FOR_NUMERIC: if (!return_bound_walk (node->as.for_numeric.body, max))  return 0; break;
+            case NODE_FOR_GENERIC: if (!return_bound_walk (node->as.for_generic.body, max))  return 0; break;
+            case NODE_DO_BLOCK:    if (!return_bound_walk (node->as.do_block.body, max))     return 0; break;
+            default: break;
+        }
+    }
+    return 1;
+}
+
+int static_return_bound (ASTNode *body)
+{
+    int max = 0;
+    return return_bound_walk (body, &max) ? max : -1;
+}
+
+// ============================================================================
 // settle_return_counts: `function vector(l, a) return rotate(0, -l, a) end`
 // forwards rotate()'s 2 values, but when vector is defined BEFORE rotate the
 // prepass counted it while rotate was still unknown (return_count 1), so

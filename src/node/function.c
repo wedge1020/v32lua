@@ -291,7 +291,7 @@ void  node_function_def (ASTNode *node)
     {
         char hint_label[300];
         snprintf (hint_label, sizeof (hint_label), "__function_%s", func_name);
-        hints_fn_end (hint_outer_escapes, hint_label);
+        hints_fn_end (hint_outer_escapes, hint_label, static_return_bound (node->as.function_def.body));
         src_marker_reset();
     }
     pop_function_context();

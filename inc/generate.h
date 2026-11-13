@@ -24,7 +24,7 @@ extern FILE *active_out_stream;
 extern bool g_emit_hints;                       // --no-hints turns them off
 void   emit_hint          (const char *fmt, ...);   // one ';@' line, as given
 bool   hints_fn_begin     (void);               // start tracking frame addresses; returns the outer state
-void   hints_fn_end       (bool outer, const char *label);  // writes ';@fn' and restores
+void   hints_fn_end       (bool outer, const char *label, int returns);  // writes ';@fn' (returns: -1 = unknown) and restores
 void   emit_debug_line    (const char *fmt, ...);   // ';@var' / ';@scope' (-g only)
 void   src_marker_reset   (void);               // forget the last marker (function start / end)
 void   src_marker_end     (void);               // ';@src -': what follows has no Lua source

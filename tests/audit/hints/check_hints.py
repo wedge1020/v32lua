@@ -43,6 +43,21 @@ check("each ;@loop is followed by its start label",
       len(re.findall(r"^\s*;@loop[^\n]*\n__main_for_start_\d+:", asm, re.M)) == 3)
 check(";@cold precedes the table slow path label", re.search(r"^\s*;@cold\n__main_idx_slow_\d+:", asm, re.M) is not None)
 check("main: ;@fn escapes=none (no LEA, no BP copy)", re.search(r";@fn __function_main escapes=none", asm) is not None)
+check("main: ;@fn returns=0 (no return, no values)", re.search(r";@fn __function_main returns=0$", asm, re.M) is not None)
+# returns=N: the most values any return produces; none for a function that forwards a call's values or `...`
+RSRC = """function one(a) return a + 1 end
+function two(a) return a, a end
+function fwd(a) return two(a) end
+function va(...) return ... end
+function br(a) if a then return 1 else return end end
+function main() local x, y = fwd(1) result_number = one(x) + y + br(true) end
+"""
+open(os.path.join(d, "r.lua"), "w").write(RSRC)
+rr = run([V32LUA, "-w", "--no-build-scripts", "r.lua", "-o", "r.asm"], cwd=d)
+rasm = open(os.path.join(d, "r.asm")).read() if rr.returncode == 0 else ""
+rv = dict(re.findall(r"^\s*;@fn __function_(\w+) returns=(\d+)$", rasm, re.M))
+check("returns=: one 1, two 2, br 1, main 0", (rv.get("one"), rv.get("two"), rv.get("br"), rv.get("main")) == ("1", "2", "1", "0"), rv)
+check("returns=: none for `return f()` and `return ...`", "fwd" not in rv and "va" not in rv, rv)
 check(";@cold { } regions are balanced and inline", len(re.findall(r"^\s*;@cold \{$", asm, re.M)) == len(re.findall(r"^\s*;@cold \}$", asm, re.M)) >= 1)
 cl = dict(re.findall(r"^\s*;@fn (\w+) clobbers=(\S+)$", asm, re.M))
 check("runtime: ;@fn LABEL clobbers= for helpers in the output", len(cl) > 20, len(cl))

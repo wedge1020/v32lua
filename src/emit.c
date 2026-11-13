@@ -75,9 +75,13 @@ bool hints_fn_begin (void)
 
 // Facts only: escapes=none is written when nothing in the function took the
 // address of a frame word (no LEA, no copy of BP into another operand).
-void hints_fn_end (bool outer, const char *label)
+//
+// returns=N: no return of the function produces more than N values, and none forwards the values of a call or of `...`,
+// so [RET_COUNT] is at most N and nothing reads R2/R3 after the call when N <= 1 (see static_return_bound()).
+void hints_fn_end (bool outer, const char *label, int returns)
 {
     if (!g_fn_escapes) emit_hint (";@fn %s escapes=none", label);
+    if (returns >= 0) emit_hint (";@fn %s returns=%d", label, returns);
     g_fn_escapes = outer;
 }
 

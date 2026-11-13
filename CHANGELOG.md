@@ -1,5 +1,16 @@
 # Changelog
 
+## 20261113-dev
+
+- **`;@fn __function_f returns=N`.** The most values any `return` of the function produces (0 for no value). Not written for a function
+  with a `return f(...)` or `return ...` (they forward however many values come back) or with inline assembly. A caller reads R2/R3
+  only after checking `[RET_COUNT]`, so with N <= 1 `v32opt` knows they are dead at the function's `RET`. `doc/HINTS.md`; test in
+  `tests/audit/hints/check_hints.py`. An older `v32opt` ignores the attribute.
+- **`tools/check_clobbers.py`**: a join of paths with different stack depths before a `MOV SP, BP` epilogue and a conditional tail
+  call to another routine are followed instead of leaving the routine out. `__pico8_add`, `__builtin_vircon32_memcard_append` and
+  `__builtin_vircon32_memcard_load_table` now have a `clobbers=` list (217 of 237 routines). The lists of the 214 routines that
+  had one are unchanged.
+
 ## 20261112-dev
 
 - **A numeric `for` whose start, limit or step is not a number is a runtime error.** `for i = 1, nil do` used to loop forever and
