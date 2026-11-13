@@ -202,7 +202,7 @@ their textures and sounds itself, beside the output (`obj/game_pico8.vtex`,
 run faster; it goes between compiling and assembling:
 
 ```bash
-v32opt -O3 -o obj/gameOpt.asm obj/game.asm
+v32opt -L lua -O3 -o obj/gameOpt.asm obj/game.asm
 assemble -o obj/gameOpt.vbin obj/gameOpt.asm
 packrom obj/gameOpt.xml -o bin/gameOpt.v32
 ```

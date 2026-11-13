@@ -207,7 +207,7 @@ compilador escribe él mismo sus texturas y sonidos, junto a la salida
 para que se ejecute más rápido; va entre la compilación y el ensamblado:
 
 ```bash
-v32opt -O3 -o obj/gameOpt.asm obj/game.asm
+v32opt -L lua -O3 -o obj/gameOpt.asm obj/game.asm
 assemble -o obj/gameOpt.vbin obj/gameOpt.asm
 packrom obj/gameOpt.xml -o bin/gameOpt.v32
 ```

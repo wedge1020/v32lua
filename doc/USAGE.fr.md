@@ -212,7 +212,7 @@ qu'il s'exécute plus vite ; il se place entre la compilation et
 l'assemblage :
 
 ```bash
-v32opt -O3 -o obj/gameOpt.asm obj/game.asm
+v32opt -L lua -O3 -o obj/gameOpt.asm obj/game.asm
 assemble -o obj/gameOpt.vbin obj/gameOpt.asm
 packrom obj/gameOpt.xml -o bin/gameOpt.v32
 ```

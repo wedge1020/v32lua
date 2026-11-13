@@ -428,7 +428,7 @@ static void write_script (FILE *f, int bat, const Plan *plan)
         put (f, bat, "\necho.\n");
         put (f, bat, "echo Build the optimized cart (v32opt)\n");
         put (f, bat, "echo --------------------------\n");
-        put (f, bat, "v32opt -O3 -o %s %s || goto :optfailed\n", word (1, plan->asm_opt), word (1, plan->asm_file));
+        put (f, bat, "v32opt -L lua -O3 -o %s %s || goto :optfailed\n", word (1, plan->asm_opt), word (1, plan->asm_file));
         put (f, bat, "assemble%s %s -o %s || goto :optfailed\n", dbg, word (1, plan->asm_opt), word (1, plan->vbin_opt));
         put (f, bat, "packrom %s -o %s || goto :optfailed\n", word (1, plan->xml_opt), word (1, plan->rom_opt));
         put (f, bat, "goto :succeeded\n");
@@ -455,7 +455,7 @@ static void write_script (FILE *f, int bat, const Plan *plan)
         put (f, bat, "    echo\n");
         put (f, bat, "    echo Build the optimized cart \\(v32opt\\)\n");
         put (f, bat, "    echo --------------------------\n");
-        put (f, bat, "    if v32opt -O3 -o %s %s \\\n", word (0, plan->asm_opt), word (0, plan->asm_file));
+        put (f, bat, "    if v32opt -L lua -O3 -o %s %s \\\n", word (0, plan->asm_opt), word (0, plan->asm_file));
         put (f, bat, "       && assemble%s %s -o %s \\\n", dbg, word (0, plan->asm_opt), word (0, plan->vbin_opt));
         put (f, bat, "       && packrom %s -o %s; then\n", word (0, plan->xml_opt), word (0, plan->rom_opt));
         put (f, bat, "        :\n");

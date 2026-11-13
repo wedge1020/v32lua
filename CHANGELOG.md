@@ -6,6 +6,8 @@
   with a `return f(...)` or `return ...` (they forward however many values come back) or with inline assembly. A caller reads R2/R3
   only after checking `[RET_COUNT]`, so with N <= 1 `v32opt` knows they are dead at the function's `RET`. `doc/HINTS.md`; test in
   `tests/audit/hints/check_hints.py`. An older `v32opt` ignores the attribute.
+- **`Make.sh` / `Make.bat` run `v32opt -L lua -O3`.** They ran `v32opt -O3`, which treats the file as C output. (A `v32opt` that reads the
+  `lang=lua` of the `;@hints` header does this by itself; `-L lua` is for the ones that do not.) `doc/USAGE*.md`.
 - **`tools/check_clobbers.py`**: a join of paths with different stack depths before a `MOV SP, BP` epilogue and a conditional tail
   call to another routine are followed instead of leaving the routine out. `__pico8_add`, `__builtin_vircon32_memcard_append` and
   `__builtin_vircon32_memcard_load_table` now have a `clobbers=` list (217 of 237 routines). The lists of the 214 routines that
