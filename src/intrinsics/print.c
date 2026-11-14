@@ -67,7 +67,7 @@ void emit_print_intrinsic(ASTNode *node)
 
     // Coerce the value to a string pointer
     emit_asm ("PUSH R%d ; Push raw value to convert\n", reg_val);
-    emit_asm ("CALL __builtin_tostring\n");
+    emit_asm ("CALL __builtin_tostring_scratch_a ; scratch buffer: print() draws it at once, no permanent allocation\n");
     emit_asm ("MOV [SP], R0 ; overwrite raw value with the string pointer\n");
     unlock_register(reg_val);
 
