@@ -55,6 +55,28 @@ PICO-8's extras in that mode); `__asm__("...{var}...")` / `__rawasm__`.
   without them, but no key is ever down, so neither `make tests` nor the
   headless harness can show those paths working.
 
+**Larger programs (lessons from the `nostalgick` platformer, 20+ `--#include`d
+files; none of this is a compiler bug, it is what the runtime model implies):**
+- **No GC means pool everything that lives per frame.** Per-frame `{...}`
+  tables, `a .. b` strings (e.g. a HUD score) and rebuilt lists leak for the
+  whole session. Pre-allocate fixed pools of tables with an `alive` flag,
+  reuse one scratch list, cache a formatted string and rebuild it only when
+  its number changes. Keep an `n_alive` counter so idle pools skip their loop.
+- **Table field reads are builtin calls** (`__builtin_table_get`). Hoist
+  `local x = o.x` out of loops, and stagger expensive per-entity checks
+  across frames.
+- **Top-level `local`s become globals shared by every included file**, so two
+  files with the same top-level `local` name collide. Prefer `Module = {}`
+  plus `function Module.fn()` over top-level `local function` helpers, and
+  give constants unique names.
+- **Resource hints are positional** (`--#texture`, `--#sound`, `--#include`
+  keep source order and ids follow it). Append new sounds at the end rather
+  than inserting; inserting renumbers every later sound.
+- **Colors:** pack with `rgba()` where it is used; a literal `-1` is folded to
+  `0xFFFFFFFF` (white, "no tint"), so `ioports.gpu.multiply = -1` resets a
+  tint. A packed word kept in a variable or table field can read back as
+  `nil` (see NaN-boxing) -- store the r/g/b components instead.
+
 **API modes** are chosen by `--api`, else `--#api`, else detected (`.p8` =
 PICO-8, `.tic` = TIC-80, entry points `TIC()` / `_draw()`/`_update()`). Picking
 `pico8` or `tic80` **replaces** the native surface, it does not add to it.

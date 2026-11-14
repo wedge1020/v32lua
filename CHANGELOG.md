@@ -1,5 +1,9 @@
 # Changelog
 
+## 20261114-dev
+
+- **`AGENTS.md`: notes for larger programs.** Pooling instead of per-frame allocation (no GC), table field reads as builtin calls, top-level `local`s shared across `--#include`d files, positional resource hints, `-1` as the no-tint multiply color. Documentation only; `AGENTS.md` is English only, `README`/`API`/`USAGE` translations unchanged.
+
 ## 20261113-dev
 
 - **`;@fn __function_f returns=N`.** The most values any `return` of the function produces (0 for no value). Not written for a function
