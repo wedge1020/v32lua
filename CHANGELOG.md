@@ -2,7 +2,7 @@
 
 ## 20261114-dev
 
-- **`AGENTS.md`: notes for larger programs.** Pooling instead of per-frame allocation (no GC), table field reads as builtin calls, top-level `local`s shared across `--#include`d files, positional resource hints, `-1` as the no-tint multiply color. Documentation only; `AGENTS.md` is English only, `README`/`API`/`USAGE` translations unchanged.
+- **`AGENTS.md`: notes for larger programs.** Pooling instead of per-frame allocation (no GC), table field reads as builtin calls, top-level `local`s shared across `--#include`d files, positional resource hints, `-1` as the no-tint multiply color. Documentation only; `AGENTS.md` is English only, `README`/`API`/`USAGE` translations unchanged. Also: sorted lists with windowed iteration for long levels, and two hidden per-frame allocators (menu string concatenation, per-frame cloud tables).
 
 ## 20261113-dev
 

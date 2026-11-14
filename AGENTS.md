@@ -62,6 +62,17 @@ files; none of this is a compiler bug, it is what the runtime model implies):**
   whole session. Pre-allocate fixed pools of tables with an `alive` flag,
   reuse one scratch list, cache a formatted string and rebuild it only when
   its number changes. Keep an `n_alive` counter so idle pools skip their loop.
+- **Long worlds: keep object lists sorted by x and iterate a window.** With
+  hundreds of platforms/enemies/pickups (a 20000px level), every table field
+  read is a builtin `CALL`, so a loop over everything per frame blows the
+  frame budget. Insert sorted, binary-search (`lower_bound`) the first entry
+  near the camera/player, loop forward until past the window, and `break`.
+  Compact dead entries in place instead of rebuilding the list. Split very
+  wide tiled objects (e.g. ground strips) into short chunks so culling works.
+- **Hidden per-frame allocators:** string concatenation in a pause/menu draw
+  and building a small table per cloud/particle each frame both ended in the
+  red out-of-memory screen after a minute idle. Cache the strings, keep
+  module-level arrays for fixed layouts.
 - **Table field reads are builtin calls** (`__builtin_table_get`). Hoist
   `local x = o.x` out of loops, and stagger expensive per-entity checks
   across frames.
