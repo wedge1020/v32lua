@@ -21,6 +21,7 @@
 ////////////////////////////////////////////////////////////////////////////////////////
 
 #include "v32lua.h"
+#include "intrinsics.h"
 
 extern ASTNode *root_node; // Ensure your bison grammar exports the root AST node
 
@@ -115,6 +116,10 @@ static void  print_usage (const char *prog_name)
     fprintf (stdout, "                   compile the named functions (comma separated, repeatable) with\n");
     fprintf (stdout, "                   an empty body: they still exist and return nil. For work a\n");
     fprintf (stdout, "                   target cannot show anyway (a software synth). Same as --#skip-fn\n");
+    fprintf (stdout, "  --bdr-step <n>\n");
+    fprintf (stdout, "                   TIC-80: call BDR(row) on every nth screen row only (default 1,\n");
+    fprintf (stdout, "                   every row); the palette it set stays for the rows between.\n");
+    fprintf (stdout, "                   Same as --#bdr-step\n");
     fprintf (stdout, "  --no-hints   Leave the ';@' compiler hints for v32opt out of the assembly\n");
     fprintf (stdout, "  --no-build-scripts\n");
     fprintf (stdout, "                   do not write Make.sh / Make.bat\n");
@@ -325,6 +330,9 @@ int  main (int  argc, char** argv)
         } else if ((val = option_value(argc, argv, &i, "--skip-fn")) != NULL) {
             skip_fn_add (val);
             RECORD_OPT ("--skip-fn", val, 0);
+        } else if ((val = option_value(argc, argv, &i, "--bdr-step")) != NULL) {
+            tic80_bdr_step = atoi (val);
+            RECORD_OPT ("--bdr-step", val, 0);
         } else if (strcmp(argv[i], "--no-build-scripts") == 0) {
             build_scripts = 0;
         } else if ((val = option_value(argc, argv, &i, "--rate")) != NULL ||
@@ -732,6 +740,7 @@ int  main (int  argc, char** argv)
         register_global ("TIC80_EXIT_FLAG");
         tic80_bank_prescan (program_text);     // -- <MAP1> ... banked asset sections
         register_global ("TIC80_RAM_PTR");     // peek/poke RAM, created on first use
+        register_global ("TIC80_PALETTE_DIRTY"); // palette bytes written since the last color table
         register_global ("TIC80_SCREEN_USED"); // set once screen RAM (0-0x3FBF) is written
         register_global ("TIC80_BANK_PTR");    // sync(..., true): bank buffers, created on first use
         register_global ("TIC80_PMEM_PTR");    // pmem() slots when there is no memory card

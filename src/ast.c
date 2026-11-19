@@ -1,4 +1,5 @@
 #include "v32lua.h"
+#include "intrinsics.h"
 
 // Global state for XML generation
 char          cart_version[64]    = "1.0";
@@ -263,6 +264,10 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
     else if (strcmp(action, "skip-fn") == 0 && tokens >= 2) {
         // --#skip-fn updateMusic[, other]: those functions get an empty body
         skip_fn_add (raw_hint + strlen ("skip-fn"));
+    }
+    else if (strcmp(action, "bdr-step") == 0 && tokens >= 2) {
+        // --#bdr-step n: TIC-80 BDR(row) runs on every nth screen row
+        tic80_bdr_step = atoi (param1);
     }
     else if (strcmp(action, "allow-float-as-clearcolor") == 0) {
         // --#allow-float-as-clearcolor: cls(variable) / ioports.gpu.clear(<number>)

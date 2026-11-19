@@ -276,7 +276,18 @@ color, tinted from the RAM palette at 0x3FC0 (3 bytes a color), and `cls(c)` fil
 with `c` (once the cart has written it). The drawing calls (`spr`, `rect`, `print`...)
 do not write it, so it holds only what the cart put there, and a palette change does
 not recolor pixels already drawn -- redraw the frame (carts that fade by poking the
-palette do). `BDR` (per-scanline palette) is not emulated.
+palette do).
+
+### BDR(row)
+
+If the cart defines `BDR`, the screen-RAM renderer calls `BDR(row)` before each screen
+row it draws (`row = y + 4`), and the palette bytes it pokes (0x3FC0, 3 a color) apply to
+that row and those after it -- the usual sky-gradient / raster-bar trick, as long as the
+picture is drawn from screen RAM. `spr`, `rect`, `print` and the other drawing calls
+are not scanline-timed here: they use the palette as it is when called, so BDR does not
+tint them. A Lua `BDR` is slow (one call a row, 136 a full redraw): `--bdr-step N`
+(or `--#bdr-step N`) calls it on every Nth row only, the palette it set holding for the
+rows between. Default 1 = every row.
 
 ## Memory banks and `sync()`
 

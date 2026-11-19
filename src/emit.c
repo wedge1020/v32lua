@@ -1226,6 +1226,7 @@ void  emit_runtime_library (void)
         }
         emit_tic80_ram_rom (out());
         emit_tic80_banks (out());
+        emit_tic80_bdr (out());
         emit_shapes_runtime (out());
 
         emit_tic80_map_data (out());

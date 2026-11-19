@@ -1655,3 +1655,27 @@ bool emit_tic80_stub_intrinsic (ASTNode *node, const char *func_name, int dest_r
     if (dest_reg != 0) emit_asm("MOV R%d, %s\n", dest_reg, result);
     return true;
 }
+
+
+/* BDR(row): the TIC-80 per-scanline callback. The screen-RAM renderer calls
+ * __tic80_bdr(row) before it draws each screen row (row = y + 4, the console's
+ * scanline numbering) when the cart defines BDR; otherwise the stub returns
+ * at once. tic80_bdr_step N calls it on every Nth row only (the palette it
+ * set stays in force in between): --bdr-step / --#bdr-step.
+ */
+int tic80_bdr_step = 1;
+
+void emit_tic80_bdr(FILE *f) {
+    SymbolNode *sym = resolve_symbol("BDR");
+    bool has = (sym != NULL && sym->is_function == 1);
+    fprintf(f, "\n__tic80_bdr_step:\n    integer %d\n", tic80_bdr_step < 1 ? 1 : tic80_bdr_step);
+    fprintf(f, "__tic80_bdr_defined:\n    integer %d\n", has ? 1 : 0);
+    fprintf(f, "__tic80_bdr:\n");
+    if (!has) { fprintf(f, "    RET\n"); return; }
+    fprintf(f, "    ;; R1 = row (integer); preserves R1-R13\n");
+    for (int r = 1; r <= 13; r++) fprintf(f, "    PUSH  R%d\n", r);
+    fprintf(f, "    MOV   R0, R1\n    CIF   R0\n    PUSH  R0\n");
+    fprintf(f, "    CALL  __function_BDR\n    IADD  SP, 1\n");
+    for (int r = 13; r >= 1; r--) fprintf(f, "    POP   R%d\n", r);
+    fprintf(f, "    RET\n");
+}

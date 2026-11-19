@@ -3304,27 +3304,7 @@ __tic80_scr_render:
 _tic80_scr_fit:
     CALL  __tic80_ram
     MOV   R9, R0                ; RAM base
-    MOV   R3, R9
-    IADD  R3, 0x3FC0            ; palette bytes
-    MOV   R4, 0                 ; color
-    MOV   R5, BP
-    ISUB  R5, 17                ; table
-_tic80_scr_pal:
-    MOV   R6, [R3]
-    MOV   R7, [R3+1]
-    SHL   R7, 8
-    OR    R6, R7
-    MOV   R7, [R3+2]
-    SHL   R7, 16
-    OR    R6, R7
-    OR    R6, 0xFF000000
-    MOV   [R5], R6
-    IADD  R3, 3
-    IADD  R5, 1
-    IADD  R4, 1
-    MOV   R0, R4
-    ILT   R0, 16
-    JT    R0, _tic80_scr_pal
+    CALL  _tic80_scr_mktab
     IN    R0, GPU_MultiplyColor
     MOV   [BP-1], R0
     OUT   GPU_SelectedTexture, 0
@@ -3352,6 +3332,26 @@ _tic80_scr_row:
     MOV   R3, R10
 _tic80_scr_n:
     ISUB  R10, R3
+    ;; BDR(row): once per row (every bdr-step-th), then refresh the colors
+    ;; if the callback wrote the palette
+    MOV   R1, __tic80_bdr_defined
+    MOV   R1, [R1]
+    JF    R1, _tic80_scr_nobdr
+    MOV   R1, __tic80_bdr_step
+    MOV   R2, [R1]
+    MOV   R1, R8
+    IMOD  R1, R2
+    JT    R1, _tic80_scr_nobdr
+    MOV   R0, 0
+    MOV   [var_TIC80_PALETTE_DIRTY], R0
+    MOV   R1, R8
+    IADD  R1, 4
+    CALL  __tic80_bdr
+    MOV   R0, [var_TIC80_PALETTE_DIRTY]
+    IEQ   R0, 1
+    JF    R0, _tic80_scr_nobdr
+    CALL  _tic80_scr_mktab
+_tic80_scr_nobdr:
     MOV   R0, R8
     IMUL  R0, 21
     IADD  R0, 4
@@ -3428,6 +3428,42 @@ _tic80_scr_out:
     POP   R1
     MOV   SP, BP
     POP   BP
+    RET
+;; _tic80_scr_mktab (internal): rebuild the 16-entry color table at [BP-17..BP-2]
+;; of __tic80_scr_render from the RAM palette. Preserves R1-R13.
+_tic80_scr_mktab:
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
+    PUSH  R7
+    CALL  __tic80_ram
+    MOV   R3, R0
+    IADD  R3, 0x3FC0            ; palette bytes
+    MOV   R4, 0                 ; color
+    MOV   R5, BP
+    ISUB  R5, 17                ; table
+_tic80_scr_pal:
+    MOV   R6, [R3]
+    MOV   R7, [R3+1]
+    SHL   R7, 8
+    OR    R6, R7
+    MOV   R7, [R3+2]
+    SHL   R7, 16
+    OR    R6, R7
+    OR    R6, 0xFF000000
+    MOV   [R5], R6
+    IADD  R3, 3
+    IADD  R5, 1
+    IADD  R4, 1
+    MOV   R0, R4
+    ILT   R0, 16
+    JT    R0, _tic80_scr_pal
+    POP   R7
+    POP   R6
+    POP   R5
+    POP   R4
+    POP   R3
     RET
 _tic80_scr_flush:
     ;; one run (R5 color, R6 x, R7 length, R8 y) = one DrawRegionZoomed of the
@@ -3652,6 +3688,12 @@ __tic80_wr_full:
     CALL  __tic80_scr_render
     JMP   _tic80_wr_done
 _tic80_wr_not_screen:
+    MOV   R3, R1
+    ILT   R3, 0x3FF0
+    JF    R3, _tic80_wr_notpal
+    MOV   R3, 1
+    MOV   [var_TIC80_PALETTE_DIRTY], R3
+_tic80_wr_notpal:
     MOV   R3, R1
     IGE   R3, 0x14404
     JF    R3, _tic80_wr_not_flags
@@ -3944,6 +3986,8 @@ _tic80_memop_fill:
     MOV   R11, R7
     SETS
 _tic80_memop_adv:
+    MOV   R0, 1
+    MOV   [var_TIC80_PALETTE_DIRTY], R0
     JF    R8, _tic80_memop_adv2
     MOV   R0, 1
     MOV   [var_TIC80_SCREEN_USED], R0
@@ -4028,6 +4072,8 @@ __builtin_tic80_sync:
     JF    R0, _tic80_sync_mask
     MOV   R6, 127               ; no mask: everything
 _tic80_sync_mask:
+    MOV   R0, 1
+    MOV   [var_TIC80_PALETTE_DIRTY], R0
     MOV   R9, 0                 ; category
 _tic80_sync_loop:
     MOV   R1, __tic80_sync_bits

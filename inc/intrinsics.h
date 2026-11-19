@@ -142,6 +142,8 @@ bool  emit_tic80_stub_intrinsic   (ASTNode *, const char *, int);   // trace/key
 extern bool tic80_uses_memory;
 extern bool tic80_uses_sync;
 void  emit_tic80_banks            (FILE *);
+void  emit_tic80_bdr              (FILE *);
+extern int  tic80_bdr_step;
 extern ASTNode    *iter_intrinsic_node;
 extern const char *iter_intrinsic_label;
 extern bool pico8_uses_memory;
