@@ -1,6 +1,9 @@
-# Checks tic80 tri() prelude algorithm (float32 span fill) against a port of TIC-80 drawTri (double, per pixel).
-# Usage: python3 -I tri_span_check.py 600   -> expect ~0.03% of pixels differing (edge rounding only).
-import math, random, sys
+# Checks the tic80 tri() prelude algorithm (src/pico8_prelude.c, float32 per-row span fill) against a Python
+# port of TIC-80's drawTri (double, per pixel barycentric test).  Usage: python3 -I tri_span_check.py [N]
+# Expect ~0.04% of pixels to differ: pixels exactly on an edge, where float32 and double round differently.
+import sys
+N = int(sys.argv[1]) if len(sys.argv) > 1 else 800
+import math, random
 import numpy as np
 f=np.float32
 def ref(v, W=240,H=136):
@@ -50,15 +53,50 @@ def mine(v, W=240,H=136):
             elif w<0: hi=-1
         for k in range(lo,hi+1): out.add((x0+k,y0+row))
     return out
+
+f=np.float32
+def fast(v, W=240,H=136):
+    (x1,y1),(x2,y2),(x3,y3)=[(f(a),f(b)) for a,b in v]
+    area=(x2-x1)*(y3-y1)-(y2-y1)*(x3-x1)
+    if math.floor(area)==0: return set()
+    if area<0: x2,y2,x3,y3=x3,y3,x2,y2; area=-area
+    x0=max(math.floor(min(x1,x2,x3)),0); y0=max(math.floor(min(y1,y2,y3)),0)
+    xe=min(math.ceil(max(x1,x2,x3)),W); ye=min(math.ceil(max(y1,y2,y3)),H)
+    if x0>=xe or y0>=ye: return set()
+    px=f(x0)+f(0.49999988); py=f(y0)+f(0.49999988)
+    inv=f(1)/area
+    ax1=(y2-y3)*inv; ay1=(x3-x2)*inv; b1=((x3-x2)*(py-y2)-(y3-y2)*(px-x2))*inv
+    ax2=(y3-y1)*inv; ay2=(x1-x3)*inv; b2=((x1-x3)*(py-y3)-(y1-y3)*(px-x3))*inv
+    ax3=(y1-y2)*inv; ay3=(x2-x1)*inv; b3=((x2-x1)*(py-y1)-(y2-y1)*(px-x1))*inv
+    last=xe-x0-1; r0,r1=0,ye-y0-1
+    # per edge: kind 1 = lower bound on k, 2 = upper bound, 0 = row-only; k bound = c + m*row
+    E=[]
+    for ax,ay,b in ((ax1,ay1,b1),(ax2,ay2,b2),(ax3,ay3,b3)):
+        if ax>0: E.append((1,-b/ax,-ay/ax))
+        elif ax<0: E.append((2,-b/ax,-ay/ax))
+        else:
+            if ay>0: r0=max(r0,math.ceil(-b/ay))
+            elif ay<0: r1=min(r1,math.floor(-b/ay))
+            elif b<0: return set()
+    out=set()
+    for row in range(r0,r1+1):
+        lo,hi=0,last
+        for kind,c,m in E:
+            k=c+m*f(row)
+            if kind==1: lo=max(lo,math.ceil(k))
+            else: hi=min(hi,math.floor(k))
+        for kk in range(lo,hi+1): out.add((x0+kk,y0+row))
+    return out
 random.seed(7)
-bad=0;tot=0;diffpix=0;npix=0
-for t in range(int(sys.argv[1])):
-    mode=t%3
+bad=0;diffpix=0;npix=0;d2=0
+for t in range(N):
+    mode=t%4
     if mode==0: v=[(random.randint(-20,260),random.randint(-20,150)) for _ in range(3)]
     elif mode==1: v=[(random.randint(0,239),random.randint(0,135)) for _ in range(3)]
-    else: v=[(random.uniform(0,239),random.uniform(0,135)) for _ in range(3)]
-    a=ref(v); b=mine(v); tot+=1; npix+=len(a)
-    if a!=b:
-        bad+=1; diffpix+=len(a^b)
-        if bad<=5: print("DIFF",v,len(a),len(b),len(a^b))
-print("triangles",tot,"mismatching",bad,"pixels",npix,"differing pixels",diffpix)
+    elif mode==2: v=[(random.uniform(0,239),random.uniform(0,135)) for _ in range(3)]
+    else:  # blade-like: flat base, fractional apex
+        x=random.randint(0,230);h=random.randint(8,18);v=[(x,116),(x+3,116),(x+1+random.uniform(-2,2),116-h)]
+    a=ref(v); b=fast(v); c=mine(v); npix+=len(a)
+    if a!=b: bad+=1; diffpix+=len(a^b)
+    d2+=len(b^c)
+print("tris",t+1,"mismatch",bad,"pixels",npix,"differing vs TIC-80 model",diffpix,"| vs previous span version",d2)
