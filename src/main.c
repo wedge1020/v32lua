@@ -534,6 +534,12 @@ int  main (int  argc, char** argv)
             expanded_source = pico8_append_prelude (expanded_source);
         }
 
+        // TIC-80 builtins implemented in Lua (tri)
+        if (runtime_req.needs_tic80 ||
+            (!g_cli_api_set && source_has_hint &&
+             strcmp (source_api_hint, "tic80") == 0))
+            expanded_source = tic80_append_prelude (expanded_source);
+
         g_uses_metatables = strstr (expanded_source, "setmetatable") != NULL;
 
         yyin = tmpfile ();

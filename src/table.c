@@ -14,6 +14,18 @@ bool is_table_unpack_call(ASTNode *call_node)
     return strcmp(path, "unpack") == 0 && pico8_prelude_builtin("unpack");
 }
 
+// table.unpack() names its synthetic globals and its labels with one id.
+// get_next_label() is per-FUNCTION, and these names carry no function
+// prefix, so two functions that each unpacked a table produced the same
+// label (`__unpack_nil_3` declared twice: "label already declared" from the
+// assembler) and shared the same `__unpack_t_N` globals. The id here is
+// program-wide.
+static int next_unpack_id(void)
+{
+    static int counter = 0;
+    return counter++;
+}
+
 // Resolves table.unpack(t, [i], [j])'s arguments into synthetic locals
 // (t_name/i_name/j_name, each written with a unique suffix so nested or
 // repeated unpack calls in the same scope never collide) that survive the
@@ -26,7 +38,7 @@ void emit_table_unpack_resolve_bounds(ASTNode *call_node, char *t_name, char *i_
     ASTNode *arg_i = arg_t ? arg_t->next : NULL;
     ASTNode *arg_j = arg_i ? arg_i->next : NULL;
 
-    int unique_id = get_next_label();
+    int unique_id = next_unpack_id();
     snprintf(t_name, buf_size, "__unpack_t_%d", unique_id);
     snprintf(i_name, buf_size, "__unpack_i_%d", unique_id);
     snprintf(j_name, buf_size, "__unpack_j_%d", unique_id);
@@ -89,7 +101,7 @@ void emit_table_unpack_fetch_element(const char *t_name, const char *i_name, con
     int j_reg = allocate_register();
     emit_load_variable(j_name, j_reg);
 
-    int label_id = get_next_label();
+    int label_id = next_unpack_id();
     char nil_label[64], done_label[64];
     snprintf(nil_label,  sizeof(nil_label),  "__unpack_nil_%d",  label_id);
     snprintf(done_label, sizeof(done_label), "__unpack_done_%d", label_id);

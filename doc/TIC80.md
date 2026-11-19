@@ -122,6 +122,20 @@ faster (witchem_up's gameplay went from 991 overrun frames in 2,500 to 5).
 `rect` is one scaled draw of a solid swatch, `rectb` four. Their
 arguments are truncated to integers as TIC-80 does, and a width or height
 of 0 or less draws nothing (it used to draw the rectangle mirrored).
+A `rect` whose x, y, w, h are whole-number literals and which lies fully
+on screen is drawn inline: the scale and position are computed by the
+compiler and the GPU writes emitted directly, with no call.
+
+`tri(x1, y1, x2, y2, x3, y3, color)` fills a triangle using TIC-80's own
+rule (a pixel is inside when its three barycentric weights are all
+non-negative, so either winding works and degenerate triangles draw
+nothing). It is a Lua prelude that finds each row's covered run and draws it
+as one `rect`, so a triangle costs one GPU draw per row, not per pixel.
+
+Carts that pack their code into cart memory and run it with
+`assert(load(...))()` can be unpacked before compiling:
+`python3 tools/tic80_unload.py game.lua -o game.unpacked.lua`, then compile
+`game.unpacked.lua` as usual.
 
 Circles and rectangles are clipped to the 240×136 screen before they reach
 the GPU, and ones entirely off it aren't drawn at all. The Vircon32 GPU has

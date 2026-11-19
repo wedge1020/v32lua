@@ -1054,6 +1054,72 @@ bool emit_tic80_line_intrinsic(ASTNode *node, int dest_reg) {
 }
 
 /**
+ * rect() with literal geometry: x, y, w, h are whole numbers and the
+ * rectangle lies fully on screen, so everything __builtin_tic80_rect works
+ * out per call (truncation, the on-screen test, scale, position) is known
+ * at compile time. Emits the GPU writes directly -- no argument pushes, no
+ * call, no clip test. The scale and position are computed with the same
+ * float32 steps as __tic80_rect_draw (w * 2.625 * 0.333333333; floor(x *
+ * 2.625 + 0.5)), so the pixels drawn are the ones the runtime would draw.
+ * Anything else (variable or fractional geometry, off-screen or empty
+ * rectangles) returns false and takes the general path.
+ */
+static bool tic80_rect_literal(const ASTNode *n, int *out)
+{
+    if (n->type != NODE_NUMBER) return false;
+    double v = n->as.number.val;
+    if (v != floor(v) || v < 0.0 || v > 1000.0) return false;
+    *out = (int) v;
+    return true;
+}
+
+static bool emit_tic80_rect_constant(ASTNode **args, int dest_reg)
+{
+    int x, y, w, h;
+    if (!tic80_rect_literal(args[0], &x) || !tic80_rect_literal(args[1], &y) ||
+        !tic80_rect_literal(args[2], &w) || !tic80_rect_literal(args[3], &h))
+        return false;
+    if (w < 1 || h < 1 || x + w > 240 || y + h > 136) return false;
+
+    volatile float k = 2.625f, third = 0.333333333f;      // as the runtime's FMUL operands
+    float sx = ((float) w * k) * third;
+    float sy = ((float) h * k) * third;
+    int   px = (int) floorf((float) x * k + 0.5f);
+    int   py = (int) floorf((float) y * k + 0.5f);
+
+    emit_asm("    ;; --- TIC-80 rect(%d, %d, %d, %d, c): literal geometry, drawn inline ---\n", x, y, w, h);
+    int color_lit;
+    bool color_const = tic80_rect_literal(args[4], &color_lit);
+    int  creg = -1;
+    if (!color_const) {
+        creg = allocate_register();
+        generate_asm(args[4], creg);
+        ensure_in_register(creg);
+    }
+    emit_asm("OUT GPU_SelectedTexture, 0\n");
+    if (color_const) {
+        emit_asm("OUT GPU_SelectedRegion, %d ; color swatch\n", 512 + (color_lit & 15));
+    } else {
+        emit_asm("CFI R%d\n", creg);
+        emit_asm("AND R%d, 15\n", creg);
+        emit_asm("IADD R%d, 512 ; the color's swatch\n", creg);
+        emit_asm("OUT GPU_SelectedRegion, R%d\n", creg);
+        unlock_register(creg);
+    }
+    int tmp = allocate_register();
+    emit_asm("MOV R%d, %.9f\n", tmp, sx);
+    emit_asm("OUT GPU_DrawingScaleX, R%d\n", tmp);
+    emit_asm("MOV R%d, %.9f\n", tmp, sy);
+    emit_asm("OUT GPU_DrawingScaleY, R%d\n", tmp);
+    emit_asm("OUT GPU_DrawingPointX, %d\n", px);
+    emit_asm("OUT GPU_DrawingPointY, %d\n", py);
+    emit_asm("OUT GPU_Command, GPUCommand_DrawRegionZoomed\n");
+    unlock_register(tmp);
+    if (dest_reg != 0) emit_asm("MOV R%d, BOXED_NIL\n", dest_reg);
+    return true;
+}
+
+/**
  * Emits assembly for the rect() intrinsic (TIC-80 compatibility).
  * Syntax: rect(x, y, w, h, color) -- filled rectangle
  */
@@ -1073,6 +1139,8 @@ bool emit_tic80_rect_intrinsic(ASTNode *node, int dest_reg) {
                       "TIC-80 rect() requires 5 arguments: rect(x, y, w, h, color)");
         return false;
     }
+
+    if (emit_tic80_rect_constant(args, dest_reg)) return true;
 
     for (int i = 4; i >= 0; i--) {
         int reg = allocate_register();

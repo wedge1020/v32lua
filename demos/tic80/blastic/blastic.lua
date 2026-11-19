@@ -1814,6 +1814,8 @@ end
 for k=0,11 do pix(x+cos(k*0.52)*t*1.8,y+sin(k*0.52)*t*1.2+t*t/60,k%2==0 and 4 or 0)end
 end
 end
+-- [tic80_unload] chunk "story" (was loaded from address 69988)
+
 local sin,cos=math.sin,math.cos
 local ART_RAM,BACKDROP_RAM,BACKDROP_BYTES=0x08000,0x11164,11520
 SUB_Y=127
@@ -2314,6 +2316,7 @@ s.leave=s.iris and IRIS or FADE
 end
 end
 
+
 local sin,cos=math.sin,math.cos
 introT=0
 local INTRO_BOOM,INTRO_END=110,330
@@ -2498,30 +2501,6 @@ restartTimer=restartTimer-1
 if restartTimer<=0 then
 score={0,0,0,0}
 init()
-end
-end
-end
-function tri(x1,y1,x2,y2,x3,y3,c)
-local top=math.floor(math.min(y1,y2,y3))
-local bot=math.floor(math.max(y1,y2,y3))
-for y=top,bot do
-local yc=y+0.5
-local lo,hi=32000,-32000
-if(y1<=yc and y2>yc)or(y2<=yc and y1>yc)then
-local x=x1+(yc-y1)*(x2-x1)/(y2-y1)
-lo=math.min(lo,x)hi=math.max(hi,x)
-end
-if(y2<=yc and y3>yc)or(y3<=yc and y2>yc)then
-local x=x2+(yc-y2)*(x3-x2)/(y3-y2)
-lo=math.min(lo,x)hi=math.max(hi,x)
-end
-if(y3<=yc and y1>yc)or(y1<=yc and y3>yc)then
-local x=x3+(yc-y3)*(x1-x3)/(y1-y3)
-lo=math.min(lo,x)hi=math.max(hi,x)
-end
-if hi>=lo then
-local a=math.floor(lo+0.5)
-rect(a,y,math.floor(hi+0.5)-a+1,1,c)
 end
 end
 end

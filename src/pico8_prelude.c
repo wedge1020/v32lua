@@ -463,3 +463,73 @@ char *pico8_append_prelude (char *src)
     free (src);
     return out;
 }
+
+// ============================================================================
+// TIC-80 prelude: tri() in Lua
+// ----------------------------------------------------------------------------
+// TIC-80's tri() (core/draw.c drawTri) walks the clipped bounding box and
+// writes every pixel whose three barycentric weights are all >= 0. Each
+// weight is linear in x, so per row the covered pixels are ONE run: the
+// intersection of three half-lines. This computes that run and draws it
+// with a single rect() -- the same pixels as the pixel walk, one GPU
+// region per row instead of one test per pixel.
+// ============================================================================
+static const char tic80_tri_code[] =
+    "function tri(x1, y1, x2, y2, x3, y3, c)\n"
+    "  local area = (x2 - x1) * (y3 - y1) - (y2 - y1) * (x3 - x1)\n"
+    "  if math.floor(area) == 0 then return end\n"
+    "  if area < 0 then\n"
+    "    local tx, ty = x2, y2\n"
+    "    x2, y2, x3, y3 = x3, y3, tx, ty\n"
+    "    area = -area\n"
+    "  end\n"
+    "  local x0 = math.max(math.floor(math.min(x1, x2, x3)), 0)\n"
+    "  local y0 = math.max(math.floor(math.min(y1, y2, y3)), 0)\n"
+    "  local xe = math.min(math.ceil(math.max(x1, x2, x3)), 240)\n"
+    "  local ye = math.min(math.ceil(math.max(y1, y2, y3)), 136)\n"
+    "  if x0 >= xe or y0 >= ye then return end\n"
+    // pixel centre of the first pixel, as TIC-80 (0.5 - FLT_EPSILON)
+    "  local px, py = x0 + 0.49999988, y0 + 0.49999988\n"
+    // weight i is edge(v[i+1], v[i+2], p) / area: base value at (x0, y0),
+    // step per pixel in x (ax) and per row in y (ay)
+    "  local ax1 = (y2 - y3) / area\n"
+    "  local ay1 = (x3 - x2) / area\n"
+    "  local b1  = ((x3 - x2) * (py - y2) - (y3 - y2) * (px - x2)) / area\n"
+    "  local ax2 = (y3 - y1) / area\n"
+    "  local ay2 = (x1 - x3) / area\n"
+    "  local b2  = ((x1 - x3) * (py - y3) - (y1 - y3) * (px - x3)) / area\n"
+    "  local ax3 = (y1 - y2) / area\n"
+    "  local ay3 = (x2 - x1) / area\n"
+    "  local b3  = ((x2 - x1) * (py - y1) - (y2 - y1) * (px - x1)) / area\n"
+    "  local last = xe - x0 - 1\n"
+    "  for row = 0, ye - y0 - 1 do\n"
+    "    local lo, hi = 0, last\n"
+    "    local w1 = b1 + ay1 * row\n"
+    "    local w2 = b2 + ay2 * row\n"
+    "    local w3 = b3 + ay3 * row\n"
+    // w + a*k >= 0  ->  k >= -w/a (a > 0)  |  k <= -w/a (a < 0)  |  w >= 0 (a == 0)
+    "    if ax1 > 0 then lo = math.max(lo, math.ceil(-w1 / ax1))\n"
+    "    elseif ax1 < 0 then hi = math.min(hi, math.floor(-w1 / ax1))\n"
+    "    elseif w1 < 0 then hi = -1 end\n"
+    "    if ax2 > 0 then lo = math.max(lo, math.ceil(-w2 / ax2))\n"
+    "    elseif ax2 < 0 then hi = math.min(hi, math.floor(-w2 / ax2))\n"
+    "    elseif w2 < 0 then hi = -1 end\n"
+    "    if ax3 > 0 then lo = math.max(lo, math.ceil(-w3 / ax3))\n"
+    "    elseif ax3 < 0 then hi = math.min(hi, math.floor(-w3 / ax3))\n"
+    "    elseif w3 < 0 then hi = -1 end\n"
+    "    if hi >= lo then rect(x0 + lo, y0 + row, hi - lo + 1, 1, c) end\n"
+    "  end\n"
+    "end\n";
+
+// Appends tri() when a TIC-80 program calls it and doesn't define it.
+char *tic80_append_prelude (char *src)
+{
+    if (!mentions (src, "tri") || defines (src, "tri")) return src;
+    size_t len = strlen (src);
+    char *out = malloc (len + sizeof (tic80_tri_code) + 40);
+    if (out == NULL) return src;
+    memcpy (out, src, len);
+    sprintf (out + len, "\n-- v32lua TIC-80 prelude\n%s", tic80_tri_code);
+    free (src);
+    return out;
+}
