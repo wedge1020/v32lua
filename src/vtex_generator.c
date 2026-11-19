@@ -29,13 +29,18 @@ void generate_vtex_from_tic80_with_colorkey(const char *output_path, int texture
             uint8_t red, green, blue, alpha;
 
             if (y >= 256) {
-                // --- Palette swatch row: 16 solid 3x3 blocks, regions 512-527 ---
+                // --- Palette swatch row: 17 solid 3x3 blocks, regions 512-528 (16 = white) ---
                 // swatch c occupies x in [c*4, c*4+2]; x%4==3 is a 1px gap.
                 int col   = x / 4;
                 int col_x = x % 4;
 
-                if (col >= 16 || col_x == 3) {
+                if (col >= 17 || col_x == 3) {
                     red = green = blue = alpha = 0x00;   // gap / unused pixel
+                } else if (col == 16) {
+                    // Swatch 16 (region 528) is white: screen-RAM runs draw it
+                    // tinted with GPU_MultiplyColor from the RAM palette
+                    // (0x3FC0), so a cart that pokes the palette is honoured.
+                    red = green = blue = alpha = 0xFF;
                 } else {
                     uint32_t color = palette[col];
                     blue  = (color >> 16) & 0xFF;

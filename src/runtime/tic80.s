@@ -81,7 +81,7 @@ _tic80_init_loop:
     JMP   _tic80_init_loop
 
 _tic80_init_next_texture:
-    ;; Register the 16 solid-color palette swatches (regions 512-527) for
+    ;; Register the 17 solid-color palette swatches (regions 512-527, 528 = white) for
     ;; THIS texture too. Every colorkey variant (0-16) carries the same
     ;; swatch bank at the same region IDs, so pix()/rect()/rectb()/line()
     ;; never need to touch GPU_SelectedTexture -- they draw on whatever
@@ -91,7 +91,7 @@ _tic80_init_next_texture:
 
 _tic80_init_swatch_loop:
     MOV   R0, R2
-    IEQ   R0, 16
+    IEQ   R0, 17
     JT    R0, _tic80_init_swatch_done
 
     OUT   GPU_SelectedRegion, R1
@@ -873,14 +873,58 @@ __builtin_tic80_cls:
     MOV   R1, [BP+2]
     CALL  __tic80_trunc
     AND   R1, 15
-    MOV   R0, __tic80_palette
-    IADD  R1, R0
-    MOV   R1, [R1]
-    OUT   GPU_ClearColor, R1
-    OUT   GPU_Command, GPUCommand_ClearScreen
+    CALL  __tic80_cls_idx
 
     MOV   SP, BP
     POP   BP
+    RET
+
+;; __tic80_cls_idx (internal): R1 = palette index 0-15. Clears the screen to
+;; the palette color. Once the cart has written screen RAM, the color is the
+;; RAM palette's (0x3FC0) and the screen RAM is filled with the index too.
+;; Clobbers R0, R1.
+__tic80_cls_idx:
+    MOV   R0, [var_TIC80_SCREEN_USED]
+    ILT   R0, 0
+    JT    R0, _tic80_cls_static
+    ;; the cart has written screen RAM: the color is the RAM palette's, and
+    ;; the screen RAM becomes that color too (one byte = two pixels)
+    PUSH  R2
+    PUSH  R11
+    PUSH  R12
+    PUSH  R13
+    MOV   R12, R1
+    SHL   R12, 4
+    OR    R12, R1
+    CALL  __tic80_ram
+    MOV   R13, R0
+    MOV   R11, 16320
+    SETS
+    MOV   R0, [var_TIC80_RAM_PTR]
+    IADD  R0, 0x3FC0
+    MOV   R2, R1
+    IMUL  R2, 3
+    IADD  R0, R2                ; the color's 3 palette bytes
+    MOV   R1, [R0]
+    MOV   R2, [R0+1]
+    SHL   R2, 8
+    OR    R1, R2
+    MOV   R2, [R0+2]
+    SHL   R2, 16
+    OR    R1, R2
+    OR    R1, 0xFF000000
+    POP   R13
+    POP   R12
+    POP   R11
+    POP   R2
+    JMP   _tic80_cls_clear
+_tic80_cls_static:
+    MOV   R0, __tic80_palette
+    IADD  R1, R0
+    MOV   R1, [R1]
+_tic80_cls_clear:
+    OUT   GPU_ClearColor, R1
+    OUT   GPU_Command, GPUCommand_ClearScreen
     RET
 
 ;; ===========================================================================
@@ -3222,9 +3266,174 @@ _tic80_map_cell_none:
 _tic80_map_cell_done:
     RET
 
+;; __tic80_scr_render (internal): R1 = first byte address (0-0x3FBF), R2 =
+;; byte count. Draws those bytes of the screen RAM (4 bpp, the low nibble is
+;; the left pixel, 120 bytes a row) as horizontal runs of one color: the
+;; white swatch (region 528) tinted by the RAM palette (3 bytes a color at
+;; 0x3FC0), one DrawRegionZoomed per run. Runs end at the end of a row.
+;; Preserves R1-R13 (R0 is clobbered).
+__tic80_scr_render:
+    PUSH  BP
+    MOV   BP, SP
+    ISUB  SP, 17                ; [BP-1] multiply color, [BP-17..BP-2] colors
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    PUSH  R6
+    PUSH  R7
+    PUSH  R8
+    PUSH  R9
+    PUSH  R10
+    PUSH  R11
+    PUSH  R12
+    PUSH  R13
+    MOV   R0, R2
+    ILE   R0, 0
+    JT    R0, _tic80_scr_out
+    MOV   R0, R1
+    IADD  R0, R2
+    IGT   R0, 16320
+    JF    R0, _tic80_scr_fit
+    MOV   R2, 16320
+    ISUB  R2, R1
+    MOV   R0, R2
+    ILE   R0, 0
+    JT    R0, _tic80_scr_out
+_tic80_scr_fit:
+    CALL  __tic80_ram
+    MOV   R9, R0                ; RAM base
+    MOV   R3, R9
+    IADD  R3, 0x3FC0            ; palette bytes
+    MOV   R4, 0                 ; color
+    MOV   R5, BP
+    ISUB  R5, 17                ; table
+_tic80_scr_pal:
+    MOV   R6, [R3]
+    MOV   R7, [R3+1]
+    SHL   R7, 8
+    OR    R6, R7
+    MOV   R7, [R3+2]
+    SHL   R7, 16
+    OR    R6, R7
+    OR    R6, 0xFF000000
+    MOV   [R5], R6
+    IADD  R3, 3
+    IADD  R5, 1
+    IADD  R4, 1
+    MOV   R0, R4
+    ILT   R0, 16
+    JT    R0, _tic80_scr_pal
+    IN    R0, GPU_MultiplyColor
+    MOV   [BP-1], R0
+    OUT   GPU_SelectedTexture, 0
+    MOV   R0, 528
+    OUT   GPU_SelectedRegion, R0
+    MOV   R10, R2               ; bytes left
+    IADD  R9, R1                ; RAM pointer
+    MOV   R8, R1
+    IDIV  R8, 120               ; y
+    MOV   R11, R1
+    IMOD  R11, 120
+    SHL   R11, 1                ; x of the byte's left pixel
+    MOV   R5, -1                ; run color (-1: none)
+    MOV   R6, 0                 ; run start x
+    MOV   R7, 0                 ; run length
+_tic80_scr_loop:
+    MOV   R0, R10
+    IGT   R0, 0
+    JF    R0, _tic80_scr_finish
+    MOV   R12, [R9]
+    MOV   R13, R12
+    AND   R13, 15               ; left pixel
+    SHL   R12, -4
+    AND   R12, 15               ; right pixel
+    MOV   R0, R13
+    IEQ   R0, R5
+    JF    R0, _tic80_scr_slow
+    MOV   R0, R12
+    IEQ   R0, R5
+    JF    R0, _tic80_scr_slow
+    IADD  R7, 2
+    JMP   _tic80_scr_next
+_tic80_scr_slow:
+    MOV   R0, R13
+    IEQ   R0, R5
+    JT    R0, _tic80_scr_lo_ext
+    CALL  _tic80_scr_flush
+    MOV   R5, R13
+    MOV   R6, R11
+    MOV   R7, 1
+    JMP   _tic80_scr_hi
+_tic80_scr_lo_ext:
+    IADD  R7, 1
+_tic80_scr_hi:
+    MOV   R0, R12
+    IEQ   R0, R5
+    JT    R0, _tic80_scr_hi_ext
+    CALL  _tic80_scr_flush
+    MOV   R5, R12
+    MOV   R6, R11
+    IADD  R6, 1
+    MOV   R7, 1
+    JMP   _tic80_scr_next
+_tic80_scr_hi_ext:
+    IADD  R7, 1
+_tic80_scr_next:
+    IADD  R9, 1
+    ISUB  R10, 1
+    IADD  R11, 2
+    MOV   R0, R11
+    ILT   R0, 240
+    JT    R0, _tic80_scr_loop
+    CALL  _tic80_scr_flush      ; end of the row
+    MOV   R5, -1
+    MOV   R11, 0
+    IADD  R8, 1
+    JMP   _tic80_scr_loop
+_tic80_scr_finish:
+    CALL  _tic80_scr_flush
+    MOV   R0, [BP-1]
+    OUT   GPU_MultiplyColor, R0
+_tic80_scr_out:
+    POP   R13
+    POP   R12
+    POP   R11
+    POP   R10
+    POP   R9
+    POP   R8
+    POP   R7
+    POP   R6
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+_tic80_scr_flush:
+    MOV   R0, R5
+    ILT   R0, 0
+    JT    R0, _tic80_scr_flush_ret
+    MOV   R0, BP
+    ISUB  R0, 17
+    IADD  R0, R5
+    MOV   R0, [R0]
+    OUT   GPU_MultiplyColor, R0
+    MOV   R1, R6
+    MOV   R2, R8
+    MOV   R3, R7
+    MOV   R4, 1
+    CALL  __tic80_rect_draw
+_tic80_scr_flush_ret:
+    RET
+
 ;; __tic80_plain_end (internal): R1 = byte address -> R0 = end (exclusive) of
 ;; the plain-storage region holding it, or 0 when it is not in one. Plain =
-;; storage with no live view: 0-0x7FFF, 0xFF84-0x14403, 0x14604-0x17FFF
+;; storage with no live view: 0-0x7FFF (0-0x3FBF is the screen: the caller
+;; draws it), 0xFF84-0x14403, 0x14604-0x17FFF
 ;; (the map, gamepad bytes and sprite flags are decoded byte by byte).
 __tic80_plain_end:
     MOV   R0, R1
@@ -3368,13 +3577,13 @@ _tic80_rd_done:
     RET
 
 ;; __tic80_wr (internal): R1 = byte address, R2 = byte. Preserves R0-R13.
-;; Fast path as for __tic80_rd.
+;; Fast path: 0x4000-0x7FFF (tiles, sprites; the screen below 0x3FC0 draws).
 __tic80_wr:
     PUSH  R0
     PUSH  R3
     MOV   R0, R1
-    AND   R0, 0xFFFF8000
-    IEQ   R0, 0
+    AND   R0, 0xFFFFC000
+    IEQ   R0, 0x4000
     JF    R0, _tic80_wr_slowpath
     MOV   R0, [var_TIC80_RAM_PTR]
     MOV   R3, R0
@@ -3406,6 +3615,19 @@ __tic80_wr_full:
     MOV   R3, R1
     IGE   R3, 98304
     JT    R3, _tic80_wr_done
+    MOV   R3, R1
+    IGE   R3, 0x3FC0
+    JT    R3, _tic80_wr_not_screen
+    ;; screen RAM (0-0x3FBF): store the byte and draw its two pixels
+    CALL  __tic80_ram
+    IADD  R0, R1
+    MOV   [R0], R7
+    MOV   R0, 1
+    MOV   [var_TIC80_SCREEN_USED], R0
+    MOV   R2, 1
+    CALL  __tic80_scr_render
+    JMP   _tic80_wr_done
+_tic80_wr_not_screen:
     MOV   R3, R1
     IGE   R3, 0x14404
     JF    R3, _tic80_wr_not_flags
@@ -3616,6 +3838,7 @@ _tic80_memop:
     PUSH  R5
     PUSH  R6
     PUSH  R7
+    PUSH  R8
     PUSH  R11
     PUSH  R12
     PUSH  R13
@@ -3647,6 +3870,18 @@ _tic80_memop_loop:
     JF    R1, _tic80_memop_dclamp
     MOV   R7, R6
 _tic80_memop_dclamp:
+    MOV   R8, 0                 ; 1: the run lands in screen RAM (0-0x3FBF)
+    MOV   R1, R4
+    ILT   R1, 0x3FC0
+    JF    R1, _tic80_memop_noscr
+    MOV   R8, 1
+    MOV   R0, 0x3FC0
+    ISUB  R0, R4
+    MOV   R1, R0
+    IGT   R1, R7
+    JT    R1, _tic80_memop_noscr
+    MOV   R7, R0
+_tic80_memop_noscr:
     JF    R3, _tic80_memop_fill
     MOV   R1, R5
     CALL  __tic80_plain_end
@@ -3685,6 +3920,15 @@ _tic80_memop_fill:
     MOV   R11, R7
     SETS
 _tic80_memop_adv:
+    JF    R8, _tic80_memop_adv2
+    MOV   R0, 1
+    MOV   [var_TIC80_SCREEN_USED], R0
+    PUSH  R2
+    MOV   R1, R4
+    MOV   R2, R7
+    CALL  __tic80_scr_render
+    POP   R2
+_tic80_memop_adv2:
     IADD  R4, R7
     ISUB  R6, R7
     JMP   _tic80_memop_loop
@@ -3705,6 +3949,7 @@ _tic80_memop_done:
     POP   R13
     POP   R12
     POP   R11
+    POP   R8
     POP   R7
     POP   R6
     POP   R5

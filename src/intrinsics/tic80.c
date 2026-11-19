@@ -268,16 +268,20 @@ bool emit_tic80_cls_intrinsic(ASTNode *node) {
 
     if (arg == NULL) {
         // Default: clear to black (palette index 0)
-        emit_asm("MOV R1, 0x%.8X ; cls() with palette index 0\n",
-                 tic80_palette[0]);
+        emit_asm("MOV R1, 0 ; cls() with palette index 0\n");
+        emit_asm("CALL __tic80_cls_idx\n");
+        return true;
     }
     else if (spu_static_number(arg, &num)) {
         double t = trunc(num);
         if (t > -16777216.0 && t < 16777216.0) {
             // a palette index: masked with 15 like every TIC-80 color
             int index = ((int) t) & 15;
-            emit_asm("MOV R1, 0x%.8X ; Palette index %d\n",
-                     tic80_palette[index], index);
+            // through the runtime: once the cart writes screen RAM the color
+            // is the RAM palette's and the screen RAM is filled as well
+            emit_asm("MOV R1, %d ; Palette index\n", index);
+            emit_asm("CALL __tic80_cls_idx\n");
+            return true;
         } else {
             // A packed color word, not a number to convert at run time:
             // 2^31..2^32-1 are unsigned, negative values two's complement

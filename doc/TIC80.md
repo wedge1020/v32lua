@@ -267,3 +267,13 @@ counting while paused.
 Strings end at the first zero word, so a NUL byte (`string.char(0)`) is stored as the
 word 256: `#s`, `string.sub`, `..` and `table.concat` keep it, `string.byte` reads it back
 as 0, `print` draws it as a space. A `\0` escape inside a string literal is not supported.
+
+## Screen RAM
+
+RAM 0x0000-0x3FBF is the screen, 4 bits a pixel (the low nibble is the left pixel, 120
+bytes a row). `poke`, `memset` and `memcpy` into it draw immediately, in runs of one
+color, tinted from the RAM palette at 0x3FC0 (3 bytes a color), and `cls(c)` fills it
+with `c` (once the cart has written it). The drawing calls (`spr`, `rect`, `print`...)
+do not write it, so it holds only what the cart put there, and a palette change does
+not recolor pixels already drawn -- redraw the frame (carts that fade by poking the
+palette do). `BDR` (per-scanline palette) is not emulated.
