@@ -3275,7 +3275,7 @@ _tic80_map_cell_done:
 __tic80_scr_render:
     PUSH  BP
     MOV   BP, SP
-    ISUB  SP, 17                ; [BP-1] multiply color, [BP-17..BP-2] colors
+    ISUB  SP, 18                ; [BP-1] multiply color, [BP-17..BP-2] colors, [BP-18] base color
     PUSH  R1
     PUSH  R2
     PUSH  R3
@@ -3356,6 +3356,62 @@ _tic80_scr_nobdr:
     IADD  R0, 4
     SHL   R0, -3
     OUT   GPU_DrawingPointY, R0
+    ;; Base color: a segment of 24+ bytes in a row is first filled with the color
+    ;; most of a 16-pixel sample has (a majority vote), as ONE run; the runs of
+    ;; that color are then not drawn again (_tic80_scr_flush skips them). Same
+    ;; pixels, fewer draws on dithered / noisy rows.
+    MOV   R0, -1
+    MOV   [BP-18], R0
+    MOV   R0, R3
+    ILT   R0, 24
+    JT    R0, _tic80_scr_nobase
+    MOV   R1, R3
+    SHL   R1, -3                ; stride between the 8 sampled bytes
+    MOV   R2, R9
+    MOV   R4, -1                ; candidate
+    MOV   R5, 0                 ; its count
+    MOV   R6, 8
+_tic80_scr_vote:
+    MOV   R12, [R2]
+    MOV   R13, R12
+    AND   R13, 15
+    JT    R5, _tic80_scr_vl1
+    MOV   R4, R13
+    MOV   R5, 1
+    JMP   _tic80_scr_vl3
+_tic80_scr_vl1:
+    MOV   R0, R13
+    IEQ   R0, R4
+    JF    R0, _tic80_scr_vl2
+    IADD  R5, 1
+    JMP   _tic80_scr_vl3
+_tic80_scr_vl2:
+    ISUB  R5, 1
+_tic80_scr_vl3:
+    SHL   R12, -4
+    JT    R5, _tic80_scr_vh1
+    MOV   R4, R12
+    MOV   R5, 1
+    JMP   _tic80_scr_vh3
+_tic80_scr_vh1:
+    MOV   R0, R12
+    IEQ   R0, R4
+    JF    R0, _tic80_scr_vh2
+    IADD  R5, 1
+    JMP   _tic80_scr_vh3
+_tic80_scr_vh2:
+    ISUB  R5, 1
+_tic80_scr_vh3:
+    IADD  R2, R1
+    ISUB  R6, 1
+    JT    R6, _tic80_scr_vote
+    MOV   R5, R4                ; draw the base run over the whole segment
+    MOV   R6, R11
+    MOV   R7, R3
+    SHL   R7, 1
+    CALL  _tic80_scr_flush
+    MOV   [BP-18], R4
+_tic80_scr_nobase:
     MOV   R6, R11               ; the run being built always ends at R6 + R7
     MOV   R7, 0
     MOV   R5, -1                ; its color (-1: none yet)
@@ -3510,6 +3566,9 @@ _tic80_scr_flush:
     ;; Uses R0 only; the Y scale and position are set once a row.
     MOV   R0, R5
     ILT   R0, 0
+    JT    R0, _tic80_scr_flush_ret
+    MOV   R0, [BP-18]           ; the row's base color is already drawn
+    IEQ   R0, R5
     JT    R0, _tic80_scr_flush_ret
     MOV   R0, BP
     ISUB  R0, 17
