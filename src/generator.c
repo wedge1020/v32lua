@@ -781,6 +781,7 @@ void generate_global_setup (ASTNode *node)
         emit_asm ("MOV [VIRCON32_MUSIC_CHANNEL_MASK], R1\n");
         emit_asm ("MOV [VIRCON32_SFX_CHANNEL_MASK], R1\n");
         emit_asm ("MOV [META_CALL_DEPTH], R1 ; no __call trampolines pending\n");
+        emit_asm ("MOV [STRLEN_CACHE], R1 ; no long string measured yet\n");
     }
 
     // v32kbd keyboard: state and strobe baseline (v32kbd.c)

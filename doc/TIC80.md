@@ -134,6 +134,11 @@ covered run and draws it as one swatch blit, so a triangle costs one GPU draw
 per row, not per pixel, and about 100 CPU cycles per row besides. A cart that
 defines its own `tri` keeps it.
 
+`--skip-fn name1,name2` (or `--#skip-fn name1, name2` in the source) compiles
+the named functions with an empty body, for work the console cannot show: a
+cart's Lua software synth writes PCM into RAM that nothing plays. The
+functions still exist and return nil.
+
 Carts that pack their code into cart memory and run it with
 `assert(load(...))()` can be unpacked before compiling:
 `python3 tools/tic80_unload.py game.lua -o game.unpacked.lua`, then compile

@@ -40,6 +40,39 @@ static bool line_is_asm_label (const char *code_start)
  * @param ...    Variable arguments for the format string
  */
 bool g_emit_hints = true;
+
+// --skip-fn NAME[,NAME...] / --#skip-fn NAME: functions compiled with an empty
+// body (they still exist and return nil, so every call to them stays valid).
+static char *g_skip_fns[64];
+static int   g_skip_fn_count = 0;
+
+void skip_fn_add (const char *list)
+{
+    char *copy = strdup (list);
+    if (copy == NULL) return;
+    for (char *tok = strtok (copy, ", \t"); tok != NULL; tok = strtok (NULL, ", \t")) {
+        if (g_skip_fn_count < 64) g_skip_fns[g_skip_fn_count++] = strdup (tok);
+    }
+    free (copy);
+}
+
+// Does `name` (as the compiler names the function: a.b and a:b are a_b)
+// match a --skip-fn entry?
+bool skip_fn_matches (const char *name)
+{
+    // a function stored in a table field is named obj_f__m0: drop the __m<n>
+    char base[256];
+    snprintf (base, sizeof base, "%s", name);
+    char *m = strstr (base, "__m");
+    if (m != NULL && m[3] != '\0' && strspn (m + 3, "0123456789") == strlen (m + 3)) *m = '\0';
+    name = base;
+    for (int i = 0; i < g_skip_fn_count; i++) {
+        const char *a = g_skip_fns[i], *b = name;
+        while (*a && *b && ((*a == *b) || ((*a == '.' || *a == ':') && *b == '_'))) { a++; b++; }
+        if (*a == '\0' && *b == '\0') return true;
+    }
+    return false;
+}
 static bool g_fn_escapes   = false;   // the function being emitted forms a frame address
 static int  g_marked_line  = -1;      // last ';@src' line written (-1: none)
 
@@ -920,6 +953,7 @@ int   emit_variable_map (void)
         fprintf (out(), "%%define  META_CALL_DEPTH          0x%.8X\n", meta_call_base);
         fprintf (out(), "%%define  META_CALL_STACK          0x%.8X\n", meta_call_base + 1);
         fprintf (out(), "%%define  META_CALL_STACK_SIZE     %d\n", META_CALL_STACK_SIZE);
+        fprintf (out(), "%%define  STRLEN_CACHE            0x%.8X\n", strlen_cache_base);
 
         // Fixed hardware address range for the memory card -- word-addressed
         // like the rest of this VM's memory, entirely outside the compiler-

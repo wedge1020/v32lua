@@ -7,6 +7,11 @@ void  node_function_def (ASTNode *node)
 {
     const char *func_name = node->as.function_def.name;
 
+    // --skip-fn / --#skip-fn: compile this function with an empty body.
+    if (node->as.function_def.body != NULL && skip_fn_matches (func_name)) {
+        node->as.function_def.body = NULL;
+    }
+
     mark_global_as_function (node);
 
     // The body is emitted exactly where this node is generated. Only the

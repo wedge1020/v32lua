@@ -443,6 +443,48 @@ __relcmp_error:
     RET
 
 ;; ---------------------------------------------------------------------------
+;; __str_length: R0 = raw string address -> R4 = its length (an integer).
+;; Clobbers R0 only. Strings carry no length and are never changed once
+;; built, so the length of a LONG string (>= 64 words: the number-to-text
+;; scratch buffers, which are rewritten in place, are shorter) is remembered
+;; in STRLEN_CACHE -- a loop calling string.byte(s, i) over one big string
+;; measures it once, not once per call.
+;; ---------------------------------------------------------------------------
+__str_length:
+    MOV  R4, STRLEN_CACHE
+    MOV  R4, [R4]
+    IEQ  R4, R0
+    JF   R4, __str_length_scan
+    MOV  R4, STRLEN_CACHE
+    IADD R4, 1
+    MOV  R4, [R4]
+    RET
+__str_length_scan:
+    PUSH R1
+    PUSH R5
+    MOV  R5, R0                  ; base
+    MOV  R1, R0
+    MOV  R4, 0
+__str_length_loop:
+    MOV  R0, [R1]
+    JF   R0, __str_length_done
+    IADD R1, 1
+    IADD R4, 1
+    JMP  __str_length_loop
+__str_length_done:
+    MOV  R0, R4
+    ILT  R0, 64
+    JT   R0, __str_length_ret
+    MOV  R0, STRLEN_CACHE
+    MOV  [R0], R5
+    IADD R0, 1
+    MOV  [R0], R4
+__str_length_ret:
+    POP  R5
+    POP  R1
+    RET
+
+;; ---------------------------------------------------------------------------
 ;; Length Operator Dispatch (#): Returns length as an IEEE 754 Float in R0 
 ;; Incoming Stack: [BP+2] = Target Value 
 ;; ---------------------------------------------------------------------------
@@ -1373,18 +1415,8 @@ __string_byte_validate:
     ;; touch it -- that's an accident of the callee's implementation, not
     ;; a guarantee, so it's preserved explicitly now too rather than left
     ;; implicit.
-    PUSH  R1                  ; preserve string pointer across the CALL below
-    PUSH  R2                  ; preserve start index across the CALL below
-    PUSH  R3                  ; preserve end index across the CALL below
-    MOV   R0, [BP+2]          ; Arg 1: the BOXED string (NOT the pre-unboxed
-    PUSH  R0                  ; pointer in R1 -- see string_len's header)
-    CALL  __builtin_string_len
-    IADD  SP, 1               ; Clean up the length-call's own argument
-    MOV   R4, R0              ; R4 = length as float
-    CFI   R4                  ; Convert float length to integer for comparisons
-    POP   R3                  ; restore end index
-    POP   R2                  ; restore start index
-    POP   R1                  ; restore string pointer
+    MOV   R0, R1
+    CALL  __str_length        ; R4 = length (integer); R1-R3 untouched
 
     ;; Negative indices count from the end: 0-based k < -1 (1-based < 0)
     ;; becomes k + length + 1.
@@ -3425,15 +3457,7 @@ __mv_string_byte:
 __mvsb_isstr:
     CALL __unbox_string          ; R0 = address (clobbers R1)
     MOV  R1, R0                  ; R1 = base
-    MOV  R4, 0                   ; R4 = length
-__mvsb_len:
-    MOV  R0, R1
-    IADD R0, R4
-    MOV  R0, [R0]
-    JF   R0, __mvsb_len_done
-    IADD R4, 1
-    JMP  __mvsb_len
-__mvsb_len_done:
+    CALL __str_length            ; R4 = length
     MOV  R2, [BP+3]              ; i
     MOV  R0, R2
     IEQ  R0, BOXED_NIL

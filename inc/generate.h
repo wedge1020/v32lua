@@ -21,6 +21,8 @@ extern FILE *active_out_stream;
 // Compiler hints for v32opt (comments only; see doc/HINTS.md) and the source
 // markers of -g. Both are ';@' comment lines, so the assembled cartridge is
 // the same with or without them.
+void skip_fn_add     (const char *list);
+bool skip_fn_matches (const char *name);
 extern bool g_emit_hints;                       // --no-hints turns them off
 void   emit_hint          (const char *fmt, ...);   // one ';@' line, as given
 bool   hints_fn_begin     (void);               // start tracking frame addresses; returns the outer state

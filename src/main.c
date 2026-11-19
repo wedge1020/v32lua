@@ -111,6 +111,10 @@ static void  print_usage (const char *prog_name)
     fprintf (stdout, "                   wav2vircon, assemble, packrom, and v32opt when installed) are\n");
     fprintf (stdout, "                   written beside the source file, or in its parent when the source\n");
     fprintf (stdout, "                   is in src/ and the output in a sibling folder such as obj/\n");
+    fprintf (stdout, "  --skip-fn <names>\n");
+    fprintf (stdout, "                   compile the named functions (comma separated, repeatable) with\n");
+    fprintf (stdout, "                   an empty body: they still exist and return nil. For work a\n");
+    fprintf (stdout, "                   target cannot show anyway (a software synth). Same as --#skip-fn\n");
     fprintf (stdout, "  --no-hints   Leave the ';@' compiler hints for v32opt out of the assembly\n");
     fprintf (stdout, "  --no-build-scripts\n");
     fprintf (stdout, "                   do not write Make.sh / Make.bat\n");
@@ -318,6 +322,9 @@ int  main (int  argc, char** argv)
             RECORD_OPT ("--no-diff-opt-title", NULL, 0);
         } else if (strcmp(argv[i], "--no-hints") == 0) {
             g_emit_hints = false;
+        } else if ((val = option_value(argc, argv, &i, "--skip-fn")) != NULL) {
+            skip_fn_add (val);
+            RECORD_OPT ("--skip-fn", val, 0);
         } else if (strcmp(argv[i], "--no-build-scripts") == 0) {
             build_scripts = 0;
         } else if ((val = option_value(argc, argv, &i, "--rate")) != NULL ||
@@ -763,6 +770,8 @@ int  main (int  argc, char** argv)
         next_ram_address                  = next_ram_address + MV_MAX;
         meta_call_base                    = next_ram_address;   // META_CALL_DEPTH
         next_ram_address                  = next_ram_address + 1 + META_CALL_STACK_SIZE;
+        strlen_cache_base                 = next_ram_address;   // STRLEN_CACHE (address, length)
+        next_ram_address                  = next_ram_address + 2;
     }
     
     // Perform full symbol pre-pass before code generation

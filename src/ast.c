@@ -260,6 +260,10 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
         // pixels differ from the console's). Outlines are always exact.
         shapes_fast = true;
     }
+    else if (strcmp(action, "skip-fn") == 0 && tokens >= 2) {
+        // --#skip-fn updateMusic[, other]: those functions get an empty body
+        skip_fn_add (raw_hint + strlen ("skip-fn"));
+    }
     else if (strcmp(action, "allow-float-as-clearcolor") == 0) {
         // --#allow-float-as-clearcolor: cls(variable) / ioports.gpu.clear(<number>)
         // pass the number's float32 bit pattern to the GPU as the clear
