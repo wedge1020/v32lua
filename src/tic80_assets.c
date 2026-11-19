@@ -207,6 +207,111 @@ void process_all_tic80_sections(void)
     // into the working directory and registered it twice.)
 }
 
+
+// ============================================================================
+// Memory banks 1-7: "-- <MAP1>" ... sections (TILES, SPRITES, MAP, FLAGS,
+// PALETTE with a bank digit). Kept as the bytes the RAM holds, for sync().
+// Bank 0 is the ordinary section; SFX/WAVES/PATTERNS/TRACKS banks are not used
+// (the sound is synthesized from bank 0).
+// ============================================================================
+const int tic80_bank_bytes[TIC80_BANK_CATS] = { 8192, 8192, 240 * 136, 512, 48 };
+static uint8_t *tic80_bank_buf[TIC80_BANK_CATS][8];
+
+const uint8_t *tic80_bank_data(int cat, int bank) {
+    if (cat < 0 || cat >= TIC80_BANK_CATS || bank < 1 || bank > 7) return NULL;
+    return tic80_bank_buf[cat][bank];
+}
+
+static int hex_digit_value(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return 0;
+}
+
+// True when `section` was a banked asset section (and has been stored).
+bool tic80_bank_store(const char *section, TIC80AssetData *assets) {
+    size_t n = strlen(section);
+    if (n < 2 || section[n - 1] < '1' || section[n - 1] > '7') return false;
+    int bank = section[n - 1] - '0';
+    static const char *names[TIC80_BANK_CATS] = { "TILES", "SPRITES", "MAP", "FLAGS", "PALETTE" };
+    int cat = -1;
+    for (int c = 0; c < TIC80_BANK_CATS; c++)
+        if (strlen(names[c]) == n - 1 && strncmp(section, names[c], n - 1) == 0) cat = c;
+    if (cat < 0) return true;           // SFX1, PATTERNS1...: ignored
+
+    int total = tic80_bank_bytes[cat];
+    if (tic80_bank_buf[cat][bank] == NULL) tic80_bank_buf[cat][bank] = calloc(total, 1);
+    uint8_t *dst = tic80_bank_buf[cat][bank];
+    if (dst == NULL) return true;
+
+    // row layout: bytes a row, and whether the hex is nibble-flipped
+    int row_bytes = (cat <= 1) ? 32 : (cat == 2) ? 240 : (cat == 3) ? 256 : 48;
+    bool flip = (cat != 4);
+    for (TIC80AssetData *item = assets; item != NULL; item = item->next) {
+        if (item->index < 0 || (item->index + 1) * row_bytes > total) continue;
+        const char *h = item->hex_data;
+        for (int i = 0; i < row_bytes && h[i * 2] && h[i * 2 + 1]; i++) {
+            int a = hex_digit_value(h[i * 2]), b = hex_digit_value(h[i * 2 + 1]);
+            dst[item->index * row_bytes + i] = (uint8_t) (flip ? (a | (b << 4)) : ((a << 4) | b));
+        }
+    }
+    return true;
+}
+
+
+// Banked sections ("-- <MAP1>" ... "-- </MAP1>") are found by a text scan
+// rather than by the lexer, whose section tags are letters only; to the lexer
+// they stay ordinary comments.
+void tic80_bank_prescan(const char *text) {
+    const char *p = text;
+    while (*p) {
+        const char *eol = strchr(p, '\n');
+        size_t len = eol ? (size_t) (eol - p) : strlen(p);
+        char name[32];
+        if (len > 6 && strncmp(p, "-- <", 4) == 0 && p[4] != '/' && len - 5 < sizeof name) {
+            const char *gt = memchr(p + 4, '>', len - 4);
+            size_t n = gt ? (size_t) (gt - (p + 4)) : 0;
+            if (n >= 2 && n < sizeof name && p[4 + n - 1] >= '1' && p[4 + n - 1] <= '7') {
+                memcpy(name, p + 4, n);
+                name[n] = '\0';
+                // collect the rows up to the closing tag
+                TIC80AssetData *head = NULL, *tail = NULL;
+                const char *q = eol ? eol + 1 : p + len;
+                while (*q) {
+                    const char *qe = strchr(q, '\n');
+                    size_t ql = qe ? (size_t) (qe - q) : strlen(q);
+                    if (strncmp(q, "-- </", 5) == 0) break;
+                    if (ql > 3 && strncmp(q, "-- ", 3) == 0 && q[3] >= '0' && q[3] <= '9') {
+                        char *line = strndup(q, ql);
+                        if (line != NULL) {
+                            TIC80AssetData *d = parse_tic80_asset_line(line);
+                            free(line);
+                            if (d != NULL) {
+                                if (tail) tail->next = d; else head = d;
+                                tail = d;
+                            }
+                        }
+                    }
+                    if (qe == NULL) { q += ql; break; }
+                    q = qe + 1;
+                }
+                tic80_bank_store(name, head);
+                while (head != NULL) {
+                    TIC80AssetData *next = head->next;
+                    free(head->hex_data);
+                    free(head);
+                    head = next;
+                }
+                p = q;
+                continue;
+            }
+        }
+        if (eol == NULL) break;
+        p = eol + 1;
+    }
+}
+
 // ============================================================================
 // Process a single TIC-80 section (PALETTE, TILES, MAP, WAVES, SFX, TRACKS)
 // ============================================================================
@@ -216,6 +321,7 @@ void process_all_tic80_sections(void)
 ///
 void process_tic80_section(const char *section, TIC80AssetData *assets)
 {
+    if (tic80_bank_store(section, assets)) return;     // MAP1..MAP7, ...
     // ========================================================================
     // PALETTE SECTION
     // Format: single line with 96 hex chars (16 colors x RRGGBB)

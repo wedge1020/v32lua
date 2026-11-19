@@ -3330,6 +3330,8 @@ _tic80_scr_pal:
     OUT   GPU_SelectedTexture, 0
     MOV   R0, 528
     OUT   GPU_SelectedRegion, R0
+    MOV   R0, 0.875
+    OUT   GPU_DrawingScaleY, R0
     MOV   R10, R2               ; bytes left
     IADD  R9, R1                ; RAM pointer
     MOV   R8, R1
@@ -3337,30 +3339,51 @@ _tic80_scr_pal:
     MOV   R11, R1
     IMOD  R11, 120
     SHL   R11, 1                ; x of the byte's left pixel
-    MOV   R5, -1                ; run color (-1: none)
-    MOV   R6, 0                 ; run start x
-    MOV   R7, 0                 ; run length
-_tic80_scr_loop:
+_tic80_scr_row:
     MOV   R0, R10
     IGT   R0, 0
     JF    R0, _tic80_scr_finish
+    MOV   R3, 240
+    ISUB  R3, R11
+    SHL   R3, -1                ; bytes left in this row
+    MOV   R0, R3
+    IGT   R0, R10
+    JF    R0, _tic80_scr_n
+    MOV   R3, R10
+_tic80_scr_n:
+    ISUB  R10, R3
+    MOV   R0, R8
+    IMUL  R0, 21
+    IADD  R0, 4
+    SHL   R0, -3
+    OUT   GPU_DrawingPointY, R0
+    MOV   R6, R11               ; the run being built always ends at R6 + R7
+    MOV   R7, 0
+    MOV   R5, -1                ; its color (-1: none yet)
+    MOV   R4, -1                ; the byte holding two pixels of that color
+_tic80_scr_byte:
     MOV   R12, [R9]
+    MOV   R0, R12
+    IEQ   R0, R4
+    JF    R0, _tic80_scr_slow
+    IADD  R7, 2                 ; same two pixels as the run: just longer
+_tic80_scr_adv:
+    IADD  R9, 1
+    ISUB  R3, 1
+    JT    R3, _tic80_scr_byte
+    CALL  _tic80_scr_flush      ; end of the row
+    IADD  R8, 1
+    MOV   R11, 0
+    JMP   _tic80_scr_row
+_tic80_scr_slow:
     MOV   R13, R12
     AND   R13, 15               ; left pixel
-    SHL   R12, -4
-    AND   R12, 15               ; right pixel
-    MOV   R0, R13
-    IEQ   R0, R5
-    JF    R0, _tic80_scr_slow
-    MOV   R0, R12
-    IEQ   R0, R5
-    JF    R0, _tic80_scr_slow
-    IADD  R7, 2
-    JMP   _tic80_scr_next
-_tic80_scr_slow:
+    SHL   R12, -4               ; right pixel
     MOV   R0, R13
     IEQ   R0, R5
     JT    R0, _tic80_scr_lo_ext
+    MOV   R11, R6
+    IADD  R11, R7               ; where the new run starts
     CALL  _tic80_scr_flush
     MOV   R5, R13
     MOV   R6, R11
@@ -3372,28 +3395,21 @@ _tic80_scr_hi:
     MOV   R0, R12
     IEQ   R0, R5
     JT    R0, _tic80_scr_hi_ext
+    MOV   R11, R6
+    IADD  R11, R7
     CALL  _tic80_scr_flush
     MOV   R5, R12
     MOV   R6, R11
-    IADD  R6, 1
     MOV   R7, 1
-    JMP   _tic80_scr_next
+    JMP   _tic80_scr_set
 _tic80_scr_hi_ext:
     IADD  R7, 1
-_tic80_scr_next:
-    IADD  R9, 1
-    ISUB  R10, 1
-    IADD  R11, 2
-    MOV   R0, R11
-    ILT   R0, 240
-    JT    R0, _tic80_scr_loop
-    CALL  _tic80_scr_flush      ; end of the row
-    MOV   R5, -1
-    MOV   R11, 0
-    IADD  R8, 1
-    JMP   _tic80_scr_loop
+_tic80_scr_set:
+    MOV   R4, R5
+    SHL   R4, 4
+    OR    R4, R5                ; a byte of two such pixels extends the run
+    JMP   _tic80_scr_adv
 _tic80_scr_finish:
-    CALL  _tic80_scr_flush
     MOV   R0, [BP-1]
     OUT   GPU_MultiplyColor, R0
 _tic80_scr_out:
@@ -3414,6 +3430,9 @@ _tic80_scr_out:
     POP   BP
     RET
 _tic80_scr_flush:
+    ;; one run (R5 color, R6 x, R7 length, R8 y) = one DrawRegionZoomed of the
+    ;; white swatch: scale 2.625 / 3 = 0.875 a pixel, position floor(21 n / 8 + 0.5).
+    ;; Uses R0 only; the Y scale and position are set once a row.
     MOV   R0, R5
     ILT   R0, 0
     JT    R0, _tic80_scr_flush_ret
@@ -3422,11 +3441,16 @@ _tic80_scr_flush:
     IADD  R0, R5
     MOV   R0, [R0]
     OUT   GPU_MultiplyColor, R0
-    MOV   R1, R6
-    MOV   R2, R8
-    MOV   R3, R7
-    MOV   R4, 1
-    CALL  __tic80_rect_draw
+    MOV   R0, R7
+    CIF   R0
+    FMUL  R0, 0.875
+    OUT   GPU_DrawingScaleX, R0
+    MOV   R0, R6
+    IMUL  R0, 21
+    IADD  R0, 4
+    SHL   R0, -3
+    OUT   GPU_DrawingPointX, R0
+    OUT   GPU_Command, GPUCommand_DrawRegionZoomed
 _tic80_scr_flush_ret:
     RET
 
@@ -3957,6 +3981,249 @@ _tic80_memop_done:
     POP   R2
     POP   R1
     POP   R3
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; ===========================================================================
+;; __builtin_tic80_sync(mask, bank, tocart) -- memory banks.
+;; Stack: [BP+2] = mask (nil/0: all)  [BP+3] = bank (nil: 0)  [BP+4] = tocart
+;; Mask bits: 1 tiles, 2 sprites, 4 map, 64 flags, 32 palette (8 sfx and 16
+;; music: nothing to copy). tocart false: the bank's image -> RAM; true: RAM
+;; -> the bank. Returns nil.
+;; ===========================================================================
+__tic80_sync_bits:
+    integer 1, 2, 4, 64, 32
+__tic80_bank_sizes:
+    integer 8192, 8192, 32640, 128, 48
+
+__builtin_tic80_sync:
+    PUSH  BP
+    MOV   BP, SP
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R6
+    PUSH  R7
+    PUSH  R8
+    PUSH  R9
+    MOV   R1, [BP+2]
+    MOV   R2, 0
+    CALL  __tic80_arg_int
+    MOV   R6, R1                ; mask
+    MOV   R1, [BP+3]
+    MOV   R2, 0
+    CALL  __tic80_arg_int
+    MOV   R7, R1                ; bank
+    MOV   R8, [BP+4]
+    IEQ   R8, BOXED_TRUE        ; tocart
+    MOV   R0, R7
+    ILT   R0, 0
+    JT    R0, _tic80_sync_done
+    MOV   R0, R7
+    IGE   R0, 8
+    JT    R0, _tic80_sync_done
+    MOV   R0, R6
+    IEQ   R0, 0
+    JF    R0, _tic80_sync_mask
+    MOV   R6, 127               ; no mask: everything
+_tic80_sync_mask:
+    MOV   R9, 0                 ; category
+_tic80_sync_loop:
+    MOV   R1, __tic80_sync_bits
+    IADD  R1, R9
+    MOV   R1, [R1]
+    AND   R1, R6
+    JF    R1, _tic80_sync_next
+    MOV   R1, R9
+    MOV   R2, R7
+    MOV   R3, R8
+    CALL  __tic80_bank_copy
+_tic80_sync_next:
+    IADD  R9, 1
+    MOV   R0, R9
+    ILT   R0, 5
+    JT    R0, _tic80_sync_loop
+_tic80_sync_done:
+    MOV   R0, BOXED_NIL
+    POP   R9
+    POP   R8
+    POP   R7
+    POP   R6
+    POP   R3
+    POP   R2
+    POP   R1
+    MOV   SP, BP
+    POP   BP
+    RET
+
+;; __tic80_bank_copy (internal): R1 = category (0 tiles, 1 sprites, 2 map,
+;; 3 flags, 4 palette), R2 = bank 0-7, R3 = tocart. Preserves R1-R13.
+;; The bank's data is its RAM buffer if a sync(.., true) made one, else the
+;; cart's image (__tic80_bank_table), else absent: zeros (palette: untouched).
+__tic80_bank_copy:
+    PUSH  BP
+    MOV   BP, SP
+    ISUB  SP, 8                 ; [BP-1] cat [BP-3] tocart [BP-4] index [BP-5] size [BP-6] live
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    PUSH  R11
+    PUSH  R12
+    PUSH  R13
+    MOV   [BP-1], R1
+    MOV   [BP-3], R3
+    MOV   R4, R1
+    SHL   R4, 3
+    IADD  R4, R2
+    MOV   [BP-4], R4
+    MOV   R0, __tic80_bank_sizes
+    IADD  R0, R1
+    MOV   R0, [R0]
+    MOV   [BP-5], R0
+    CALL  __tic80_ram           ; R0 = RAM base
+    MOV   R1, [BP-1]
+    MOV   R2, R1
+    IEQ   R2, 0
+    JF    R2, _tic80_bc_sprites
+    IADD  R0, 0x4000
+    JMP   _tic80_bc_live
+_tic80_bc_sprites:
+    MOV   R2, R1
+    IEQ   R2, 1
+    JF    R2, _tic80_bc_map
+    IADD  R0, 0x6000
+    JMP   _tic80_bc_live
+_tic80_bc_map:
+    MOV   R2, R1
+    IEQ   R2, 2
+    JF    R2, _tic80_bc_flags
+    MOV   R0, [var_TIC80_MAP_BUFFER_PTR]
+    JMP   _tic80_bc_live
+_tic80_bc_flags:
+    MOV   R2, R1
+    IEQ   R2, 3
+    JF    R2, _tic80_bc_palette
+    MOV   R0, [var_TIC80_SPRITE_FLAGS_PTR]
+    JMP   _tic80_bc_live
+_tic80_bc_palette:
+    IADD  R0, 0x3FC0
+_tic80_bc_live:
+    MOV   [BP-6], R0
+    MOV   R5, 0                 ; the bank's buffer (0: none yet)
+    MOV   R1, [var_TIC80_BANK_PTR]
+    MOV   R2, R1
+    ILT   R2, 0                 ; BOXED_NIL: no buffers made
+    JT    R2, _tic80_bc_no_table
+    IADD  R1, R4
+    MOV   R5, [R1]
+_tic80_bc_no_table:
+    MOV   R3, [BP-3]
+    JT    R3, _tic80_bc_to_cart
+    ;; --- bank -> RAM
+    MOV   R0, R5
+    IEQ   R0, 0
+    JF    R0, _tic80_bc_have_src
+    MOV   R5, __tic80_bank_table
+    IADD  R5, R4
+    MOV   R5, [R5]              ; the cart's image
+    MOV   R0, R5
+    IEQ   R0, 0
+    JF    R0, _tic80_bc_have_src
+    MOV   R0, [BP-1]            ; absent bank: zeros, but the palette stays
+    IEQ   R0, 4
+    JT    R0, _tic80_bc_done
+    MOV   R13, [BP-6]
+    MOV   R12, 0
+    MOV   R11, [BP-5]
+    SETS
+    MOV   R0, [BP-1]
+    IEQ   R0, 2
+    JF    R0, _tic80_bc_done
+    CALL  __tic80_ram
+    IADD  R0, 0x8000            ; the map's RAM mirror
+    MOV   R13, R0
+    MOV   R12, 0
+    MOV   R11, [BP-5]
+    SETS
+    JMP   _tic80_bc_done
+_tic80_bc_have_src:
+    MOV   R13, [BP-6]
+    MOV   R12, R5
+    MOV   R11, [BP-5]
+    MOVS
+    MOV   R0, [BP-1]
+    IEQ   R0, 2
+    JF    R0, _tic80_bc_done
+    CALL  __tic80_ram
+    IADD  R0, 0x8000
+    MOV   R13, R0
+    MOV   R12, R5
+    MOV   R11, [BP-5]
+    MOVS
+    JMP   _tic80_bc_done
+    ;; --- RAM -> bank
+_tic80_bc_to_cart:
+    MOV   R0, R5
+    IEQ   R0, 0
+    JF    R0, _tic80_bc_store
+    MOV   R1, [var_TIC80_BANK_PTR]
+    MOV   R2, R1
+    ILT   R2, 0
+    JF    R2, _tic80_bc_have_table
+    MOV   R0, 40
+    PUSH  R0
+    CALL  __malloc
+    IADD  SP, 1
+    MOV   R1, R0
+    IEQ   R0, 0
+    JT    R0, _tic80_bc_done    ; out of memory: nothing saved
+    MOV   [var_TIC80_BANK_PTR], R1
+    MOV   R13, R1
+    MOV   R12, 0
+    MOV   R11, 40
+    SETS
+_tic80_bc_have_table:
+    MOV   R0, [BP-5]
+    PUSH  R0
+    CALL  __malloc
+    IADD  SP, 1
+    MOV   R5, R0
+    IEQ   R0, 0
+    JT    R0, _tic80_bc_done
+    MOV   R4, [BP-4]
+    MOV   R1, [var_TIC80_BANK_PTR]
+    IADD  R1, R4
+    MOV   [R1], R5
+    MOV   R13, R5               ; start from the cart's image, or zeros
+    MOV   R12, 0
+    MOV   R11, [BP-5]
+    SETS
+    MOV   R12, __tic80_bank_table
+    IADD  R12, R4
+    MOV   R12, [R12]
+    MOV   R0, R12
+    IEQ   R0, 0
+    JT    R0, _tic80_bc_store
+    MOV   R13, R5
+    MOV   R11, [BP-5]
+    MOVS
+_tic80_bc_store:
+    MOV   R13, R5
+    MOV   R12, [BP-6]
+    MOV   R11, [BP-5]
+    MOVS
+_tic80_bc_done:
+    POP   R13
+    POP   R12
+    POP   R11
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
     MOV   SP, BP
     POP   BP
     RET

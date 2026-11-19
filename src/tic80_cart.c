@@ -15,8 +15,9 @@
 // .lua project (src/studio/project.c, tic_project_save): the code, followed by
 // "-- <TILES>" ... "-- </TILES>" sections of hex rows. That text then goes
 // through the same lexer / tic80_assets.c path as any .lua export, so a .tic
-// and its .lua export compile to the same program. Only bank 0 is emitted --
-// the only bank the TIC-80 layer uses -- plus the code from every bank.
+// and its .lua export compile to the same program. Bank 0 is emitted as the
+// ordinary sections; banks 1-7 of tiles/sprites/map/flags/palette as "<MAP1>"
+// etc. (for sync()); plus the code from every bank.
 // =============================================================================
 
 #include "v32lua.h"
@@ -49,6 +50,10 @@ enum {
 static uint8_t t_tiles[8192], t_sprites[8192], t_map[240 * 136], t_waves[16 * 16];
 static uint8_t t_sfx[64 * 66], t_patterns[60 * 192], t_tracks[8 * 51], t_flags[512];
 static uint8_t t_palette[2 * 48];
+// Banks 1-7 (tiles, sprites, map, flags, palette), for sync(); see tic80_bank_store().
+static uint8_t t_bank[8][5][240 * 136];
+static const int t_bank_bytes[5] = { 8192, 8192, 240 * 136, 512, 48 };
+static bool t_bank_seen[8][5];
 
 // TIC-80's defaults for a bank saved as CHUNK_DEFAULT (src/cart.c).
 static const uint8_t Sweetie16[48] = {
@@ -175,6 +180,14 @@ char *tic80_cart_to_text (const char *path)
                 "load and save it in a current TIC-80, or export it as a .lua project", path);
         } else if (type == TIC_CHUNK_LANG) {
             lang = size > 0 ? data[0] : 0;
+        } else if (bank > 0) {
+            int cat = type == TIC_CHUNK_TILES ? 0 : type == TIC_CHUNK_SPRITES ? 1 : type == TIC_CHUNK_MAP ? 2 :
+                      type == TIC_CHUNK_FLAGS ? 3 : type == TIC_CHUNK_PALETTE ? 4 : -1;
+            if (cat >= 0) {
+                size_t n = (size_t) size < (size_t) t_bank_bytes[cat] ? (size_t) size : (size_t) t_bank_bytes[cat];
+                memcpy (t_bank[bank][cat], data, n);
+                t_bank_seen[bank][cat] = true;
+            }
         } else if (bank == 0) {
             switch (type) {
             case TIC_CHUNK_TILES:    TAKE (t_tiles);    break;
@@ -251,6 +264,18 @@ char *tic80_cart_to_text (const char *path)
     emit_section (&out, "TRACKS",   t_tracks,   8,   51,  true);
     emit_section (&out, "FLAGS",    t_flags,    2,   256, true);
     emit_section (&out, "PALETTE",  t_palette,  1,   48,  false);
+    // Banks 1-7: the asset sections with the bank digit, as TIC-80's text format has them.
+    for (int b = 1; b < 8; b++) {
+        char tag[16];
+        static const char *names[5] = { "TILES", "SPRITES", "MAP", "FLAGS", "PALETTE" };
+        static const int  counts[5] = { 256, 256, 136, 2, 1 };
+        static const int  sizes[5]  = { 32, 32, 240, 256, 48 };
+        for (int c = 0; c < 5; c++) {
+            if (!t_bank_seen[b][c]) continue;
+            snprintf (tag, sizeof tag, "%s%d", names[c], b);
+            emit_section (&out, tag, t_bank[b][c], counts[c], sizes[c], c != 4);
+        }
+    }
 
     free (buf);
     return out.s;

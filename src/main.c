@@ -730,8 +730,10 @@ int  main (int  argc, char** argv)
         register_global ("TIC80_COLOR_MULTIPLY");
         register_global ("TIC80_SPRITE_FLAGS_PTR");
         register_global ("TIC80_EXIT_FLAG");
+        tic80_bank_prescan (program_text);     // -- <MAP1> ... banked asset sections
         register_global ("TIC80_RAM_PTR");     // peek/poke RAM, created on first use
         register_global ("TIC80_SCREEN_USED"); // set once screen RAM (0-0x3FBF) is written
+        register_global ("TIC80_BANK_PTR");    // sync(..., true): bank buffers, created on first use
         register_global ("TIC80_PMEM_PTR");    // pmem() slots when there is no memory card
     }
 

@@ -944,33 +944,32 @@ bool emit_tic80_fset_intrinsic(ASTNode *node, int dest_reg) {
 }
 
 /**
- * Emits assembly for the sync() intrinsic (TIC-80 compatibility).
+ * Emits assembly for the sync() intrinsic.
  *
- * Syntax: sync([mask [, bank [, tocart]]])
- *
- * Real TIC-80 sync() copies data between VRAM and one of several cart
- * memory banks. Vircon32 has no equivalent bank-switching mechanism --
- * its map/texture/palette data is already directly addressable -- so
- * there's nothing to synchronize. This is intentionally a no-op: it
- * exists purely so debug-only calls to sync() don't fail to compile.
- * Arguments are still evaluated (and discarded) to preserve Lua's
- * argument-evaluation-has-side-effects semantics.
+ * sync([mask [, bank [, tocart]]]) copies between the cart's memory banks
+ * (0-7) and the RAM: mask bits 1 tiles, 2 sprites, 4 map, 32 palette, 64
+ * flags (0 = all; 8 sfx and 16 music are accepted and ignored -- the sound is
+ * synthesized from bank 0 at compile time). tocart = false: bank -> RAM;
+ * true: RAM -> bank. Bank data comes from the cart's -- <MAP1> ... sections;
+ * a bank the cart doesn't have reads as zeros (the palette is left alone).
+ * Only RAM changes: the sprite sheet the GPU draws spr() from is built at
+ * compile time from bank 0.
  */
-bool emit_tic80_sync_intrinsic(ASTNode *node, int dest_reg) {
-    emit_asm("    ;; --- TIC-80 sync() Intrinsic (no-op: no cart banks on Vircon32) ---\n");
+bool tic80_uses_sync = false;
+static void push_mem_args (ASTNode *node, int count, const char *fill);
 
-    ASTNode *curr = node->as.call.args_head;
-    while (curr != NULL) {
-        int reg = allocate_register();
-        generate_asm(curr, reg);   // evaluate for side effects only
-        unlock_register(reg);
-        curr = curr->next;
-    }
+bool emit_tic80_sync_intrinsic(ASTNode *node, int dest_reg) {
+    emit_asm("    ;; --- TIC-80 sync() Intrinsic ---\n");
+    tic80_uses_memory = true;       // the RAM image and its live views
+    tic80_uses_sync   = true;       // the bank images
+
+    push_mem_args(node, 3, NULL);   // mask, bank, tocart (nil: the defaults)
+    emit_asm("CALL __builtin_tic80_sync\n");
+    emit_asm("IADD SP, 3 ; Clean up sync() arguments\n");
 
     if (dest_reg != 0) {
         emit_asm("MOV R%d, BOXED_NIL\n", dest_reg);
     }
-
     return true;
 }
 
@@ -1554,6 +1553,85 @@ void emit_tic80_ram_rom (FILE *f)
         }
     }
     fprintf(f, "    integer -1\n");
+}
+
+
+// The bank images for sync(): bank 0 is the cart's own assets, banks 1-7 the
+// -- <MAP1> ... sections. One word a byte (so a copy is one MOVS), except the
+// flags, which are packed 4 a word like __tic80_flags_rom. __tic80_bank_table
+// holds the image address for (category * 8 + bank), 0 for a bank the cart
+// lacks. Categories: 0 tiles, 1 sprites, 2 map, 3 flags, 4 palette.
+static void emit_bank_words (FILE *f, const char *label, const uint8_t *bytes, int count, bool pack)
+{
+    fprintf(f, "%s:\n", label);
+    int words = pack ? count / 4 : count;
+    for (int w = 0; w < words; w++) {
+        uint32_t v = pack ? ((uint32_t) bytes[w * 4] | ((uint32_t) bytes[w * 4 + 1] << 8) |
+                             ((uint32_t) bytes[w * 4 + 2] << 16) | ((uint32_t) bytes[w * 4 + 3] << 24))
+                          : bytes[w];
+        fprintf(f, "%s%u%s", (w % 16 == 0) ? "    integer " : "", v,
+                (w % 16 == 15 || w == words - 1) ? "\n" : ", ");
+    }
+}
+
+void emit_tic80_banks (FILE *f)
+{
+    fprintf(f, "\n;; --- TIC-80 memory banks for sync() (%s) ---\n",
+            tic80_uses_sync ? "bank images" : "unused");
+    if (!tic80_uses_sync) {
+        fprintf(f, "__tic80_bank_table:\n    integer 0\n");
+        return;
+    }
+    static uint8_t img[240 * 136];
+    char label[48];
+    bool present[TIC80_BANK_CATS][8];
+
+    for (int bank = 0; bank < 8; bank++) {
+        for (int cat = 0; cat < TIC80_BANK_CATS; cat++) {
+            const uint8_t *data = NULL;
+            if (bank == 0) {
+                memset(img, 0, sizeof img);
+                if (cat <= 1) {                       // tiles / sprites, 32 bytes an 8x8
+                    for (int t = 0; t < 256; t++) {
+                        int tile = cat * 256 + t;
+                        for (int k = 0; k < 32; k++) {
+                            int i0 = k * 2, i1 = k * 2 + 1;
+                            int x0 = (tile % 16) * 8 + i0 % 8, y0 = (tile / 16) * 8 + i0 / 8;
+                            int x1 = (tile % 16) * 8 + i1 % 8, y1 = (tile / 16) * 8 + i1 / 8;
+                            img[t * 32 + k] = (uint8_t) ((get_tic80_tile_pixel(x0, y0) & 15) |
+                                                         ((get_tic80_tile_pixel(x1, y1) & 15) << 4));
+                        }
+                    }
+                } else if (cat == 2) {
+                    if (tic80_has_map && tic80_map_width > 0 && tic80_map_width <= 240)
+                        for (int y = 0; y < tic80_map_height && y < 136; y++)
+                            for (int x = 0; x < tic80_map_width; x++)
+                                img[y * 240 + x] = tic80_map_data[y * tic80_map_width + x];
+                } else if (cat == 3) {
+                    memcpy(img, tic80_sprite_flags, 512);
+                } else {
+                    for (int i = 0; i < 16; i++) {
+                        uint32_t c = tic80_get_palette_color(i);
+                        img[i * 3] = c & 0xFF; img[i * 3 + 1] = (c >> 8) & 0xFF; img[i * 3 + 2] = (c >> 16) & 0xFF;
+                    }
+                }
+                data = img;
+            } else {
+                data = tic80_bank_data(cat, bank);
+            }
+            present[cat][bank] = (data != NULL);
+            if (data == NULL) continue;
+            snprintf(label, sizeof label, "__tic80_bank_%d_%d", cat, bank);
+            emit_bank_words(f, label, data, tic80_bank_bytes[cat], cat == 3);
+        }
+    }
+    fprintf(f, "__tic80_bank_table:\n");
+    for (int cat = 0; cat < TIC80_BANK_CATS; cat++) {
+        for (int bank = 0; bank < 8; bank++) {
+            if (present[cat][bank]) fprintf(f, "    pointer __tic80_bank_%d_%d\n", cat, bank);
+            else                    fprintf(f, "    integer 0\n");
+        }
+    }
 }
 
 // TIC-80 functions with nothing to act on here: trace() (debug console

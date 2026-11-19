@@ -277,3 +277,15 @@ with `c` (once the cart has written it). The drawing calls (`spr`, `rect`, `prin
 do not write it, so it holds only what the cart put there, and a palette change does
 not recolor pixels already drawn -- redraw the frame (carts that fade by poking the
 palette do). `BDR` (per-scanline palette) is not emulated.
+
+## Memory banks and `sync()`
+
+`sync(mask, bank, tocart)` copies between the cart's banks 0-7 and the RAM. Mask bits:
+1 tiles, 2 sprites, 4 map, 32 palette, 64 flags (0 = all; 8 sfx and 16 music are
+ignored). `tocart` false: bank -> RAM; true: RAM -> bank. Banks 1-7 come from the
+cart's `-- <MAP1>` ... `-- <MAP7>` sections (also TILES, SPRITES, FLAGS, PALETTE with a
+bank digit; a binary `.tic` carries them as bank > 0 chunks); bank 0 is the cart's own
+data. A bank the cart doesn't have reads as zeros (the palette is left alone). Only
+the RAM changes: `spr()` still draws the sheet built from bank 0 at compile time, so
+tile/sprite banks are for `peek`, not for drawing. Banked sections cost ROM only when
+the program calls `sync`.

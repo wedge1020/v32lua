@@ -41,6 +41,14 @@ int       tic80_get_map_height       (void);
 uint8_t   tic80_get_map_tile         (int, int);
 void      parse_tic80_map_row        (int, const char *);
 
+// Memory banks 1-7 (-- <MAP1> ... sections): the categories sync() copies
+// that the layer emulates. Bank 0 is the cart's live data.
+#define TIC80_BANK_CATS 5      // 0 tiles, 1 sprites, 2 map, 3 flags, 4 palette
+extern const int tic80_bank_bytes[TIC80_BANK_CATS];
+bool           tic80_bank_store (const char *section, TIC80AssetData *assets);
+void           tic80_bank_prescan (const char *text);   // -- <MAP1> sections
+const uint8_t *tic80_bank_data  (int cat, int bank);     // NULL: bank not in the cart
+
 // ============================================================================
 // Sound Function Declarations
 // ============================================================================
