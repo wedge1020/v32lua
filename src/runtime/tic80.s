@@ -896,8 +896,8 @@ __builtin_tic80_cls:
 %define TIC80_MAP_ACTUAL_WIDTH  240
 %define TIC80_MAP_ACTUAL_HEIGHT 136
 
-;; Buffer size in words (64KB = 16384 words)
-%define TIC80_MAP_BUFFER_WORDS  16384
+;; Buffer size in words: one byte per word, full 240x136 map
+%define TIC80_MAP_BUFFER_WORDS  32640
 
 ;; ============================================================================
 ;; TIC-80 Map Initialization with Static Data
@@ -966,8 +966,7 @@ _tic80_copy_continue:
     ;; Zero-fill fallback
 _tic80_init_map_zero_fill:
     MOV   R2, 0
-    MOV   R3, TIC80_MAP_BUFFER_WORDS
-    SHL   R3, 2              ; bytes = words * 4
+    MOV   R3, TIC80_MAP_BUFFER_WORDS   ; one word per cell
 
 _tic80_init_map_zero_loop:
     MOV   R8, R2

@@ -1455,6 +1455,11 @@ __string_byte_end_ok:
     ;; --- Step 5: Return byte at validated position ---
     IADD  R1, R2              ; R1 = string pointer + start offset
     MOV   R0, [R1]            ; Load byte from string memory
+    MOV   R5, R0
+    IEQ   R5, 256             ; the stored form of a NUL byte (string.char)
+    JF    R5, __string_byte_nonul
+    MOV   R0, 0
+__string_byte_nonul:
     CIF   R0                  ; Convert to Lua float
     JMP   __string_byte_done
 
@@ -1534,6 +1539,13 @@ __string_char_copy_loop:
     CFI   R3                  ; Convert float to integer (byte value) --
                                 ; R3 is untouched by the check above, so
                                 ; this now converts the real argument.
+    ;; A NUL byte can't be stored as 0 (strings end at the first 0 word):
+    ;; it is kept as the word 256, which string.byte reads back as 0.
+    MOV   R6, R3
+    IEQ   R6, 0
+    JF    R6, __string_char_store
+    MOV   R3, 256
+__string_char_store:
     MOV   [R5], R3            ; Store byte at current heap position
     IADD  R5, 1               ; Advance write pointer (by 1 word)
     IADD  R1, 1               ; Advance read pointer to next argument
@@ -3512,6 +3524,11 @@ __mvsb_cnt_pos:
 __mvsb_loop:
     JF   R3, __mvsb_done
     MOV  R0, [R1]
+    MOV  R6, R0
+    IEQ  R6, 256                 ; the stored form of a NUL byte
+    JF   R6, __mvsb_nonul
+    MOV  R0, 0
+__mvsb_nonul:
     CIF  R0
     MOV  [R5], R0
     IADD R1, 1

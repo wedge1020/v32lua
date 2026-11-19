@@ -120,6 +120,11 @@ __bios_print_text:
 
 __bios_print_loop:
     MOV  R4, [R3]                ; Read character from string memory 
+    MOV  R5, R4
+    IEQ  R5, 256                 ; a NUL byte (string.char(0)): draws nothing
+    JF   R5, __bios_print_glyph
+    MOV  R4, 32
+__bios_print_glyph:
     OUT  GPU_SelectedRegion, R4  ; set character to display 
     IEQ  R4, 0                   ; Check for null terminator 
     JT   R4, __bios_print_done 

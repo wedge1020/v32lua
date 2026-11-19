@@ -261,3 +261,9 @@ on the screen. Any arguments are evaluated and ignored.
 Start (gamepad 1) pauses: `TIC()` stops, every SPU channel pauses, one dimmed
 frame is drawn with "- PAUSED -", and Start again resumes. `time()` keeps
 counting while paused.
+
+## Strings with NUL bytes
+
+Strings end at the first zero word, so a NUL byte (`string.char(0)`) is stored as the
+word 256: `#s`, `string.sub`, `..` and `table.concat` keep it, `string.byte` reads it back
+as 0, `print` draws it as a space. A `\0` escape inside a string literal is not supported.
