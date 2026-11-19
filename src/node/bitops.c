@@ -117,8 +117,47 @@ double bitop_eval (NodeType type, double a, double b)
     return bit_out (x, ha, p8);
 }
 
+// Fast path for the common case, emitted inline in front of the generic call:
+// in the integer model (not PICO-8's 16.16), & | ~ << >> of operands that are
+// whole numbers in [0, 2^24) -- sprite and tile data, masks, packed fields,
+// shift counts. There the 64-bit-sign bookkeeping of __builtin_bitop is moot
+// (both operands are non-negative), the word is the operand itself and the
+// result is exact, so the answer is the same bits the runtime would return:
+//   & | ~   result < 2^24
+//   >> n    (0 <= n <= 31, logical == arithmetic for a non-negative word)
+//   << n    (0 <= n <= 7:  a << n < 2^31, so the word stays non-negative)
+// Anything else (negative, fractional, >= 2^24, nil/non-numbers, other
+// counts) falls through to the generic call. NaN-boxed values fail the
+// compares, so they take the generic path too.
+static int bit_fast_label = 0;
+
+// Is a literal operand inside the fast range for this op, as the b operand?
+static bool literal_b_ok (int op, double v)
+{
+    if (v != floor (v)) return false;
+    if (op == BITOP_SHL) return v >= 0 && v <= 7;
+    if (op == BITOP_SHR) return v >= 0 && v <= 31;
+    return v >= 0 && v < 16777216.0;
+}
+
+static void emit_bit_operand_check (int reg, int t, int w, const char *slow, bool integral)
+{
+    emit_asm ("MOV R%d, R%d\n", t, reg);
+    emit_asm ("FGE R%d, 0.0\n", t);
+    emit_asm ("JF R%d, %s\n", t, slow);
+    emit_asm ("MOV R%d, R%d\n", t, reg);
+    emit_asm ("FLT R%d, %s\n", t, integral ? "16777216.0" : "32.0");
+    emit_asm ("JF R%d, %s\n", t, slow);
+    emit_asm ("MOV R%d, R%d\n", w, reg);
+    emit_asm ("CFI R%d\n", w);
+    emit_asm ("MOV R%d, R%d\n", t, w);
+    emit_asm ("CIF R%d\n", t);
+    emit_asm ("FEQ R%d, R%d ; whole number?\n", t, reg);
+    emit_asm ("JF R%d, %s\n", t, slow);
+}
+
 // Emits: push mode, op; evaluate operands; push a, b; CALL __builtin_bitop.
-static void emit_bitop_call (int op, ASTNode *left, ASTNode *right, int dest_reg)
+static void emit_bitop_generic (int op, ASTNode *left, ASTNode *right, int dest_reg)
 {
     runtime_req.needs_math = true;   // __builtin_bitop lives in math.s
 
@@ -152,6 +191,84 @@ static void emit_bitop_call (int op, ASTNode *left, ASTNode *right, int dest_reg
     if (dest_reg != 0) {
         emit_asm ("MOV R%d, R0\n", dest_reg);
     }
+}
+
+// Evaluates both operands, tries the inline fast path, and otherwise makes
+// the generic call with the same operand values.
+static void emit_bitop_fast (int op, ASTNode *left, ASTNode *right, int dest_reg)
+{
+    runtime_req.needs_math = true;
+    bool b_lit = right->type == NODE_NUMBER;
+
+    generate_asm (left, dest_reg);
+    ensure_in_register (dest_reg);
+    emit_asm ("PUSH R%d ; spill left operand\n", dest_reg);
+    int right_reg = allocate_register ();
+    mark_register_live (right_reg, 1);
+    generate_asm (right, right_reg);
+    ensure_in_register (right_reg);
+    emit_asm ("POP R%d ; reload left operand\n", dest_reg);
+
+    int id = bit_fast_label++;
+    char slow[64], done[64];
+    snprintf (slow, sizeof (slow), "__bitslow_%d", id);
+    snprintf (done, sizeof (done), "__bitdone_%d", id);
+    int t = allocate_register (); mark_register_live (t, 1);
+    int w = allocate_register (); mark_register_live (w, 1);
+    int u = allocate_register (); mark_register_live (u, 1);
+
+    emit_asm ("    ;; --- inline fast path: whole numbers in [0, 2^24) ---\n");
+    emit_bit_operand_check (dest_reg, t, w, slow, true);
+    if (!b_lit) {
+        emit_bit_operand_check (right_reg, t, u, slow, op != BITOP_SHL && op != BITOP_SHR);
+        if (op == BITOP_SHL) {               // count 0..7 only
+            emit_asm ("MOV R%d, R%d\n", t, right_reg);
+            emit_asm ("FLT R%d, 8.0\n", t);
+            emit_asm ("JF R%d, %s\n", t, slow);
+        }
+    } else {
+        emit_asm ("MOV R%d, R%d\n", u, right_reg);
+        emit_asm ("CFI R%d\n", u);
+    }
+    switch (op) {
+    case BITOP_AND: emit_asm ("AND R%d, R%d\n", w, u); break;
+    case BITOP_OR:  emit_asm ("OR R%d, R%d\n", w, u);  break;
+    case BITOP_XOR: emit_asm ("XOR R%d, R%d\n", w, u); break;
+    case BITOP_SHL: emit_asm ("SHL R%d, R%d\n", w, u); break;
+    default:        // >>: SHL by a negative count (a >= 0: logical == arithmetic)
+        emit_asm ("MOV R%d, 0\n", t);
+        emit_asm ("ISUB R%d, R%d\n", t, u);
+        emit_asm ("SHL R%d, R%d\n", w, t);
+        break;
+    }
+    emit_asm ("CIF R%d\n", w);
+    emit_asm ("MOV R%d, R%d\n", dest_reg, w);
+    emit_asm ("JMP %s\n", done);
+
+    emit_asm ("%s:\n", slow);
+    emit_asm ("MOV R%d, 0 ; bitop mode: integer\n", t);
+    emit_asm ("PUSH R%d\n", t);
+    emit_asm ("MOV R%d, %d ; bitop op\n", t, op);
+    emit_asm ("PUSH R%d\n", t);
+    emit_asm ("PUSH R%d ; a\n", dest_reg);
+    emit_asm ("PUSH R%d ; b\n", right_reg);
+    emit_asm ("CALL __builtin_bitop\n");
+    emit_asm ("IADD SP, 4\n");
+    if (dest_reg != 0) emit_asm ("MOV R%d, R0\n", dest_reg);
+    emit_asm ("%s:\n", done);
+    unlock_register (t); unlock_register (w); unlock_register (u);
+    unlock_register (right_reg);
+}
+
+static void emit_bitop_call (int op, ASTNode *left, ASTNode *right, int dest_reg)
+{
+    bool fast = !runtime_req.needs_pico8 && right != NULL &&
+                (op == BITOP_AND || op == BITOP_OR || op == BITOP_XOR ||
+                 op == BITOP_SHL || op == BITOP_SHR);
+    if (fast && right->type == NODE_NUMBER && !literal_b_ok (op, right->as.number.val))
+        fast = false;
+    if (fast) emit_bitop_fast (op, left, right, dest_reg);
+    else      emit_bitop_generic (op, left, right, dest_reg);
 }
 
 static void emit_folded (double v, int dest_reg)

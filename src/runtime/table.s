@@ -669,6 +669,61 @@ __table_hash_store_done:
     POP  R0
     RET
 
+;; __table_border_follow: R1 = raw header, R2 = key just stored in the hash
+;; part, R3 = its value. The array part holds at most TABLE_ARRAYSIZE
+;; (65535) slots, so a longer sequence continues in the hash part, and the
+;; border (#t, header word 1) must follow it: when the key stored is
+;; border + 1, advance the border over every following key present in the
+;; hash. Without it `t[#t+1] = v` kept rewriting key 65536 and table.concat
+;; stopped at 65535 elements. Preserves every register.
+__table_border_follow:
+    PUSH R0
+    PUSH R2
+    PUSH R3
+    PUSH R4
+    PUSH R5
+    PUSH R6
+    MOV  R4, R3
+    IEQ  R4, BOXED_NIL
+    JT   R4, __table_border_follow_out   ; a deletion never extends it
+    MOV  R4, R2
+    AND  R4, NAN_VALUE
+    IEQ  R4, NAN_VALUE
+    JT   R4, __table_border_follow_out   ; not a number key
+    MOV  R4, R2
+    CFI  R4
+    MOV  R5, R4
+    CIF  R5
+    INE  R5, R2
+    JT   R5, __table_border_follow_out   ; fractional
+    MOV  R5, [R1+1]
+    IADD R5, 1
+    INE  R5, R4
+    JT   R5, __table_border_follow_out   ; not the key right after the border
+    MOV  R6, [R1+3]                      ; hash block
+__table_border_follow_loop:
+    MOV  [R1+1], R4                      ; border = this key
+    IADD R4, 1
+    MOV  R2, R4
+    CIF  R2
+    MOV  R6, [R1+3]
+    MOV  R5, R6
+    CALL __table_hash_find               ; R0 = slot or 0
+    MOV  R5, R0
+    IEQ  R5, 0
+    JT   R5, __table_border_follow_out
+    MOV  R5, [R0+1]
+    IEQ  R5, BOXED_NIL
+    JF   R5, __table_border_follow_loop
+__table_border_follow_out:
+    POP  R6
+    POP  R5
+    POP  R4
+    POP  R3
+    POP  R2
+    POP  R0
+    RET
+
 ;; __table_array_grow: R1 = raw header, R4 = key that must fit (int >= 1).
 ;; New capacity = max(8, 2 * capacity), doubled until it covers R4. Copies
 ;; the old array, nil-fills the rest, then moves any of the new range's
@@ -696,6 +751,20 @@ __table_array_grow_cap:
     SHL  R6, 1
     JMP  __table_array_grow_cap
 __table_array_grow_alloc:
+    ;; The capacity lives in 16 bits of the header's first word, so it can
+    ;; never pass TABLE_ARRAYSIZE (65535). Doubling 32768 gave 65536, which
+    ;; overflowed into the flag bits and read back as capacity 0: a table
+    ;; holding 32769 elements lost every one of them. Clamp, and if the array
+    ;; is already that big there is nothing to grow (callers send keys beyond
+    ;; it to the hash part).
+    MOV  R7, R6
+    IGT  R7, TABLE_ARRAYSIZE
+    JF   R7, __table_array_grow_fits
+    MOV  R6, TABLE_ARRAYSIZE
+__table_array_grow_fits:
+    MOV  R7, R6
+    ILE  R7, R5
+    JT   R7, __table_array_grow_done
     PUSH R1                  ; __malloc clobbers R1-R3, R6
     PUSH R6
     PUSH R6
@@ -844,6 +913,9 @@ __builtin_table_set_grow_limit:
     MOV  R7, R4
     IGT  R7, R6
     JT   R7, __builtin_table_set_hash
+    MOV  R7, R4
+    IGT  R7, TABLE_ARRAYSIZE ; past the largest possible array part
+    JT   R7, __builtin_table_set_hash
     CALL __table_array_grow
 
 __builtin_table_set_array:
@@ -878,6 +950,9 @@ __builtin_table_set_extend:
 __builtin_table_set_extend_hash:
     ;; the border reached the end of the array part: if the hash part holds
     ;; key capacity+1, pull that range into the array and keep going
+    MOV  R6, R5
+    IGE  R6, TABLE_ARRAYSIZE ; array part already at its maximum: nowhere to pull to
+    JT   R6, __builtin_table_set_extended
     MOV  R6, [R1+3]
     MOV  R7, R6
     IEQ  R7, 0
@@ -924,6 +999,7 @@ __builtin_table_set_hash_num:
     MOV  R2, 0
 __builtin_table_set_hash:
     CALL __table_hash_store
+    CALL __table_border_follow
 
     JMP  __builtin_table_set_done
 __builtin_table_set_meta:
@@ -1971,8 +2047,9 @@ __concat_make_empty_string:
 __builtin_table_concat:
     PUSH BP
     MOV  BP, SP
-    ISUB SP, 6   ; [BP-1]=i  [BP-2]=j  [BP-3]=accumulator  [BP-4]=loop idx
-                 ; [BP-5]=resolved sep  [BP-6]=first-element flag
+    ISUB SP, 8   ; [BP-1]=i  [BP-2]=j  [BP-3]=sep address (0 = none)  [BP-4]=sep length
+                 ; [BP-5]=total length, then the result's base  [BP-6]=loop idx
+                 ; [BP-7]=write head  [BP-8]=element count
 
     PUSH R1
     PUSH R2
@@ -2014,74 +2091,134 @@ __concat_i_given:
     CFI  R1
     MOV  [BP-1], R1
 
-    ;; --- Resolve sep: default to a fresh empty string if nil ---
+    ;; --- count = j - i + 1; an empty range gives "" ---
+    MOV  R1, [BP-2]
+    MOV  R2, [BP-1]
+    ISUB R1, R2
+    IADD R1, 1
+    MOV  [BP-8], R1
+    ILT  R1, 1
+    JF   R1, __concat_nonempty
+    CALL __concat_make_empty_string
+    JMP  __concat_return
+
+__concat_nonempty:
+    ;; --- Separator: address and length (none = address 0, length 0) ---
     MOV  R1, [BP+4]
     MOV  R2, R1
     IEQ  R2, BOXED_NIL
     JF   R2, __concat_sep_given
-    CALL __concat_make_empty_string
-    MOV  R1, R0
-__concat_sep_given:
-    MOV  [BP-5], R1
-
-    ;; --- Seed accumulator with a fresh empty string, first-flag = true ---
-    CALL __concat_make_empty_string
+    MOV  R0, 0
     MOV  [BP-3], R0
-    MOV  R1, 1
-    MOV  [BP-6], R1
+    MOV  [BP-4], R0
+    JMP  __concat_sep_done
+__concat_sep_given:
+    MOV  R0, R1
+    CALL __concat_string_of      ; R0 = raw address of the separator's characters
+    MOV  [BP-3], R0
+    CALL __concat_strlen
+    MOV  [BP-4], R0
+__concat_sep_done:
 
-    MOV  R1, [BP-1]
-    MOV  [BP-4], R1      ; loop index = i
-
-__concat_loop:
+    ;; --- Pass 1: total = sep_len * (count - 1) + the length of every element ---
     MOV  R1, [BP-4]
+    MOV  R2, [BP-8]
+    ISUB R2, 1
+    IMUL R1, R2
+    MOV  [BP-5], R1
+    MOV  R1, [BP-1]
+    MOV  [BP-6], R1
+__concat_len_loop:
+    MOV  R1, [BP-6]
     MOV  R2, [BP-2]
     IGT  R1, R2
-    JT   R1, __concat_done
-
-    ;; --- If not the first element, append the separator first ---
+    JT   R1, __concat_len_done
+    MOV  R1, [BP+5]
+    MOV  R2, [BP-6]
+    CALL __concat_fetch          ; R0 = element's characters
+    CALL __concat_strlen
+    MOV  R1, [BP-5]
+    IADD R1, R0
+    MOV  [BP-5], R1
     MOV  R1, [BP-6]
-    IEQ  R1, 1
-    JT   R1, __concat_skip_sep
-
-    MOV  R3, [BP-3]       ; accumulator
-    PUSH R3
-    MOV  R4, [BP-5]       ; separator
-    PUSH R4
-    CALL __builtin_strcat
-    IADD SP, 2
-    MOV  [BP-3], R0       ; accumulator = accumulator .. sep
-
-__concat_skip_sep:
-    ;; --- Fetch element and append it ---
-    MOV  R5, [BP-4]        ; raw int loop index
-    MOV  R6, R5
-    CIF  R6                ; boxed float key
-    MOV  R7, [BP+5]        ; table pointer
-    PUSH R7
-    PUSH R6
-    CALL __builtin_table_get
-    IADD SP, 2
-    MOV  R8, R0            ; R8 = element value (any type; strcat coerces)
-
-    MOV  R3, [BP-3]        ; accumulator
-    PUSH R3
-    PUSH R8
-    CALL __builtin_strcat
-    IADD SP, 2
-    MOV  [BP-3], R0        ; accumulator = accumulator .. tostring(element)
-
-    ;; --- Clear the first-flag, advance loop index ---
-    MOV  R1, 0
-    MOV  [BP-6], R1
-    MOV  R1, [BP-4]
     IADD R1, 1
-    MOV  [BP-4], R1
-    JMP  __concat_loop
+    MOV  [BP-6], R1
+    JMP  __concat_len_loop
+__concat_len_done:
 
-__concat_done:
-    MOV  R0, [BP-3]         ; R0 = final accumulator string
+    ;; --- One allocation for the whole result (+1 for the terminator) ---
+    MOV  R1, [BP-5]
+    IADD R1, 1
+    PUSH R1
+    CALL __malloc
+    IADD SP, 1
+    MOV  R1, R0
+    IEQ  R1, 0
+    JT   R1, __oom_handler
+    MOV  [BP-5], R0              ; base
+    MOV  [BP-7], R0              ; write head
 
+    ;; --- Pass 2: copy separator and elements in order ---
+    MOV  R1, [BP-1]
+    MOV  [BP-6], R1
+__concat_copy_loop:
+    MOV  R1, [BP-6]
+    MOV  R2, [BP-2]
+    IGT  R1, R2
+    JT   R1, __concat_copy_done
+
+    ;; separator before every element but the first
+    MOV  R1, [BP-6]
+    MOV  R2, [BP-1]
+    IEQ  R1, R2
+    JT   R1, __concat_copy_elem
+    MOV  R3, [BP-3]
+    MOV  R1, [BP-4]
+    IEQ  R1, 0
+    JT   R1, __concat_copy_elem
+    MOV  R4, [BP-7]
+__concat_sep_copy:
+    MOV  R5, [R3]
+    MOV  R1, R5
+    IEQ  R1, 0
+    JT   R1, __concat_sep_copied
+    MOV  [R4], R5
+    IADD R3, 1
+    IADD R4, 1
+    JMP  __concat_sep_copy
+__concat_sep_copied:
+    MOV  [BP-7], R4
+
+__concat_copy_elem:
+    MOV  R1, [BP+5]
+    MOV  R2, [BP-6]
+    CALL __concat_fetch          ; R0 = element's characters
+    MOV  R3, R0
+    MOV  R4, [BP-7]
+__concat_elem_copy:
+    MOV  R5, [R3]
+    MOV  R1, R5
+    IEQ  R1, 0
+    JT   R1, __concat_elem_copied
+    MOV  [R4], R5
+    IADD R3, 1
+    IADD R4, 1
+    JMP  __concat_elem_copy
+__concat_elem_copied:
+    MOV  [BP-7], R4
+    MOV  R1, [BP-6]
+    IADD R1, 1
+    MOV  [BP-6], R1
+    JMP  __concat_copy_loop
+
+__concat_copy_done:
+    MOV  R1, 0
+    MOV  R2, [BP-7]
+    MOV  [R2], R1                ; terminator
+    MOV  R0, [BP-5]
+    OR   R0, BOXED_RAMSTRING
+
+__concat_return:
     POP  R8
     POP  R7
     POP  R6
@@ -2093,6 +2230,80 @@ __concat_done:
 
     MOV  SP, BP
     POP  BP
+    RET
+
+;; __concat_string_of (internal): R0 = any value -> R0 = raw address of its
+;; characters (a string as is; anything else through tostring's scratch
+;; buffer "B", which the elements -- using "A" -- do not disturb).
+;; Clobbers R0-R8.
+__concat_string_of:
+    MOV  R1, R0
+    MOV  R2, R1
+    AND  R2, BOXED_DATA
+    IEQ  R2, BOXED_ROMSTRING
+    JT   R2, __concat_string_of_str
+    MOV  R2, R1
+    AND  R2, BOXED_DATA
+    IEQ  R2, BOXED_RAMSTRING
+    JF   R2, __concat_string_of_conv
+    MOV  R2, R1
+    AND  R2, BOXED_PAYLOAD
+    ILT  R2, 4                   ; nil/false/true share the RAM-string tag
+    JT   R2, __concat_string_of_conv
+__concat_string_of_str:
+    MOV  R0, R1
+    JMP  __unbox_string
+__concat_string_of_conv:
+    PUSH R1
+    CALL __builtin_tostring_scratch_b
+    IADD SP, 1
+    JMP  __unbox_string
+
+;; __concat_fetch (internal): R1 = table (boxed), R2 = integer index
+;; -> R0 = raw address of t[index]'s characters (numbers are converted
+;; through tostring's scratch buffer "A"; the caller uses the characters
+;; before fetching the next element). Clobbers R0-R8.
+__concat_fetch:
+    CIF  R2
+    PUSH R1
+    PUSH R2
+    CALL __builtin_table_get
+    IADD SP, 2
+    MOV  R1, R0
+    MOV  R2, R1
+    AND  R2, BOXED_DATA
+    IEQ  R2, BOXED_ROMSTRING
+    JT   R2, __concat_fetch_str
+    MOV  R2, R1
+    AND  R2, BOXED_DATA
+    IEQ  R2, BOXED_RAMSTRING
+    JF   R2, __concat_fetch_conv
+    MOV  R2, R1
+    AND  R2, BOXED_PAYLOAD
+    ILT  R2, 4
+    JT   R2, __concat_fetch_conv
+__concat_fetch_str:
+    MOV  R0, R1
+    JMP  __unbox_string
+__concat_fetch_conv:
+    PUSH R1
+    CALL __builtin_tostring_scratch_a
+    IADD SP, 1
+    JMP  __unbox_string
+
+;; __concat_strlen (internal): R0 = raw string address -> R0 = length.
+;; Clobbers R1, R2.
+__concat_strlen:
+    MOV  R1, R0
+    MOV  R0, 0
+__concat_strlen_loop:
+    MOV  R2, [R1]
+    IEQ  R2, 0
+    JT   R2, __concat_strlen_done
+    IADD R1, 1
+    IADD R0, 1
+    JMP  __concat_strlen_loop
+__concat_strlen_done:
     RET
 
 ;; ---------------------------------------------------------------------------
