@@ -61,6 +61,20 @@ static SymbolNode *mv_call_symbol (ASTNode *call, bool *is_unknown)
     return NULL;
 }
 
+// string.byte(s, i, j): the one string intrinsic that returns a list.
+bool mv_is_strbyte (ASTNode *e)
+{
+    if (e == NULL || e->type != NODE_FUNCTION_CALL || e->as.call.is_method_call) return false;
+    ASTNode *t = e->as.call.target;
+    if (t == NULL) return false;
+    char path[256] = {0};
+    if (!resolve_static_path (t, path) || strcmp (path, "string.byte") != 0) return false;
+    if (resolve_symbol (path) != NULL) return false;      // a user's own string.byte
+    int n = 0;
+    for (ASTNode *a = e->as.call.args_head; a != NULL; a = a->next) n++;
+    return n == 3;
+}
+
 bool mv_is_unpack (ASTNode *e)
 {
     if (e == NULL || e->type != NODE_FUNCTION_CALL) return false;
@@ -75,7 +89,7 @@ bool mv_is_tail (ASTNode *e)
     if (e == NULL) return false;
     if (e->type == NODE_VARIADIC_EXPR) return e->as.vararg.index == 0;
     if (e->type != NODE_FUNCTION_CALL) return false;
-    if (mv_is_unpack (e)) return true;
+    if (mv_is_unpack (e) || mv_is_strbyte (e)) return true;
     bool unknown;
     SymbolNode *s = mv_call_symbol (e, &unknown);
     if (s != NULL) return s->return_count > 1 || s->returns_mv;
@@ -143,7 +157,9 @@ void emit_mv_to_buf (ASTNode *e)
         return;
     }
 
-    if (mv_is_unpack (e)) {
+    if (mv_is_unpack (e) || mv_is_strbyte (e)) {
+        bool sb = mv_is_strbyte (e);
+        if (sb) runtime_req.needs_strings = true;
         ASTNode *a = e->as.call.args_head;
         int r = allocate_pinned_register ();
         for (int k = 0; k < 3; k++) {
@@ -157,7 +173,7 @@ void emit_mv_to_buf (ASTNode *e)
             emit_asm ("PUSH R%d ; unpack() argument %d\n", r, k + 1);
         }
         unlock_pinned_register (r);
-        emit_asm ("CALL __mv_unpack\n");
+        emit_asm ("CALL %s\n", sb ? "__mv_string_byte" : "__mv_unpack");
         emit_asm ("IADD SP, 3\n");
         return;
     }
@@ -189,7 +205,7 @@ void emit_mv_return (ASTNode *exprs)
     while (tail->next != NULL) { tail = tail->next; k++; }
 
     // a lone call to a Lua function already leaves exactly this state
-    if (k == 0 && tail->type == NODE_FUNCTION_CALL && !mv_is_unpack (tail)) {
+    if (k == 0 && tail->type == NODE_FUNCTION_CALL && !mv_is_unpack (tail) && !mv_is_strbyte (tail)) {
         int r = alloc_not_r2r3 ();
         mark_register_live (r, 4);
         generate_asm (tail, r);

@@ -91,6 +91,7 @@ void  numlocals_leave          (void);
 // node/multivalue.c
 bool  mv_is_tail               (ASTNode *);
 bool  mv_is_unpack             (ASTNode *);
+bool  mv_is_strbyte             (ASTNode *);
 bool  body_returns_mv          (ASTNode *);
 void  emit_mv_to_buf           (ASTNode *);
 void  emit_mv_return           (ASTNode *);

@@ -1883,6 +1883,20 @@ int  try_emit_table_get_intrinsic (ASTNode *table_expr, ASTNode *key_expr, int d
         }
     }
 
+    // --- string.byte as a function value (`local byte = string.byte`) ---
+    // A callable label that returns the full multi-value list; other
+    // string.* functions keep their existing handling.
+    if (strcmp (base_path, "string") == 0 &&
+        strcmp (key_expr->as.string_val.value, "byte") == 0) {
+        runtime_req.needs_strings = true;
+        if (dest_reg != 0) {
+            emit_asm ("    ;; --- string.byte (function value, not called) ---\n");
+            emit_asm ("    MOV R%d, __strfn_byte\n", dest_reg);
+            emit_asm ("    OR  R%d, BOXED_FUNCTION ; Box as Function\n", dest_reg);
+        }
+        return 1;
+    }
+
     // Build full path first
     char full_path[512];
     snprintf(full_path, sizeof(full_path), "%s.%s", base_path, key_expr->as.string_val.value);

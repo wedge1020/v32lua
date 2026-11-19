@@ -226,7 +226,7 @@ static void node_multiple_assignment_body(ASTNode *node)
         for (ASTNode *t = curr_tgt; t != NULL; t = t->next) nt++;
         for (ASTNode *v = curr_val; v != NULL; v = v->next) { nv++; lastv = v; }
         if (lastv != NULL && nt - (nv - 1) >= 2 && mv_is_tail(lastv) && !is_table_unpack_call(lastv)) {
-            if (lastv->type == NODE_VARIADIC_EXPR || nv > 1 || nt > 3) {
+            if (lastv->type == NODE_VARIADIC_EXPR || nv > 1 || nt > 3 || mv_is_strbyte(lastv)) {
                 mv_assign = true;
             } else {
                 char path[256] = {0};

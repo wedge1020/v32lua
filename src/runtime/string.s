@@ -1386,6 +1386,21 @@ __string_byte_validate:
     POP   R2                  ; restore start index
     POP   R1                  ; restore string pointer
 
+    ;; Negative indices count from the end: 0-based k < -1 (1-based < 0)
+    ;; becomes k + length + 1.
+    MOV   R5, R2
+    ILT   R5, -1
+    JF    R5, __string_byte_start_ok
+    IADD  R2, R4
+    IADD  R2, 1
+__string_byte_start_ok:
+    MOV   R5, R3
+    ILT   R5, -1
+    JF    R5, __string_byte_end_ok
+    IADD  R3, R4
+    IADD  R3, 1
+__string_byte_end_ok:
+
     ;; Validate: start >= 0 AND start < length. Use a scratch register (R5)
     ;; for these comparisons -- R2/R3 are still needed below at Step 5 to
     ;; compute the byte address, and ILT/IGE destructively overwrite their
@@ -3343,15 +3358,146 @@ __strmeth_sub:
     POP  BP
     RET
 __strmeth_byte:
+__strfn_byte:
+    ;; string.byte as a function value / s:byte(i, j): called through
+    ;; __builtin_exec with R13 = argument count. Missing arguments are nil
+    ;; (the stack past the real arguments is garbage). Returns the Lua
+    ;; multi-value form: R0/R2/R3 + MV_BUF, [RET_COUNT] = j - i + 1.
+    PUSH BP
+    MOV  BP, SP
+    MOV  R1, R13                 ; argument count
+    MOV  R4, BOXED_NIL           ; j
+    MOV  R5, BOXED_NIL           ; i
+    MOV  R6, R1
+    IGT  R6, 2
+    JF   R6, __strfn_byte_noj
+    MOV  R4, [BP+4]
+__strfn_byte_noj:
+    MOV  R6, R1
+    IGT  R6, 1
+    JF   R6, __strfn_byte_noi
+    MOV  R5, [BP+3]
+__strfn_byte_noi:
+    MOV  R0, [BP+2]
+    PUSH R0
+    PUSH R5
+    PUSH R4
+    CALL __mv_string_byte
+    IADD SP, 3
+    MOV  R6, MV_BUF
+    MOV  R0, [R6]
+    MOV  R2, [R6+1]
+    MOV  R3, [R6+2]
+    MOV  R1, [RET_COUNT]
+    MOV  R4, R1
+    IGT  R4, 0
+    JT   R4, __strfn_byte_has0
+    MOV  R0, BOXED_NIL
+__strfn_byte_has0:
+    MOV  R4, R1
+    IGT  R4, 1
+    JT   R4, __strfn_byte_has1
+    MOV  R2, BOXED_NIL
+__strfn_byte_has1:
+    IGT  R1, 2
+    JT   R1, __strfn_byte_has2
+    MOV  R3, BOXED_NIL
+__strfn_byte_has2:
+    MOV  SP, BP
+    POP  BP
+    RET
+
+;; __mv_string_byte(s, i, j): [BP+4] = s, [BP+3] = i, [BP+2] = j (nil: i = 1,
+;; j = i). Lua semantics: negative indices count from the end, ranges clamp
+;; to the string. The bytes go to MV_BUF, [RET_COUNT] = how many (<= MV_MAX).
+__mv_string_byte:
     PUSH BP
     MOV  BP, SP
     MOV  R0, [BP+4]
-    PUSH R0
-    MOV  R0, [BP+3]
-    PUSH R0
-    MOV  R0, [BP+2]
-    PUSH R0
-    CALL __builtin_string_byte
+    MOV  R1, R0
+    AND  R1, BOXED_DATA
+    IEQ  R1, BOXED_ROMSTRING
+    JT   R1, __mvsb_isstr
+    MOV  R1, R0
+    AND  R1, BOXED_DATA
+    IEQ  R1, BOXED_RAMSTRING
+    JF   R1, __mvsb_none
+__mvsb_isstr:
+    CALL __unbox_string          ; R0 = address (clobbers R1)
+    MOV  R1, R0                  ; R1 = base
+    MOV  R4, 0                   ; R4 = length
+__mvsb_len:
+    MOV  R0, R1
+    IADD R0, R4
+    MOV  R0, [R0]
+    JF   R0, __mvsb_len_done
+    IADD R4, 1
+    JMP  __mvsb_len
+__mvsb_len_done:
+    MOV  R2, [BP+3]              ; i
+    MOV  R0, R2
+    IEQ  R0, BOXED_NIL
+    JF   R0, __mvsb_have_i
+    MOV  R2, 1.0
+__mvsb_have_i:
+    FLR  R2
+    CFI  R2
+    MOV  R0, R2
+    ILT  R0, 0
+    JF   R0, __mvsb_i_pos
+    IADD R2, R4
+    IADD R2, 1                   ; negative: from the end
+__mvsb_i_pos:
+    MOV  R0, R2
+    ILT  R0, 1
+    JF   R0, __mvsb_i_ok
+    MOV  R2, 1
+__mvsb_i_ok:
+    MOV  R3, [BP+2]              ; j
+    MOV  R0, R3
+    IEQ  R0, BOXED_NIL
+    JF   R0, __mvsb_have_j
+    MOV  R3, R2                  ; j defaults to i
+    JMP  __mvsb_j_pos
+__mvsb_have_j:
+    FLR  R3
+    CFI  R3
+    MOV  R0, R3
+    ILT  R0, 0
+    JF   R0, __mvsb_j_pos
+    IADD R3, R4
+    IADD R3, 1
+__mvsb_j_pos:
+    MOV  R0, R3
+    IGT  R0, R4
+    JF   R0, __mvsb_j_done
+    MOV  R3, R4                  ; clamp to the length
+__mvsb_j_done:
+    ISUB R3, R2
+    IADD R3, 1                   ; count = j - i + 1
+    MOV  R0, R3
+    ILT  R0, 0
+    JF   R0, __mvsb_cnt_pos
+    MOV  R3, 0
+__mvsb_cnt_pos:
+    IMIN R3, MV_MAX
+    MOV  [RET_COUNT], R3
+    ISUB R2, 1
+    IADD R1, R2                  ; first byte's address
+    MOV  R5, MV_BUF
+__mvsb_loop:
+    JF   R3, __mvsb_done
+    MOV  R0, [R1]
+    CIF  R0
+    MOV  [R5], R0
+    IADD R1, 1
+    IADD R5, 1
+    ISUB R3, 1
+    JMP  __mvsb_loop
+__mvsb_none:
+    MOV  R0, 0
+    MOV  [RET_COUNT], R0
+__mvsb_done:
     MOV  SP, BP
     POP  BP
     RET
