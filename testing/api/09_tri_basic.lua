@@ -1,5 +1,5 @@
 --#api tic80
--- tri(): filled triangle, drawn as one rect() span per row (prelude).
+-- tri(): filled triangle, drawn as one swatch blit per row (native).
 -- Covers: normal winding, reversed winding, degenerate (nothing drawn),
 -- partly off-screen, and a program that defines its own tri().
 function TIC()

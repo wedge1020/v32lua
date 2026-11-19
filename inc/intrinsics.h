@@ -153,6 +153,7 @@ bool  emit_tic80_pix_intrinsic   (ASTNode *, int);
 bool  emit_tic80_line_intrinsic  (ASTNode *, int);
 bool  emit_tic80_rect_intrinsic  (ASTNode *, int);
 bool  emit_tic80_rectb_intrinsic (ASTNode *, int);
+bool  emit_tic80_tri_intrinsic   (ASTNode *, int);
 bool  emit_tic80_circ_intrinsic  (ASTNode *, int);
 bool  emit_tic80_circb_intrinsic (ASTNode *, int);
 

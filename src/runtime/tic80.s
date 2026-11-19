@@ -2474,6 +2474,456 @@ __tic80_rect_draw:
     OUT   GPU_Command, GPUCommand_DrawRegionZoomed
     RET
 
+;; ===========================================================================
+;; __builtin_tic80_tri -- tri(x1, y1, x2, y2, x3, y3, color)   [filled]
+;; Stack: [BP+2] = x1 ... [BP+7] = y3, [BP+8] = color. Fills the pixels whose
+;; centers lie inside the triangle (the same coverage rule as TIC-80's
+;; software rasterizer, to within an edge pixel): each edge's weight is
+;; linear in (column, row), so it bounds the columns of a row by
+;; c + m * row; a row is then one DrawRegionZoomed of the color's swatch.
+;; Everything is on screen (the bounding box is clipped to 240 x 136 first).
+;; Preserves R6-R13.
+;; ===========================================================================
+__builtin_tic80_tri:
+    PUSH  BP
+    MOV   BP, SP
+    ISUB  SP, 26
+    MOV   [BP-23], R6
+    MOV   [BP-24], R7
+    MOV   [BP-25], R8
+    MOV   [BP-26], R9
+    MOV   R0, [BP+2]
+    MOV   [BP-1], R0
+    MOV   R0, [BP+3]
+    MOV   [BP-2], R0
+    MOV   R0, [BP+4]
+    MOV   [BP-3], R0
+    MOV   R0, [BP+5]
+    MOV   [BP-4], R0
+    MOV   R0, [BP+6]
+    MOV   [BP-5], R0
+    MOV   R0, [BP+7]
+    MOV   [BP-6], R0
+    MOV   R0, [BP+8]
+    MOV   [BP-7], R0
+    MOV   R0, [BP-3]
+    MOV   R1, [BP-1]
+    FSUB  R0, R1
+    MOV   R1, [BP-6]
+    MOV   R2, [BP-2]
+    FSUB  R1, R2
+    FMUL  R0, R1
+    MOV   R1, [BP-4]
+    FSUB  R1, R2
+    MOV   R2, [BP-5]
+    MOV   R3, [BP-1]
+    FSUB  R2, R3
+    FMUL  R1, R2
+    FSUB  R0, R1
+    MOV   R1, R0
+    FLR   R1
+    FEQ   R1, 0.0
+    JT    R1, __tic80_tri_done
+    MOV   R1, R0
+    FLT   R1, 0.0
+    JF    R1, __tic80_tri_oriented
+    MOV   R1, [BP-3]
+    MOV   R2, [BP-5]
+    MOV   [BP-3], R2
+    MOV   [BP-5], R1
+    MOV   R1, [BP-4]
+    MOV   R2, [BP-6]
+    MOV   [BP-4], R2
+    MOV   [BP-6], R1
+    FSGN  R0
+__tic80_tri_oriented:
+    MOV   [BP-13], R0
+    MOV   R0, [BP-1]
+    MOV   R1, [BP-3]
+    FMIN  R0, R1
+    MOV   R1, [BP-5]
+    FMIN  R0, R1
+    FLR   R0
+    FMAX  R0, 0.0
+    MOV   [BP-8], R0
+    MOV   R0, [BP-1]
+    MOV   R1, [BP-3]
+    FMAX  R0, R1
+    MOV   R1, [BP-5]
+    FMAX  R0, R1
+    FSGN  R0
+    FLR   R0
+    FSGN  R0
+    FMIN  R0, 240.0
+    MOV   R1, [BP-8]
+    MOV   R2, R1
+    FGE   R2, R0
+    JT    R2, __tic80_tri_done
+    FSUB  R0, R1
+    FSUB  R0, 1.0
+    MOV   [BP-10], R0
+    MOV   R0, [BP-2]
+    MOV   R1, [BP-4]
+    FMIN  R0, R1
+    MOV   R1, [BP-6]
+    FMIN  R0, R1
+    FLR   R0
+    FMAX  R0, 0.0
+    MOV   [BP-9], R0
+    MOV   R0, [BP-2]
+    MOV   R1, [BP-4]
+    FMAX  R0, R1
+    MOV   R1, [BP-6]
+    FMAX  R0, R1
+    FSGN  R0
+    FLR   R0
+    FSGN  R0
+    FMIN  R0, 136.0
+    MOV   R1, [BP-9]
+    MOV   R2, R1
+    FGE   R2, R0
+    JT    R2, __tic80_tri_done
+    FSUB  R0, R1
+    FSUB  R0, 1.0
+    MOV   [BP-12], R0
+    MOV   R0, 0.0
+    MOV   [BP-11], R0
+    MOV   R4, [BP-8]
+    FADD  R4, 0.49999988
+    MOV   R5, [BP-9]
+    FADD  R5, 0.49999988
+    MOV   R0, [BP-13]
+    MOV   R3, 1.0
+    FDIV  R3, R0
+    MOV   R0, [BP-4]
+    MOV   R1, [BP-6]
+    FSUB  R0, R1
+    FMUL  R0, R3
+    MOV   R1, [BP-5]
+    MOV   R2, [BP-3]
+    FSUB  R1, R2
+    MOV   R6, R1
+    MOV   R7, R5
+    MOV   R8, [BP-4]
+    FSUB  R7, R8
+    FMUL  R7, R6
+    MOV   R8, [BP-6]
+    MOV   R9, [BP-4]
+    FSUB  R8, R9
+    MOV   R9, R4
+    MOV   R2, [BP-3]
+    FSUB  R9, R2
+    FMUL  R8, R9
+    FSUB  R7, R8
+    FMUL  R7, R3
+    MOV   R2, R7
+    FMUL  R1, R3
+    MOV   R6, R0
+    FGT   R6, 0.0
+    JT    R6, __tic80_tri_e1_lo
+    MOV   R6, R0
+    FLT   R6, 0.0
+    JT    R6, __tic80_tri_e1_hi
+    ; flat edge: limits the rows only
+    MOV   R6, R1
+    FGT   R6, 0.0
+    JT    R6, __tic80_tri_e1_ypos
+    MOV   R6, R1
+    FLT   R6, 0.0
+    JT    R6, __tic80_tri_e1_yneg
+    MOV   R6, R2
+    FLT   R6, 0.0
+    JT    R6, __tic80_tri_done
+    MOV   R6, 0
+    JMP   __tic80_tri_e1_set
+__tic80_tri_e1_ypos:
+    MOV   R6, R2
+    FSGN  R6
+    FDIV  R6, R1
+    FSGN  R6
+    FLR   R6
+    FSGN  R6
+    MOV   R7, [BP-11]
+    FMAX  R6, R7
+    MOV   [BP-11], R6
+    MOV   R6, 0
+    JMP   __tic80_tri_e1_set
+__tic80_tri_e1_yneg:
+    MOV   R6, R2
+    FSGN  R6
+    FDIV  R6, R1
+    FLR   R6
+    MOV   R7, [BP-12]
+    FMIN  R6, R7
+    MOV   [BP-12], R6
+    MOV   R6, 0
+    JMP   __tic80_tri_e1_set
+__tic80_tri_e1_lo:
+    MOV   R6, 1
+    JMP   __tic80_tri_e1_cm
+__tic80_tri_e1_hi:
+    MOV   R6, 2
+__tic80_tri_e1_cm:
+    ; c = -b/ax, m = -ay/ax
+    FSGN  R2
+    FDIV  R2, R0
+    FSGN  R1
+    FDIV  R1, R0
+    MOV   [BP-15], R2
+    MOV   [BP-16], R1
+__tic80_tri_e1_set:
+    MOV   [BP-14], R6
+    MOV   R0, [BP-6]
+    MOV   R1, [BP-2]
+    FSUB  R0, R1
+    FMUL  R0, R3
+    MOV   R1, [BP-1]
+    MOV   R2, [BP-5]
+    FSUB  R1, R2
+    MOV   R6, R1
+    MOV   R7, R5
+    MOV   R8, [BP-6]
+    FSUB  R7, R8
+    FMUL  R7, R6
+    MOV   R8, [BP-2]
+    MOV   R9, [BP-6]
+    FSUB  R8, R9
+    MOV   R9, R4
+    MOV   R2, [BP-5]
+    FSUB  R9, R2
+    FMUL  R8, R9
+    FSUB  R7, R8
+    FMUL  R7, R3
+    MOV   R2, R7
+    FMUL  R1, R3
+    MOV   R6, R0
+    FGT   R6, 0.0
+    JT    R6, __tic80_tri_e2_lo
+    MOV   R6, R0
+    FLT   R6, 0.0
+    JT    R6, __tic80_tri_e2_hi
+    ; flat edge: limits the rows only
+    MOV   R6, R1
+    FGT   R6, 0.0
+    JT    R6, __tic80_tri_e2_ypos
+    MOV   R6, R1
+    FLT   R6, 0.0
+    JT    R6, __tic80_tri_e2_yneg
+    MOV   R6, R2
+    FLT   R6, 0.0
+    JT    R6, __tic80_tri_done
+    MOV   R6, 0
+    JMP   __tic80_tri_e2_set
+__tic80_tri_e2_ypos:
+    MOV   R6, R2
+    FSGN  R6
+    FDIV  R6, R1
+    FSGN  R6
+    FLR   R6
+    FSGN  R6
+    MOV   R7, [BP-11]
+    FMAX  R6, R7
+    MOV   [BP-11], R6
+    MOV   R6, 0
+    JMP   __tic80_tri_e2_set
+__tic80_tri_e2_yneg:
+    MOV   R6, R2
+    FSGN  R6
+    FDIV  R6, R1
+    FLR   R6
+    MOV   R7, [BP-12]
+    FMIN  R6, R7
+    MOV   [BP-12], R6
+    MOV   R6, 0
+    JMP   __tic80_tri_e2_set
+__tic80_tri_e2_lo:
+    MOV   R6, 1
+    JMP   __tic80_tri_e2_cm
+__tic80_tri_e2_hi:
+    MOV   R6, 2
+__tic80_tri_e2_cm:
+    ; c = -b/ax, m = -ay/ax
+    FSGN  R2
+    FDIV  R2, R0
+    FSGN  R1
+    FDIV  R1, R0
+    MOV   [BP-18], R2
+    MOV   [BP-19], R1
+__tic80_tri_e2_set:
+    MOV   [BP-17], R6
+    MOV   R0, [BP-2]
+    MOV   R1, [BP-4]
+    FSUB  R0, R1
+    FMUL  R0, R3
+    MOV   R1, [BP-3]
+    MOV   R2, [BP-1]
+    FSUB  R1, R2
+    MOV   R6, R1
+    MOV   R7, R5
+    MOV   R8, [BP-2]
+    FSUB  R7, R8
+    FMUL  R7, R6
+    MOV   R8, [BP-4]
+    MOV   R9, [BP-2]
+    FSUB  R8, R9
+    MOV   R9, R4
+    MOV   R2, [BP-1]
+    FSUB  R9, R2
+    FMUL  R8, R9
+    FSUB  R7, R8
+    FMUL  R7, R3
+    MOV   R2, R7
+    FMUL  R1, R3
+    MOV   R6, R0
+    FGT   R6, 0.0
+    JT    R6, __tic80_tri_e3_lo
+    MOV   R6, R0
+    FLT   R6, 0.0
+    JT    R6, __tic80_tri_e3_hi
+    ; flat edge: limits the rows only
+    MOV   R6, R1
+    FGT   R6, 0.0
+    JT    R6, __tic80_tri_e3_ypos
+    MOV   R6, R1
+    FLT   R6, 0.0
+    JT    R6, __tic80_tri_e3_yneg
+    MOV   R6, R2
+    FLT   R6, 0.0
+    JT    R6, __tic80_tri_done
+    MOV   R6, 0
+    JMP   __tic80_tri_e3_set
+__tic80_tri_e3_ypos:
+    MOV   R6, R2
+    FSGN  R6
+    FDIV  R6, R1
+    FSGN  R6
+    FLR   R6
+    FSGN  R6
+    MOV   R7, [BP-11]
+    FMAX  R6, R7
+    MOV   [BP-11], R6
+    MOV   R6, 0
+    JMP   __tic80_tri_e3_set
+__tic80_tri_e3_yneg:
+    MOV   R6, R2
+    FSGN  R6
+    FDIV  R6, R1
+    FLR   R6
+    MOV   R7, [BP-12]
+    FMIN  R6, R7
+    MOV   [BP-12], R6
+    MOV   R6, 0
+    JMP   __tic80_tri_e3_set
+__tic80_tri_e3_lo:
+    MOV   R6, 1
+    JMP   __tic80_tri_e3_cm
+__tic80_tri_e3_hi:
+    MOV   R6, 2
+__tic80_tri_e3_cm:
+    ; c = -b/ax, m = -ay/ax
+    FSGN  R2
+    FDIV  R2, R0
+    FSGN  R1
+    FDIV  R1, R0
+    MOV   [BP-21], R2
+    MOV   [BP-22], R1
+__tic80_tri_e3_set:
+    MOV   [BP-20], R6
+    ; -- draw: texture 0, the color's swatch
+    OUT   GPU_SelectedTexture, 0
+    MOV   R0, [BP-7]
+    CFI   R0
+    AND   R0, 15
+    IADD  R0, 512
+    OUT   GPU_SelectedRegion, R0
+    MOV   R6, [BP-11]       ; row
+    MOV   R7, [BP-12]       ; last row
+__tic80_tri_row:
+    MOV   R0, R6
+    FGT   R0, R7
+    JT    R0, __tic80_tri_done
+    MOV   R8, 0.0                ; lo
+    MOV   R9, [BP-10]      ; hi
+    MOV   R0, [BP-14]
+    JF    R0, __tic80_tri_n1
+    MOV   R1, [BP-16]
+    FMUL  R1, R6
+    MOV   R2, [BP-15]
+    FADD  R1, R2
+    IEQ   R0, 1
+    JF    R0, __tic80_tri_h1
+    FSGN  R1
+    FLR   R1
+    FSGN  R1
+    FMAX  R8, R1
+    JMP   __tic80_tri_n1
+__tic80_tri_h1:
+    FLR   R1
+    FMIN  R9, R1
+__tic80_tri_n1:
+    MOV   R0, [BP-17]
+    JF    R0, __tic80_tri_n2
+    MOV   R1, [BP-19]
+    FMUL  R1, R6
+    MOV   R2, [BP-18]
+    FADD  R1, R2
+    IEQ   R0, 1
+    JF    R0, __tic80_tri_h2
+    FSGN  R1
+    FLR   R1
+    FSGN  R1
+    FMAX  R8, R1
+    JMP   __tic80_tri_n2
+__tic80_tri_h2:
+    FLR   R1
+    FMIN  R9, R1
+__tic80_tri_n2:
+    MOV   R0, [BP-20]
+    JF    R0, __tic80_tri_n3
+    MOV   R1, [BP-22]
+    FMUL  R1, R6
+    MOV   R2, [BP-21]
+    FADD  R1, R2
+    IEQ   R0, 1
+    JF    R0, __tic80_tri_h3
+    FSGN  R1
+    FLR   R1
+    FSGN  R1
+    FMAX  R8, R1
+    JMP   __tic80_tri_n3
+__tic80_tri_h3:
+    FLR   R1
+    FMIN  R9, R1
+__tic80_tri_n3:
+    MOV   R0, R9
+    FGE   R0, R8
+    JF    R0, __tic80_tri_next
+    MOV   R1, [BP-8]
+    FADD  R1, R8
+    CFI   R1
+    MOV   R2, [BP-9]
+    FADD  R2, R6
+    CFI   R2
+    MOV   R3, R9
+    FSUB  R3, R8
+    FADD  R3, 1.0
+    CFI   R3
+    MOV   R4, 1
+    CALL  __tic80_rect_draw
+__tic80_tri_next:
+    FADD  R6, 1.0
+    JMP   __tic80_tri_row
+__tic80_tri_done:
+    MOV   R6, [BP-23]
+    MOV   R7, [BP-24]
+    MOV   R8, [BP-25]
+    MOV   R9, [BP-26]
+    MOV   R0, BOXED_NIL
+    MOV   SP, BP
+    POP   BP
+    RET
+
+
 ;; __tic80_circ_run (internal): one run of first-octant points -- column
 ;; R1 = X, rows R2 = k1 .. R3 = k2 (relative to the center R8, R9) --
 ;; drawn with its 7 mirror images (R11 = 0) or as the 4 row spans it

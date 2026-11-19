@@ -1162,6 +1162,43 @@ bool emit_tic80_rect_intrinsic(ASTNode *node, int dest_reg) {
 }
 
 /**
+ * tri(x1, y1, x2, y2, x3, y3, color) -- filled triangle, drawn by
+ * __builtin_tic80_tri (runtime/tic80.s) as one swatch blit per pixel row.
+ */
+bool emit_tic80_tri_intrinsic(ASTNode *node, int dest_reg) {
+    emit_asm("    ;; --- TIC-80 tri() Intrinsic ---\n");
+
+    ASTNode *args[7];
+    int arg_count = 0;
+    for (ASTNode *curr = node->as.call.args_head; curr != NULL; curr = curr->next) {
+        if (arg_count < 7) args[arg_count] = curr;
+        arg_count++;
+    }
+    if (arg_count != 7) {
+        compiler_error(ERR_SEMANTIC, node->line_number,
+                      "TIC-80 tri() requires 7 arguments: tri(x1, y1, x2, y2, x3, y3, color)");
+        return false;
+    }
+
+    for (int i = 6; i >= 0; i--) {
+        int reg = allocate_register();
+        register_pinned[reg] = 1;
+        generate_asm(args[i], reg);
+        emit_asm("PUSH R%d ; tri() arg %d\n", reg, i);
+        register_pinned[reg] = 0;
+        unlock_register(reg);
+    }
+
+    emit_asm("CALL __builtin_tic80_tri\n");
+    emit_asm("IADD SP, 7 ; Clean up tri() arguments\n");
+
+    if (dest_reg != 0) {
+        emit_asm("MOV R%d, R0 ; Transfer result to dest_reg\n", dest_reg);
+    }
+    return true;
+}
+
+/**
  * Emits assembly for the rectb() intrinsic (TIC-80 compatibility).
  * Syntax: rectb(x, y, w, h, color) -- rectangle border only
  */

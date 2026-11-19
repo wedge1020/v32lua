@@ -1134,6 +1134,12 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
             return (emit_tic80_rect_intrinsic (node, dest_reg));
         }
 
+        // tri() -- filled triangle
+        if (strcmp (func_name, "tri") == 0)
+        {
+            return (emit_tic80_tri_intrinsic (node, dest_reg));
+        }
+
         // rectb() -- rectangle border
         if (strcmp (func_name, "rectb") == 0)
         {

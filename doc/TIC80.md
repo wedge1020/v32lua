@@ -129,8 +129,10 @@ compiler and the GPU writes emitted directly, with no call.
 `tri(x1, y1, x2, y2, x3, y3, color)` fills a triangle using TIC-80's own
 rule (a pixel is inside when its three barycentric weights are all
 non-negative, so either winding works and degenerate triangles draw
-nothing). It is a Lua prelude that finds each row's covered run and draws it
-as one `rect`, so a triangle costs one GPU draw per row, not per pixel.
+nothing). It is native assembly (`__builtin_tic80_tri`): it finds each row's
+covered run and draws it as one swatch blit, so a triangle costs one GPU draw
+per row, not per pixel, and about 100 CPU cycles per row besides. A cart that
+defines its own `tri` keeps it.
 
 Carts that pack their code into cart memory and run it with
 `assert(load(...))()` can be unpacked before compiling:
