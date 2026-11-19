@@ -646,87 +646,74 @@ bool emit_math_fmod_intrinsic(ASTNode *node, int dest_reg)
 }
 
 /**
- * Emits assembly for the math.max(x, y) intrinsic.
+ * Shared emitter for math.max(x, ...) and math.min(x, ...).
  *
- * Returns the larger of x and y.
- * Uses Vircon32 FMAX instruction directly.
+ * Like Lua, accepts one or more arguments and folds left:
+ * min(a, b, c) == min(min(a, b), c).  One argument returns it unchanged.
+ * Each step is a single FMAX/FMIN register-register instruction.
  */
-bool emit_math_max_intrinsic(ASTNode *node, int dest_reg)
+static bool emit_math_minmax(ASTNode *node, int dest_reg, bool is_min)
 {
-    ASTNode *arg = node->as.call.args_head;
+    const char *name = is_min ? "math.min" : "math.max";
+    const char *op   = is_min ? "FMIN"     : "FMAX";
+    ASTNode    *arg  = node->as.call.args_head;
 
-    if (!arg || !arg->next || arg->next->next != NULL) {
+    if (!arg) {
         compiler_error(ERR_SYNTAX, node->line_number,
-            "math.max() expects exactly two arguments");
+            "%s() expects at least one argument", name);
         return false;
     }
 
-    emit_asm("    ;; --- Intrinsic: math.max(x, y) ---\n");
+    emit_asm("    ;; --- Intrinsic: %s(x, ...) ---\n", name);
 
-    // The second argument may CALL (max(a, f())), and registers don't
-    // survive a CALL: hold the first on the stack meanwhile (as node_add()).
     int x_reg = allocate_register();
     generate_asm(arg, x_reg);
     ensure_in_register(x_reg);
-    emit_asm("PUSH R%d ; hold the first argument while the second is evaluated\n", x_reg);
 
-    int y_reg = allocate_register();
-    mark_register_live(y_reg, 1);
-    generate_asm(arg->next, y_reg);
-    ensure_in_register(y_reg);
-    emit_asm("POP R%d\n", x_reg);
+    for (arg = arg->next; arg != NULL; arg = arg->next) {
+        // A later argument may CALL (max(a, f())), and registers don't
+        // survive a CALL: hold the running result on the stack meanwhile
+        // (as node_add()).
+        emit_asm("PUSH R%d ; hold the running result while the next argument is evaluated\n", x_reg);
 
-    emit_asm("FMAX R%d, R%d ; R%d = max(R%d, R%d)\n", x_reg, y_reg, x_reg, x_reg, y_reg);
+        int y_reg = allocate_register();
+        mark_register_live(y_reg, 1);
+        generate_asm(arg, y_reg);
+        ensure_in_register(y_reg);
+        emit_asm("POP R%d\n", x_reg);
+
+        emit_asm("%s R%d, R%d ; R%d = %s(R%d, R%d)\n", op, x_reg, y_reg, x_reg,
+                 is_min ? "min" : "max", x_reg, y_reg);
+
+        unlock_register(y_reg);
+    }
 
     if (dest_reg != 0) {
         emit_asm("    MOV R%d, R%d ; Transfer result to dest_reg\n", dest_reg, x_reg);
     }
 
     unlock_register(x_reg);
-    unlock_register(y_reg);
     return true;
 }
 
 /**
- * Emits assembly for the math.min(x, y) intrinsic.
+ * Emits assembly for the math.max(x, ...) intrinsic.
  *
- * Returns the smaller of x and y.
- * Uses Vircon32 FMIN instruction directly.
+ * Returns the largest argument (one or more, as in Lua).
+ */
+bool emit_math_max_intrinsic(ASTNode *node, int dest_reg)
+{
+    return emit_math_minmax(node, dest_reg, false);
+}
+
+/**
+ * Emits assembly for the math.min(x, ...) intrinsic.
+ *
+ * Returns the smallest argument (one or more, as in Lua).
  */
 bool emit_math_min_intrinsic(ASTNode *node, int dest_reg)
 {
-    ASTNode *arg = node->as.call.args_head;
-
-    if (!arg || !arg->next || arg->next->next != NULL) {
-        compiler_error(ERR_SYNTAX, node->line_number,
-            "math.min() expects exactly two arguments");
-        return false;
-    }
-
-    emit_asm("    ;; --- Intrinsic: math.min(x, y) ---\n");
-
-    // The second argument may CALL (max(a, f())), and registers don't
-    // survive a CALL: hold the first on the stack meanwhile (as node_add()).
-    int x_reg = allocate_register();
-    generate_asm(arg, x_reg);
-    ensure_in_register(x_reg);
-    emit_asm("PUSH R%d ; hold the first argument while the second is evaluated\n", x_reg);
-
-    int y_reg = allocate_register();
-    mark_register_live(y_reg, 1);
-    generate_asm(arg->next, y_reg);
-    ensure_in_register(y_reg);
-    emit_asm("POP R%d\n", x_reg);
-
-    emit_asm("FMIN R%d, R%d ; R%d = min(R%d, R%d)\n", x_reg, y_reg, x_reg, x_reg, y_reg);
-
-    if (dest_reg != 0) {
-        emit_asm("    MOV R%d, R%d ; Transfer result to dest_reg\n", dest_reg, x_reg);
-    }
-
-    unlock_register(x_reg);
-    unlock_register(y_reg);
-    return true;
+    return emit_math_minmax(node, dest_reg, true);
 }
 
 // ============================================================================

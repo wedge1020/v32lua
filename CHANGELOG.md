@@ -1,5 +1,9 @@
 # Changelog
 
+## 20261119-dev
+
+- **`math.min` / `math.max` take any number of arguments**, as in Lua (one or more, folded left: `min(a, b, c) == min(min(a, b), c)`; one argument is returned unchanged). They were refused for anything but exactly two (`math.min() expects exactly two arguments`), which stopped BlasTIC's `math.min(1, v.t/200, (v.len-v.t)/300)`. One shared emitter (`emit_math_minmax`, `src/intrinsics/math.c`) does the `PUSH`/evaluate/`POP`/`FMIN|FMAX` step per extra argument, so a later argument may still `CALL`. A call with no arguments is refused (`expects at least one argument`). Two-argument calls compile to the same instructions as before (30 programs diffed). Tests: `testing/math/09_math_minmax_variadic.lua`, `tests/audit/minmax.lua`, `testing/fail/minmax00.lua`.
+
 ## 20261114-dev
 
 - **`AGENTS.md`: notes for larger programs.** Pooling instead of per-frame allocation (no GC), table field reads as builtin calls, top-level `local`s shared across `--#include`d files, positional resource hints, `-1` as the no-tint multiply color. Documentation only; `AGENTS.md` is English only, `README`/`API`/`USAGE` translations unchanged. Also: sorted lists with windowed iteration for long levels, and two hidden per-frame allocators (menu string concatenation, per-frame cloud tables).
