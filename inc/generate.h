@@ -23,6 +23,8 @@ extern FILE *active_out_stream;
 // the same with or without them.
 void skip_fn_add     (const char *list);
 bool skip_fn_matches (const char *name);
+void hook_fn_add     (const char *list);
+const char *hook_fn_for (const char *name);
 extern bool g_emit_hints;                       // --no-hints turns them off
 void   emit_hint          (const char *fmt, ...);   // one ';@' line, as given
 bool   hints_fn_begin     (void);               // start tracking frame addresses; returns the outer state

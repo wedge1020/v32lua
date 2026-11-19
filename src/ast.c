@@ -265,6 +265,10 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
         // --#skip-fn updateMusic[, other]: those functions get an empty body
         skip_fn_add (raw_hint + strlen ("skip-fn"));
     }
+    else if (strcmp(action, "hook-fn") == 0 && tokens >= 2) {
+        // --#hook-fn fn=hook[, fn2=hook2]
+        hook_fn_add (raw_hint + strlen ("hook-fn"));
+    }
     else if (strcmp(action, "bdr-step") == 0 && tokens >= 2) {
         // --#bdr-step n: TIC-80 BDR(row) runs on every nth screen row
         tic80_bdr_step = atoi (param1);

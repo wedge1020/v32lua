@@ -300,3 +300,46 @@ data. A bank the cart doesn't have reads as zeros (the palette is left alone). O
 the RAM changes: `spr()` still draws the sheet built from bank 0 at compile time, so
 tile/sprite banks are for `peek`, not for drawing. Banked sections cost ROM only when
 the program calls `sync`.
+
+## Music a cart synthesizes itself (`--hook-fn`, `tools/tic80_pcm_capture.py`)
+
+A cart can mix its music in Lua, every frame, into a PCM buffer in RAM (BlasTIC:
+`updateMusic()` writes 128 samples a frame at 7680 Hz to 0x14E24). The SPU plays only
+sounds that are in the cartridge, and the synth takes several frames of CPU for each
+frame of sound, so this cannot be streamed. Instead the music is rendered offline, one
+sound per start event, and played when the cart starts it -- without editing the cart.
+
+**`--hook-fn FN=HOOK`** (or `--#hook-fn FN=HOOK`, repeatable, comma separated) puts
+`if HOOK(<FN's parameters>) then return end` at the top of FN's body. The hook is an
+ordinary function of the program; it sees every call and may handle it instead of
+FN's own code by returning `true`. Works for any function (`Obj.method` too).
+
+**`tools/tic80_pcm_capture.py`** does the whole job:
+
+    tic80_pcm_capture.py blastic.lua -o pcm/ --mixer updateMusic --pcm 0x14E24,128 \
+        --rate 7680 --music-fn startSong --sfx-fn sndExplosion --setup 'loadSamples()' \
+        --event 'startSong(1,false)' --event 'startSong(2,true)' ... \
+        --event 'startSong(1~,true,MOODS.calm)' --event 'sndExplosion()'
+
+For each `--event` (a call of the music function or of a one-shot sfx function, literal
+arguments; `1~` is a wildcard captured as 1 that matches any value) the tool compiles
+the cart with a driver, runs it headless, and logs every sample the mixer leaves in the
+PCM buffer. Calls the cart makes to the music function itself while the sound renders
+(the next song, or the same one again to loop) are skipped and recorded with their
+position. Output: `<stem>_pcm_NN.vsnd`, `<stem>_pcm.lua` (the `--#sound` and
+`--#hook-fn` lines and the run-time) and `<stem>_pcm_main.lua` (includes the cart, then
+the hooks). Compile the `_main` file.
+
+At run time a call of the music function plays its sound on SPU channels 8-11 (sfx
+12-15; channel 0 and 4-7 stay the TIC-80 layer's), the mixer is replaced by a tick that
+fires the recorded follow-up calls at the same position of the sound (a crossfade
+overlaps exactly as the synth's did), and a call the *game* makes fades the music that
+is playing out over `--fade` seconds. The functions' own bodies still run, so the cart's
+own bookkeeping (BlasTIC's `musicMood` looks at the song table) keeps working.
+
+Limits: follow-ups are placed to the nearest 128-sample frame; a mixer effect that
+reacts to other game state (BlasTIC ducks the music while an explosion plays) is
+not reproduced; sounds are stored at `--upsample` (default 2) times the cart's rate
+and played at the matching channel speed (the SPU holds samples, so a low rate
+aliases); the size is about 4 bytes per stored sample (BlasTIC's 12 songs and 3
+moods: 56 MB at the default).

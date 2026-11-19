@@ -56,6 +56,46 @@ void skip_fn_add (const char *list)
     free (copy);
 }
 
+// --hook-fn FN=HOOK / --#hook-fn FN=HOOK: at the top of FN's body the compiler
+// inserts `if HOOK(<FN's parameters>) then return end`: the hook (an ordinary
+// function of the program, usually from an --#include'd file) sees every call
+// and may handle it instead of FN's own code by returning true. This is how a
+// cart's software-synth music is replaced by captured sound without touching
+// its source (tools/tic80_pcm_capture.py writes the hooks).
+static char *g_hook_fn[32];
+static char *g_hook_to[32];
+static int   g_hook_count = 0;
+
+void hook_fn_add (const char *list)
+{
+    char *copy = strdup (list);
+    if (copy == NULL) return;
+    for (char *tok = strtok (copy, ", \t"); tok != NULL; tok = strtok (NULL, ", \t")) {
+        char *eq = strchr (tok, '=');
+        if (eq == NULL || eq == tok || eq[1] == '\0' || g_hook_count >= 32) continue;
+        *eq = '\0';
+        g_hook_fn[g_hook_count] = strdup (tok);
+        g_hook_to[g_hook_count] = strdup (eq + 1);
+        g_hook_count++;
+    }
+    free (copy);
+}
+
+// the hook function named for `name` (as skip_fn_matches names it), or NULL
+const char *hook_fn_for (const char *name)
+{
+    char base[256];
+    snprintf (base, sizeof base, "%s", name);
+    char *m = strstr (base, "__m");
+    if (m != NULL && m[3] != '\0' && strspn (m + 3, "0123456789") == strlen (m + 3)) *m = '\0';
+    for (int i = 0; i < g_hook_count; i++) {
+        const char *a = g_hook_fn[i], *b = base;
+        while (*a && *b && ((*a == *b) || ((*a == '.' || *a == ':') && *b == '_'))) { a++; b++; }
+        if (*a == '\0' && *b == '\0') return g_hook_to[i];
+    }
+    return NULL;
+}
+
 // Does `name` (as the compiler names the function: a.b and a:b are a_b)
 // match a --skip-fn entry?
 bool skip_fn_matches (const char *name)

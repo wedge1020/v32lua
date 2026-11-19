@@ -116,6 +116,10 @@ static void  print_usage (const char *prog_name)
     fprintf (stdout, "                   compile the named functions (comma separated, repeatable) with\n");
     fprintf (stdout, "                   an empty body: they still exist and return nil. For work a\n");
     fprintf (stdout, "                   target cannot show anyway (a software synth). Same as --#skip-fn\n");
+    fprintf (stdout, "  --hook-fn <fn=hook>\n");
+    fprintf (stdout, "                   at the top of function fn call hook(fn's parameters); when the\n");
+    fprintf (stdout, "                   hook returns true fn's own body is skipped. Repeatable, comma\n");
+    fprintf (stdout, "                   separated. Same as --#hook-fn\n");
     fprintf (stdout, "  --bdr-step <n>\n");
     fprintf (stdout, "                   TIC-80: call BDR(row) on every nth screen row only (default 1,\n");
     fprintf (stdout, "                   every row); the palette it set stays for the rows between.\n");
@@ -333,6 +337,9 @@ int  main (int  argc, char** argv)
         } else if ((val = option_value(argc, argv, &i, "--bdr-step")) != NULL) {
             tic80_bdr_step = atoi (val);
             RECORD_OPT ("--bdr-step", val, 0);
+        } else if ((val = option_value(argc, argv, &i, "--hook-fn")) != NULL) {
+            hook_fn_add (val);
+            RECORD_OPT ("--hook-fn", val, 0);
         } else if (strcmp(argv[i], "--no-build-scripts") == 0) {
             build_scripts = 0;
         } else if ((val = option_value(argc, argv, &i, "--rate")) != NULL ||

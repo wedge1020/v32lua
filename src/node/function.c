@@ -12,6 +12,40 @@ void  node_function_def (ASTNode *node)
         node->as.function_def.body = NULL;
     }
 
+    // --hook-fn: `if HOOK(params) then return end` goes first in the body.
+    {
+        const char *hook = (node->as.function_def.body != NULL) ? hook_fn_for (func_name) : NULL;
+        ASTNode *b0 = node->as.function_def.body;
+        if (hook != NULL && b0 != NULL && b0->type == NODE_IF && b0->as.if_stmt.condition != NULL &&
+            b0->as.if_stmt.condition->type == NODE_FUNCTION_CALL &&
+            b0->as.if_stmt.condition->as.call.target != NULL &&
+            b0->as.if_stmt.condition->as.call.target->type == NODE_IDENTIFIER &&
+            strcmp (b0->as.if_stmt.condition->as.call.target->as.id.name, hook) == 0)
+            hook = NULL;                        // already inserted (node generated twice)
+        if (hook != NULL) {
+            ASTNode *args = NULL, *tail = NULL;
+            for (ASTNode *pp = node->as.function_def.params; pp != NULL; pp = pp->next) {
+                if (pp->type != NODE_IDENTIFIER || strcmp (pp->as.id.name, "...") == 0) continue;
+                ASTNode *a = make_node_ident (pp->as.id.name);
+                if (tail) tail->next = a; else args = a;
+                tail = a;
+            }
+            ASTNode *call = make_node (NODE_FUNCTION_CALL);
+            call->as.call.target         = make_node_ident (hook);
+            call->as.call.is_method_call = 0;
+            call->as.call.args_head      = args;
+            ASTNode *ret = make_node (NODE_RETURN);
+            ret->as.return_stmt.expressions_head = NULL;
+            ret->as.return_stmt.parent_func_arg_count = 0;
+            ASTNode *iff = make_node (NODE_IF);
+            iff->as.if_stmt.condition = call;
+            iff->as.if_stmt.if_body   = ret;
+            iff->as.if_stmt.else_body = NULL;
+            iff->next = node->as.function_def.body;
+            node->as.function_def.body = iff;
+        }
+    }
+
     mark_global_as_function (node);
 
     // The body is emitted exactly where this node is generated. Only the
