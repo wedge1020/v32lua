@@ -3348,9 +3348,8 @@ _tic80_scr_n:
     IADD  R1, 4
     CALL  __tic80_bdr
     MOV   R0, [var_TIC80_PALETTE_DIRTY]
-    IEQ   R0, 1
     JF    R0, _tic80_scr_nobdr
-    CALL  _tic80_scr_mktab
+    CALL  _tic80_scr_mkmask     ; R0 = bit mask of the colors written
 _tic80_scr_nobdr:
     MOV   R0, R8
     IMUL  R0, 21
@@ -3464,6 +3463,46 @@ _tic80_scr_pal:
     POP   R5
     POP   R4
     POP   R3
+    RET
+;; _tic80_scr_mkmask (internal): R0 = mask of colors (bit n = color n) whose RAM
+;; palette bytes changed: rebuild just those table entries. Preserves R1-R13.
+_tic80_scr_mkmask:
+    PUSH  R1
+    PUSH  R2
+    PUSH  R3
+    PUSH  R4
+    PUSH  R5
+    MOV   R1, R0
+    CALL  __tic80_ram
+    MOV   R2, R0
+    IADD  R2, 0x3FC0            ; RAM palette bytes
+    MOV   R3, BP
+    ISUB  R3, 17                ; table
+    MOV   R5, 16
+_tic80_scr_mm_loop:
+    MOV   R0, R1
+    AND   R0, 1
+    JF    R0, _tic80_scr_mm_next
+    MOV   R0, [R2]
+    MOV   R4, [R2+1]
+    SHL   R4, 8
+    OR    R0, R4
+    MOV   R4, [R2+2]
+    SHL   R4, 16
+    OR    R0, R4
+    OR    R0, 0xFF000000
+    MOV   [R3], R0
+_tic80_scr_mm_next:
+    SHL   R1, -1
+    IADD  R2, 3
+    IADD  R3, 1
+    ISUB  R5, 1
+    JT    R5, _tic80_scr_mm_loop
+    POP   R5
+    POP   R4
+    POP   R3
+    POP   R2
+    POP   R1
     RET
 _tic80_scr_flush:
     ;; one run (R5 color, R6 x, R7 length, R8 y) = one DrawRegionZoomed of the
@@ -3691,7 +3730,13 @@ _tic80_wr_not_screen:
     MOV   R3, R1
     ILT   R3, 0x3FF0
     JF    R3, _tic80_wr_notpal
+    MOV   R4, R1                ; palette byte: set the bit of its color (n = (addr - 0x3FC0) / 3)
+    ISUB  R4, 0x3FC0
+    IDIV  R4, 3
     MOV   R3, 1
+    SHL   R3, R4
+    MOV   R4, [var_TIC80_PALETTE_DIRTY]
+    OR    R3, R4
     MOV   [var_TIC80_PALETTE_DIRTY], R3
 _tic80_wr_notpal:
     MOV   R3, R1
@@ -3986,7 +4031,7 @@ _tic80_memop_fill:
     MOV   R11, R7
     SETS
 _tic80_memop_adv:
-    MOV   R0, 1
+    MOV   R0, 0xFFFF
     MOV   [var_TIC80_PALETTE_DIRTY], R0
     JF    R8, _tic80_memop_adv2
     MOV   R0, 1
@@ -4072,7 +4117,7 @@ __builtin_tic80_sync:
     JF    R0, _tic80_sync_mask
     MOV   R6, 127               ; no mask: everything
 _tic80_sync_mask:
-    MOV   R0, 1
+    MOV   R0, 0xFFFF
     MOV   [var_TIC80_PALETTE_DIRTY], R0
     MOV   R9, 0                 ; category
 _tic80_sync_loop:
