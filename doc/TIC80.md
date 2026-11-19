@@ -63,6 +63,14 @@ Differences from TIC-80:
 
 Programs without sound data keep the placeholder tone bank.
 
+A cart that creates its sound at run time (`poke`s waveforms and SFX into RAM)
+has no sound data to render. `tools/tic80_audio_snapshot.py cart.lua -o
+cart_audio.lua --call initFunction` runs the cart headless with those setup
+functions called, reads the waveform and SFX RAM back, and writes a copy with
+the matching `<WAVES>` / `<SFX>` sections to compile instead. Sound a cart
+mixes itself into a RAM buffer cannot be played: the SPU only plays samples
+built into the cartridge.
+
 Sample rate: `--rate 11025|22050|44100` (or `--#rate`), 22050 Hz by default (`V32LUA_DEFAULT_TIC80_RATE` in `inc/config.h`)
 and shared with the PICO-8 layer. witchem_up: 16.5 MB at 22050 Hz (three
 tracks of 25–83 s, 29 SFX renders), about half that at 11025.
