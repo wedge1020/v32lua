@@ -511,15 +511,12 @@ __builtin_string_len:
     ;; (handles RAM vs ROM automatically)
     CALL __unbox_string
 
-    ;; 3. Calculate string length
-    MOV  R1, 0                  ; R1 = Character counter
-__string_len_loop:
-    MOV  R2, [R0]               ; Read character from address
-    IEQ  R2, 0                  ; Is it null terminator?
-    JT   R2, __string_len_done
-    IADD R0, 1                  ; Advance pointer
-    IADD R1, 1                  ; Increment counter
-    JMP  __string_len_loop
+    ;; 3. Length: __str_length scans once and remembers the last long string,
+    ;; so `for i = 1, #s` / `i <= #s` over a big string measures it once
+    PUSH R4
+    CALL __str_length
+    MOV  R1, R4
+    POP  R4
 
 __string_len_done:
     ;; 4. Convert integer count in R1 to a Vircon32 Float in R0

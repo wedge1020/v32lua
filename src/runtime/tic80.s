@@ -3222,8 +3222,61 @@ _tic80_map_cell_none:
 _tic80_map_cell_done:
     RET
 
+;; __tic80_plain_end (internal): R1 = byte address -> R0 = end (exclusive) of
+;; the plain-storage region holding it, or 0 when it is not in one. Plain =
+;; storage with no live view: 0-0x7FFF, 0xFF84-0x14403, 0x14604-0x17FFF
+;; (the map, gamepad bytes and sprite flags are decoded byte by byte).
+__tic80_plain_end:
+    MOV   R0, R1
+    ILT   R0, 0
+    JT    R0, _tic80_pe_none
+    MOV   R0, R1
+    ILT   R0, 0x8000
+    JF    R0, _tic80_pe_b
+    MOV   R0, 0x8000
+    RET
+_tic80_pe_b:
+    MOV   R0, R1
+    ILT   R0, 0xFF84
+    JT    R0, _tic80_pe_none
+    MOV   R0, R1
+    ILT   R0, 0x14404
+    JF    R0, _tic80_pe_c
+    MOV   R0, 0x14404
+    RET
+_tic80_pe_c:
+    MOV   R0, R1
+    ILT   R0, 0x14604
+    JT    R0, _tic80_pe_none
+    MOV   R0, R1
+    ILT   R0, 98304
+    JF    R0, _tic80_pe_none
+    MOV   R0, 98304
+    RET
+_tic80_pe_none:
+    MOV   R0, 0
+    RET
+
 ;; __tic80_rd (internal): R1 = byte address -> R0 = byte. Preserves R1-R13.
+;; Fast path: an address in 0..0x7FFF (screen, tiles, sprites: plain storage)
+;; once the RAM exists; everything else takes the full decoder below.
 __tic80_rd:
+    PUSH  R2
+    MOV   R0, R1
+    AND   R0, 0xFFFF8000
+    IEQ   R0, 0
+    JF    R0, _tic80_rd_slowpath
+    MOV   R0, [var_TIC80_RAM_PTR]
+    MOV   R2, R0
+    ILT   R2, 0                 ; BOXED_NIL: not created yet
+    JT    R2, _tic80_rd_slowpath
+    IADD  R0, R1
+    MOV   R0, [R0]
+    POP   R2
+    RET
+_tic80_rd_slowpath:
+    POP   R2
+__tic80_rd_full:
     PUSH  R2
     PUSH  R3
     PUSH  R4
@@ -3315,7 +3368,29 @@ _tic80_rd_done:
     RET
 
 ;; __tic80_wr (internal): R1 = byte address, R2 = byte. Preserves R0-R13.
+;; Fast path as for __tic80_rd.
 __tic80_wr:
+    PUSH  R0
+    PUSH  R3
+    MOV   R0, R1
+    AND   R0, 0xFFFF8000
+    IEQ   R0, 0
+    JF    R0, _tic80_wr_slowpath
+    MOV   R0, [var_TIC80_RAM_PTR]
+    MOV   R3, R0
+    ILT   R3, 0
+    JT    R3, _tic80_wr_slowpath
+    IADD  R0, R1
+    MOV   R3, R2
+    AND   R3, 255
+    MOV   [R0], R3
+    POP   R3
+    POP   R0
+    RET
+_tic80_wr_slowpath:
+    POP   R3
+    POP   R0
+__tic80_wr_full:
     PUSH  R0
     PUSH  R2
     PUSH  R3
@@ -3540,6 +3615,10 @@ _tic80_memop:
     PUSH  R4
     PUSH  R5
     PUSH  R6
+    PUSH  R7
+    PUSH  R11
+    PUSH  R12
+    PUSH  R13
     MOV   R4, [BP+2]
     FLR   R4
     CFI   R4                    ; dest
@@ -3554,6 +3633,62 @@ _tic80_memop_loop:
     MOV   R1, R6
     IGT   R1, 0
     JF    R1, _tic80_memop_done
+    ;; bulk: 8 or more bytes lying inside one plain region go to SETS / MOVS
+    MOV   R1, R6
+    ILT   R1, 8
+    JT    R1, _tic80_memop_byte
+    MOV   R1, R4
+    CALL  __tic80_plain_end
+    JF    R0, _tic80_memop_byte
+    MOV   R7, R0
+    ISUB  R7, R4                ; bytes left in dest's region
+    MOV   R1, R7
+    IGT   R1, R6
+    JF    R1, _tic80_memop_dclamp
+    MOV   R7, R6
+_tic80_memop_dclamp:
+    JF    R3, _tic80_memop_fill
+    MOV   R1, R5
+    CALL  __tic80_plain_end
+    JF    R0, _tic80_memop_byte
+    ISUB  R0, R5                ; bytes left in src's region
+    MOV   R1, R0
+    ILT   R1, R7
+    JF    R1, _tic80_memop_sclamp
+    MOV   R7, R0
+_tic80_memop_sclamp:
+    ;; overlapping ranges keep the byte-by-byte (forward) behaviour
+    MOV   R1, R4
+    IADD  R1, R7
+    IGT   R1, R5                ; dest end > src
+    JF    R1, _tic80_memop_copy
+    MOV   R1, R5
+    IADD  R1, R7
+    IGT   R1, R4                ; src end > dest
+    JT    R1, _tic80_memop_byte
+_tic80_memop_copy:
+    CALL  __tic80_ram
+    MOV   R13, R0
+    IADD  R13, R4
+    MOV   R12, R0
+    IADD  R12, R5
+    MOV   R11, R7
+    MOVS
+    IADD  R5, R7
+    JMP   _tic80_memop_adv
+_tic80_memop_fill:
+    CALL  __tic80_ram
+    MOV   R13, R0
+    IADD  R13, R4
+    MOV   R12, R5
+    AND   R12, 255
+    MOV   R11, R7
+    SETS
+_tic80_memop_adv:
+    IADD  R4, R7
+    ISUB  R6, R7
+    JMP   _tic80_memop_loop
+_tic80_memop_byte:
     JF    R3, _tic80_memop_put
     MOV   R1, R5
     CALL  __tic80_rd
@@ -3567,6 +3702,10 @@ _tic80_memop_put:
     JMP   _tic80_memop_loop
 _tic80_memop_done:
     MOV   R0, BOXED_NIL
+    POP   R13
+    POP   R12
+    POP   R11
+    POP   R7
     POP   R6
     POP   R5
     POP   R4
