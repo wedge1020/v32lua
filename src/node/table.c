@@ -636,44 +636,56 @@ void emit_index_lookup (int table_reg, int key_reg, ASTNode *key, int dest_reg)
     {
         int pt = pin_reg (table_reg), pk = pin_reg (key_reg);   // see pin_reg()
         int a = allocate_register ();
+        mark_register_live (a, 1);
+        int b = allocate_register ();       // the table's payload (its address)
+        mark_register_live (b, 1);
         unpin_reg (key_reg, pk);
         unpin_reg (table_reg, pt);
-        mark_register_live (a, 1);
         emit_asm ("MOV  R0, R%d ; inline t[i]\n", table_reg);
         emit_asm ("AND  R0, BOXED_DATA\n");
         emit_asm ("IEQ  R0, BOXED_TABLE\n");
         emit_asm ("JF   R0, __%s_idx_slow_%d\n", ctx, id);
         if (lit)
         {
-            emit_asm ("MOV  R%d, %d\n", a, (int) key->as.number.val);
+            int iv = (int) key->as.number.val;
+            emit_asm ("MOV  R%d, R%d\n", b, table_reg);
+            emit_asm ("AND  R%d, BOXED_PAYLOAD\n", b);
+            emit_asm ("MOV  R0, [R%d] ; flags: array capacity in the low 16 bits\n", b);
+            emit_asm ("AND  R0, TABLE_ARRAYSIZE\n");
+            emit_asm ("ILT  R0, %d ; capacity < i ?\n", iv);
+            emit_asm ("JT   R0, __%s_idx_slow_%d\n", ctx, id);
+            emit_asm ("MOV  R0, [R%d+2] ; array data\n", b);
+            if (iv > 1) emit_asm ("IADD R0, %d\n", iv - 1);
         }
         else
         {
-            emit_asm ("MOV  R0, R%d\n", key_reg);
-            emit_asm ("AND  R0, NAN_VALUE\n");
-            emit_asm ("IEQ  R0, NAN_VALUE\n");
-            emit_asm ("JT   R0, __%s_idx_slow_%d ; not a number\n", ctx, id);
+            if (!expr_is_known_number (key))
+            {
+                emit_asm ("MOV  R0, R%d\n", key_reg);
+                emit_asm ("AND  R0, NAN_VALUE\n");
+                emit_asm ("IEQ  R0, NAN_VALUE\n");
+                emit_asm ("JT   R0, __%s_idx_slow_%d ; not a number\n", ctx, id);
+            }
             emit_asm ("MOV  R%d, R%d\n", a, key_reg);
             emit_asm ("CFI  R%d\n", a);
             emit_asm ("MOV  R0, R%d\n", a);
             emit_asm ("CIF  R0\n");
             emit_asm ("IEQ  R0, R%d\n", key_reg);
             emit_asm ("JF   R0, __%s_idx_slow_%d ; not a whole number (or -0)\n", ctx, id);
-            emit_asm ("MOV  R0, R%d\n", a);
-            emit_asm ("ILT  R0, 1\n");
+            emit_asm ("MOV  R%d, R%d\n", b, table_reg);
+            emit_asm ("AND  R%d, BOXED_PAYLOAD\n", b);
+            emit_asm ("ISUB R%d, 1 ; zero-based index\n", a);
+            // 0 <= idx < capacity  <=>  ((capacity-1-idx) | idx) >= 0
+            emit_asm ("MOV  R0, [R%d] ; flags: array capacity in the low 16 bits\n", b);
+            emit_asm ("AND  R0, TABLE_ARRAYSIZE\n");
+            emit_asm ("ISUB R0, 1\n");
+            emit_asm ("ISUB R0, R%d\n", a);
+            emit_asm ("OR   R0, R%d\n", a);
+            emit_asm ("ILT  R0, 0\n");
             emit_asm ("JT   R0, __%s_idx_slow_%d\n", ctx, id);
+            emit_asm ("MOV  R0, [R%d+2] ; array data\n", b);
+            emit_asm ("IADD R0, R%d\n", a);
         }
-        emit_asm ("MOV  R0, R%d\n", table_reg);
-        emit_asm ("AND  R0, BOXED_PAYLOAD\n");
-        emit_asm ("MOV  R0, [R0] ; flags: array capacity in the low 16 bits\n");
-        emit_asm ("AND  R0, TABLE_ARRAYSIZE\n");
-        emit_asm ("ILT  R0, R%d ; capacity < i ?\n", a);
-        emit_asm ("JT   R0, __%s_idx_slow_%d\n", ctx, id);
-        emit_asm ("MOV  R0, R%d\n", table_reg);
-        emit_asm ("AND  R0, BOXED_PAYLOAD\n");
-        emit_asm ("MOV  R0, [R0+2] ; array data\n");
-        emit_asm ("IADD R0, R%d\n", a);
-        emit_asm ("ISUB R0, 1\n");
         emit_asm ("MOV  R0, [R0]\n");
         // a hole (nil) goes the slow way: a metatable's __index may answer
         // (only in programs that can have metatables at all)
@@ -684,6 +696,7 @@ void emit_index_lookup (int table_reg, int key_reg, ASTNode *key, int dest_reg)
         }
         emit_asm ("MOV  R%d, R0\n", dest_reg);
         emit_asm ("JMP  __%s_idx_done_%d\n", ctx, id);
+        unlock_register (b);
         unlock_register (a);
     }
     emit_hint (";@cold");                 // the generic path: rarely taken

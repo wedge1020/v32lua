@@ -1,6 +1,7 @@
 # Changelog
 
 ## 20261119-dev
+- Inline `t[i]` array reads are tighter: the table payload is computed once, the range test is a single fused check, and the "is it a number" test is skipped when the key is provably a number (literal, arithmetic, number local / for variable). About 3% on BlasTIC drawMap. NaN, 0, negative, fractional and too-large keys still miss correctly (testing/tables/20).
 - Calls to named (static) functions are now direct `CALL __function_NAME` instead of going through the `__builtin_exec` trampoline (about 2.7% on BlasTIC BATTLE). `--no-direct-calls` restores the old path.
 - Small functions whose body is a single `return <expr>` (at most 16 AST nodes, no loops/calls to themselves) are inlined at call sites when every argument is a simple expression (literal, local/global name, or simple arithmetic). Parameters are bound to the caller's argument expressions, evaluated in the caller's scope. `--no-inline` disables it.
 
