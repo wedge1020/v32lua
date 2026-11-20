@@ -1,6 +1,6 @@
 # --- Configuration ---
 DEMO          = blastic
-COMPILER      = ../../../bin/v32lua
+COMPILER      = ../../../bin/v32lua --skip-fn showBackdrop
 OPTIMIZER     = v32opt -O3 -v
 ASSEMBLER     = assemble
 TEXTURE_TOOL  = png2vircon

@@ -1973,35 +1973,31 @@ _tic80_line_have_angle:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 __builtin_tic80_rect:
-    PUSH  BP
-    MOV   BP, SP
     MOV   R5, 1                  ; filled
     JMP   __tic80_rect_common
 
 __builtin_tic80_rectb:
-    PUSH  BP
-    MOV   BP, SP
     MOV   R5, 0                  ; border
 
-    ;; R1-R5 are scratch here, as in pix()/line() (callers keep nothing in
-    ;; them across a TIC-80 drawing call); R6-R13 are untouched.
+    ;; No BP frame: the arguments are read relative to SP ([SP] = the return
+    ;; address, [SP+1] = x ... [SP+5] = color). R1-R5 are scratch here, as in
+    ;; pix()/line() (callers keep nothing in them across a TIC-80 drawing
+    ;; call); R6-R13 are untouched.
 __tic80_rect_common:
-    MOV   R3, [BP+4]
+    MOV   R3, [SP+3]
     CFI   R3                     ; w
-    MOV   R0, R3
-    ILT   R0, 1
-    JT    R0, _tic80_rect_done
-    MOV   R4, [BP+5]
+    MOV   R4, [SP+4]
     CFI   R4                     ; h
-    MOV   R0, R4
-    ILT   R0, 1
+    MOV   R0, R3
+    IMIN  R0, R4
+    ILT   R0, 1                  ; w < 1 or h < 1: nothing
     JT    R0, _tic80_rect_done
-    MOV   R1, [BP+2]
+    MOV   R1, [SP+1]
     CFI   R1                     ; x
-    MOV   R2, [BP+3]
+    MOV   R2, [SP+2]
     CFI   R2                     ; y
     OUT   GPU_SelectedTexture, 0
-    MOV   R0, [BP+6]
+    MOV   R0, [SP+5]
     CFI   R0
     AND   R0, 15
     IADD  R0, 512                ; the color's swatch
@@ -2029,8 +2025,6 @@ _tic80_rect_border:
 
 _tic80_rect_done:
     MOV   R0, BOXED_NIL
-    MOV   SP, BP
-    POP   BP
     RET
 
 ;; __tic80_trunc (internal): R1 = Lua number -> R1 = integer, truncated
@@ -2492,27 +2486,21 @@ __tic80_rect_int:
 __tic80_rect_draw:
     MOV   R0, R3
     CIF   R0
-    FMUL  R0, 2.625
-    FMUL  R0, 0.333333333         ; the swatch is 3x3
+    FMUL  R0, 0.875               ; 2.625 / 3: the swatch is 3x3
     OUT   GPU_DrawingScaleX, R0
     MOV   R0, R4
     CIF   R0
-    FMUL  R0, 2.625
-    FMUL  R0, 0.333333333
+    FMUL  R0, 0.875
     OUT   GPU_DrawingScaleY, R0
-    MOV   R0, R1
-    CIF   R0
-    FMUL  R0, 2.625
-    FADD  R0, 0.5
-    FLR   R0
-    CFI   R0
+    MOV   R0, R1                  ; floor(2.625 x + 0.5) = (21 x + 4) >> 3
+    IMUL  R0, 21
+    IADD  R0, 4
+    SHL   R0, -3
     OUT   GPU_DrawingPointX, R0
     MOV   R0, R2
-    CIF   R0
-    FMUL  R0, 2.625
-    FADD  R0, 0.5
-    FLR   R0
-    CFI   R0
+    IMUL  R0, 21
+    IADD  R0, 4
+    SHL   R0, -3
     OUT   GPU_DrawingPointY, R0
     OUT   GPU_Command, GPUCommand_DrawRegionZoomed
     RET
