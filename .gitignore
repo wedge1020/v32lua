@@ -68,3 +68,4 @@ put/*
 *.new
 *.old
 bin/*
+stuff/*
