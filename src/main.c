@@ -116,6 +116,9 @@ static void  print_usage (const char *prog_name)
     fprintf (stdout, "                   call named functions through __builtin_exec as before instead\n");
     fprintf (stdout, "                   of directly (a debugging switch)\n");
     fprintf (stdout, "  --no-inline    never expand a call of a tiny `return <expr>` function in place\n");
+    fprintf (stdout, "  --tic80-commit TIC-80: queue the drawing calls while TIC() runs and draw them in one\n");
+    fprintf (stdout, "                   burst when it returns, so a TIC() that spans several frames does\n");
+    fprintf (stdout, "                   not flicker (the previous complete frame stays on screen)\n");
     fprintf (stdout, "  --skip-fn <names>\n");
     fprintf (stdout, "                   compile the named functions (comma separated, repeatable) with\n");
     fprintf (stdout, "                   an empty body: they still exist and return nil. For work a\n");
@@ -336,6 +339,9 @@ int  main (int  argc, char** argv)
         } else if (strcmp(argv[i], "--no-direct-calls") == 0) {
             g_no_direct_calls = true;
             RECORD_OPT ("--no-direct-calls", NULL, 0);
+        } else if (strcmp(argv[i], "--tic80-commit") == 0) {
+            g_tic80_commit = true;
+            RECORD_OPT ("--tic80-commit", NULL, 0);
         } else if (strcmp(argv[i], "--no-inline") == 0) {
             g_no_inline = true;
             RECORD_OPT ("--no-inline", NULL, 0);

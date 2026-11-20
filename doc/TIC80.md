@@ -272,6 +272,16 @@ Start (gamepad 1) pauses: `TIC()` stops, every SPU channel pauses, one dimmed
 frame is drawn with "- PAUSED -", and Start again resumes. `time()` keeps
 counting while paused.
 
+## Flicker: `--tic80-commit`
+
+The GPU draws straight into the displayed image. A `TIC()` that takes longer than one hardware frame (a heavy map, many sprites) therefore shows the cleared or half-drawn screen between its start and its end, which looks like flicker. With `--tic80-commit` the drawing calls (`cls`, `rect`, `rectb`, `circ`, `circb`, `line`, `tri`, `pix`, `spr`, `map`, `print`) do not draw while `TIC()` runs: each copies its arguments into a display list. When `TIC()` returns, the list is replayed in one burst, at once if the rest of the hardware frame can hold it (judged by the last replay's cost plus 1/8) and otherwise at the start of the next one, so the previous complete frame stays on screen until the new one is ready. A `print()` still returns its width.
+
+What it costs: about 6 words of RAM per queued call (a list of 16K words; a full list is replayed and the queue goes on) and the extra copy of each call's arguments. A replay of about 1,600 calls (BlasTIC's battle screen) takes about 145,000 cycles, so it fits in the hardware frame it starts in.
+
+Order stays the program's: anything that could see or change what a queued call reads replays the queue first. These are `peek`/`poke`/`memcpy`/`memset` with an address below 0x10000 (screen, palette, tiles, sprites, map; sound and other addresses above that do not), `mset`, `fset`, `sync`, and a `cls()` with a raw color. The one visible difference: a call that draws through a function value (`local r = rect; r(...)`) is not queued, and draws at once.
+
+Not for carts that rely on reading the screen back while they draw (there is no `pix` read here, but `peek` of screen RAM after a draw works: it replays first, which gives up the frame's atomicity). It is off by default; try it on a cart that flickers.
+
 ## Strings with NUL bytes
 
 Strings end at the first zero word, so a NUL byte (`string.char(0)`) is stored as the

@@ -58,6 +58,10 @@ void  node_function_call       (ASTNode *, int);
 extern ASTNode *g_last_exec_call;
 extern bool     g_uses_metatables;   // the source calls setmetatable() (main.c)
 extern bool     g_no_direct_calls;
+extern bool     g_tic80_commit;       // tic80_commit.c: --tic80-commit (deferred drawing, replayed per frame)
+const char *tic80_callee (const char *builtin);   // the routine to CALL for a drawing builtin
+void  emit_tic80_commit_runtime (void);
+int   tic80_dl_capacity (void);
 extern bool     g_no_inline;         // --no-inline: calls are never expanded in place   // --no-direct-calls: calls to named functions go through __builtin_exec
 void  node_function_def        (ASTNode *);
 void  node_function_pointer    (ASTNode *, int);

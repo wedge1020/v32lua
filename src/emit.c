@@ -907,6 +907,17 @@ int   emit_variable_map (void)
         fprintf (out(), "%%define  TIC80_SFX_DURATION       0x%.8X\n", next_ram_address);
         next_ram_address = next_ram_address + 4;
         lines_printed += 3;
+        if (g_tic80_commit)
+        {
+            // frame commit (tic80_commit.c): on flag, words queued, replay
+            // position / argument count, frame and cycle at the replay's
+            // start, its cost, then the display list itself
+            const char *nm[8] = { "ON", "FILL", "POS", "N", "FRAME", "CYCLE", "COST", "BUF" };
+            for (int i = 0; i < 8; i++)
+                fprintf (out(), "%%define  TIC80_DL_%-14s 0x%.8X\n", nm[i], next_ram_address + i);
+            next_ram_address = next_ram_address + 7 + tic80_dl_capacity ();
+            lines_printed += 8;
+        }
     }
 
     if (runtime_req.needs_pico8)
@@ -1222,6 +1233,7 @@ void  emit_runtime_library (void)
     if (runtime_req.needs_tic80)
     {
         emit_embedded_asm (runtime_tic80_start);
+        emit_tic80_commit_runtime ();
 
         // OVERWRITE default palette with custom if present
         emit_asm ("\n;; =========================================================");

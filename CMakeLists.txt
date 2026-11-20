@@ -327,6 +327,7 @@ set(V32LUA_CORE_SRC
     src/tic80_assets.c
     src/tic80_cart.c
     src/tic80_audio.c
+    src/tic80_commit.c
     src/vtex_generator.c
     src/pathutil.c
     src/buildscript.c

@@ -112,7 +112,7 @@ bool emit_tic80_spr_intrinsic(ASTNode *node) {
         unlock_register(reg);
     }
 
-    emit_asm("CALL __builtin_tic80_spr\n");
+    emit_asm("CALL %s\n", tic80_callee("__builtin_tic80_spr"));
     emit_asm("IADD SP, 9 ; Clean up spr() arguments\n");
 
     return true;
@@ -266,6 +266,20 @@ bool emit_tic80_cls_intrinsic(ASTNode *node) {
     ASTNode *arg = node->as.call.args_head;
     double   num;
 
+    if (g_tic80_commit) {
+        // deferred: a palette index goes through cls() like a run-time one
+        if (arg == NULL || (spu_static_number(arg, &num)
+                            && trunc(num) > -16777216.0 && trunc(num) < 16777216.0)) {
+            int index = (arg == NULL) ? 0 : (((int) trunc(num)) & 15);
+            union { float f; uint32_t u; } cv = { .f = (float) index };
+            emit_asm("MOV R1, 0x%.8X ; Palette index %d (deferred)\n", cv.u, index);
+            emit_asm("PUSH R1\n");
+            emit_asm("CALL %s\n", tic80_callee("__builtin_tic80_cls"));
+            emit_asm("IADD SP, 1 ; Clean up cls() arguments\n");
+            return true;
+        }
+    }
+
     if (arg == NULL) {
         // Default: clear to black (palette index 0)
         emit_asm("MOV R1, 0 ; cls() with palette index 0\n");
@@ -346,11 +360,12 @@ bool emit_tic80_cls_intrinsic(ASTNode *node) {
         emit_asm("PUSH R%d ; Arg 1: palette index\n", reg);
         register_pinned[reg] = 0;
         unlock_register(reg);
-        emit_asm("CALL __builtin_tic80_cls\n");
+        emit_asm("CALL %s\n", tic80_callee("__builtin_tic80_cls"));
         emit_asm("IADD SP, 1 ; Clean up cls() arguments\n");
         return true;
     }
 
+    if (g_tic80_commit) emit_asm("CALL __tic80_dl_flush ; a raw-color clear: keep the order\n");
     emit_asm("OUT GPU_ClearColor, R1\n");
     emit_asm("OUT GPU_Command, GPUCommand_ClearScreen\n");
 
@@ -394,7 +409,7 @@ bool emit_tic80_print_intrinsic(ASTNode *node, int dest_reg) {
         emit_asm("PUSH R%d ; print arg %d\n", reg, i + 1);
         unlock_register(reg);
     }
-    emit_asm("CALL __builtin_tic80_print\n");
+    emit_asm("CALL %s\n", tic80_callee("__builtin_tic80_print"));   // (a queued print still returns its width)
     emit_asm("IADD SP, 7\n");
     if (dest_reg != 0) {
         emit_asm("MOV R%d, R0 ; text width\n", dest_reg);
@@ -488,6 +503,7 @@ bool emit_tic80_mset_intrinsic(ASTNode *node, int dest_reg) {
     unlock_register(reg);
 
     // Call runtime subroutine
+    if (g_tic80_commit) emit_asm("CALL __tic80_dl_flush\n");
     emit_asm("CALL __builtin_tic80_mset\n");
     emit_asm("IADD SP, 3 ; Clean up mset() arguments\n");
 
@@ -541,7 +557,7 @@ bool emit_tic80_map_intrinsic(ASTNode *node) {
         unlock_register(reg);
     }
 
-    emit_asm("CALL __builtin_tic80_map\n");
+    emit_asm("CALL %s\n", tic80_callee("__builtin_tic80_map"));
     emit_asm("IADD SP, 8 ; Clean up map() arguments\n");
 
     return true;
@@ -935,6 +951,7 @@ bool emit_tic80_fset_intrinsic(ASTNode *node, int dest_reg) {
     unlock_register(reg);
 
     // Call runtime subroutine
+    if (g_tic80_commit) emit_asm("CALL __tic80_dl_flush\n");
     emit_asm("CALL __builtin_tic80_fset\n");
     emit_asm("IADD SP, 3 ; Clean up fset() arguments\n");
 
@@ -967,6 +984,7 @@ bool emit_tic80_sync_intrinsic(ASTNode *node, int dest_reg) {
     tic80_uses_sync   = true;       // the bank images
 
     push_mem_args(node, 3, NULL);   // mask, bank, tocart (nil: the defaults)
+    if (g_tic80_commit) emit_asm("CALL __tic80_dl_flush\n");
     emit_asm("CALL __builtin_tic80_sync\n");
     emit_asm("IADD SP, 3 ; Clean up sync() arguments\n");
 
@@ -1009,7 +1027,7 @@ bool emit_tic80_pix_intrinsic(ASTNode *node, int dest_reg) {
         unlock_register(reg);
     }
 
-    emit_asm("CALL __builtin_tic80_pix\n");
+    emit_asm("CALL %s\n", tic80_callee("__builtin_tic80_pix"));
     emit_asm("IADD SP, 3 ; Clean up pix() arguments\n");
 
     if (dest_reg != 0) {
@@ -1049,7 +1067,7 @@ bool emit_tic80_line_intrinsic(ASTNode *node, int dest_reg) {
         unlock_register(reg);
     }
 
-    emit_asm("CALL __builtin_tic80_line\n");
+    emit_asm("CALL %s\n", tic80_callee("__builtin_tic80_line"));
     emit_asm("IADD SP, 5 ; Clean up line() arguments\n");
 
     if (dest_reg != 0) {
@@ -1081,6 +1099,7 @@ static bool tic80_rect_literal(const ASTNode *n, int *out)
 
 static bool emit_tic80_rect_constant(ASTNode **args, int dest_reg)
 {
+    if (g_tic80_commit) return false;      // would draw at once, ahead of queued calls
     int x, y, w, h;
     if (!tic80_rect_literal(args[0], &x) || !tic80_rect_literal(args[1], &y) ||
         !tic80_rect_literal(args[2], &w) || !tic80_rect_literal(args[3], &h))
@@ -1157,7 +1176,7 @@ bool emit_tic80_rect_intrinsic(ASTNode *node, int dest_reg) {
         unlock_register(reg);
     }
 
-    emit_asm("CALL __builtin_tic80_rect\n");
+    emit_asm("CALL %s\n", tic80_callee("__builtin_tic80_rect"));
     emit_asm("IADD SP, 5 ; Clean up rect() arguments\n");
 
     if (dest_reg != 0) {
@@ -1195,7 +1214,7 @@ bool emit_tic80_tri_intrinsic(ASTNode *node, int dest_reg) {
         unlock_register(reg);
     }
 
-    emit_asm("CALL __builtin_tic80_tri\n");
+    emit_asm("CALL %s\n", tic80_callee("__builtin_tic80_tri"));
     emit_asm("IADD SP, 7 ; Clean up tri() arguments\n");
 
     if (dest_reg != 0) {
@@ -1234,7 +1253,7 @@ bool emit_tic80_rectb_intrinsic(ASTNode *node, int dest_reg) {
         unlock_register(reg);
     }
 
-    emit_asm("CALL __builtin_tic80_rectb\n");
+    emit_asm("CALL %s\n", tic80_callee("__builtin_tic80_rectb"));
     emit_asm("IADD SP, 5 ; Clean up rectb() arguments\n");
 
     if (dest_reg != 0) {
@@ -1275,7 +1294,7 @@ bool emit_tic80_circ_intrinsic(ASTNode *node, int dest_reg) {
         unlock_register(reg);
     }
 
-    emit_asm("CALL __builtin_tic80_circ\n");
+    emit_asm("CALL %s\n", tic80_callee("__builtin_tic80_circ"));
     emit_asm("IADD SP, 4 ; Clean up circ() arguments\n");
 
     if (dest_reg != 0) {
@@ -1315,7 +1334,7 @@ bool emit_tic80_circb_intrinsic(ASTNode *node, int dest_reg) {
         unlock_register(reg);
     }
 
-    emit_asm("CALL __builtin_tic80_circb\n");
+    emit_asm("CALL %s\n", tic80_callee("__builtin_tic80_circb"));
     emit_asm("IADD SP, 4 ; Clean up circb() arguments\n");
 
     if (dest_reg != 0) {
@@ -1497,6 +1516,23 @@ bool emit_tic80_memory_intrinsic (ASTNode *node, const char *func_name, int dest
         pushed = 3;
     }
 
+    if (g_tic80_commit) {
+        // Queued drawing reads the screen, palette, tiles, sprites and map
+        // (RAM below 0x10000), so a memory access that may touch them
+        // replays the queue first. A constant address above that (sound,
+        // persistent memory, work RAM) can't, and must not break the frame.
+        bool outside = true;
+        ASTNode *a0 = node->as.call.args_head;
+        ASTNode *a1 = (a0 != NULL) ? a0->next : NULL;
+        double   v;
+        if (a0 == NULL || !spu_static_number(a0, &v) || v < 65536.0) outside = false;
+        if (outside && strcmp(routine, "__builtin_tic80_memcpy") == 0
+            && (a1 == NULL || !spu_static_number(a1, &v) || v < 65536.0)) outside = false;
+        if (!outside)
+            emit_asm("CALL %s ; replay the queue first if this access is below 0x10000\n",
+                     strcmp(routine, "__builtin_tic80_memcpy") == 0 ? "__tic80_dl_flush_mem2"
+                                                                    : "__tic80_dl_flush_mem1");
+    }
     emit_asm("CALL %s\n", routine);
     emit_asm("IADD SP, %d\n", pushed);
     if (dest_reg != 0) {

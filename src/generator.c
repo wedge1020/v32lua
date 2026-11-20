@@ -1058,6 +1058,7 @@ void generate_program (ASTNode *head)
     //  __global_scope_initialization -- see generate_global_setup().)
     if (runtime_req.needs_tic80) {
         emit_asm ("CALL __builtin_tic80_init  ; Initialize TIC-80 assets\n");
+        if (g_tic80_commit) emit_asm ("CALL __tic80_dl_init   ; frame commit: empty display list\n");
     }
 
     // If init() exists, execute it immediately after global variable setup
@@ -1209,7 +1210,16 @@ void generate_program (ASTNode *head)
             emit_asm ("IEQ R1, 0\n");
             emit_asm ("JF R1, __just_wait ; If paused, skip TIC\n");
             v32io_emit_frame_start_hooks ();
+            if (g_tic80_commit) {
+                emit_asm ("MOV R0, 1\n");
+                emit_asm ("MOV [TIC80_DL_ON], R0 ; queue the drawing calls\n");
+            }
             emit_asm ("CALL __function_TIC\n");
+            if (g_tic80_commit) {
+                emit_asm ("MOV R0, 0\n");
+                emit_asm ("MOV [TIC80_DL_ON], R0\n");
+                emit_asm ("CALL __tic80_dl_commit ; draw them in one burst\n");
+            }
             emit_asm ("CALL __builtin_tic80_sound_tick ; sfx() durations\n");
             emit_asm ("__just_wait:");
             v32io_emit_frame_end_hooks ();     // paused frames too
@@ -1236,7 +1246,16 @@ void generate_program (ASTNode *head)
             emit_asm ("MOV [R1], R2 ; Save current multiply\n");
             emit_asm ("MOV R2, 0xFF404040 ; 50%% gray\n");
             emit_asm ("OUT GPU_MultiplyColor, R2\n");
+            if (g_tic80_commit) {
+                emit_asm ("MOV R0, 1\n");
+                emit_asm ("MOV [TIC80_DL_ON], R0\n");
+            }
             emit_asm ("CALL __function_TIC ; Render ONE dimmed frame\n");
+            if (g_tic80_commit) {
+                emit_asm ("MOV R0, 0\n");
+                emit_asm ("MOV [TIC80_DL_ON], R0\n");
+                emit_asm ("CALL __tic80_dl_flush ; while the dimming is still set\n");
+            }
             emit_asm ("MOV R1, 0xFFFFFFFF ; Restore for text\n");
             emit_asm ("OUT GPU_MultiplyColor, R1\n");
             emit_asm ("MOV R1, 275\n");
