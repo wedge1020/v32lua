@@ -120,8 +120,11 @@ __bios_print_text:
 
     ;; TIC-80 print() with a scale / small font: draw each glyph zoomed and
     ;; advance by __print_ex_adv (float pixels). Off (0) for every other print.
-    MOV  R6, [var_PRINT_EX_ON]
-    JF   R6, __bios_print_loop
+    ;; (the flag is nil-initialised like every global, which is NOT 0: only an
+    ;; explicit raw 1, stored by TIC-80's print(), turns the zoomed path on)
+    MOV  R4, [var_PRINT_EX_ON]
+    IEQ  R4, 1
+    JF   R4, __bios_print_loop
     MOV  R6, [var_PRINT_EX_SX]
     OUT  GPU_DrawingScaleX, R6
     MOV  R6, [var_PRINT_EX_SY]
