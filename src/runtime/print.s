@@ -118,6 +118,38 @@ __bios_print_text:
     MOV  R2, [BP+3]              ; R2 = Y Pixel Coordinate (Integer) 
     MOV  R3, [BP+4]              ; R3 = Heap Offset to unboxed ASCII String
 
+    ;; TIC-80 print() with a scale / small font: draw each glyph zoomed and
+    ;; advance by __print_ex_adv (float pixels). Off (0) for every other print.
+    MOV  R6, [var_PRINT_EX_ON]
+    JF   R6, __bios_print_loop
+    MOV  R6, [var_PRINT_EX_SX]
+    OUT  GPU_DrawingScaleX, R6
+    MOV  R6, [var_PRINT_EX_SY]
+    OUT  GPU_DrawingScaleY, R6
+    MOV  R6, 0.0
+    OUT  GPU_DrawingAngle, R6
+    MOV  R7, [var_PRINT_EX_ADV]
+    CIF  R1                      ; R1 = float x, advanced by R7 per glyph
+__bios_print_xloop:
+    MOV  R4, [R3]
+    MOV  R5, R4
+    IEQ  R5, 256
+    JF   R5, __bios_print_xglyph
+    MOV  R4, 32
+__bios_print_xglyph:
+    OUT  GPU_SelectedRegion, R4
+    IEQ  R4, 0
+    JT   R4, __bios_print_done
+    MOV  R5, R1
+    FLR  R5
+    CFI  R5
+    OUT  GPU_DrawingPointX, R5
+    OUT  GPU_DrawingPointY, R2
+    OUT  GPU_Command, GPUCommand_DrawRegionZoomed
+    IADD R3, 1
+    FADD R1, R7
+    JMP  __bios_print_xloop
+
 __bios_print_loop:
     MOV  R4, [R3]                ; Read character from string memory 
     MOV  R5, R4
@@ -144,4 +176,5 @@ __bios_print_done:
     MOV  SP, BP 
     POP  BP 
     RET 
+
 

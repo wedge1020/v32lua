@@ -75,6 +75,16 @@ Sample rate: `--rate 11025|22050|44100` (or `--#rate`), 22050 Hz by default (`V3
 and shared with the PICO-8 layer. witchem_up: 16.5 MB at 22050 Hz (three
 tracks of 25–83 s, 29 SFX renders), about half that at 11025.
 
+## print
+
+`print(text, x, y, color, fixed, scale, smallfont)`: the glyphs are the BIOS
+font, zoomed to a TIC-80 6x6 cell (1.3125 x 0.984 times `scale`; the small
+font 0.79 x 0.82) and advanced 6 TIC-80 pixels times `scale` per character
+(4 for the small font). It returns the width, `#text * 6 * scale`. `fixed`
+is ignored: TIC-80's default font is proportional, this one is always
+fixed-width, so centering by the returned width is right but the text is
+slightly wider than TIC-80's.
+
 ## Sprites
 
 TIC-80 draws at whole pixels: `spr`, `pix`, `print`, `map`, `rect` and the

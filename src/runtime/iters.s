@@ -207,6 +207,24 @@ __ipairs_iter_check_bounds:
     IGT  R7, R5
     JT   R7, __ipairs_iter_done_nil   ; Next index exceeds length -> done
 
+    ;; --- Array part: read the slot directly (a nil there -- a hole, or a
+    ;; metatable's __index -- takes the general lookup below) ---
+    MOV  R7, [R4]
+    AND  R7, TABLE_ARRAYSIZE
+    ILT  R7, R6               ; capacity < index ?
+    JT   R7, __ipairs_iter_general
+    MOV  R7, [R4+2]
+    IADD R7, R6
+    ISUB R7, 1
+    MOV  R2, [R7]
+    MOV  R7, R2
+    IEQ  R7, BOXED_NIL
+    JT   R7, __ipairs_iter_general
+    MOV  R0, R6
+    CIF  R0                   ; R0 = next index as boxed float
+    JMP  __ipairs_iter_done
+
+__ipairs_iter_general:
     ;; --- Fetch value at index R6 via __builtin_table_get ---
     MOV  R7, R6
     CIF  R7                   ; R7 = boxed float key

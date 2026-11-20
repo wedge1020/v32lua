@@ -735,6 +735,12 @@ int  main (int  argc, char** argv)
     log_stage(4, "analyzer", verbose);
     init_global_scope();
 
+    // print() zoom state, read by __bios_print_text (set by TIC-80's print())
+    register_global ("PRINT_EX_ON");
+    register_global ("PRINT_EX_SX");
+    register_global ("PRINT_EX_SY");
+    register_global ("PRINT_EX_ADV");
+
     if (runtime_req.needs_tic80)
     {
         // TIC-80 map buffer pointer - must be registered before prepass

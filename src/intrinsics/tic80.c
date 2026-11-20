@@ -363,25 +363,28 @@ bool emit_tic80_cls_intrinsic(ASTNode *node) {
 // color is applied as a GPU multiply color (it used to be ignored). The
 // returned width -- used by the common `local w = print(s, 0, -6)` centering
 // idiom -- is #text * 6 (TIC-80's default font advance); it used to be
-// whatever R0 held. fixed/scale/smallfont are accepted and ignored.
+// whatever R0 held. scale and smallfont are honoured (each character is
+// drawn zoomed, advancing 6 TIC-80 pixels times scale -- 4 for smallfont);
+// fixed is accepted and ignored (the font here is always fixed-width).
 // Arguments are pushed as they are evaluated (they used to sit in pinned
 // registers across each other's evaluation, so print(f(), g(), 0) could
 // clobber f()'s result).
 bool emit_tic80_print_intrinsic(ASTNode *node, int dest_reg) {
     emit_asm("    ;; --- TIC-80 print() Intrinsic ---\n");
 
-    ASTNode *args[4] = { NULL };
+    ASTNode *args[7] = { NULL };
     int n = 0;
-    for (ASTNode *c = node->as.call.args_head; c != NULL && n < 4; c = c->next) args[n++] = c;
+    for (ASTNode *c = node->as.call.args_head; c != NULL && n < 7; c = c->next) args[n++] = c;
     if (n < 1) {
         compiler_error(ERR_SEMANTIC, node->line_number,
                        "TIC-80 print() requires at least 1 argument: print(text [, x, y, color])");
         return false;
     }
 
-    // [BP+5] = text, [BP+4] = x, [BP+3] = y, [BP+2] = color
-    static const char *defaults[4] = { NULL, "0.0", "0.0", "15.0" };
-    for (int i = 0; i < 4; i++) {
+    // [BP+8] = text, [BP+7] = x, [BP+6] = y, [BP+5] = color, [BP+4] = fixed,
+    // [BP+3] = scale, [BP+2] = smallfont
+    static const char *defaults[7] = { NULL, "0.0", "0.0", "15.0", "BOXED_FALSE", "1.0", "BOXED_FALSE" };
+    for (int i = 0; i < 7; i++) {
         int reg = allocate_register();
         if (args[i] != NULL && args[i]->type != NODE_NIL) {
             generate_asm(args[i], reg);
@@ -392,7 +395,7 @@ bool emit_tic80_print_intrinsic(ASTNode *node, int dest_reg) {
         unlock_register(reg);
     }
     emit_asm("CALL __builtin_tic80_print\n");
-    emit_asm("IADD SP, 4\n");
+    emit_asm("IADD SP, 7\n");
     if (dest_reg != 0) {
         emit_asm("MOV R%d, R0 ; text width\n", dest_reg);
     }

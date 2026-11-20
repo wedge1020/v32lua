@@ -172,7 +172,7 @@ __builtin_table_get:
     AND  R5, TABLE_ARRAYSIZE ; capacity
     MOV  R4, R3
     IGT  R4, R5
-    JT   R4, __builtin_table_get_hash
+    JT   R4, __builtin_table_get_numhash
     MOV  R5, [R1+2]          ; array data
     IADD R5, R3
     ISUB R5, 1
@@ -186,8 +186,46 @@ __builtin_table_get_hash_num:
     ;; -0 and 0 are the same key
     MOV  R4, R2
     IEQ  R4, 0x80000000
-    JF   R4, __builtin_table_get_hash
+    JF   R4, __builtin_table_get_numhash
     MOV  R2, 0
+;; A number key in the hash part (0, negative, fractional, beyond the array,
+;; or a sparse key like y*100+x): probe inline. Same hash as __table_hash's
+;; scalar case; the key is a number, so a stored key is equal only bitwise
+;; (no string-content compare). R1 = header, R2 = key.
+__builtin_table_get_numhash:
+    MOV  R5, [R1+3]          ; hash block
+    MOV  R4, R5
+    IEQ  R4, 0
+    JT   R4, __builtin_table_get_not_found
+    MOV  R0, R2
+    IMUL R0, 0x9E3779B1
+    MOV  R4, R0
+    SHL  R4, -16
+    XOR  R0, R4
+    MOV  R3, [R5]
+    ISUB R3, 1
+    AND  R0, R3              ; slot index
+__tget_numhash_probe:
+    MOV  R4, R0
+    SHL  R4, 1
+    IADD R4, R5              ; slot - 2
+    MOV  R3, [R4+2]          ; stored key
+    IEQ  R3, R2
+    JT   R3, __tget_numhash_hit
+    MOV  R3, [R4+2]
+    IEQ  R3, BOXED_NIL
+    JT   R3, __builtin_table_get_not_found   ; empty slot: absent
+    IADD R0, 1
+    MOV  R3, [R5]
+    ISUB R3, 1
+    AND  R0, R3
+    JMP  __tget_numhash_probe
+__tget_numhash_hit:
+    MOV  R0, [R4+3]
+    MOV  R4, R0
+    IEQ  R4, BOXED_NIL       ; a deleted key: as absent
+    JT   R4, __builtin_table_get_not_found
+    JMP  __builtin_table_get_done
 __builtin_table_get_hash:
     MOV  R5, [R1+3]          ; hash block
     MOV  R4, R5

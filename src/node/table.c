@@ -429,6 +429,39 @@ void  node_table_get (ASTNode *node, int  dest_reg)
         return;
     }
 
+    // 3b. t[expr] where expr may CALL (t[i+1], t[f(x)], t[c*100+r]): the table
+    //     is pushed while the key is evaluated (as in 4), then popped into a
+    //     register for the same inline array read; a key that is not a whole
+    //     number in range takes the CALL as before.
+    if (dest_reg != 0 && node->as.table_get.key != NULL
+        && node->as.table_get.key->type != NODE_STRING
+        && node->as.table_get.key->type != NODE_NIL
+        && node->as.table_get.key->type != NODE_BOOLEAN)
+    {
+        int t0 = allocate_register ();
+        mark_register_live (t0, 2);
+        generate_asm (node->as.table_get.table_expr, t0);
+        ensure_in_register (t0);
+        emit_asm ("PUSH R%d ; Arg1: Table Pointer", t0);
+        unlock_register (t0);
+
+        int k_reg = allocate_register ();
+        mark_register_live (k_reg, 3);
+        generate_asm (node->as.table_get.key, k_reg);
+        ensure_in_register (k_reg);
+        int pk = pin_reg (k_reg);
+        int t_reg = allocate_register ();
+        mark_register_live (t_reg, 3);
+        emit_asm ("POP  R%d ; the table", t_reg);
+        int pt = pin_reg (t_reg);
+        emit_index_lookup (t_reg, k_reg, node->as.table_get.key, dest_reg);
+        unpin_reg (t_reg, pt);
+        unpin_reg (k_reg, pk);
+        unlock_register (t_reg);
+        unlock_register (k_reg);
+        return;
+    }
+
     // 4. Fallback: Dynamic heap table lookup.
     // Each operand is pushed as soon as it is computed, so the table value
     // never has to survive the key expression in a register (the key may
@@ -521,11 +554,54 @@ void emit_getk_lookup (int table_reg, int key_reg, ASTNode *key, int dest_reg)
     emit_asm ("SHL  R0, 1\n");
     emit_asm ("IADD R0, R%d ; slot - 2\n", a);
     emit_asm ("MOV  R%d, [R0+2] ; stored key\n", a);
-    emit_asm ("IEQ  R%d, R%d\n", a, key_reg);
-    emit_asm ("JF   R%d, __%s_getk_slow_%d\n", a, ctx, id);
+    emit_asm ("MOV  R%d, R%d\n", dest_reg, a);
+    emit_asm ("IEQ  R%d, R%d\n", dest_reg, key_reg);
+    emit_asm ("JF   R%d, __%s_getk_miss_%d\n", dest_reg, ctx, id);
     emit_asm ("MOV  R%d, [R0+3] ; value\n", dest_reg);
     emit_asm ("JMP  __%s_getk_done_%d\n", ctx, id);
+    // First slot empty: the field is absent -> nil (a table with a metatable
+    // may have an __index to ask: the general lookup does that).
+    emit_asm ("__%s_getk_miss_%d:\n", ctx, id);
+    emit_asm ("IEQ  R%d, BOXED_NIL ; empty slot?\n", a);
+    emit_asm ("JF   R%d, __%s_getk_slow_%d\n", a, ctx, id);
+    if (g_uses_metatables)
+    {
+        emit_asm ("MOV  R0, R%d\n", table_reg);
+        emit_asm ("AND  R0, BOXED_PAYLOAD\n");
+        emit_asm ("MOV  R0, [R0+4] ; metatable?\n");
+        emit_asm ("JT   R0, __%s_getk_slow_%d\n", ctx, id);
+    }
+    emit_asm ("MOV  R%d, BOXED_NIL ; absent\n", dest_reg);
+    emit_asm ("JMP  __%s_getk_done_%d\n", ctx, id);
     emit_asm ("__%s_getk_slow_%d:\n", ctx, id);
+    // s:sub(...), s:len() ...: strings have no metatable here, so a string
+    // receiver resolves a string-library name to its __strmeth_ wrapper
+    // (the same value __builtin_string_method_lookup returns, after a chain
+    // of name compares). Resolve it right here for those names.
+    static const char *strmeth[] = { "len", "sub", "upper", "lower", "rep",
+                                     "byte", "find", "reverse", "gsub", NULL };
+    for (int m = 0; strmeth[m]; m++)
+    {
+        if (strcmp (key->as.string_val.value, strmeth[m]) != 0) continue;
+        emit_asm ("MOV  R0, R%d ; string receiver: its method, directly\n", table_reg);
+        emit_asm ("AND  R0, BOXED_DATA\n");
+        emit_asm ("IEQ  R0, BOXED_ROMSTRING\n");
+        emit_asm ("JT   R0, __%s_getk_str_%d\n", ctx, id);
+        emit_asm ("MOV  R0, R%d\n", table_reg);
+        emit_asm ("AND  R0, BOXED_DATA\n");
+        emit_asm ("IEQ  R0, BOXED_RAMSTRING\n");
+        emit_asm ("JF   R0, __%s_getk_gen_%d\n", ctx, id);
+        emit_asm ("MOV  R0, R%d\n", table_reg);
+        emit_asm ("AND  R0, BOXED_PAYLOAD\n");
+        emit_asm ("ILT  R0, 4 ; nil/false/true share the RAM-string tag\n");
+        emit_asm ("JT   R0, __%s_getk_gen_%d\n", ctx, id);
+        emit_asm ("__%s_getk_str_%d:\n", ctx, id);
+        emit_asm ("MOV  R%d, __strmeth_%s\n", dest_reg, strmeth[m]);
+        emit_asm ("OR   R%d, BOXED_FUNCTION\n", dest_reg);
+        emit_asm ("JMP  __%s_getk_done_%d\n", ctx, id);
+        emit_asm ("__%s_getk_gen_%d:\n", ctx, id);
+        break;
+    }
     emit_asm ("PUSH R%d\n", table_reg);
     emit_asm ("PUSH R%d\n", key_reg);
     emit_asm ("CALL __builtin_table_getk\n");
@@ -555,7 +631,7 @@ void emit_index_lookup (int table_reg, int key_reg, ASTNode *key, int dest_reg)
         if (v < 1 || v > 65535 || v != (double)(int) v) lit = false;
         if (!lit) goto general;   // not an array index at all: no fast path
     }
-    else if (key->type != NODE_IDENTIFIER)
+    else if (key->type == NODE_STRING || key->type == NODE_NIL || key->type == NODE_BOOLEAN)
         goto general;             // string/nil/boolean literal: hash part
     {
         int pt = pin_reg (table_reg), pk = pin_reg (key_reg);   // see pin_reg()

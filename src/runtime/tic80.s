@@ -3074,8 +3074,11 @@ _tic80_run_done:
     RET
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; __builtin_tic80_print(text, x, y, color)
-;; [BP+5] = text, [BP+4] = x, [BP+3] = y, [BP+2] = color (TIC-80 px / index)
+;; __builtin_tic80_print(text, x, y, color, fixed, scale, smallfont)
+;; [BP+8] = text, [BP+7] = x, [BP+6] = y, [BP+5] = color (TIC-80 px / index),
+;; [BP+4] = fixed (ignored), [BP+3] = scale, [BP+2] = smallfont
+;; Each glyph is drawn zoomed (x 1.3125 * scale, y 0.984 * scale; small font
+;; 0.79 / 0.82) and advances 6 (small font 4) TIC-80 pixels * scale.
 ;; Returns R0 = width in TIC-80 px (#text * 6) as a float.
 ;; Color is applied as a GPU multiply over the white BIOS font; the current
 ;; multiply color (e.g. the pause-screen dim) is saved and restored.
@@ -3090,7 +3093,7 @@ __builtin_tic80_print:
     IN    R3, GPU_MultiplyColor          ; saved multiply (kept on the stack:
     PUSH  R3                             ; __builtin_print clobbers R3)
 
-    MOV   R1, [BP+2]
+    MOV   R1, [BP+5]
     FLR   R1
     CFI   R1
     AND   R1, 15
@@ -3099,14 +3102,14 @@ __builtin_tic80_print:
     MOV   R1, [R1]
     OUT   GPU_MultiplyColor, R1
 
-    MOV   R1, [BP+4]                     ; x: whole pixels, as TIC-80
+    MOV   R1, [BP+7]                     ; x: whole pixels, as TIC-80
     CFI   R1
     CIF   R1
     FMUL  R1, 2.625
     FADD  R1, 0.5
     FLR   R1
     CFI   R1
-    MOV   R2, [BP+3]                     ; y
+    MOV   R2, [BP+6]                     ; y
     CFI   R2
     CIF   R2
     FMUL  R2, 2.625
@@ -3114,22 +3117,58 @@ __builtin_tic80_print:
     FLR   R2
     CFI   R2
 
+    ;; zoom state: R3 = scale; small font?
+    MOV   R3, [BP+3]
+    MOV   R0, [BP+2]
+    IEQ   R0, BOXED_TRUE
+    JT    R0, _tic80_print_small
+    MOV   R0, R3
+    FMUL  R0, 1.3125
+    MOV   [var_PRINT_EX_SX], R0
+    MOV   R0, R3
+    FMUL  R0, 0.984375
+    MOV   [var_PRINT_EX_SY], R0
+    FMUL  R3, 15.75                      ; advance: 6 px * 2.625
+    JMP   _tic80_print_go
+_tic80_print_small:
+    MOV   R0, R3
+    FMUL  R0, 0.79
+    MOV   [var_PRINT_EX_SX], R0
+    MOV   R0, R3
+    FMUL  R0, 0.82
+    MOV   [var_PRINT_EX_SY], R0
+    FMUL  R3, 10.5                       ; advance: 4 px * 2.625
+_tic80_print_go:
+    MOV   [var_PRINT_EX_ADV], R3
+    MOV   R0, 1
+    MOV   [var_PRINT_EX_ON], R0
+
     ;; __builtin_print ABI: [BP+4] = x, [BP+3] = y, [BP+2] = value
     PUSH  R1
     PUSH  R2
-    MOV   R1, [BP+5]
+    MOV   R1, [BP+8]
     PUSH  R1
     CALL  __builtin_print
     IADD  SP, 3
 
+    MOV   R0, 0
+    MOV   [var_PRINT_EX_ON], R0
+
     POP   R3
     OUT   GPU_MultiplyColor, R3
 
-    MOV   R1, [BP+5]
+    MOV   R1, [BP+8]
     PUSH  R1
     CALL  __builtin_len                  ; 0 for non-strings
     IADD  SP, 1
+    MOV   R1, [BP+3]
     FMUL  R0, 6.0
+    MOV   R2, [BP+2]
+    IEQ   R2, BOXED_TRUE
+    JF    R2, _tic80_print_w
+    FMUL  R0, 0.6666667                  ; small font: 4 px per character
+_tic80_print_w:
+    FMUL  R0, R1
 
     POP   R3
     POP   R2
