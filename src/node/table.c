@@ -368,6 +368,67 @@ void  node_table_set (ASTNode *node)
 }
 
 
+// ---------------------------------------------------------------------------
+// `X and X[k]` (the mget idiom `map[r] and map[r][c]`): the right operand
+// reads the table X again. When both are the same side-effect-free read of
+// variables and literals, and nothing can run between them (no metatables),
+// the right operand starts from the value the left already put in the
+// result register instead of reading X a second time. node_and (relational.c)
+// arms this for the right operand's table expression; node_table_get takes it.
+// ---------------------------------------------------------------------------
+static ASTNode *cse_base_node = NULL;
+static int      cse_base_reg  = -1;
+
+static bool cse_pure_same (ASTNode *a, ASTNode *b)
+{
+    if (a == NULL || b == NULL || a->type != b->type) return false;
+    switch (a->type)
+    {
+        case NODE_IDENTIFIER:
+            return expr_is_simple_load (a) && expr_is_simple_load (b)
+                && strcmp (a->as.id.name, b->as.id.name) == 0;
+        case NODE_NUMBER:
+            return a->as.number.val == b->as.number.val;
+        case NODE_STRING:
+            return strcmp (a->as.string_val.value, b->as.string_val.value) == 0;
+        case NODE_TABLE_GET:
+            return cse_pure_same (a->as.table_get.table_expr, b->as.table_get.table_expr)
+                && cse_pure_same (a->as.table_get.key, b->as.table_get.key);
+        default:
+            return false;
+    }
+}
+
+// left = X, right = X[k] ...: arm the right operand to reuse X from `reg`
+void table_cse_arm (ASTNode *left, ASTNode *right, int reg)
+{
+    cse_base_node = NULL;
+    if (g_uses_metatables || left == NULL || right == NULL) return;
+    if (left->type != NODE_TABLE_GET || right->type != NODE_TABLE_GET) return;
+    if (reg == 0) return;
+    if (!cse_pure_same (left, right->as.table_get.table_expr)) return;
+    cse_base_node = right->as.table_get.table_expr;
+    cse_base_reg  = reg;
+}
+
+void table_cse_disarm (void)
+{
+    cse_base_node = NULL;
+}
+
+// the table operand of a read: a copy of the armed register, or evaluated
+static void generate_table_operand (ASTNode *expr, int t_reg)
+{
+    if (expr != NULL && expr == cse_base_node)
+    {
+        cse_base_node = NULL;
+        emit_asm ("MOV  R%d, R%d ; table already read by the left operand\n", t_reg, cse_base_reg);
+        return;
+    }
+    generate_asm (expr, t_reg);
+}
+
+
 void  node_table_get (ASTNode *node, int  dest_reg)
 {
     // 1. Attempt hardware intrinsic read directly into dest_reg
@@ -395,7 +456,7 @@ void  node_table_get (ASTNode *node, int  dest_reg)
     {
         int t_reg = allocate_register ();
         mark_register_live (t_reg, 3);
-        generate_asm (node->as.table_get.table_expr, t_reg);
+        generate_table_operand (node->as.table_get.table_expr, t_reg);
         ensure_in_register (t_reg);
         int pt = pin_reg (t_reg);                  // k_reg must not be t_reg
         int k_reg = allocate_register ();          // literal: a MOV, no CALL
@@ -415,7 +476,7 @@ void  node_table_get (ASTNode *node, int  dest_reg)
     {
         int t_reg = allocate_register ();
         mark_register_live (t_reg, 3);
-        generate_asm (node->as.table_get.table_expr, t_reg);
+        generate_table_operand (node->as.table_get.table_expr, t_reg);
         ensure_in_register (t_reg);
         int pt = pin_reg (t_reg);                  // k_reg must not be t_reg
         int k_reg = allocate_register ();

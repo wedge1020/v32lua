@@ -27,7 +27,9 @@ void  node_and (ASTNode *node, int  dest_reg)
 
     // 4. Otherwise, evaluate Right Operand into dest_reg
     //    dest_reg still holds left value, but we overwrite it with right
+    table_cse_arm (node -> as.binary.left, node -> as.binary.right, dest_reg);   // X and X[k]
     generate_asm (node -> as.binary.right, dest_reg);
+    table_cse_disarm ();
 
     // 5. End label
     emit_asm ("%s:\n", end_label);

@@ -105,6 +105,8 @@ void  emit_mv_return           (ASTNode *);
 void  emit_mv_table_tail       (ASTNode *, int, int);
 void  emit_mv_push_values      (int);
 void  node_table_get           (ASTNode *, int);
+void  table_cse_arm            (ASTNode *, ASTNode *, int);   // node/table.c: `X and X[k]`
+void  table_cse_disarm         (void);
 void  node_table_set           (ASTNode *);
 void  node_unary               (ASTNode *, int);
 void  node_while               (ASTNode *);
