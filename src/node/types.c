@@ -31,6 +31,16 @@ void  node_identifier (ASTNode *node, int  dest_reg)
         return;
     }
 
+    if (sym != NULL && sym -> inline_value != NULL)
+    {
+        // a parameter of an inlined call: the argument, evaluated where the call is
+        ScopeNode *saved_scope = current_scope;
+        if (sym -> inline_scope != NULL) current_scope = sym -> inline_scope;
+        generate_asm (sym -> inline_value, dest_reg);
+        current_scope = saved_scope;
+        return;
+    }
+
     emit_load_variable (node -> as.id.name, dest_reg);
 }
 

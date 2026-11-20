@@ -252,6 +252,14 @@ void numlocals_enter (ASTNode *func_def)
     if (!ok || s->changed || s->n >= NUMLOCALS_MAX) numlocals_rule_out_all (s);
 }
 
+// An inlined function's expression is generated inside the caller, but its
+// names are the callee's: no caller local's "only ever a number" fact applies.
+void numlocals_enter_blank (void)
+{
+    if (numlocals_depth >= NUMLOCALS_DEPTH) { numlocals_depth++; return; }
+    numlocals_stack[numlocals_depth++].n = 0;
+}
+
 void numlocals_leave (void)
 {
     if (numlocals_depth > 0) numlocals_depth--;

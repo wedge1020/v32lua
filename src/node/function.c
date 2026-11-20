@@ -383,6 +383,166 @@ ASTNode *g_last_exec_call = NULL;
 // t[i] path skips the check that would ask __index (node/table.c).
 bool g_uses_metatables = false;
 
+// --no-direct-calls: every call to a named function goes through
+// __builtin_exec as before (a debugging switch).
+bool g_no_direct_calls = false;
+
+
+// ============================================================================
+// Inlining of tiny functions.
+//
+// A call f(a, b) of a named function whose whole body is `return <expr>` is
+// expanded in place when the expression is simple (literals, parameters,
+// globals, table reads, arithmetic, comparisons, and/or/not -- no calls, no
+// upvalues, no varargs, at most INLINE_MAX_NODES nodes) and every argument is
+// a literal or a variable (so evaluating it where the parameter is used --
+// possibly more than once -- has no side effect). The parameters are bound,
+// in a scratch function scope (which hides the caller's locals from the
+// expression, as a real call would), to the caller's own variables or literal
+// nodes; the expression is generated into the destination register. The
+// function itself is still compiled, for any other use of its value.
+// ============================================================================
+#define INLINE_MAX_NODES 16
+
+bool g_no_inline = false;
+
+static bool inl_is_param (ASTNode *params, const char *name)
+{
+    for (ASTNode *p = params; p != NULL; p = p->next)
+        if (p->type == NODE_IDENTIFIER && strcmp (p->as.id.name, name) == 0) return true;
+    return false;
+}
+
+static SymbolNode *inl_global (const char *name)
+{
+    for (SymbolNode *g = global_scope->symbols; g != NULL; g = g->next)
+        if (strcmp (g->name, name) == 0) return g;
+    return NULL;
+}
+
+static bool inl_name_reserved (const char *name)
+{
+    return strcmp (name, "self") == 0 || strcmp (name, "_ENV") == 0 || strcmp (name, "_G") == 0 ||
+           is_intrinsic_alias (name);
+}
+
+static bool inl_expr_ok (ASTNode *e, ASTNode *params, int *budget)
+{
+    if (e == NULL) return false;
+    if (--(*budget) < 0) return false;
+    switch (e->type)
+    {
+        case NODE_NUMBER: case NODE_STRING: case NODE_BOOLEAN: case NODE_NIL:
+            return true;
+        case NODE_IDENTIFIER: {
+            const char *n = e->as.id.name;
+            if (n == NULL || inl_name_reserved (n)) return false;
+            if (inl_is_param (params, n)) return true;
+            SymbolNode *g = inl_global (n);
+            return g != NULL && g->type == SYM_GLOBAL && !g->is_function && !g->is_c_native &&
+                   !g->is_cart_resource && !g->is_boxed;
+        }
+        case NODE_ADD: case NODE_SUB: case NODE_MUL: case NODE_DIV: case NODE_FLOORDIV:
+        case NODE_MOD: case NODE_POW: case NODE_AND: case NODE_OR: case NODE_RELATIONAL:
+            return inl_expr_ok (e->as.binary.left, params, budget) &&
+                   inl_expr_ok (e->as.binary.right, params, budget);
+        case NODE_UNARY:
+            return inl_expr_ok (e->as.unary.operand, params, budget);
+        case NODE_TABLE_GET:
+            return inl_expr_ok (e->as.table_get.table_expr, params, budget) &&
+                   inl_expr_ok (e->as.table_get.key, params, budget);
+        default:
+            return false;
+    }
+}
+
+// The single `return <expr>` of an inlinable function body, or NULL.
+static ASTNode *inl_body_expr (SymbolNode *fn)
+{
+    ASTNode *def = fn->def_node;
+    if (def == NULL || def->type != NODE_FUNCTION_DEF) return NULL;
+    if (def->as.function_def.is_variadic) return NULL;
+    if (name_list_length (def->as.function_def.upvalues) != 0) return NULL;
+    if (name_list_length (def->as.function_def.boxed_locals) != 0) return NULL;
+    for (ASTNode *p = def->as.function_def.params; p != NULL; p = p->next)
+        if (p->type != NODE_IDENTIFIER) return NULL;
+    ASTNode *st = def->as.function_def.body;
+    while (st != NULL && (st->type == NODE_COMMENT_LINE || st->type == NODE_COMMENT_BLOCK)) st = st->next;
+    if (st == NULL || st->type != NODE_RETURN) return NULL;
+    for (ASTNode *r = st->next; r != NULL; r = r->next)
+        if (r->type != NODE_COMMENT_LINE && r->type != NODE_COMMENT_BLOCK) return NULL;
+    ASTNode *e = st->as.return_stmt.expressions_head;
+    if (e == NULL || e->next != NULL) return NULL;
+    int budget = INLINE_MAX_NODES;
+    ASTNode *saved_next = e->next;
+    bool ok = inl_expr_ok (e, def->as.function_def.params, &budget);
+    e->next = saved_next;
+    return ok ? e : NULL;
+}
+
+static bool inl_arg_ok (ASTNode *a)
+{
+    if (a == NULL) return false;
+    switch (a->type)
+    {
+        case NODE_NUMBER: case NODE_STRING: case NODE_BOOLEAN: case NODE_NIL:
+            return true;
+        case NODE_IDENTIFIER: {
+            const char *n = a->as.id.name;
+            if (n == NULL || inl_name_reserved (n)) return false;
+            SymbolNode *s = resolve_symbol (n);
+            return s != NULL && !s->is_function && !s->is_c_native && !s->is_cart_resource &&
+                   s->inline_value == NULL;
+        }
+        default:
+            return false;
+    }
+}
+
+static bool try_inline_call (ASTNode *node, SymbolNode *fn, int dest_reg)
+{
+    if (g_no_inline || dest_reg == 0) return false;
+    ASTNode *expr = inl_body_expr (fn);
+    if (expr == NULL) return false;
+    for (ASTNode *a = node->as.call.args_head; a != NULL; a = a->next)
+        if (!inl_arg_ok (a)) return false;
+    // a trailing multi-value argument (f(...), f(g())) is not simple: caught above
+
+    ASTNode *def = fn->def_node;
+    // Bind: resolve each argument in the caller's scope first
+    int np = 0;
+    for (ASTNode *p = def->as.function_def.params; p != NULL; p = p->next) np++;
+    SymbolNode **binds = (SymbolNode **) calloc ((size_t) np + 1, sizeof (SymbolNode *));
+    static ASTNode nil_node;
+    nil_node.type = NODE_NIL;
+    int i = 0;
+    ASTNode *a = node->as.call.args_head;
+    for (ASTNode *p = def->as.function_def.params; p != NULL; p = p->next, i++)
+    {
+        SymbolNode *b = (SymbolNode *) calloc (1, sizeof (SymbolNode));
+        b->type = SYM_LOCAL;
+        b->inline_value = (a != NULL) ? a : &nil_node;
+        b->inline_scope = current_scope;           // the caller's scope: where the argument is read
+        b->name = strdup (p->as.id.name);
+        binds[i] = b;
+        if (a != NULL) a = a->next;
+    }
+
+    emit_asm ("    ;; --- inlined call of %s ---\n", def->as.function_def.name ? def->as.function_def.name : "?");
+    push_function_scope ();
+    for (i = 0; i < np; i++) {
+        binds[i]->next = current_scope->symbols;
+        current_scope->symbols = binds[i];
+        if (current_scope->last == NULL) current_scope->last = binds[i];
+    }
+    numlocals_enter_blank ();
+    generate_asm (expr, dest_reg);
+    numlocals_leave ();
+    pop_scope ();
+    free (binds);
+    return true;
+}
+
 void  node_function_call (ASTNode *node, int  dest_reg)
 {
     // -------------------------------------------------------------------------
@@ -482,9 +642,38 @@ void  node_function_call (ASTNode *node, int  dest_reg)
     // preventing normal reuse. Pinned registers can NEVER be spilled, which
     // was causing the exhaustion issue.
     // -------------------------------------------------------------------------
+    if (!is_c_call && !node->as.call.is_method_call &&
+        node->as.call.target->type == NODE_IDENTIFIER &&
+        target_sym != NULL && target_sym->is_function &&
+        try_inline_call (node, target_sym, dest_reg))
+    {
+        return;
+    }
+
     int total_arg_count = 0;
-    int target_reg = allocate_pinned_register();  // NOT pinned - allows emergency spilling
-    lock_register(target_reg);             // Still protected from normal reuse
+
+    // A call to a named, compiled, non-closure function (`function f()` at
+    // any level, no upvalues): its code address is a link-time constant (a
+    // function name can't be reassigned: see the "Duplicate name" check in
+    // context.c), so the call is a plain CALL of the label -- no function
+    // value to load, spill and reload, no __builtin_exec trampoline. The
+    // callee stores its own return count (RET_COUNT) on every return.
+    bool direct_call = false;
+    if (!is_c_call && !node->as.call.is_method_call &&
+        node->as.call.target->type == NODE_IDENTIFIER &&
+        target_sym != NULL && target_sym->is_function &&
+        target_sym->def_node != NULL && target_sym->def_node->type == NODE_FUNCTION_DEF &&
+        name_list_length (target_sym->def_node->as.function_def.upvalues) == 0 &&
+        !g_no_direct_calls)
+    {
+        direct_call = true;
+    }
+
+    int target_reg = -1;
+    if (!direct_call) {
+        target_reg = allocate_pinned_register();  // NOT pinned - allows emergency spilling
+        lock_register(target_reg);             // Still protected from normal reuse
+    }
     int table_reg = -1; // Only used for method calls
 
     // -------------------------------------------------------------------------
@@ -557,7 +746,7 @@ void  node_function_call (ASTNode *node, int  dest_reg)
     else
     {
         // Direct function call: foo() or module.func()
-        if (!is_c_call) {
+        if (!is_c_call && !direct_call) {
             // Standard Lua function - resolve target directly into locked register
             generate_asm(node->as.call.target, target_reg);
         }
@@ -582,7 +771,7 @@ void  node_function_call (ASTNode *node, int  dest_reg)
     // STEP 4 reloads it correctly afterward, the same as it already does for
     // ordinary spills.
     // -------------------------------------------------------------------------
-    if (!is_c_call) {
+    if (!is_c_call && !direct_call) {
         force_spill_register(target_reg);
     }
 
@@ -866,6 +1055,7 @@ void  node_function_call (ASTNode *node, int  dest_reg)
         }
     } else {
         // --- Lua Function Call (via __builtin_exec trampoline) ---
+        if (!direct_call) {
         // Argument evaluation above may have needed target_reg's register
         // number for something else, in which case allocate_register()
         // correctly spilled target_reg's value to preserve it. Reload it
@@ -877,6 +1067,7 @@ void  node_function_call (ASTNode *node, int  dest_reg)
 
         // Unlock target_reg now that we've moved its value to R0
         unlock_pinned_register(target_reg);
+        }
 
         if (mv_args) {
             ensure_in_register (mv_cnt_reg);
@@ -887,8 +1078,12 @@ void  node_function_call (ASTNode *node, int  dest_reg)
                      VARARG_COUNT_REG, actual_passed_count);
         }
 
+        if (direct_call) {
+            emit_asm("CALL __function_%s ; direct call (known function)\n", func_name);
+        } else {
         // Call the Lua function executor (handles tag validation & tail-call)
         emit_asm("CALL __builtin_exec ; Validate and execute\n");
+        }
         g_last_exec_call = node;   // RET_COUNT is valid right after this call
 
         // Clean up arguments from stack

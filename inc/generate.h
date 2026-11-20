@@ -57,6 +57,8 @@ void  node_for_generic         (ASTNode *);
 void  node_function_call       (ASTNode *, int);
 extern ASTNode *g_last_exec_call;
 extern bool     g_uses_metatables;   // the source calls setmetatable() (main.c)
+extern bool     g_no_direct_calls;
+extern bool     g_no_inline;         // --no-inline: calls are never expanded in place   // --no-direct-calls: calls to named functions go through __builtin_exec
 void  node_function_def        (ASTNode *);
 void  node_function_pointer    (ASTNode *, int);
 void  node_identifier          (ASTNode *, int);
@@ -91,6 +93,7 @@ void  emit_arith_coerce        (int, ASTNode *);
 void  emit_for_number          (int, ASTNode *, const char *);
 void  numlocals_enter          (ASTNode *);
 void  numlocals_leave          (void);
+void  numlocals_enter_blank    (void);
 
 // node/multivalue.c
 bool  mv_is_tail               (ASTNode *);

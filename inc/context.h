@@ -7,6 +7,8 @@
 
 typedef enum { SYM_GLOBAL, SYM_LOCAL, SYM_UPVALUE } SymbolType;
 
+struct ScopeNode;
+
 typedef struct SymbolNode
 {
     char       *name;
@@ -26,6 +28,9 @@ typedef struct SymbolNode
                               // prepass also registers the targets of plain assignments to names a function declares local,
                               // and those are not globals worth a ";@var"
     ASTNode    *def_node;     // for is_function symbols
+    ASTNode    *inline_value; // a parameter of an inlined call: the argument's node, generated in place of
+                              // the name, in scope `inline_scope` (the caller's) (node/function.c)
+    struct ScopeNode *inline_scope;
     char       *fn_alias;     // local/upvalue bound to a `local function`
                               // (or `local f = function ...`): the mangled
                               // name of that function's own symbol, which
