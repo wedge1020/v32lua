@@ -49,7 +49,11 @@ Limits that follow from it:
 * **22-bit payloads.** RAM is exactly 4M words, so every RAM address fits.
   ROM strings and functions must lie in the first 4M words (16 MB) of the
   cartridge's program ROM (a BIOS built with `-b`, likewise); textures and sounds
-  don't count toward this.
+  don't count toward this. Because a closure is a function-tagged value
+  with bit 21 set, plain function code must also lie in the first 2M words.
+  The entry vector checks both limits once at boot and shows `CART ERROR:
+  PROGRAM CODE EXCEEDS 2M ROM WORDS` / `PROGRAM DATA EXCEEDS 4M ROM WORDS`
+  (see [NaN_boxing.md](NaN_boxing.md)).
 * **Numbers are float32**: 24 significant bits. Integers above 2^24 are
   not exact, and there is no separate integer type.
 * **A raw 32-bit word can look like a tagged value.** Packed colors from
@@ -69,6 +73,26 @@ go through a reserved RAM buffer (`MV_BUF`, 32 values), with the count in
 `RET_COUNT` when it isn't known at compile time. Captured variables
 (upvalues) are pushed as hidden trailing arguments by the closure call
 (`__builtin_exec`), so a closure's body reads them like parameters.
+
+## The heap: modes and out-of-memory
+
+The heap is a bump allocator. By default (`--gc none`) it never frees, and
+the generated code and RAM use are exactly what they always were. With
+`--gc arena` the program gets `arena.mark()`, `arena.release(m)` and
+`arena.used()`: releasing a mark frees everything allocated since in one
+step, by resetting the heap top. Tables made before the arena that grow
+inside it get their new storage pinned, and the runtime's long-lived
+buffers are always pinned; a value made inside an arena must not be kept in
+anything older (`--gc-check` finds such stores while developing). The
+runtime source has conditional blocks (`;#if GC_ARENA` ... `;#endif`), so
+the arena code is only emitted in arena mode. `--gc marksweep` is a
+reserved name. See [USAGE.md](USAGE.md#7-heap-management---gc).
+
+Running out of memory always reaches the red out-of-memory screen:
+`__malloc` itself panics when the heap would run into the stack (it used to
+return 0, which about half of its callers never checked), and string
+concatenation (`..`) allocates through it (it used to bump the heap pointer
+by hand, so a long `s = s .. c` loop wrote over the stack).
 
 ## The embedded runtime
 

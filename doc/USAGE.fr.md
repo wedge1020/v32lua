@@ -42,6 +42,8 @@ Lancez `v32lua --help` pour voir toutes les options ; les plus courantes :
 | `--rate 11025\|22050\|44100` | Fréquence d'échantillonnage du son produit à partir d'une cartouche PICO-8 ou TIC-80. |
 | `--bezel FICHIER`, `--no-bezel` | Panneaux latéraux PICO-8 : vos propres images, ou aucun. |
 | `--fast-circles` | PICO-8/TIC-80 : dessine plus vite les grands cercles pleins (bords légèrement différents). |
+| `--gc none\|arena` | Gestion du tas ([section 7](#7-gestion-du-tas---gc)) : `none` (par défaut) ne libère jamais ; `arena` ajoute `arena.mark()` / `arena.release(m)`, qui libèrent d'un coup tout ce qui a été alloué entre les deux. |
+| `--gc-check` | Avec `--gc arena` : s'arrête quand une valeur créée dans une arène ouverte est rangée dans quelque chose qui lui survit. Pour les compilations de développement. |
 | `--allow-float-as-clearcolor` | Un nombre Lua donné à `ioports.gpu.clear` ou au `cls()` TIC-80 garde ses bits float32 comme couleur d'effacement, comme les anciennes versions (effacement translucide = traînée de flou). Désactivé par défaut. |
 | `--xml-preserve-paths` | Conserve dans le XML les chemins de `--#texture`/`--#sound` tels qu'écrits et écrit le XML dans le dossier du projet, à côté de la source ou dans son parent quand la source est dans `src/` et la sortie dans un dossier voisin comme `obj/` ([section 3](#3-le-xml-de-la-cartouche)). |
 | `--keyboard 0-3` | Port de manette d'un clavier v32kbd (`key()`, `keyp()`, `kbd.*`) ; 2 par défaut. Demande un périphérique v32io (voir plus bas). |
@@ -78,7 +80,7 @@ haut du fichier.
 | `--#include "fichier.lua"` | Insère ici un autre fichier source. |
 | `--#api "pico8"` / `"tic80"` | Choisit une API de compatibilité. |
 | `--#p8 "cart.p8"` | PICO-8 : utilise les sprites, les drapeaux et la carte d'un fichier `.p8`. |
-| `--#rate 22050`, `--#bezel off`, `--#fast-circles`, `--#keyboard 2`, `--#mouse 3` | Comme les options de la ligne de commande, qui ont priorité. |
+| `--#rate 22050`, `--#bezel off`, `--#fast-circles`, `--#keyboard 2`, `--#mouse 3`, `--#gc arena`, `--#gc-check` | Comme les options de la ligne de commande, qui ont priorité. |
 | `--#allow-float-as-clearcolor` | Comme l'option de la ligne de commande. |
 
 ```lua
@@ -263,7 +265,7 @@ vers `bin/game.v32`. Chaque commande est suivie de `|| abort_build`
   `--no-build-scripts`, donc compiler depuis le script ne le réécrit pas.
 * **Les options sont reprises.** `--api`, `--title`, `--titleopt`,
   `--no-diff-opt-title`, `--rate`, `--bezel`, `--no-bezel`, `--fast-circles`,
-  `--allow-float-as-clearcolor`, `--keyboard`, `--mouse`,
+  `--gc`, `--gc-check`, `--allow-float-as-clearcolor`, `--keyboard`, `--mouse`,
   `--xml-preserve-paths` et `-w` sont répétées dans la ligne `v32lua` du
   script ; `-g` ajoute aussi `assemble -g program`, et `-b` (compilation de BIOS)
   est répété lui aussi et ajoute `assemble -b` (avec les deux : `assemble -b -g program`).
@@ -274,3 +276,101 @@ vers `bin/game.v32`. Chaque commande est suivie de `|| abort_build`
 être changée dans `inc/config.h`, `V32LUA_DEFAULT_BUILD_SCRIPTS`). Les
 Makefiles des démos et les suites de tests l'utilisent, car ils compilent à
 leur manière.
+
+## 7. Gestion du tas (`--gc`)
+
+Par défaut (`--gc none`) le tas est un allocateur linéaire qui ne libère
+jamais : chaque chaîne, table et closure créée reste jusqu'à la
+réinitialisation de la console, donc un jeu qui en crée de nouvelles à chaque
+image finira par manquer de mémoire (un écran rouge « out of memory »). Le
+remède habituel est de réutiliser les tables. L'alternative facultative est
+**`--gc arena`** : vous posez une marque, allouez librement, puis libérez en
+une fois tout ce qui a été alloué depuis la marque.
+
+```lua
+local m = arena.mark()   -- ouvre une arène : renvoie le sommet actuel du tas
+-- ... allouez librement : chaînes, tables, closures ...
+arena.release(m)         -- libère tout ce qui a été créé depuis la marque m
+                         -- (et ferme toutes les arènes ouvertes après)
+arena.used()             -- mots du tas utilisés en ce moment
+```
+
+`arena.*` fonctionne dans tous les modes d'API (natif, PICO-8, TIC-80) et
+demande `--gc arena` (ou `--#gc arena`) ; sans cela, utiliser `arena.*` est
+une erreur de compilation. Les marques s'imbriquent, 16 ouvertes au plus à la
+fois ; libérer une marque extérieure ferme aussi les intérieures. Libérer
+quelque chose qui n'est pas une marque ouverte (jamais ouverte, ou déjà
+libérée) ou ouvrir une 17e marque arrête le programme sur un écran rouge
+`ARENA ERROR`. Mark, release et used coûtent quelques instructions chacun, et
+le temps d'un release ne dépend pas de la quantité allouée. Sans
+`--gc arena`, le code généré est exactement celui de toujours.
+
+```lua
+--#gc arena
+
+function _draw()
+  local m = arena.mark()
+  cls()
+  print("score: " .. score .. "  " .. tostring(time()), 4, 4, 7)  -- chaînes temporaires
+  arena.release(m)            -- toutes libérées d'un coup
+end
+```
+
+Dans un programme Vircon32 natif, enveloppez de la même façon le corps de la
+boucle de `main`, autour du travail fait avant `system.wait()`.
+
+Avec `--tic80-commit`, les appels de dessin faits par `TIC()` sont mis en
+file et rejoués quand elle se termine, et un `print()` en file pointe encore
+sur sa chaîne. Libérer une arène à l'intérieur de `TIC()` libère ces chaînes
+avant qu'elles soient dessinées. Libérez plutôt l'arène de l'image
+*précédente* au début du `TIC()` suivant, quand la file a été dessinée :
+
+```lua
+--#gc arena
+local frame_mark
+function TIC()
+  if frame_mark then arena.release(frame_mark) end
+  frame_mark = arena.mark()    -- un nombre : il peut rester dans un upvalue
+  cls(0)
+  print("t=" .. time(), 4, 4)
+end
+```
+
+**Ce qui est sûr automatiquement.** Une table créée *avant* l'arène qui
+grandit *dans* l'arène (`bullets[#bullets+1] = b` sur une liste durable, une
+nouvelle clé dans une ancienne table) voit son nouveau stockage *épinglé*
+(pinned) : le release conserve le tas jusqu'à ce bloc, si bien que l'ancienne
+table ne pointe jamais vers de la mémoire libérée. Le prix : le reste des
+déchets de l'arène sous le bloc épinglé reste alloué (au plus l'équivalent
+d'une arène par épinglage, et les tables grandissent par doublement, donc les
+épinglages sont rares). Les tampons durables du runtime lui-même (RAM émulée
+de PICO-8 et TIC-80, tampons `pmem` et de banques de TIC-80, une tilemap
+promue) sont toujours épinglés.
+
+**La règle.** Une valeur créée dans l'arène ne doit pas être référencée,
+après le release, par quoi que ce soit qui survive à l'arène : une globale,
+une table créée avant la marque, un upvalue (variable locale capturée)
+déclaré avant la marque, ou une locale d'une fonction englobante. Cette
+référence pointerait vers de la mémoire libérée (valeurs aberrantes, plantages).
+Créez les choses durables avant la marque ou hors de l'arène, copiez ce qui
+doit survivre (par exemple un nombre plutôt qu'une chaîne), ou ne mettez pas
+ce code dans une arène.
+
+**`--gc-check`** (ou `--#gc-check` ; seulement avec `--gc arena`, sinon
+ignoré avec un avertissement) détecte les violations de la règle pendant le
+développement : il s'arrête au stockage fautif avec `ARENA ERROR: A VALUE
+MADE IN THE OPEN ARENA / WAS STORED IN SOMETHING OLDER (--gc-check)`, avec
+l'adresse de la valeur, celle du conteneur (0 = une globale) et le début de
+l'arène. Il vérifie les stockages dans les globales, les écritures dans les
+upvalues, tout stockage dans une table (`t[k]=v`, `t.k=v`, constructeurs,
+`rawset`, `table.insert`, `add()` de PICO-8, ... ; la valeur comme la clé) et
+`setmetatable`. Il ne vérifie pas les locales des fonctions englobantes, et
+les nombres, booléens, nil, littéraux de chaîne et fonctions simples (non
+closures) passent toujours. Il ajoute un appel à chacun de ces stockages
+(environ 9 % de cycles en plus dans une cartouche PICO-8 riche en tables) :
+il est donc destiné aux compilations de développement.
+
+`--gc marksweep` est un nom réservé et il est refusé (« not implemented
+yet »). La ligne de commande l'emporte sur l'indication, et un mode inconnu
+est une erreur. Le mode par défaut peut être changé à la compilation
+(`-DV32LUA_DEFAULT_GC=1`, et `V32LUA_DEFAULT_GC_CHECK`, dans `inc/config.h`).

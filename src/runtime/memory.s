@@ -29,9 +29,46 @@
 ;; ===========================================================================
 
 ;; ---------------------------------------------------------------------------
+;; __malloc_owned: __malloc for a block that belongs to something that may be
+;; older than the allocation itself -- the new array or hash part of an
+;; existing table, or a long-lived runtime buffer kept in a fixed pointer.
+;; Incoming Stack: [BP+2] = Number of words requested (as __malloc)
+;; In: R0 = RAW address of the owner (a table header), 0 = a long-lived
+;;     runtime buffer. Returns and clobbers exactly like __malloc.
+;; Without --gc arena it IS __malloc (the label falls through). With it, a
+;; block whose owner is older than the innermost open arena is pinned: the
+;; arena's release keeps the heap up to the end of it (arena.s), so the
+;; owner never ends up pointing at freed memory.
+;; ---------------------------------------------------------------------------
+__malloc_owned:
+;#if GC_ARENA
+    MOV  R1, [ARENA_FLOOR]
+    JF   R1, __malloc            ; no arena open: a plain allocation
+    IGT  R1, R0                  ; owner older than the innermost arena?
+    JF   R1, __malloc            ; no: it is freed with its owner
+    PUSH BP
+    MOV  BP, SP
+    MOV  R0, [BP+2]
+    PUSH R0
+    CALL __malloc
+    IADD SP, 1
+    MOV  R1, [HEAP_POINTER]
+    MOV  [ARENA_PIN_TOP], R1     ; a release keeps everything up to here
+    MOV  SP, BP
+    POP  BP
+    RET
+;#endif
+
+;; ---------------------------------------------------------------------------
 ;; Memory Allocator: Carves out raw word blocks from HEAP_POINTER
 ;; Incoming Stack: [BP+2] = Number of words requested
-;; Returns: R0 = Raw pointer to allocated memory (or 0 if Out-Of-Memory)
+;; Returns: R0 = Raw pointer to allocated memory. Never returns on
+;;          Out-Of-Memory: it goes straight to __oom_handler (the red panic
+;;          screen). It used to return 0 and leave the check to the caller,
+;;          and about half the callers never made it -- they then wrote
+;;          their block over RAM word 0 (HEAP_POINTER) and onwards. The
+;;          callers' old `IEQ Rn, 0 / JT Rn, __oom_handler` checks are now
+;;          dead but harmless.
 ;; ---------------------------------------------------------------------------
 __malloc:
     PUSH BP
@@ -57,8 +94,8 @@ __malloc:
     JMP  __malloc_done
     
 __malloc_oom:
-    MOV  R0, 0               ; Return 0 to signal Out-Of-Memory to caller
-    
+    JMP  __oom_handler       ; fatal: halts, never returns
+
 __malloc_done:
     MOV  SP, BP
     POP  BP
@@ -107,6 +144,42 @@ __oom_handler:
     MOV   R0, [HEAP_POINTER]
     PUSH  R0                       ; value
     CALL __panic_print_uint
+
+    JMP __panic_halt
+
+;; ---------------------------------------------------------------------------
+;; __panic_with_message: the red panic screen with one ROM message, then halt.
+;; In: R1 = boxed ROM string. Never returns. Allocation-free (safe to use
+;; before __global_scope_initialization and with a full heap).
+;; Used by the cartridge-layout check in the entry vector (generator.c) and
+;; by the arena allocator.
+;; ---------------------------------------------------------------------------
+__panic_with_message:
+    PUSH BP
+    MOV  BP, SP
+    ISUB SP, 1
+    MOV  [BP-1], R1
+
+    MOV  R0, 0xFF000080
+    OUT  GPU_ClearColor, R0
+    OUT  GPU_Command, GPUCommand_ClearScreen
+
+    MOV  R0, 20
+    PUSH R0
+    MOV  R0, 0
+    PUSH R0
+    MOV  R0, __const_str_panic_banner
+    OR   R0, BOXED_ROMSTRING
+    PUSH R0
+    CALL __builtin_print
+
+    MOV  R0, 20
+    PUSH R0
+    MOV  R0, 20
+    PUSH R0
+    MOV  R0, [BP-1]
+    PUSH R0
+    CALL __builtin_print
 
     JMP __panic_halt
 

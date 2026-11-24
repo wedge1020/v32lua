@@ -333,7 +333,8 @@ set(V32LUA_CORE_SRC
     src/buildscript.c
     src/shapes.c
     src/v32kbd.c
-    src/v32mouse.c)
+    src/v32mouse.c
+    src/gc.c)
 
 file(GLOB V32LUA_NODE_SRC       CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/node/*.c")
 file(GLOB V32LUA_INTRINSICS_SRC CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/intrinsics/*.c")

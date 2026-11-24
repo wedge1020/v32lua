@@ -141,6 +141,17 @@ the first 4MW/16MB of CART ROM data). A BIOS built with `-b` lives in the
 BIOS program ROM page instead (`0x10000000`), and the compiler defines
 `V32_CART_PAGE` accordingly; the offsets inside the NaN boxes are the same.
 
+**Boot-time cartridge layout check:** a closure is a function-tagged value
+with bit 21 set, so a plain function whose code sits 2M words (8 MB) or
+more into the ROM would be called as a closure record, and a string literal
+past 4M words cannot be addressed at all. Only the assembler knows the
+final addresses, so the entry vector compares two labels (`__v32lua_code_end`
+after the code, `__v32lua_rom_end` after the string pool) once at boot and
+shows `CART ERROR: PROGRAM CODE EXCEEDS 2M ROM WORDS` or `CART ERROR:
+PROGRAM DATA EXCEEDS 4M ROM WORDS` instead of misbehaving later. Real carts
+are nowhere near this; if it were ever needed, the fix would be function
+values that are indices into a ROM jump table.
+
 ## Supported Tags & Type Representations
 
 The compiler  uses specific bit  patterns in  the upper byte/tag  mask to
@@ -168,7 +179,9 @@ The **RAM  String** payload is  being overloaded: the  lowest-most values
 are reserved for  things like nil and the booleans,  likely a `TOMBSTONE`
 value  for eventually  memory  freeing functionality.  This sacrifice  is
 small in the grand scheme of things,  and works around the limited set of
-broad NaN-type categories only have two mode bits to work with.
+broad NaN-type categories only have two mode bits to work with. (The
+`--gc arena` mode does not use the tombstone: an arena frees by resetting the
+heap top, see [USAGE.md](USAGE.md#7-heap-management---gc).)
 
 The "payload" is  either a 22-bit memory address (covering  either ALL of
 RAM, or the  lowest 4MW/16MB of the  CART ROM address space),  or used to

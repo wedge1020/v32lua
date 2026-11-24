@@ -2255,7 +2255,10 @@ __builtin_vircon32_tilemap_set:
     MOV  R10, R3
     IMUL R10, R4            ; total cell count = __malloc's argument
     PUSH R10
-    CALL __malloc
+;#if GC_ARENA
+    MOV  R0, 0               ; owner: a long-lived runtime buffer (pinned in an arena)
+;#endif
+    CALL __malloc_owned
     IADD SP, 1              ; clean up __malloc's own argument
     POP  R9                 ; restore value
     POP  R1                 ; restore index

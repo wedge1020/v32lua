@@ -86,6 +86,12 @@ static void  print_usage (const char *prog_name)
     fprintf (stdout, "  --fast-circles   TIC-80/PICO-8: draw filled circles above radius 31 as a\n");
     fprintf (stdout, "                   scaled disc (1 draw instead of ~1.2 per radius; about\n");
     fprintf (stdout, "                   1.5%% of the edge pixels differ). Outlines stay exact\n");
+    fprintf (stdout, "  --gc <mode>      Heap management: none (default: the bump allocator, which\n");
+    fprintf (stdout, "                   never frees) or arena (arena.mark() / arena.release(m) free\n");
+    fprintf (stdout, "                   everything allocated between them at once). Same as --#gc\n");
+    fprintf (stdout, "  --gc-check       With --gc arena: panic when a value made in an open arena is\n");
+    fprintf (stdout, "                   stored in a global, an older table or an upvalue (it would\n");
+    fprintf (stdout, "                   dangle after the release). For development builds\n");
     fprintf (stdout, "  --allow-float-as-clearcolor\n");
     fprintf (stdout, "                   TIC-80: cls(variable) hands the variable's float bit pattern\n");
     fprintf (stdout, "                   to the GPU as the clear color (the old behaviour; witchem_up's\n");
@@ -378,6 +384,23 @@ int  main (int  argc, char** argv)
         } else if (strcmp(argv[i], "--xml-preserve-paths") == 0) {
             xml_preserve_paths = 1;
             RECORD_OPT ("--xml-preserve-paths", NULL, 0);
+        } else if ((val = option_value(argc, argv, &i, "--gc")) != NULL) {
+            int mode = gc_parse_mode (val);
+            if (mode == GC_MARKSWEEP_RESERVED) {
+                fprintf(stderr, "Compiler Error: --gc marksweep is not implemented yet (use none or arena)\n");
+                return 1;
+            }
+            if (mode < 0) {
+                fprintf(stderr, "Compiler Error: --gc must be none or arena (got '%s')\n", val);
+                return 1;
+            }
+            g_gc_mode    = mode;
+            g_cli_gc_set = true;
+            RECORD_OPT ("--gc", val, 0);
+        } else if (strcmp(argv[i], "--gc-check") == 0) {
+            g_gc_check         = true;
+            g_cli_gc_check_set = true;
+            RECORD_OPT ("--gc-check", NULL, 0);
         } else if (strcmp(argv[i], "--fast-circles") == 0) {
             shapes_fast = true;
             RECORD_OPT ("--fast-circles", NULL, 0);
@@ -815,6 +838,9 @@ int  main (int  argc, char** argv)
         next_ram_address                  = next_ram_address + 2;
     }
     
+    // --gc / --#gc and --gc-check / --#gc-check are all known now
+    gc_settle_options ();
+
     // Perform full symbol pre-pass before code generation
     register_all_globals_prepass(root_node);
     settle_return_counts();

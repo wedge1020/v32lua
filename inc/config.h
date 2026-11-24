@@ -83,6 +83,22 @@
 #define V32LUA_DEFAULT_FAST_CIRCLES 0
 #endif
 
+// Heap management (src/gc.c). 0 = none: the bump allocator, which never
+// frees (the console has no OS, and a cart that allocates once has nothing
+// to reclaim) -- the generated code is the same as before any GC support.
+// 1 = arena: arena.mark() / arena.release(m) free everything allocated
+// between them in one step. --gc / --#gc pick it for one cart.
+#ifndef V32LUA_DEFAULT_GC
+#define V32LUA_DEFAULT_GC 0
+#endif
+// --gc-check / --#gc-check (arena mode only): panic when a value made
+// inside an open arena is stored into a global, an older table or an
+// upvalue -- the reference that would dangle after the release. Costs a
+// call per such store; meant for development builds. 0 = off (default).
+#ifndef V32LUA_DEFAULT_GC_CHECK
+#define V32LUA_DEFAULT_GC_CHECK 0
+#endif
+
 // TIC-80: cls(c) with a VARIABLE c is a palette index, like every other
 // TIC-80 color argument (floored, & 15, looked up in the cart's palette).
 // Before 20261015-dev the value was handed to the GPU as the clear color

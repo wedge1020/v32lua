@@ -96,6 +96,7 @@ bool pico8_fold_numeric_string_args (ASTNode *, const char *);
 bool emit_cart_restart_intrinsic (ASTNode *, int, const char *);
 double pico8_fix_literal (double);
 bool emit_runtime_call_intrinsic (ASTNode *, int, int, const char *);
+int  emit_arena_intrinsic (ASTNode *, int, const char *);   // arena.* (intrinsics/arena.c)
 bool  emit_pico8_sspr_intrinsic     (ASTNode *, int);
 bool  emit_pico8_count_intrinsic    (ASTNode *, int);
 bool  emit_pico8_del_intrinsic      (ASTNode *, int);

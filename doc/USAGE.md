@@ -41,6 +41,8 @@ Run `v32lua --help` for every option; the common ones:
 | `--rate 11025\|22050\|44100` | Sample rate of the sound made from a PICO-8 or TIC-80 cart. |
 | `--bezel FILE`, `--no-bezel` | PICO-8 side panels: your own art, or none. |
 | `--fast-circles` | PICO-8/TIC-80: draw big filled circles faster (slightly different edges). |
+| `--gc none\|arena` | Heap management ([section 7](#7-heap-management---gc)): `none` (default) never frees; `arena` adds `arena.mark()` / `arena.release(m)`, which free everything allocated between them at once. |
+| `--gc-check` | With `--gc arena`: panic when a value made in an open arena is stored somewhere that outlives it. For development builds. |
 | `--allow-float-as-clearcolor` | A Lua number given to `ioports.gpu.clear` or TIC-80 `cls()` keeps its float32 bits as the clear color, as in older versions (translucent clear = motion-blur streak). Off by default. |
 | `--xml-preserve-paths` | Keep the `--#texture`/`--#sound` paths in the XML as written and write the XML in the project folder, beside the source or in its parent when the source is in `src/` and the output in a sibling like `obj/` ([section 3](#3-the-cartridge-xml)). |
 | `--keyboard 0-3` | Gamepad port of a v32kbd keyboard (`key()`, `keyp()`, `kbd.*`); default 2. Needs a v32io device (below). |
@@ -74,7 +76,7 @@ reads as cartridge settings. Put them at the top of the file.
 | `--#include "file.lua"` | Inserts another source file here. |
 | `--#api "pico8"` / `"tic80"` | Chooses a compatibility API. |
 | `--#p8 "cart.p8"` | PICO-8: use the sprites, flags and map of a `.p8` file. |
-| `--#rate 22050`, `--#bezel off`, `--#fast-circles`, `--#keyboard 2`, `--#mouse 3` | Same as the command-line options, which take precedence. |
+| `--#rate 22050`, `--#bezel off`, `--#fast-circles`, `--#keyboard 2`, `--#mouse 3`, `--#gc arena`, `--#gc-check` | Same as the command-line options, which take precedence. |
 | `--#allow-float-as-clearcolor` | Same as the command-line option. |
 
 ```lua
@@ -250,7 +252,7 @@ into the place the XML expects it, `assemble`, and `packrom` into
   doesn't rewrite it.
 * **Options carry over.** `--api`, `--title`, `--titleopt`,
   `--no-diff-opt-title`, `--rate`, `--bezel`, `--no-bezel`, `--fast-circles`,
-  `--allow-float-as-clearcolor`, `--keyboard`, `--mouse`,
+  `--gc`, `--gc-check`, `--allow-float-as-clearcolor`, `--keyboard`, `--mouse`,
   `--xml-preserve-paths` and `-w` are repeated in the script's `v32lua`
   line; `-g` also gives `assemble -g program`, and `-b`
   (a BIOS build) is repeated too and gives `assemble -b` (with both:
@@ -261,3 +263,94 @@ into the place the XML expects it, `assemble`, and `packrom` into
 `--no-build-scripts` turns all of this off (the default can also be changed
 in `inc/config.h`, `V32LUA_DEFAULT_BUILD_SCRIPTS`). The demo Makefiles and
 the test suites pass it, because they build their own way.
+
+## 7. Heap management (`--gc`)
+
+By default (`--gc none`) the heap is a bump allocator that never frees:
+every string, table and closure you make stays until the console is reset,
+so a game that makes new ones every frame will eventually run out of memory
+(a red "out of memory" screen). The usual cure is to reuse tables. The
+opt-in alternative is **`--gc arena`**: you mark a point, allocate freely,
+and release everything allocated since the mark in one step.
+
+```lua
+local m = arena.mark()   -- open an arena: returns the current heap top
+-- ... allocate freely: strings, tables, closures ...
+arena.release(m)         -- free everything made since mark m (and close
+                         -- every arena opened after it)
+arena.used()             -- heap words in use right now
+```
+
+`arena.*` works in every API mode (native, PICO-8, TIC-80) and needs
+`--gc arena` (or `--#gc arena`); without it, using `arena.*` is a compile
+error. Marks nest, up to 16 open at once; releasing an outer mark closes the
+inner ones too. Releasing something that is not an open mark (never opened,
+or already released) or opening a 17th mark stops the program with a red
+`ARENA ERROR` screen. Mark, release and used take a few instructions each,
+and the time of a release does not depend on how much was allocated. Without
+`--gc arena` the generated code is exactly what it always was.
+
+```lua
+--#gc arena
+
+function _draw()
+  local m = arena.mark()
+  cls()
+  print("score: " .. score .. "  " .. tostring(time()), 4, 4, 7)  -- temporary strings
+  arena.release(m)            -- all of them freed at once
+end
+```
+
+In a native Vircon32 program, wrap the body of the `main` loop the same way,
+around the work done before `system.wait()`.
+
+With `--tic80-commit`, the drawing calls `TIC()` makes are queued and
+replayed after it returns, and a queued `print()` still refers to its
+string. Release an arena inside `TIC()` and those strings are freed before
+they are drawn. Release the *previous* frame's arena at the start of the
+next `TIC()` instead, when the queue has been drawn:
+
+```lua
+--#gc arena
+local frame_mark
+function TIC()
+  if frame_mark then arena.release(frame_mark) end
+  frame_mark = arena.mark()    -- a number: fine to keep in an upvalue
+  cls(0)
+  print("t=" .. time(), 4, 4)
+end
+```
+
+**What is safe automatically.** A table made *before* the arena that grows
+*inside* it (`bullets[#bullets+1] = b` on a long-lived list, a new key on an
+old table) gets its new storage *pinned*: the release keeps the heap up to
+that block, so the old table never points into freed memory. The price is
+that the arena's other garbage below the pinned block stays allocated (at
+most one arena's worth per pin, and tables grow by doubling, so pins are
+rare). The runtime's own long-lived buffers (PICO-8 and TIC-80 emulated RAM,
+TIC-80 `pmem` and bank buffers, a promoted tilemap) are always pinned.
+
+**The rule.** A value made inside the arena must not be referenced, after
+the release, from anything that outlives the arena: a global, a table made
+before the mark, an upvalue (a captured local) declared before the mark, or a
+local of an outer function. That reference would point at freed memory
+(garbage values, crashes). Create long-lived things before the mark or
+outside the arena, copy what must survive (for instance a number instead of
+a string), or don't put that code in an arena.
+
+**`--gc-check`** (or `--#gc-check`; only with `--gc arena`, otherwise ignored
+with a warning) finds violations of the rule while you develop: it panics at
+the store with `ARENA ERROR: A VALUE MADE IN THE OPEN ARENA / WAS STORED IN
+SOMETHING OLDER (--gc-check)`, with the value's address, the container's
+address (0 = a global) and where the arena starts. It checks stores into
+globals, writes to upvalues, every table store (`t[k]=v`, `t.k=v`,
+constructors, `rawset`, `table.insert`, PICO-8 `add()`, ...; both value and
+key) and `setmetatable`. It does not check locals of outer functions, and
+numbers, booleans, nil, string literals and plain (non-closure) functions
+always pass. It adds a call to each such store (about 9% more cycles in a
+table-heavy PICO-8 cart), so it is meant for development builds.
+
+`--gc marksweep` is a reserved name and is rejected ("not implemented yet").
+The command line wins over the hint, and an unknown mode is an error. The
+default mode can be changed at build time (`-DV32LUA_DEFAULT_GC=1`, and
+`V32LUA_DEFAULT_GC_CHECK`, in `inc/config.h`).

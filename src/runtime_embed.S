@@ -262,6 +262,24 @@
     runtime_tic80_end:
 #endif
 
+/* --- Arena allocator (--gc arena only) --- */
+#ifdef __APPLE__
+    .global _runtime_arena_start
+    _runtime_arena_start:
+#else
+    .global runtime_arena_start
+    runtime_arena_start:
+#endif
+    .incbin "runtime/arena.s"
+    .byte 0
+#ifdef __APPLE__
+    .global _runtime_arena_end
+    _runtime_arena_end:
+#else
+    .global runtime_arena_end
+    runtime_arena_end:
+#endif
+
 /* --- Constants (footer) --- */
 #ifdef __APPLE__
     .global _runtime_constant_start

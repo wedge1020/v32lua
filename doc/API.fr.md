@@ -36,6 +36,7 @@ modifié — la console n'a ni l'un ni l'autre ; voir
 - [Clavier et souris : ce qu'il faut (v32io)](#clavier-et-souris--ce-quil-faut-v32io)
 - [Clavier : key() / keyp() / kbd.\*](#clavier--key--keyp--kbd)
 - [Souris : mouse() / mouse.\*](#souris--mouse--mouse)
+- [Arènes du tas : arena.\*](#arènes-du-tas--arena)
 - [Tilemap : tilemap.\*](#tilemap--tilemap)
 - [Carte mémoire : memcard.\*](#carte-mémoire--memcard)
 - [Autres ports d'E/S bruts](#autres-ports-des-bruts)
@@ -129,6 +130,7 @@ nom (`spr`, `rgba`, `color`, …) remplace l'intrinsèque.
 | `system.wait()` / `system.halt()` | nil | `WAIT` jusqu'à l'image suivante / `HLT`. [Détails](#système--system) |
 | `system.date()` / `system.time()` | chaîne, 3 nombres | `"YYYY-MM-DD", a, m, j` / `"HH:MM:SS", h, m, s`. |
 | `system.frames()` / `system.cycles()` | nombre | Images depuis la mise sous tension / cycles CPU de l'image en cours (aussi sans `()`). |
+| `arena.mark()` / `arena.release(m)` / `arena.used()` | nombre / nil / nombre | Libère d'un coup tout ce qui a été alloué depuis une marque. Demande `--gc arena`. [Détails](#arènes-du-tas--arena) |
 
 *Langage et assembleur en ligne*
 
@@ -1486,6 +1488,48 @@ et repart de l'état actuel du périphérique (le pointeur reste où il est).
 `mouse.connected()` est vrai quand quelque chose est branché sur le port de
 la souris. Comme pour le clavier, lire le port de la souris ne perturbe pas
 la manette sélectionnée par le programme.
+
+---
+
+## Arènes du tas : arena.\*
+
+```
+arena.mark()      -> nombre   (ouvre une arène : le sommet actuel du tas)
+arena.release(m)  -> nil      (libère tout ce qui a été alloué depuis la marque m)
+arena.used()      -> nombre   (mots du tas utilisés en ce moment)
+```
+
+Ce sont des extensions de v32lua, disponibles dans tous les modes d'API
+(natif, PICO-8, TIC-80), mais **seulement en compilant avec `--gc arena`**
+(ou avec une indication `--#gc arena`). Sans cela, utiliser `arena.*` est
+une erreur de compilation. Une globale ou une table du programme nommée
+`arena` garde son nom.
+
+```lua
+local m = arena.mark()   -- ouvre une arène
+-- ... allouez librement : chaînes, tables, closures ...
+arena.release(m)         -- libère tout d'un coup ; ferme aussi toutes les
+                         -- arènes ouvertes après m
+```
+
+`arena.mark()` renvoie le sommet actuel du tas (un nombre ordinaire) ;
+conservez-le et passez-le à `arena.release(m)`, qui libère tout ce qui a été
+alloué depuis et ramène le tas à ce point. Le coût est de quelques
+instructions et ne dépend pas de la quantité allouée. `arena.used()` donne le
+nombre de mots du tas utilisés maintenant, pratique pour vérifier qu'une
+boucle ne fait pas grossir le tas. Jusqu'à 16 marques peuvent être ouvertes
+en même temps ; libérer une marque extérieure ferme les intérieures. Libérer
+quelque chose qui n'est pas une marque ouverte (jamais ouverte, ou déjà
+libérée) s'arrête sur un écran rouge, `ARENA ERROR: arena.release(m): m IS NOT
+AN OPEN MARK` ; une 17e marque ouverte donne `ARENA ERROR: TOO MANY OPEN
+arena.mark()s (16)`.
+
+La règle : après le release, rien de ce qui survit à l'arène (une globale,
+une table créée avant la marque, un upvalue ou une locale englobante déclaré
+avant) ne doit encore référencer une valeur créée dedans. Les tables créées
+avant l'arène qui grandissent dedans sont gérées automatiquement. Voir
+[USAGE.fr.md](USAGE.fr.md#7-gestion-du-tas---gc) pour les détails, un exemple
+et `--gc-check`, qui trouve les violations pendant le développement.
 
 ---
 

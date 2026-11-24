@@ -363,6 +363,12 @@ works):
   `--no-bezel`: black margins.
 * `--fast-circles`: TIC-80/PICO-8 filled circles above radius 31 drawn as
   a scaled disc.
+* `--gc none|arena`: heap management (default `none`: the heap never
+  frees). `arena` adds `arena.mark()`, `arena.release(m)` and
+  `arena.used()`, which free everything allocated since a mark in one step
+  (see [doc/USAGE.md](doc/USAGE.md#7-heap-management---gc)).
+  `--gc-check`: with `--gc arena`, panic when a value made in an open arena
+  is stored in a global, an older table or an upvalue (development builds).
 * `--xml-preserve-paths`: keep the `--#texture` / `--#sound` paths in the
   cartridge XML as written, and write the XML in the project folder (beside
   the source file, or in its parent when the source is in `src/` and the
@@ -514,6 +520,7 @@ Supported hints:
 | `--#rate 11025` \| `22050` \| `44100` | Sample rate of the sound synthesized from a PICO-8 or TIC-80 cart (default 22050; `--#p8rate` is the old name; see [doc/PICO8.md](doc/PICO8.md#sound)). |
 | `--#bezel off` \| `on` \| `"art.png"` | PICO-8: the side panels beside the 128×128 screen — none, the built-in art, or your own (see [doc/PICO8.md](doc/PICO8.md#side-panels)). |
 | `--#fast-circles` | TIC-80/PICO-8: filled circles above radius 31 are drawn as one scaled disc (faster, edges differ slightly). |
+| `--#gc none` / `arena`, `--#gc-check` | Same as `--gc` and `--gc-check`: heap management with explicit arenas (`arena.mark()` / `arena.release(m)`); see [doc/USAGE.md](doc/USAGE.md#7-heap-management---gc). |
 | `--#allow-float-as-clearcolor` | Same as the command-line option. |
 | `--#keyboard 0`–`3` | Gamepad port of a v32kbd keyboard (v32io adapter or the modified emulator required, see [Keyboard and mouse](#keyboard-and-mouse-v32io)), for `key()`/`keyp()`/`kbd.*` (default 2; see [doc/API.md](doc/API.md#keyboard-key--keyp--kbd)). |
 | `--#mouse 0`–`3` | Gamepad port of a v32mouse mouse (v32io adapter or the modified emulator required, see [Keyboard and mouse](#keyboard-and-mouse-v32io)), for `mouse()`/`mouse.*` and PICO-8's `stat(32..34)` (default 3; see [doc/API.md](doc/API.md#mouse-mouse--mouse)). |
@@ -1231,7 +1238,10 @@ decision:
   `string.format(...)`.
 * Garbage collection: the heap is a bump allocator, so every table,
   closure and runtime string lives until reset. Long-running games should
-  reuse tables rather than create them per frame. Strings take one word
+  reuse tables rather than create them per frame. The opt-in alternative is
+  `--gc arena`: wrap the per-frame work in `arena.mark()` /
+  `arena.release(m)` and everything allocated in between is freed at once
+  (see [doc/USAGE.md](doc/USAGE.md#7-heap-management---gc)). Strings take one word
   per character, so building a long string one piece at a time
   (`s = s .. c` in a loop) uses memory quadratically: nanoman decodes its
   levels that way and fills the 4M-word RAM after about 100 s of play.

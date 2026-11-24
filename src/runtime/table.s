@@ -570,7 +570,10 @@ __table_hash_new:
     IADD R2, 2
     PUSH R1                  ; __malloc clobbers R1-R3, R6
     PUSH R2
-    CALL __malloc
+;#if GC_ARENA
+    MOV  R0, [SP+5]       ; owner: this table's header (pinned if older than the arena)
+;#endif
+    CALL __malloc_owned
     IADD SP, 1
     POP  R1
     MOV  R2, R0
@@ -806,7 +809,10 @@ __table_array_grow_fits:
     PUSH R1                  ; __malloc clobbers R1-R3, R6
     PUSH R6
     PUSH R6
-    CALL __malloc
+;#if GC_ARENA
+    MOV  R0, R1           ; owner: this table's header (pinned if older than the arena)
+;#endif
+    CALL __malloc_owned
     IADD SP, 1
     POP  R6
     POP  R1
@@ -905,6 +911,18 @@ __builtin_table_set:
     IEQ  R4, BOXED_TABLE
     JF   R4, __runtime_error_not_table
     AND  R1, BOXED_PAYLOAD
+;#if GC_CHECK
+    ;; --gc-check: neither the value nor the key may be younger than the
+    ;; innermost open arena when the table is older (arena.s). Every table
+    ;; store -- t[k]=v, constructors, rawset, table.insert, add() -- is here.
+    PUSH R1
+    PUSH R3
+    CALL __arena_check_store
+    IADD SP, 1
+    PUSH R2
+    CALL __arena_check_store
+    IADD SP, 2
+;#endif
 
     ;; nil key: nothing can be stored (Lua raises an error; ignored here)
     MOV  R4, R2
@@ -1116,7 +1134,10 @@ __set_with_shift_allocate_array:
 
     MOV  R0, 8
     PUSH R0
-    CALL __malloc
+;#if GC_ARENA
+    MOV  R0, R5           ; owner: this table's header (pinned if older than the arena)
+;#endif
+    CALL __malloc_owned
     IADD SP, 1
 
     POP  R6
@@ -1178,7 +1199,10 @@ __set_with_shift_use_doubled:
 
     MOV  R0, R8
     PUSH R0
-    CALL __malloc
+;#if GC_ARENA
+    MOV  R0, R5           ; owner: this table's header (pinned if older than the arena)
+;#endif
+    CALL __malloc_owned
     IADD SP, 1
 
     POP  R7
@@ -2046,18 +2070,17 @@ __sort_done:
     RET
 
 ;; ---------------------------------------------------------------------------
-;; __concat_make_empty_string: allocate a fresh zero-length RAM string.
-;; Output: R0 = boxed empty string. Clobbers: R0, R1, R2 only.
+;; __concat_make_empty_string: the empty string, for an empty range.
+;; Output: R0 = boxed empty string. Clobbers: R0 only.
+;; It used to allocate a fresh one-word RAM string by bumping HEAP_POINTER
+;; by hand (no out-of-memory check, invisible to the arena allocator). The
+;; shared ROM constant compares and hashes the same (equality and string
+;; keys go by content; a ROM string outside the literal pool hashes its
+;; characters), and nothing writes into a string after it is made.
 ;; ---------------------------------------------------------------------------
 __concat_make_empty_string:
-    MOV  R1, [HEAP_POINTER]   ; R1 = base address for this new string
-    MOV  R2, 0
-    MOV  [R1], R2             ; write null terminator
-    MOV  R0, R1
-    IADD R0, 1
-    MOV  [HEAP_POINTER], R0   ; bump heap pointer past the 1 byte used
-    MOV  R0, R1
-    OR   R0, BOXED_RAMSTRING  ; box the STRING BASE (not the bumped pointer)
+    MOV  R0, __const_str_empty
+    OR   R0, BOXED_ROMSTRING
     RET
 
 ;; ---------------------------------------------------------------------------
@@ -2999,6 +3022,12 @@ __builtin_setmetatable:              ; [BP+3] = t, [BP+2] = mt
     JF   R2, __builtin_setmetatable_set  ; nil (or anything else): removed
     MOV  R2, [BP+2]
 __builtin_setmetatable_set:
+;#if GC_CHECK
+    PUSH R1                              ; --gc-check: a metatable from the
+    PUSH R2                              ; arena on an older table escapes
+    CALL __arena_check_store
+    IADD SP, 2
+;#endif
     MOV  [R1+4], R2
 __builtin_setmetatable_done:
     POP  R2

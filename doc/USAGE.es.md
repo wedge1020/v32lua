@@ -42,6 +42,8 @@ Ejecuta `v32lua --help` para ver todas las opciones; las más comunes:
 | `--rate 11025\|22050\|44100` | Frecuencia de muestreo del sonido generado a partir de un cartucho de PICO-8 o TIC-80. |
 | `--bezel ARCHIVO`, `--no-bezel` | Paneles laterales de PICO-8: tu propio arte, o ninguno. |
 | `--fast-circles` | PICO-8/TIC-80: dibuja más rápido los círculos rellenos grandes (bordes ligeramente distintos). |
+| `--gc none\|arena` | Gestión del montón ([sección 7](#7-gestión-del-montón---gc)): `none` (por defecto) nunca libera; `arena` añade `arena.mark()` / `arena.release(m)`, que liberan de una vez todo lo reservado entre ambos. |
+| `--gc-check` | Con `--gc arena`: se detiene cuando un valor creado en una arena abierta se guarda en algo que sobrevive a la arena. Para compilaciones de desarrollo. |
 | `--allow-float-as-clearcolor` | Un número Lua dado a `ioports.gpu.clear` o al `cls()` de TIC-80 conserva sus bits float32 como color de borrado, como las versiones antiguas (borrado translúcido = estela de desenfoque). Desactivado por defecto. |
 | `--xml-preserve-paths` | Conserva en el XML las rutas de `--#texture`/`--#sound` tal como se escribieron y escribe el XML en la carpeta del proyecto, junto al fuente o en su directorio padre cuando el fuente está en `src/` y la salida en una hermana como `obj/` ([sección 3](#3-el-xml-del-cartucho)). |
 | `--keyboard 0-3` | Puerto de mando de un teclado v32kbd (`key()`, `keyp()`, `kbd.*`); 2 por defecto. Necesita un dispositivo v32io (ver abajo). |
@@ -77,7 +79,7 @@ archivo.
 | `--#include "archivo.lua"` | Inserta aquí otro archivo fuente. |
 | `--#api "pico8"` / `"tic80"` | Elige una API de compatibilidad. |
 | `--#p8 "cart.p8"` | PICO-8: usa los sprites, los flags y el mapa de un archivo `.p8`. |
-| `--#rate 22050`, `--#bezel off`, `--#fast-circles`, `--#keyboard 2`, `--#mouse 3` | Igual que las opciones de la línea de órdenes, que tienen prioridad. |
+| `--#rate 22050`, `--#bezel off`, `--#fast-circles`, `--#keyboard 2`, `--#mouse 3`, `--#gc arena`, `--#gc-check` | Igual que las opciones de la línea de órdenes, que tienen prioridad. |
 | `--#allow-float-as-clearcolor` | Igual que la opción de la línea de órdenes. |
 
 ```lua
@@ -258,7 +260,7 @@ las opciones que diste, convierten cada `--#texture` / `--#sound` con
   de modo que compilar desde el script no lo reescribe.
 * **Las opciones se conservan.** `--api`, `--title`, `--titleopt`,
   `--no-diff-opt-title`, `--rate`, `--bezel`, `--no-bezel`, `--fast-circles`,
-  `--allow-float-as-clearcolor`, `--keyboard`, `--mouse`,
+  `--gc`, `--gc-check`, `--allow-float-as-clearcolor`, `--keyboard`, `--mouse`,
   `--xml-preserve-paths` y `-w` se repiten en la línea de `v32lua` del
   script; `-g` añade además `assemble -g program`, y `-b` (compilación de BIOS)
   también se repite y añade `assemble -b` (con ambos: `assemble -b -g program`).
@@ -268,3 +270,101 @@ las opciones que diste, convierten cada `--#texture` / `--#sound` con
 `--no-build-scripts` lo desactiva todo (el valor por defecto también puede
 cambiarse en `inc/config.h`, `V32LUA_DEFAULT_BUILD_SCRIPTS`). Los Makefiles
 de las demos y las suites de pruebas lo pasan, porque compilan a su manera.
+
+## 7. Gestión del montón (`--gc`)
+
+Por defecto (`--gc none`) el montón es un asignador incremental que nunca
+libera: cada cadena, tabla y closure que creas permanece hasta reiniciar la
+consola, así que un juego que crea otras nuevas en cada fotograma acabará
+sin memoria (una pantalla roja de «out of memory»). El remedio habitual es
+reutilizar tablas. La alternativa opcional es **`--gc arena`**: marcas un
+punto, reservas libremente y liberas de una vez todo lo reservado desde la
+marca.
+
+```lua
+local m = arena.mark()   -- abre una arena: devuelve el tope actual del montón
+-- ... reserva libremente: cadenas, tablas, closures ...
+arena.release(m)         -- libera todo lo creado desde la marca m (y cierra
+                         -- todas las arenas abiertas después)
+arena.used()             -- palabras del montón en uso ahora mismo
+```
+
+`arena.*` funciona en todos los modos de API (nativo, PICO-8, TIC-80) y
+necesita `--gc arena` (o `--#gc arena`); sin él, usar `arena.*` es un error
+de compilación. Las marcas se anidan, hasta 16 abiertas a la vez; liberar una
+marca externa cierra también las internas. Liberar algo que no es una marca
+abierta (nunca abierta, o ya liberada) o abrir una marca 17 detiene el
+programa con una pantalla roja `ARENA ERROR`. Mark, release y used cuestan
+unas pocas instrucciones cada una, y el tiempo de un release no depende de
+cuánto se reservó. Sin `--gc arena` el código generado es exactamente el de
+siempre.
+
+```lua
+--#gc arena
+
+function _draw()
+  local m = arena.mark()
+  cls()
+  print("score: " .. score .. "  " .. tostring(time()), 4, 4, 7)  -- cadenas temporales
+  arena.release(m)            -- todas liberadas de una vez
+end
+```
+
+En un programa nativo de Vircon32, envuelve igual el cuerpo del bucle de
+`main`, alrededor del trabajo hecho antes de `system.wait()`.
+
+Con `--tic80-commit`, las llamadas de dibujo que hace `TIC()` se encolan y
+se reproducen cuando termina, y un `print()` encolado sigue apuntando a su
+cadena. Si se libera un arena dentro de `TIC()`, esas cadenas se liberan
+antes de dibujarse. Libere en su lugar el arena del fotograma *anterior* al
+principio del siguiente `TIC()`, cuando la cola ya se ha dibujado:
+
+```lua
+--#gc arena
+local frame_mark
+function TIC()
+  if frame_mark then arena.release(frame_mark) end
+  frame_mark = arena.mark()    -- un número: se puede guardar en un upvalue
+  cls(0)
+  print("t=" .. time(), 4, 4)
+end
+```
+
+**Qué es seguro automáticamente.** Una tabla creada *antes* de la arena que
+crece *dentro* de ella (`bullets[#bullets+1] = b` sobre una lista duradera,
+una clave nueva en una tabla antigua) tiene su nuevo almacenamiento
+*fijado* (pinned): el release conserva el montón hasta ese bloque, de modo
+que la tabla antigua nunca apunta a memoria liberada. El precio es que el
+resto de la basura de la arena por debajo del bloque fijado sigue reservado
+(como mucho el equivalente a una arena por cada fijado, y las tablas crecen
+duplicándose, así que los fijados son raros). Los búferes duraderos del
+propio runtime (RAM emulada de PICO-8 y TIC-80, búferes `pmem` y de bancos de
+TIC-80, un tilemap promovido) se fijan siempre.
+
+**La regla.** Un valor creado dentro de la arena no debe ser referenciado,
+tras el release, desde nada que sobreviva a la arena: una global, una tabla
+creada antes de la marca, un upvalue (variable local capturada) declarado
+antes de la marca, o una local de una función exterior. Esa referencia
+apuntaría a memoria liberada (valores basura, cuelgues). Crea las cosas
+duraderas antes de la marca o fuera de la arena, copia lo que deba
+sobrevivir (por ejemplo un número en lugar de una cadena), o no pongas ese
+código en una arena.
+
+**`--gc-check`** (o `--#gc-check`; solo con `--gc arena`, si no se ignora con
+un aviso) detecta las infracciones de la regla durante el desarrollo: se
+detiene en el propio almacenamiento con `ARENA ERROR: A VALUE MADE IN THE
+OPEN ARENA / WAS STORED IN SOMETHING OLDER (--gc-check)`, con la dirección
+del valor, la del contenedor (0 = una global) y dónde empieza la arena.
+Comprueba los almacenamientos en globales, las escrituras en upvalues, todo
+almacenamiento en tablas (`t[k]=v`, `t.k=v`, constructores, `rawset`,
+`table.insert`, `add()` de PICO-8, ...; tanto el valor como la clave) y
+`setmetatable`. No comprueba las locales de funciones exteriores, y los
+números, booleanos, nil, literales de cadena y funciones simples (que no son
+closures) siempre pasan. Añade una llamada a cada uno de esos
+almacenamientos (alrededor de un 9 % más de ciclos en un cartucho de PICO-8
+con muchas tablas), por lo que está pensado para compilaciones de desarrollo.
+
+`--gc marksweep` es un nombre reservado y se rechaza («not implemented
+yet»). La línea de órdenes tiene prioridad sobre la pista, y un modo
+desconocido es un error. El modo por defecto puede cambiarse al compilar
+(`-DV32LUA_DEFAULT_GC=1`, y `V32LUA_DEFAULT_GC_CHECK`, en `inc/config.h`).

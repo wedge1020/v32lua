@@ -126,13 +126,18 @@ __strcat_len_right:
 
     ;; --- 3. Allocate Memory on Heap ---
 __strcat_alloc:
-    MOV  R0, [HEAP_POINTER]  ; R0 = New string base (raw pointer)
+    ;; Through __malloc, like every other allocation: this used to bump
+    ;; HEAP_POINTER by hand, with no stack-collision check (a long enough
+    ;; `s = s .. c` loop wrote over the stack instead of reaching the
+    ;; out-of-memory screen) and out of reach of the arena allocator.
+    ;; __malloc keeps R7/R8 (the two source pointers).
+    MOV  R0, R2
+    IADD R0, R4
+    IADD R0, 1               ; left + right + terminator
+    PUSH R0
+    CALL __malloc            ; R0 = New string base (raw pointer)
+    IADD SP, 1
     MOV  R5, R0              ; R5 = Write head
-    MOV  R6, R0
-    IADD R6, R2
-    IADD R6, R4
-    IADD R6, 1
-    MOV  [HEAP_POINTER], R6
 
     ;; --- 4. Copy Left String to Heap ---
     MOV  R1, R7
@@ -799,7 +804,10 @@ __builtin_ftoa_scratch_a:
     ;; __builtin_ftoa does, and cache its address for every future call.
     MOV  R0, 48
     PUSH R0
-    CALL __malloc
+;#if GC_ARENA
+    MOV  R0, 0               ; owner: a long-lived runtime buffer (pinned in an arena)
+;#endif
+    CALL __malloc_owned
     IADD SP, 1
 
     MOV  R4, R0
@@ -837,7 +845,10 @@ __builtin_ftoa_scratch_b:
 
     MOV  R0, 48
     PUSH R0
-    CALL __malloc
+;#if GC_ARENA
+    MOV  R0, 0               ; owner: a long-lived runtime buffer (pinned in an arena)
+;#endif
+    CALL __malloc_owned
     IADD SP, 1
 
     MOV  R4, R0

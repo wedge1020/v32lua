@@ -751,6 +751,7 @@ void generate_global_setup (ASTNode *node)
     emit_asm ("MOV R0, 0\n");
     emit_asm ("MOV [FTOA_SCRATCH_PTR_A], R0 ; must start at 0 -- see generate_global_setup() comment\n");
     emit_asm ("MOV [FTOA_SCRATCH_PTR_B], R0 ; must start at 0 -- see generate_global_setup() comment\n");
+    gc_emit_init ();      // --gc arena: no arena open; the scratch buffers now
 
     // PICO-8: GPU regions, draw state, map + sprite flags -- BEFORE any
     // top-level cart statement below can call mset()/fget()/spr().
@@ -1050,6 +1051,32 @@ void generate_program (ASTNode *head)
         emit_asm ("\n");
     }
     emit_asm (";; --- Compiled Code Entry Vector ---\n");
+    // Cartridge layout check. NaN-boxed values carry 22-bit ROM offsets, and
+    // a closure is a function-tagged value with bit 21 (BOXED_CLOSURE_FLAG)
+    // set -- so a plain function whose code sits 2M words or more into the
+    // ROM would be called as a closure record, and a string literal past
+    // 4M words cannot be addressed at all. The assembler is the only one
+    // that knows the final addresses, so the check runs once at boot, on
+    // the __v32lua_code_end / __v32lua_rom_end labels put after the code and
+    // after the string pool (at the end of this function). A few
+    // instructions at start-up instead of wrong behaviour at an unrelated
+    // call in a huge cart.
+    emit_asm ("MOV  R0, __v32lua_code_end\n");
+    emit_asm ("ISUB R0, V32_CART_PAGE\n");
+    emit_asm ("IGE  R0, 0x00200000 ; past bit 21: functions would read as closures\n");
+    emit_asm ("JF   R0, __v32lua_layout_code_ok\n");
+    emit_asm ("MOV  R1, __const_str_err_rom_code\n");
+    emit_asm ("OR   R1, BOXED_ROMSTRING\n");
+    emit_asm ("JMP  __panic_with_message\n");
+    emit_asm ("__v32lua_layout_code_ok:\n");
+    emit_asm ("MOV  R0, __v32lua_rom_end\n");
+    emit_asm ("ISUB R0, V32_CART_PAGE\n");
+    emit_asm ("IGT  R0, 0x00400000 ; the 22-bit payload reaches 4M words\n");
+    emit_asm ("JF   R0, __v32lua_layout_ok\n");
+    emit_asm ("MOV  R1, __const_str_err_rom_data\n");
+    emit_asm ("OR   R1, BOXED_ROMSTRING\n");
+    emit_asm ("JMP  __panic_with_message\n");
+    emit_asm ("__v32lua_layout_ok:\n");
     emit_asm ("CALL __global_scope_initialization  ; Run top-level setups first\n");
     
     // --- API Initialization: Call the appropriate region setup routine ---
@@ -1127,6 +1154,7 @@ void generate_program (ASTNode *head)
                 emit_asm ("IGT  R0, 250000 ; would the draw run past the frame?\n");
                 emit_asm ("JF   R0, __pico8_draw_now\n");
                 v32io_emit_frame_end_hooks ();
+                gc_emit_safepoint ();              // end of a frame: nothing half-allocated
                 // the rest of this frame is spent waiting, not computing:
                 // stat(1) must not count it
                 emit_asm ("IN   R0, TIM_CycleCounter\n");
@@ -1168,6 +1196,7 @@ void generate_program (ASTNode *head)
         // its PICO8_FRAME_STEP frames.
         emit_asm ("__pico8_pace:\n");
         v32io_emit_frame_end_hooks ();         // every frame, 30 fps ticks too
+        gc_emit_safepoint ();              // end of a frame: nothing half-allocated
         emit_asm ("WAIT\n");
         emit_asm ("CALL __builtin_pico8_music_tick ; start the next music pattern on time\n");
         emit_asm ("IN   R0, TIM_FrameCounter\n");
@@ -1223,6 +1252,7 @@ void generate_program (ASTNode *head)
             emit_asm ("CALL __builtin_tic80_sound_tick ; sfx() durations\n");
             emit_asm ("__just_wait:");
             v32io_emit_frame_end_hooks ();     // paused frames too
+            gc_emit_safepoint ();              // end of a frame: nothing half-allocated
             emit_asm ("WAIT\n");
 
             // exit() defers termination to the end of the current frame --
@@ -1288,6 +1318,7 @@ void generate_program (ASTNode *head)
             v32io_emit_frame_start_hooks ();
             emit_asm ("CALL __function_game_loop ; Execute game loop tick\n");
         }
+        gc_emit_safepoint ();              // end of a TIC()/game_loop() frame
         emit_asm ("WAIT\n");
         emit_asm ("JMP __start\n");
     }
@@ -1331,7 +1362,12 @@ void generate_program (ASTNode *head)
     src_marker_end ();
     emit_runtime_library ();
     emit_globals_to_nil ();
+    // Everything callable is above this label (user functions, runtime
+    // routines and the runtime's own function values): the boot-time
+    // layout check in the entry vector reads it.
+    fprintf (out(), "\n__v32lua_code_end:\n");
     emit_string_data_section ();
+    fprintf (out(), "\n__v32lua_rom_end:\n");
 
     // --- GENERATE DEBUG FILE ---
     // FILE.asm.debug, one "asmfile,asmline,srcfile,srcline[,function]" entry

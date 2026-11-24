@@ -376,6 +376,13 @@ código fuente, así que un cartucho de PICO-8 o TIC-80 compila sin editarlo
   [doc/PICO8.md](doc/PICO8.md#side-panels)); `--no-bezel`: márgenes negros.
 * `--fast-circles`: los círculos rellenos de TIC-80/PICO-8 de radio mayor
   que 31 se dibujan como un disco escalado.
+* `--gc none|arena`: gestión del montón (por defecto `none`: el montón nunca
+  libera). `arena` añade `arena.mark()`, `arena.release(m)` y
+  `arena.used()`, que liberan de una vez todo lo reservado desde una marca
+  (consulta [doc/USAGE.es.md](doc/USAGE.es.md#7-gestión-del-montón---gc)).
+  `--gc-check`: con `--gc arena`, se detiene cuando un valor creado en una
+  arena abierta se guarda en una global, una tabla más antigua o un upvalue
+  (compilaciones de desarrollo).
 * `--xml-preserve-paths`: conserva en el XML del cartucho las rutas de
   `--#texture` / `--#sound` tal como se escribieron, y escribe el XML en la
   carpeta del proyecto (junto al archivo fuente, o en su directorio padre si el
@@ -539,6 +546,7 @@ Pistas soportadas:
 | `--#rate 11025` \| `22050` \| `44100` | Frecuencia de muestreo del sonido sintetizado a partir de un cartucho de PICO-8 o TIC-80 (por defecto 22050; `--#p8rate` es el nombre antiguo; ver [doc/PICO8.md](doc/PICO8.md#sound)). |
 | `--#bezel off` \| `on` \| `"arte.png"` | PICO-8: los paneles laterales junto a la pantalla de 128×128 — ninguno, el arte integrado o el tuyo propio (ver [doc/PICO8.md](doc/PICO8.md#side-panels)). |
 | `--#fast-circles` | TIC-80/PICO-8: los círculos rellenos de radio mayor que 31 se dibujan como un único disco escalado (más rápido, los bordes difieren ligeramente). |
+| `--#gc none` / `arena`, `--#gc-check` | Igual que `--gc` y `--gc-check`: gestión del montón con arenas explícitas (`arena.mark()` / `arena.release(m)`); consulta [doc/USAGE.es.md](doc/USAGE.es.md#7-gestión-del-montón---gc). |
 | `--#allow-float-as-clearcolor` | Igual que la opción de la línea de órdenes. |
 | `--#keyboard 0`–`3` | Puerto de mando de un teclado v32kbd (requiere un adaptador v32io o el emulador modificado, ver [Teclado y ratón](#teclado-y-ratón-v32io)), para `key()`/`keyp()`/`kbd.*` (2 por defecto; ver [doc/API.es.md](doc/API.es.md#teclado-key--keyp--kbd)). |
 | `--#mouse 0`–`3` | Puerto de mando de un ratón v32mouse (requiere un adaptador v32io o el emulador modificado, ver [Teclado y ratón](#teclado-y-ratón-v32io)), para `mouse()`/`mouse.*` y `stat(32..34)` de PICO-8 (3 por defecto; ver [doc/API.es.md](doc/API.es.md#ratón-mouse--mouse)). |
@@ -1317,7 +1325,11 @@ una decisión de diseño:
 * Recolección de basura: el heap es un asignador lineal, así que cada
   tabla, clausura y cadena en tiempo de ejecución vive hasta el reinicio.
   Los juegos de larga duración deberían reutilizar tablas en lugar de
-  crearlas en cada fotograma. Las cadenas ocupan una palabra por carácter,
+  crearlas en cada fotograma. La alternativa opcional es `--gc arena`:
+  envuelve el trabajo de cada fotograma en `arena.mark()` /
+  `arena.release(m)` y todo lo reservado entre ambos se libera de una vez
+  (consulta [doc/USAGE.es.md](doc/USAGE.es.md#7-gestión-del-montón---gc)).
+  Las cadenas ocupan una palabra por carácter,
   así que construir una cadena larga pieza a pieza (`s = s .. c` en un
   bucle) usa memoria de forma cuadrática: nanoman decodifica sus niveles
   así y llena los 4M palabras de RAM tras unos 100 s de juego.

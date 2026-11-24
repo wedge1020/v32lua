@@ -154,7 +154,10 @@ __builtin_tic80_init_flags:
     ;; Allocate flag buffer (128 words = 512 bytes)
     MOV   R0, TIC80_FLAG_BUFFER_WORDS
     PUSH  R0
-    CALL  __malloc
+;#if GC_ARENA
+    MOV  R0, 0               ; owner: a long-lived runtime buffer (pinned in an arena)
+;#endif
+    CALL  __malloc_owned
     IADD  SP, 1
 
     ;; Store pointer globally
@@ -955,7 +958,10 @@ __builtin_tic80_init_map:
     ;; Allocate map buffer (64KB)
     MOV   R0, TIC80_MAP_BUFFER_WORDS
     PUSH  R0
-    CALL  __malloc
+;#if GC_ARENA
+    MOV  R0, 0               ; owner: a long-lived runtime buffer (pinned in an arena)
+;#endif
+    CALL  __malloc_owned
     IADD  SP, 1
 
     ;; Store pointer globally
@@ -1524,7 +1530,10 @@ _tic80_pmem_ram:
     PUSH  R1                      ; first use: 256 zeroed words
     MOV   R0, 256
     PUSH  R0
-    CALL  __malloc                ; clobbers R0-R3, R6
+;#if GC_ARENA
+    MOV  R0, 0               ; owner: a long-lived runtime buffer (pinned in an arena)
+;#endif
+    CALL  __malloc_owned                ; clobbers R0-R3, R6
     IADD  SP, 1
     POP   R1
     MOV   [var_TIC80_PMEM_PTR], R0
@@ -3202,7 +3211,10 @@ _tic80_ram_create:
     PUSH  R13
     MOV   R0, 98304
     PUSH  R0
-    CALL  __malloc
+;#if GC_ARENA
+    MOV  R0, 0               ; owner: a long-lived runtime buffer (pinned in an arena)
+;#endif
+    CALL  __malloc_owned
     IADD  SP, 1
     MOV   [var_TIC80_RAM_PTR], R0
     MOV   R13, R0               ; zero-fill: SETS writes R12 to [R13], R11 times
@@ -4352,7 +4364,10 @@ _tic80_bc_to_cart:
     JF    R2, _tic80_bc_have_table
     MOV   R0, 40
     PUSH  R0
-    CALL  __malloc
+;#if GC_ARENA
+    MOV  R0, 0               ; owner: a long-lived runtime buffer (pinned in an arena)
+;#endif
+    CALL  __malloc_owned
     IADD  SP, 1
     MOV   R1, R0
     IEQ   R0, 0
@@ -4365,7 +4380,10 @@ _tic80_bc_to_cart:
 _tic80_bc_have_table:
     MOV   R0, [BP-5]
     PUSH  R0
-    CALL  __malloc
+;#if GC_ARENA
+    MOV  R0, 0               ; owner: a long-lived runtime buffer (pinned in an arena)
+;#endif
+    CALL  __malloc_owned
     IADD  SP, 1
     MOV   R5, R0
     IEQ   R0, 0

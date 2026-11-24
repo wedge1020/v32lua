@@ -3854,7 +3854,10 @@ _pico8_ram_create:
     PUSH  R13
     MOV   R0, 65536
     PUSH  R0
-    CALL  __malloc                ; clobbers R0-R3, R6
+;#if GC_ARENA
+    MOV  R0, 0               ; owner: a long-lived runtime buffer (pinned in an arena)
+;#endif
+    CALL  __malloc_owned                ; clobbers R0-R3, R6
     IADD  SP, 1
     MOV   [PICO8_RAM_PTR], R0
     MOV   R13, R0                 ; zero-fill: SETS writes R12 to [R13], R11 times

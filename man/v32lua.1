@@ -21,6 +21,9 @@ v32lua \- compile a subset of Lua to Vircon32 assembly and cartridge XML
 .RB [ \-\-rate
 .IR hz ]
 .RB [ \-\-fast\-circles ]
+.RB [ \-\-gc
+.IR mode ]
+.RB [ \-\-gc\-check ]
 .RB [ \-\-allow\-float\-as\-clearcolor ]
 .RB [ \-\-xml\-preserve\-paths ]
 .RB [ \-\-keyboard
@@ -243,6 +246,37 @@ pre-rendered radius-31 disc, scaled (one GPU draw instead of about 1.2
 per unit of radius; roughly 1.5% of the edge pixels differ from the
 console's). Outlines are always exact. Same as a
 .B \-\-#fast\-circles
+hint.
+.TP
+.BI \-\-gc " mode"
+Heap management. \fImode\fR is
+.B none
+(the default: a bump allocator that never frees, with exactly the code generated
+before this option existed) or
+.BR arena .
+With
+.B arena
+the program gets
+.BR arena.mark() ,
+.B arena.release(m)
+and
+.B arena.used()
+(in every API mode): everything allocated after a mark is freed at once by
+releasing it. A value made inside an arena must not be kept in a global, an
+older table or an upvalue past the release.
+.B marksweep
+is reserved and rejected. Same as a
+.B \-\-#gc
+hint; the command line wins.
+.TP
+.B \-\-gc\-check
+With
+.BR "\-\-gc arena" ,
+panic at run time when a value made in an open arena is stored in a global,
+an older table or an upvalue, where it would dangle after the release
+(about 9% more cycles in table-heavy code, so for development builds).
+Ignored with a warning in other modes. Same as a
+.B \-\-#gc\-check
 hint.
 .TP
 .B \-\-allow\-float\-as\-clearcolor
@@ -655,7 +689,7 @@ the companion XML file:
 .BR \-\-#version ", " \-\-#title ", " \-\-#titleopt ", " \-\-#no\-diff\-opt\-title ", " \-\-#api ", " \-\-#texture ,
 .BR \-\-#sound ", " \-\-#tilemap ", " \-\-#p8 ", " \-\-#rate ,
 .BR \-\-#bezel ", " \-\-#fast\-circles ", " \-\-#keyboard ,
-.BR \-\-#mouse ", and " \-\-#include .
+.BR \-\-#gc ", " \-\-#gc\-check ", " \-\-#mouse ", and " \-\-#include .
 The XML names the
 .I .vtex
 and

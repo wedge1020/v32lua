@@ -36,6 +36,7 @@ itself has neither; see
 - [Keyboard and mouse: what you need (v32io)](#keyboard-and-mouse-what-you-need-v32io)
 - [Keyboard: key() / keyp() / kbd.\*](#keyboard-key--keyp--kbd)
 - [Mouse: mouse() / mouse.\*](#mouse-mouse--mouse)
+- [Heap arenas: arena.\*](#heap-arenas-arena)
 - [Tilemap: tilemap.\*](#tilemap-tilemap)
 - [Memory card: memcard.\*](#memory-card-memcard)
 - [Other raw IO ports](#other-raw-io-ports)
@@ -127,6 +128,7 @@ function behind it. A function of your own with the same name (`spr`,
 | `system.wait()` / `system.halt()` | nil | `WAIT` for the next frame / `HLT`. [Details](#system-system) |
 | `system.date()` / `system.time()` | string, 3 numbers | `"YYYY-MM-DD", y, m, d` / `"HH:MM:SS", h, m, s`. |
 | `system.frames()` / `system.cycles()` | number | Frames since power-on / CPU cycles in the current frame (also without `()`). |
+| `arena.mark()` / `arena.release(m)` / `arena.used()` | number / nil / number | Free everything allocated since a mark, in one step. Needs `--gc arena`. [Details](#heap-arenas-arena) |
 
 *Language and inline assembly*
 
@@ -1367,6 +1369,46 @@ starts over from the device's current state (the pointer stays where it
 is). `mouse.connected()` is true when something is plugged into the
 mouse's port. As with the keyboard, reading the mouse's port doesn't
 disturb the gamepad the program has selected.
+
+---
+
+## Heap arenas: arena.\*
+
+```
+arena.mark()      -> number   (open an arena: the current heap top)
+arena.release(m)  -> nil      (free everything allocated since mark m)
+arena.used()      -> number   (heap words in use right now)
+```
+
+These are v32lua extensions, available in every API mode (native, PICO-8,
+TIC-80), but **only when compiled with `--gc arena`** (or a `--#gc arena`
+hint). Without it, using `arena.*` is a compile error. A program's own
+global or table named `arena` keeps the name.
+
+```lua
+local m = arena.mark()   -- open an arena
+-- ... allocate freely: strings, tables, closures ...
+arena.release(m)         -- free it all in one step; also closes every
+                         -- arena opened after m
+```
+
+`arena.mark()` returns the current heap top (an ordinary number); keep it
+and pass it to `arena.release(m)`, which frees everything allocated since
+and resets the heap to that point. The cost is a few instructions, and does
+not depend on how much was allocated. `arena.used()` is the number of heap
+words in use now, handy for checking that a loop is not growing the heap.
+Up to 16 marks can be open at once; releasing an outer mark closes the inner
+ones. Releasing something that is not an open mark (never opened, or already
+released) stops with a red screen, `ARENA ERROR: arena.release(m): m IS NOT
+AN OPEN MARK`; a 17th open mark gives `ARENA ERROR: TOO MANY OPEN
+arena.mark()s (16)`.
+
+The rule: after the release, nothing that outlives the arena (a global, a
+table made before the mark, an upvalue or outer local declared before it)
+may still refer to a value made inside it. Tables made before the arena that
+grow inside it are handled automatically. See
+[USAGE.md](USAGE.md#7-heap-management---gc) for the details, an example, and
+`--gc-check`, which finds violations while you develop.
 
 ---
 

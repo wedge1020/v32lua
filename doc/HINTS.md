@@ -54,6 +54,12 @@ listed; `SP`/`BP` never are). The table is `src/runtime_clobbers.h`, generated b
 the table routines were wrong and are fixed; remaining differences are results in R0/R1
 that a comment calls "output" rather than "clobbered").
 
+Runtime files can contain conditional blocks (`;#if GC_ARENA` / `;#else` / `;#endif`) that
+the compiler resolves when it embeds the runtime. The markers are plain comments to
+`check_clobbers.py`, so it computes the clobbers over all branches: a superset of what any one
+mode clobbers, which is the safe direction for the hint. (The `--#gc` and `--#gc-check`
+cartridge hints are in [USAGE.md](USAGE.md#2-describe-the-cartridge-with----hints).)
+
 ## `var=` on `;@loop`
 
 The numeric `for` keeps the visible variable (`i`) in its own frame word and copies the hidden counter into it at

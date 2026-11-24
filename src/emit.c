@@ -1045,6 +1045,9 @@ int   emit_variable_map (void)
         curr = curr->next;
     }
 
+    // --gc arena: its fixed words (gc.c), before the heap starts
+    lines_printed += gc_emit_defines (out());
+
     // Heap base as a SYMBOL, not a baked-in literal. generate_global_setup()
     // used to emit "MOV R0, <next_ram_address>" at the top of the init
     // routine -- but codegen for the top-level statements that follows can
@@ -1168,10 +1171,61 @@ static void emit_runtime_clobbers_hint (const char *line)
     }
 }
 
+// Mode-specific runtime code: a runtime .s file can bracket lines with
+//     ;#if NAME          (also ;#if !NAME)
+//     ...
+//     ;#else             (optional)
+//     ...
+//     ;#endif
+// and only the lines of the selected branch reach the output (gc.c's
+// gc_asm_flag() says which NAMEs are on: GC_ARENA, GC_NONE, GC_CHECK).
+// Blocks nest. The marker lines themselves are dropped. They are plain
+// comments to the assembler and to tools/check_clobbers.py, which
+// therefore works out every routine's clobbers over ALL branches -- a
+// superset of what any one mode emits, which is the safe direction for
+// the ';@fn ... clobbers=' hints v32opt reads.
+#define EMBED_IF_MAX 8
+static bool embed_directive (const char *line, bool *keep, int *depth, bool stack[][2])
+{
+    const char *p = line;
+    while (*p == ' ' || *p == '\t') p++;
+    if (strncmp (p, ";#", 2) != 0) return false;
+    p += 2;
+    if (strncmp (p, "if ", 3) == 0) {
+        p += 3;
+        while (*p == ' ') p++;
+        bool neg = (*p == '!');
+        if (neg) p++;
+        size_t n = strcspn (p, " \t\r\n;");
+        bool cond = gc_asm_flag (p, n);
+        if (neg) cond = !cond;
+        if (*depth < EMBED_IF_MAX) {
+            stack[*depth][0] = *keep;       // keeping before this block
+            stack[*depth][1] = cond;
+            (*depth)++;
+        }
+        *keep = *keep && cond;
+        return true;
+    }
+    if (strncmp (p, "else", 4) == 0 && *depth > 0) {
+        *keep = stack[*depth - 1][0] && !stack[*depth - 1][1];
+        return true;
+    }
+    if (strncmp (p, "endif", 5) == 0 && *depth > 0) {
+        (*depth)--;
+        *keep = stack[*depth][0];
+        return true;
+    }
+    return false;
+}
+
 static void emit_embedded_asm (const char *start)
 {
     const char *cursor = start;
     char line[EMIT_BUFFER_SIZE];
+    bool keep  = true;
+    int  depth = 0;
+    bool stack[EMBED_IF_MAX][2];
 
     while (*cursor != '\0') {
         int i = 0;
@@ -1182,6 +1236,8 @@ static void emit_embedded_asm (const char *start)
             line[i++] = *cursor++;
         }
         line[i] = '\0';
+        if (embed_directive (line, &keep, &depth, stack)) continue;
+        if (!keep) continue;
         emit_runtime_clobbers_hint (line);
         emit_asm ("%s", line);  // Preserves formatting, comments
     }
@@ -1198,6 +1254,8 @@ void  emit_runtime_library (void)
     // Always needed - core routines
     //
     emit_embedded_asm (runtime_memory_start);
+    if (g_gc_mode == GC_ARENA)
+        emit_embedded_asm (runtime_arena_start);   // arena.mark/release (--gc arena)
     emit_embedded_asm (runtime_datetime_start);
     emit_embedded_asm (runtime_exec_start);
 
@@ -1439,6 +1497,9 @@ void emit_store_variable (const char *name, int src_reg)
     get_variable_access_string(name, access_str);
 
     if (!sym->is_boxed) {
+        // --gc-check: a global outlives every arena (a stack local is not
+        // checked: its frame may well end before the release)
+        if (sym->type == SYM_GLOBAL) gc_emit_store_check (-1, src_reg);
         emit_asm("MOV %s, R%d ; store '%s'", access_str, src_reg, name);
         return;
     }
@@ -1446,6 +1507,7 @@ void emit_store_variable (const char *name, int src_reg)
     int ptr_reg = allocate_pinned_register();
     emit_asm("    ; --- '%s' is captured -- boxed access ---", name);
     emit_asm("MOV R%d, %s ; load box pointer", ptr_reg, access_str);
+    gc_emit_store_check (ptr_reg, src_reg);   // --gc-check: the cell may be older
     emit_asm("MOV [R%d], R%d ; write through box", ptr_reg, src_reg);
     unlock_pinned_register(ptr_reg);
 }

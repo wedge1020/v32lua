@@ -44,7 +44,9 @@ PICO-8's extras in that mode); `__asm__("...{var}...")` / `__rawasm__`.
   `__concat`...), coroutines (`coroutine.create` is not rejected at compile
   time, so a missing feature can fail silently), or garbage collection (bump
   allocator: build tables once, not per frame; `s = s .. c` in a loop is
-  quadratic).
+  quadratic). The opt-in exception is `--gc arena` (`--#gc arena`):
+  `arena.mark()` / `arena.release(m)` / `arena.used()` free everything
+  allocated since a mark in one step (`doc/USAGE.md`, section 7).
 - Arithmetic on non-numbers (`nil + 1`, `"abc" + 1`) raises nothing; the
   result is meaningless. A numeric `for` whose start, limit or step is not a
   number (a numeric string is converted) panics when the loop is entered
@@ -62,6 +64,12 @@ files; none of this is a compiler bug, it is what the runtime model implies):**
   whole session. Pre-allocate fixed pools of tables with an `alive` flag,
   reuse one scratch list, cache a formatted string and rebuild it only when
   its number changes. Keep an `n_alive` counter so idle pools skip their loop.
+  (Default mode only. With `--gc arena`, wrap the per-frame work in
+  `arena.mark()` / `arena.release(m)` instead. The rule: after the release,
+  nothing that outlives the arena -- a global, a table made before the mark,
+  an upvalue or outer local declared before it -- may still hold a value made
+  inside it. Tables made before the mark that grow inside it are pinned
+  automatically. Build with `--gc-check` while developing to find violations.)
 - **Long worlds: keep object lists sorted by x and iterate a window.** With
   hundreds of platforms/enemies/pickups (a 20000px level), every table field
   read is a builtin `CALL`, so a loop over everything per frame blows the
@@ -197,6 +205,29 @@ Both layers' known gaps are listed in the README roadmap and `doc/PICO8.md`,
   `src/runtime_embed.S` (`.incbin`) and appended to output only when used
   (`runtime_req`). Edit the `.s`, rebuild. The `*.s.txt` copies from
   `make context` / `make put` are paste-into-chat snapshots: never edit them.
+- **Heap modes** (`--gc none|arena`, `--gc-check`): `src/gc.c` + `inc/gc.h`
+  (mode state, emitted defines/init, store-check emitter),
+  `src/runtime/arena.s` (emitted only in arena mode), `src/intrinsics/arena.c`
+  (the `arena.*` intrinsics), tests in `testing/gc/`. `gc_emit_safepoint()` is
+  called at every frame end (beside the v32io frame-end hooks) and emits
+  nothing yet; it is the hook a future collecting mode would use.
+- **Conditional runtime blocks:** runtime `.s` files can bracket lines with
+  `;#if NAME` / `;#if !NAME` / `;#else` / `;#endif` (nestable);
+  `emit_embedded_asm()` (`emit.c`) keeps only the selected lines. Names:
+  `GC_ARENA`, `GC_NONE`, `GC_CHECK` (`gc_asm_flag` in `gc.c`). The markers are
+  plain comments to the assembler and to `tools/check_clobbers.py`, which
+  therefore computes clobbers over all branches (a superset of any one mode,
+  the safe direction for `;@fn ... clobbers=`). Regenerate
+  `src/runtime_clobbers.h` after editing a runtime file.
+- **Allocation in the runtime:** `__malloc` never returns 0 (it goes to the
+  out-of-memory panic screen itself), so callers need no check; never bump the
+  heap pointer by hand. A new allocation of a block *owned by an existing
+  object* (a table's array/hash block, ...) or of a persistent runtime buffer
+  must use `__malloc_owned` (same contract as `__malloc`, plus R0 = raw
+  address of the owning object, or 0 for a long-lived runtime buffer); in
+  arena mode that is what pins the block. Without arena mode it is just a
+  second label on `__malloc`. `__panic_with_message` (`memory.s`) is the
+  allocation-free red panic screen (R1 = boxed ROM string).
 - Generated `src/lexer.c`, `src/parser.c`, `inc/parser.h` are checked in.
   Editing `lexer.l`/`parser.y` makes `make` call flex/bison (bison 3.x, flex
   2.6.x); if they are not installed the build fails, so regenerate where

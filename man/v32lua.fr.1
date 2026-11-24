@@ -21,6 +21,9 @@ v32lua \- compile un sous-ensemble de Lua en assembleur Vircon32 et en XML de ca
 .RB [ \-\-rate
 .IR hz ]
 .RB [ \-\-fast\-circles ]
+.RB [ \-\-gc
+.IR mode ]
+.RB [ \-\-gc\-check ]
 .RB [ \-\-allow\-float\-as\-clearcolor ]
 .RB [ \-\-xml\-preserve\-paths ]
 .RB [ \-\-keyboard
@@ -247,6 +250,38 @@ d'environ 1,2 par unit\('e de rayon ; environ 1,5 % des pixels du bord diff\(`er
 de ceux de la console). Les contours sont toujours exacts. \('Equivaut \(`a une
 indication
 .BR \-\-#fast\-circles .
+.TP
+.BI \-\-gc " mode"
+Gestion du tas. \fImode\fR vaut
+.B none
+(par défaut : un allocateur linéaire qui ne libère jamais, avec exactement le
+code généré avant l'existence de cette option) ou
+.BR arena .
+Avec
+.B arena
+le programme dispose de
+.BR arena.mark() ,
+.B arena.release(m)
+et
+.B arena.used()
+(dans tous les modes d'API) : tout ce qui est alloué après une marque est
+libéré d'un coup en libérant la marque. Une valeur créée dans une arène ne doit
+pas rester dans une globale, une table plus ancienne ou un upvalue après le
+release.
+.B marksweep
+est réservé et refusé. Comme l'indication
+.BR \-\-#gc ;
+la ligne de commande l'emporte.
+.TP
+.B \-\-gc\-check
+Avec
+.BR "\-\-gc arena" ,
+s'arrête à l'exécution quand une valeur créée dans une arène ouverte est
+rangée dans une globale, une table plus ancienne ou un upvalue, où elle
+resterait pendante après le release (environ 9 % de cycles en plus dans du code
+riche en tables : pour les compilations de développement). Ignoré avec un
+avertissement dans les autres modes. Comme l'indication
+.BR \-\-#gc\-check .
 .TP
 .B \-\-allow\-float\-as\-clearcolor
 Un nombre Lua donné à
@@ -668,7 +703,7 @@ compagnon :
 .BR \-\-#version ", " \-\-#title ", " \-\-#titleopt ", " \-\-#no\-diff\-opt\-title ", " \-\-#api ", " \-\-#texture ,
 .BR \-\-#sound ", " \-\-#tilemap ", " \-\-#p8 ", " \-\-#rate ,
 .BR \-\-#bezel ", " \-\-#fast\-circles ", " \-\-#keyboard ,
-.BR \-\-#mouse ", et " \-\-#include .
+.BR \-\-#gc ", " \-\-#gc\-check ", " \-\-#mouse ", et " \-\-#include .
 Le XML nomme les fichiers
 .I .vtex
 et

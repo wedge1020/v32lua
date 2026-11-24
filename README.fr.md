@@ -378,6 +378,13 @@ modification (`--opt=valeur` fonctionne aussi) :
   `--no-bezel` : marges noires.
 * `--fast-circles` : les cercles pleins TIC-80/PICO-8 de rayon supérieur à
   31 sont dessinés comme un disque mis à l'échelle.
+* `--gc none|arena` : gestion du tas (par défaut `none` : le tas ne libère
+  jamais). `arena` ajoute `arena.mark()`, `arena.release(m)` et
+  `arena.used()`, qui libèrent d'un coup tout ce qui a été alloué depuis une
+  marque (voir [doc/USAGE.fr.md](doc/USAGE.fr.md#7-gestion-du-tas---gc)).
+  `--gc-check` : avec `--gc arena`, s'arrête quand une valeur créée dans une
+  arène ouverte est rangée dans une globale, une table plus ancienne ou un
+  upvalue (compilations de développement).
 * `--xml-preserve-paths` : conserve dans le XML de la cartouche les chemins
   de `--#texture` / `--#sound` tels qu'écrits, et écrit le XML dans le
   dossier du projet (à côté du fichier source, ou dans son parent si la source
@@ -545,6 +552,7 @@ Indices pris en charge :
 | `--#rate 11025` \| `22050` \| `44100` | Fréquence d'échantillonnage du son synthétisé à partir d'une cartouche PICO-8 ou TIC-80 (22050 par défaut ; `--#p8rate` est l'ancien nom ; voir [doc/PICO8.md](doc/PICO8.md#sound)). |
 | `--#bezel off` \| `on` \| `"art.png"` | PICO-8 : les panneaux latéraux à côté de l'écran 128×128 — aucun, les images intégrées, ou les vôtres (voir [doc/PICO8.md](doc/PICO8.md#side-panels)). |
 | `--#fast-circles` | TIC-80/PICO-8 : les cercles pleins de rayon supérieur à 31 sont dessinés comme un seul disque mis à l'échelle (plus rapide, bords légèrement différents). |
+| `--#gc none` / `arena`, `--#gc-check` | Comme `--gc` et `--gc-check` : gestion du tas avec arènes explicites (`arena.mark()` / `arena.release(m)`) ; voir [doc/USAGE.fr.md](doc/USAGE.fr.md#7-gestion-du-tas---gc). |
 | `--#allow-float-as-clearcolor` | Comme l'option de la ligne de commande. |
 | `--#keyboard 0`–`3` | Port de manette d'un clavier v32kbd (adaptateur v32io ou émulateur modifié nécessaire, voir [Clavier et souris](#clavier-et-souris-v32io)), pour `key()`/`keyp()`/`kbd.*` (2 par défaut ; voir [doc/API.fr.md](doc/API.fr.md#clavier--key--keyp--kbd)). |
 | `--#mouse 0`–`3` | Port de manette d'une souris v32mouse (adaptateur v32io ou émulateur modifié nécessaire, voir [Clavier et souris](#clavier-et-souris-v32io)), pour `mouse()`/`mouse.*` et `stat(32..34)` de PICO-8 (3 par défaut ; voir [doc/API.fr.md](doc/API.fr.md#souris--mouse--mouse)). |
@@ -1336,7 +1344,11 @@ attente d'une décision de conception :
 * Le ramasse-miettes : le tas est un allocateur linéaire, donc chaque
   table, fermeture et chaîne créée à l'exécution vit jusqu'à la
   réinitialisation. Les jeux qui tournent longtemps devraient réutiliser
-  leurs tables plutôt que d'en créer à chaque image. Les chaînes occupent
+  leurs tables plutôt que d'en créer à chaque image. L'alternative
+  facultative est `--gc arena` : enveloppez le travail de chaque image dans
+  `arena.mark()` / `arena.release(m)` et tout ce qui est alloué entre les
+  deux est libéré d'un coup (voir
+  [doc/USAGE.fr.md](doc/USAGE.fr.md#7-gestion-du-tas---gc)). Les chaînes occupent
   un mot par caractère, donc construire une longue chaîne morceau par
   morceau (`s = s .. c` dans une boucle) consomme de la mémoire de façon
   quadratique : nanoman décode ses niveaux ainsi et remplit les 4M mots de

@@ -595,6 +595,13 @@ int try_emit_call_intrinsic(ASTNode *node, int dest_reg) {
         return 0;
     }
 
+    // arena.* -- --gc arena (gc.c, runtime/arena.s), every API mode. A
+    // program's own `arena` global or table keeps the name.
+    if (strncmp(func_name, "arena.", 6) == 0 && resolve_symbol ("arena") == NULL &&
+        resolve_function_symbol ("arena") == NULL) {
+        return emit_arena_intrinsic (node, dest_reg, func_name);
+    }
+
     // kbd.* -- v32kbd keyboard, every API mode (v32kbd.c)
     if (strncmp(func_name, "kbd.", 4) == 0 && resolve_symbol ("kbd") == NULL) {
         return try_emit_kbd_namespace_intrinsic (node, dest_reg, func_name);

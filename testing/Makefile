@@ -94,6 +94,7 @@ tests:
 	@$(MAKE) -C special tests
 	@$(MAKE) -C api tests
 	@$(MAKE) -C v32stdapi tests
+	@$(MAKE) -C gc tests
 
 # Clean target drops all generated assembly and binary test files
 clean:

@@ -37,6 +37,7 @@ la consola no tiene ni lo uno ni lo otro; ver
 - [Teclado y ratón: qué se necesita (v32io)](#teclado-y-ratón-qué-se-necesita-v32io)
 - [Teclado: key() / keyp() / kbd.\*](#teclado-key--keyp--kbd)
 - [Ratón: mouse() / mouse.\*](#ratón-mouse--mouse)
+- [Arenas del montón: arena.\*](#arenas-del-montón-arena)
 - [Mapa de mosaicos: tilemap.\*](#mapa-de-mosaicos-tilemap)
 - [Tarjeta de memoria: memcard.\*](#tarjeta-de-memoria-memcard)
 - [Otros puertos de E/S en bruto](#otros-puertos-de-es-en-bruto)
@@ -130,6 +131,7 @@ nombre (`spr`, `rgba`, `color`, …) reemplaza al intrínseco.
 | `system.wait()` / `system.halt()` | nil | `WAIT` hasta el siguiente cuadro / `HLT`. [Detalles](#sistema-system) |
 | `system.date()` / `system.time()` | cadena, 3 números | `"YYYY-MM-DD", a, m, d` / `"HH:MM:SS", h, m, s`. |
 | `system.frames()` / `system.cycles()` | número | Cuadros desde el encendido / ciclos de CPU en el cuadro actual (también sin `()`). |
+| `arena.mark()` / `arena.release(m)` / `arena.used()` | número / nil / número | Libera de una vez todo lo reservado desde una marca. Necesita `--gc arena`. [Detalles](#arenas-del-montón-arena) |
 
 *Lenguaje y ensamblador en línea*
 
@@ -1462,6 +1464,47 @@ empieza de nuevo desde el estado actual del dispositivo (el puntero se queda
 donde está). `mouse.connected()` es verdadero cuando hay algo conectado en
 el puerto del ratón. Como con el teclado, leer el puerto del ratón no altera
 el mando que el programa tiene seleccionado.
+
+---
+
+## Arenas del montón: arena.\*
+
+```
+arena.mark()      -> número   (abre una arena: el tope actual del montón)
+arena.release(m)  -> nil      (libera todo lo reservado desde la marca m)
+arena.used()      -> número   (palabras del montón en uso ahora mismo)
+```
+
+Son extensiones de v32lua, disponibles en todos los modos de API (nativo,
+PICO-8, TIC-80), pero **solo al compilar con `--gc arena`** (o con una
+pista `--#gc arena`). Sin ello, usar `arena.*` es un error de compilación.
+Una global o tabla del propio programa llamada `arena` conserva el nombre.
+
+```lua
+local m = arena.mark()   -- abre una arena
+-- ... reserva libremente: cadenas, tablas, closures ...
+arena.release(m)         -- lo libera todo de una vez; cierra también todas
+                         -- las arenas abiertas después de m
+```
+
+`arena.mark()` devuelve el tope actual del montón (un número corriente);
+guárdalo y pásalo a `arena.release(m)`, que libera todo lo reservado desde
+entonces y devuelve el montón a ese punto. El coste es de unas pocas
+instrucciones y no depende de cuánto se reservó. `arena.used()` es el número
+de palabras del montón en uso ahora, útil para comprobar que un bucle no hace
+crecer el montón. Puede haber hasta 16 marcas abiertas a la vez; liberar una
+marca externa cierra las internas. Liberar algo que no es una marca abierta
+(nunca abierta, o ya liberada) se detiene con una pantalla roja, `ARENA
+ERROR: arena.release(m): m IS NOT AN OPEN MARK`; una marca 17 abierta da
+`ARENA ERROR: TOO MANY OPEN arena.mark()s (16)`.
+
+La regla: tras el release, nada que sobreviva a la arena (una global, una
+tabla creada antes de la marca, un upvalue o local exterior declarado antes)
+puede seguir refiriéndose a un valor creado dentro de ella. Las tablas
+creadas antes de la arena que crecen dentro de ella se tratan
+automáticamente. Consulta [USAGE.es.md](USAGE.es.md#7-gestión-del-montón---gc)
+para los detalles, un ejemplo y `--gc-check`, que encuentra las infracciones
+durante el desarrollo.
 
 ---
 

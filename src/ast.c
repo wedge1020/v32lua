@@ -255,6 +255,26 @@ ASTNode *make_node_cart_hint (const char *raw_hint)
         }
         node->as.cart_hint.value = strdup(param1);
     }
+    else if (strcmp(action, "gc") == 0 && tokens >= 2) {
+        // --#gc none | arena -- heap management (gc.c); --gc wins
+        char v[128];
+        snprintf (v, sizeof v, "%s", param1[0] == '"' ? param1 + 1 : param1);
+        size_t n = strlen (v);
+        if (n > 0 && v[n - 1] == '"') v[n - 1] = '\0';
+        int mode = gc_parse_mode (v);
+        if (mode == GC_MARKSWEEP_RESERVED) {
+            compiler_error(ERR_SEMANTIC, yylineno, "--#gc marksweep is not implemented yet (use none or arena)");
+        } else if (mode < 0) {
+            compiler_error(ERR_SEMANTIC, yylineno, "--#gc: use none or arena (got '%s')", param1);
+        } else if (!g_cli_gc_set) {
+            g_gc_mode = mode;
+        }
+        node->as.cart_hint.value = strdup (param1);
+    }
+    else if (strcmp(action, "gc-check") == 0) {
+        // --#gc-check: the arena escape check (gc.c), as --gc-check
+        g_gc_check = true;
+    }
     else if (strcmp(action, "fast-circles") == 0) {
         // --#fast-circles: filled circles above the shape atlas's largest
         // radius are drawn as that disc, scaled (1 draw; ~1.5% of the edge
