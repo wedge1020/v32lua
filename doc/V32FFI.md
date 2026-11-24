@@ -164,7 +164,7 @@ RAM Address (32-Bit Word Addressing)
 0x00000000 +-------------------------------------------------------+
            | C Global & Static Variables (.bss / .data)            |
            | Allocated upward by Vircon32 C Linker                  |
-           | Address Range: 0 to (FFI_MAX_MEM - 1)                 |
+           | Address Range: 1 to (FFI_MAX_MEM - 1); word 0 is NULL  |
            +-------------------------------------------------------+
            | FFI Safety Padding (FFI_SAFETY_PADDING = 256 words)  |
 FFI Base   +-------------------------------------------------------+
@@ -202,7 +202,7 @@ v32lua's RAM words, not only its heap, above the reserve.)
 | Directive / Annotation | Source | Description | Example |
 | --- | --- | --- | --- |
 | `--#config FFI_RAM_RESERVE <words>` | Script Source | Explicitly overrides the low-memory reservation for C globals. | `--#config FFI_RAM_RESERVE 262144` *(Reserves 256 kW / 1 MB)* |
-| `;;FFI_MAX_MEM <address>` | Generated Header | Emitted by toolchains to specify the highest word address used by C static memory. | `;;FFI_MAX_MEM 8192` *(Indicates C globals end at word 8192)* |
+| `;;FFI_MAX_MEM <address>` | Linked C `.asm` (v32cc `--ffi-c-heap=WORDS`) | The first RAM word after C's static memory (`__v32_data_end`), in words; written with `;;FFI_C_HEAP <words>` (5.2). | `;;FFI_MAX_MEM 8192` *(Indicates C globals end at word 8192)* |
 
 ---
 
@@ -224,7 +224,8 @@ v32lua RAM word -- the three low words included -- is laid out from
 **Lua base** upwards instead of from 0:
 
 ```
-0x00000000  C globals (.data / .bss), from 0 as v32cc places them
+0x00000000  word 0: C's null pointer (never a global)
+0x00000001  C globals (.data / .bss), from word 1 as v32cc places them
             C heap (if any), inside the reserve (5.3)
             FFI_SAFETY_PADDING
 Lua base    HEAP_POINTER, FTOA_SCRATCH_PTR_A/B, runtime words, globals,
@@ -244,19 +245,30 @@ those names.
 $$\text{Lua base} = \max\left(\text{FFI\_RAM\_RESERVE},\; \text{FFI\_MAX\_MEM} + \text{C heap words} + \text{FFI\_SAFETY\_PADDING}\right)$$
 
 v32lua lays out its RAM at compile time, as numbers, so it needs the C
-side's size as a number when it compiles: **v32cc writes it**. v32cc's link
-already defines `__v32_data_end` (the first RAM word after all C globals);
-a v32cc option will write it, with the C heap size, as the annotation
-v32lua already reads (`src/ast.c`):
+side's size as a number when it compiles: **v32cc writes it**. Linking with
+v32cc's `--ffi-c-heap=WORDS` (a link option, also on `v32ld`; v32cc
+2026-11-24) puts two lines at the top of the **linked `.asm`**:
 
 ```
-;;FFI_MAX_MEM <__v32_data_end>
-;;FFI_C_HEAP <words>        (0 or absent: no C heap)
+;;FFI_MAX_MEM <N>          N = __v32_data_end: the first RAM word after all C globals
+;;FFI_C_HEAP <WORDS>       the C heap v32lua reserves (0: none)
 ```
 
-So the C side is built first and the Lua side reads its annotation file
-(`--#include`d, or given on the command line). `--#config FFI_RAM_RESERVE`
-stays the floor for a hand-made layout.
+* Both numbers are in **words**.
+* `FFI_MAX_MEM` is at least 1 even with no C globals: C's globals start at
+  word 1, word 0 being its null pointer.
+* The lines are written at link time. Moving a global afterwards with
+  `v32as -D` does not update them -- relink instead.
+* So the C side is built (and linked) first, and v32lua reads these lines
+  **from that linked `.asm` file** when it compiles the Lua side.
+  `--#config FFI_RAM_RESERVE` stays the floor for a hand-made layout.
+
+**v32lua's side is not written yet.** Its old reader
+(`handle_compiler_directive()` in `src/ast.c`) is commented out, only knew
+`FFI_MAX_MEM`, and read it from the Lua source; nothing reads
+`FFI_C_HEAP`; and `calculate_lua_heap_start()` (`src/emit.c`) has no
+callers. The FFI's first step is to read both lines from the linked C
+`.asm` and lay v32lua's RAM out from Lua base (5.1).
 
 ### 5.3 The C heap lives in the reserve
 
