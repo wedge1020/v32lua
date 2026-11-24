@@ -441,8 +441,12 @@ bool emit_pico8_sgn_intrinsic(ASTNode *node, int dest_reg)
 
     int result_reg = (dest_reg != 0) ? dest_reg : allocate_register();
     int label_id = get_next_label();
-    char done_label[64];
-    snprintf(done_label, sizeof(done_label), "__pico8_sgn_done_%d", label_id);
+    char done_label[160];
+    // get_next_label() counts per FUNCTION: the label needs the function's
+    // name too, or the Nth sgn() of two functions declared the same label
+    // ("__pico8_sgn_done_26 has already been declared")
+    snprintf(done_label, sizeof(done_label), "__%s_sgn_done_%d",
+             get_current_function_name(), label_id);
 
     emit_asm("MOV R%d, 1.0\n", result_reg);
     emit_asm("JF  R%d, %s\n", flag_reg, done_label);

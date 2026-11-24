@@ -312,27 +312,28 @@ int emit_pico8_stat_intrinsic (ASTNode *node, int dest_reg)
     } else {
         // 32 <= flr(n) <= 34 -> the mouse decoder; nil and other non-numbers
         // (NaN-boxed words) never are, and are not compared as floats
-        int label = get_next_label ();
+        int label = get_next_label ();   // per function: labels carry its name
+        const char *fn = get_current_function_name ();
         int a     = allocate_register ();
         int b     = allocate_register ();
         emit_asm ("MOV R%d, [SP] ; stat(): the id\n", a);
         emit_asm ("MOV R%d, R%d\n", b, a);
         emit_asm ("AND R%d, NAN_VALUE\n", b);
         emit_asm ("IEQ R%d, NAN_VALUE\n", b);
-        emit_asm ("JT R%d, __stat_general_%d\n", b, label);
+        emit_asm ("JT R%d, __%s_stat_general_%d\n", b, fn, label);
         emit_asm ("FLR R%d\n", a);
         emit_asm ("MOV R%d, R%d\n", b, a);
         emit_asm ("FGE R%d, 32.0\n", b);
         emit_asm ("FLE R%d, 34.0\n", a);
         emit_asm ("AND R%d, R%d\n", a, b);
-        emit_asm ("JF R%d, __stat_general_%d\n", a, label);
+        emit_asm ("JF R%d, __%s_stat_general_%d\n", a, fn, label);
         unlock_register (b);
         unlock_register (a);
         emit_asm ("CALL __builtin_v32mouse_stat\n");
-        emit_asm ("JMP __stat_done_%d\n", label);
-        emit_asm ("__stat_general_%d:\n", label);
+        emit_asm ("JMP __%s_stat_done_%d\n", fn, label);
+        emit_asm ("__%s_stat_general_%d:\n", fn, label);
         emit_asm ("CALL __builtin_pico8_stat\n");
-        emit_asm ("__stat_done_%d:\n", label);
+        emit_asm ("__%s_stat_done_%d:\n", fn, label);
     }
     emit_asm ("IADD SP, 1\n");
     if (dest_reg != 0) emit_asm ("MOV R%d, R0\n", dest_reg);

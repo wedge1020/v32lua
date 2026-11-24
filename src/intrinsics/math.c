@@ -328,17 +328,18 @@ bool emit_math_atan2_intrinsic(ASTNode *node, int dest_reg)
     int t_reg = allocate_register();
     int u_reg = allocate_register();
     int id = get_next_label();
+    const char *fn = get_current_function_name(); // per-function ids: name both
     emit_asm("MOV  R%d, R%d\n", t_reg, y_reg);
     emit_asm("FEQ  R%d, 0.0\n", t_reg);
     emit_asm("MOV  R%d, R%d\n", u_reg, x_reg);
     emit_asm("FEQ  R%d, 0.0\n", u_reg);
     emit_asm("AND  R%d, R%d\n", t_reg, u_reg);
-    emit_asm("JF   R%d, __atan2_ok_%d\n", t_reg, id);
+    emit_asm("JF   R%d, __%s_atan2_ok_%d\n", t_reg, fn, id);
     emit_asm("MOV  R%d, 0.0 ; atan2(0, 0) = 0\n", y_reg);
-    emit_asm("JMP  __atan2_done_%d\n", id);
-    emit_asm("__atan2_ok_%d:\n", id);
+    emit_asm("JMP  __%s_atan2_done_%d\n", fn, id);
+    emit_asm("__%s_atan2_ok_%d:\n", fn, id);
     emit_asm("ATAN2 R%d, R%d ; R%d = atan2(R%d, R%d)\n", y_reg, x_reg, y_reg, y_reg, x_reg);
-    emit_asm("__atan2_done_%d:\n", id);
+    emit_asm("__%s_atan2_done_%d:\n", fn, id);
 
     if (dest_reg != 0) {
         emit_asm("MOV R%d, R%d ; Transfer result to dest_reg\n", dest_reg, y_reg);

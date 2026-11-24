@@ -170,26 +170,43 @@ static const PreludeFunc prelude[] = {
     // entries, slots 1-5. The first call registers __p8_pausemenu as the
     // pause screen (pico8.s __builtin_pico8_pause_check runs it on Start).
     { "menuitem", "__p8_pausemenu",
-      // (the table is made on first use: the prelude runs after the cart's
-      // own top-level code, which may already call menuitem())
+      // The five slots are fixed globals, not a table: menuitem() is often
+      // called from a frame, and with --gc arena a table it made there (the
+      // list on first use -- the prelude runs after the cart's own top-level
+      // code, so it can't be made up front -- or a {label, cb} entry) was
+      // freed with the frame's arena while the menu still pointed at it.
+      // Globals are fixed RAM words: nothing is allocated here at all.
       "function menuitem(i, label, cb)\n"
       "  if i == nil or i < 1 or i > 5 then return end\n"
-      "  if __p8_menuitems == nil then __p8_menuitems = {} end\n"
-      "  if label == nil then __p8_menuitems[i] = nil\n"
-      "  else __p8_menuitems[i] = {label, cb} end\n"
+      "  i = flr(i)\n"
+      "  if label == nil then cb = nil end\n"
+      "  if i == 1 then __p8_mi_l1, __p8_mi_c1 = label, cb\n"
+      "  elseif i == 2 then __p8_mi_l2, __p8_mi_c2 = label, cb\n"
+      "  elseif i == 3 then __p8_mi_l3, __p8_mi_c3 = label, cb\n"
+      "  elseif i == 4 then __p8_mi_l4, __p8_mi_c4 = label, cb\n"
+      "  else __p8_mi_l5, __p8_mi_c5 = label, cb end\n"
       "  __p8_menu_hook(__p8_pausemenu)\n"
+      "end\n", NULL },
+    // slot i of the pause menu: label (nil = empty), callback
+    { "__p8_menuitem_get", NULL,
+      "function __p8_menuitem_get(i)\n"
+      "  if i == 1 then return __p8_mi_l1, __p8_mi_c1\n"
+      "  elseif i == 2 then return __p8_mi_l2, __p8_mi_c2\n"
+      "  elseif i == 3 then return __p8_mi_l3, __p8_mi_c3\n"
+      "  elseif i == 4 then return __p8_mi_l4, __p8_mi_c4 end\n"
+      "  return __p8_mi_l5, __p8_mi_c5\n"
       "end\n", NULL },
     // The pause menu: continue, the cart's items, reset cart. Up/down
     // choose; O/X pick (an item's callback gets 32, and the menu stays open
     // only if it returns true); left/right on an item call it with 1 / 2
     // and keep the menu open; Start closes it. Runs its own frames (a raw
     // WAIT -- flip() would re-enter the pause check).
-    { "__p8_pausemenu", NULL,
+    { "__p8_pausemenu", "__p8_menuitem_get",
       "function __p8_pausemenu()\n"
       "  local items = {{\"continue\"}}\n"
       "  for i = 1, 5 do\n"
-      "    local m = __p8_menuitems[i]\n"
-      "    if m ~= nil then items[#items + 1] = {m[1], m[2]} end\n"
+      "    local ml, mc = __p8_menuitem_get(i)\n"
+      "    if ml ~= nil then items[#items + 1] = {ml, mc} end\n"
       "  end\n"
       "  items[#items + 1] = {\"reset cart\", nil, true}\n"
       "  local cx, cy, pen = peek2(0x5f28), peek2(0x5f2a), peek(0x5f25)\n"
@@ -437,6 +454,20 @@ char *pico8_append_prelude (char *src)
             for (int j = 0; j < count; j++)
                 if (prelude[i].needs && strcmp (prelude[j].name, prelude[i].needs) == 0)
                     want[j] = true;
+        }
+    }
+
+    // needs are followed to the end of the chain (menuitem -> __p8_pausemenu
+    // -> __p8_menuitem_get), not just one link
+    for (bool grew = true; grew; ) {
+        grew = false;
+        for (int i = 0; i < count; i++) {
+            if (!want[i] || prelude[i].needs == NULL) continue;
+            for (int j = 0; j < count; j++)
+                if (!want[j] && strcmp (prelude[j].name, prelude[i].needs) == 0) {
+                    want[j] = true;
+                    grew = true;
+                }
         }
     }
 
