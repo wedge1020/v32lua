@@ -12,9 +12,11 @@ echo "   add -D to a runlua call to dump every global)"
 for t in pico8/*.lua pico8/*.p8 tic80/*.lua; do
   printf "%-16s %s\n" "$t" "$($H/runlua $t -f 60 -q -p '0:Right=1;1:A=1' | grep -E 'FAIL|STATUS|TRAP' | head -1)"
 done
+echo "== panic screens: the text of the numeric-for panic, read back from the GPU log"
+python3 ./panic_text.py | tail -4
 # generated files (asm, vbin, logs, vsnd/vtex, reference copies) are removed
 # unless KEEP=1
 if [ -z "$KEEP" ]; then
-  find . -type f ! -name "*.lua" ! -name "*.p8" ! -name "*.sh" ! -name "*.md" -delete
+  find . -type f ! -name "*.lua" ! -name "*.p8" ! -name "*.sh" ! -name "*.md" ! -name "*.py" -delete   # .py: panic_text.py, hints/check_hints.py
   find . -name "*.ref.lua" -delete
 fi

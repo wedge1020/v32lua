@@ -202,8 +202,9 @@ __for_number:
 __runtime_error_for:
     PUSH BP
     MOV  BP, SP
-    ISUB SP, 1
+    ISUB SP, 2
     MOV  [BP-1], R2                ; the value that wasn't a number
+    MOV  [BP-2], R1                ; the message: __builtin_print overwrites R1
 
     MOV   R0, 0xFF000080
     OUT   GPU_ClearColor, R0
@@ -222,8 +223,9 @@ __runtime_error_for:
     PUSH  R0
     MOV   R0, 20
     PUSH  R0
-    OR    R1, BOXED_ROMSTRING      ; R1 = the message
-    PUSH  R1
+    MOV   R0, [BP-2]
+    OR    R0, BOXED_ROMSTRING      ; the message
+    PUSH  R0
     CALL __builtin_print
 
     MOV   R0, 20
