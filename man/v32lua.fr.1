@@ -254,8 +254,9 @@ indication
 .BI \-\-gc " mode"
 Gestion du tas. \fImode\fR vaut
 .B none
-(par défaut : un allocateur linéaire qui ne libère jamais, avec exactement le
-code généré avant l'existence de cette option) ou
+(par défaut : un allocateur linéaire sans ramasse-miettes ; il ne réutilise,
+dans tous les modes, que les blocs laissés par une table qui grandit et la fin
+inutilisée du texte d'un nombre) ou
 .BR arena .
 Avec
 .B arena

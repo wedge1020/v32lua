@@ -43,8 +43,8 @@ PICO-8's extras in that mode); `__asm__("...{var}...")` / `__rawasm__`.
   arithmetic/comparison/concat metamethods (`__add`, `__eq`, `__lt`,
   `__concat`...), coroutines (`coroutine.create` is not rejected at compile
   time, so a missing feature can fail silently), or garbage collection (bump
-  allocator: build tables once, not per frame; `s = s .. c` in a loop is
-  quadratic). The opt-in exception is `--gc arena` (`--#gc arena`):
+  allocator that only reuses the blocks tables outgrow: build tables once, not
+  per frame; `s = s .. c` in a loop is quadratic). The opt-in exception is `--gc arena` (`--#gc arena`):
   `arena.mark()` / `arena.release(m)` / `arena.used()` free everything
   allocated since a mark in one step (`doc/USAGE.md`, section 7).
 - Arithmetic on non-numbers (`nil + 1`, `"abc" + 1`) raises nothing; the
@@ -219,6 +219,23 @@ Both layers' known gaps are listed in the README roadmap and `doc/PICO8.md`,
   therefore computes clobbers over all branches (a superset of any one mode,
   the safe direction for `;@fn ... clobbers=`). Regenerate
   `src/runtime_clobbers.h` after editing a runtime file.
+- **Block reuse (all modes):** `__mfree` (`memory.s`; stack: `[BP+3]` = raw
+  block, `[BP+2]` = size; preserves every register; drops blocks under 2
+  words) puts a block on a free list by size class (bin k = 2^k .. 2^(k+1)-1
+  words; 23 fixed RAM words, `FREE_MASK` + 22 bin heads). `__malloc` tries the
+  first 4 blocks of its own bin, then the head of the smallest non-empty larger
+  bin (splitting; a remainder of 2+ words goes back), else bumps the heap top.
+  Reused memory is not zeroed: every allocation site must initialise what it
+  allocates. Any runtime code that replaces a block it alone owns (the table
+  grow routines, the trimmed tail in `__ftoa_terminate`) may free the old one,
+  but only after its last read. `__malloc` keeps its R0-R3, R6 clobber
+  contract. In arena mode nothing is reused while an arena is open and blocks
+  freed inside one are not kept. This is not a collector: dead tables, strings
+  and closures are never freed. Test: `testing/gc/04_block_reuse.lua`.
+- **Runtime label names:** runtime labels must not end in `_return` or `_skip`,
+  or look like `_mvpad_N` / `_mvarg_N`: those are the suffixes the compiler
+  generates for user functions (`__NAME_return`), and a clash fails assembly
+  (`__ftoa_return` once collided with `lib/string.lua`'s `ftoa`).
 - **Allocation in the runtime:** `__malloc` never returns 0 (it goes to the
   out-of-memory panic screen itself), so callers need no check; never bump the
   heap pointer by hand. A new allocation of a block *owned by an existing

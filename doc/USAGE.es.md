@@ -42,7 +42,7 @@ Ejecuta `v32lua --help` para ver todas las opciones; las más comunes:
 | `--rate 11025\|22050\|44100` | Frecuencia de muestreo del sonido generado a partir de un cartucho de PICO-8 o TIC-80. |
 | `--bezel ARCHIVO`, `--no-bezel` | Paneles laterales de PICO-8: tu propio arte, o ninguno. |
 | `--fast-circles` | PICO-8/TIC-80: dibuja más rápido los círculos rellenos grandes (bordes ligeramente distintos). |
-| `--gc none\|arena` | Gestión del montón ([sección 7](#7-gestión-del-montón---gc)): `none` (por defecto) nunca libera; `arena` añade `arena.mark()` / `arena.release(m)`, que liberan de una vez todo lo reservado entre ambos. |
+| `--gc none\|arena` | Gestión del montón ([sección 7](#7-gestión-del-montón---gc)): `none` (por defecto) no tiene recolector (solo reutiliza los bloques que las tablas dejan al crecer); `arena` añade `arena.mark()` / `arena.release(m)`, que liberan de una vez todo lo reservado entre ambos. |
 | `--gc-check` | Con `--gc arena`: se detiene cuando un valor creado en una arena abierta se guarda en algo que sobrevive a la arena. Para compilaciones de desarrollo. |
 | `--allow-float-as-clearcolor` | Un número Lua dado a `ioports.gpu.clear` o al `cls()` de TIC-80 conserva sus bits float32 como color de borrado, como las versiones antiguas (borrado translúcido = estela de desenfoque). Desactivado por defecto. |
 | `--xml-preserve-paths` | Conserva en el XML las rutas de `--#texture`/`--#sound` tal como se escribieron y escribe el XML en la carpeta del proyecto, junto al fuente o en su directorio padre cuando el fuente está en `src/` y la salida en una hermana como `obj/` ([sección 3](#3-el-xml-del-cartucho)). |
@@ -273,11 +273,22 @@ de las demos y las suites de pruebas lo pasan, porque compilan a su manera.
 
 ## 7. Gestión del montón (`--gc`)
 
-Por defecto (`--gc none`) el montón es un asignador incremental que nunca
-libera: cada cadena, tabla y closure que creas permanece hasta reiniciar la
-consola, así que un juego que crea otras nuevas en cada fotograma acabará
+Por defecto (`--gc none`) el montón es un asignador incremental sin
+recolector: cada cadena, tabla y closure que creas permanece hasta reiniciar
+la consola, así que un juego que crea otras nuevas en cada fotograma acabará
 sin memoria (una pantalla roja de «out of memory»). El remedio habitual es
-reutilizar tablas. La alternativa opcional es **`--gc arena`**: marcas un
+reutilizar tablas. Lo único que el runtime sí libera, en todos los modos de
+`--gc`, es la basura que conoce: cuando una tabla supera su parte de array o
+de hash, el bloque antiguo pasa a una lista libre (`__mfree`) y las
+reservas posteriores de cualquier tipo (cadenas, tablas, closures) lo
+reutilizan, primer ajuste por clase de tamaño; `tostring(número)` también
+devuelve la cola sin usar de su búfer de texto, así que conserva unas 5
+palabras en lugar de 48. Una tabla que crece elemento a elemento hasta 64
+cuesta unas 75 palabras del montón en lugar de unas 128. El coste es de 23
+palabras de RAM y 2 instrucciones por reserva mientras no se haya liberado
+nada. Las tablas, cadenas y closures muertas siguen sin liberarse, y `stat(0)`
+en modo PICO-8 sigue informando del tope del montón, de modo que las palabras
+reutilizables cuentan como usadas. La alternativa opcional es **`--gc arena`**: marcas un
 punto, reservas libremente y liberas de una vez todo lo reservado desde la
 marca.
 
@@ -296,8 +307,13 @@ marca externa cierra también las internas. Liberar algo que no es una marca
 abierta (nunca abierta, o ya liberada) o abrir una marca 17 detiene el
 programa con una pantalla roja `ARENA ERROR`. Mark, release y used cuestan
 unas pocas instrucciones cada una, y el tiempo de un release no depende de
-cuánto se reservó. Sin `--gc arena` el código generado es exactamente el de
-siempre.
+cuánto se reservó. Con `--gc arena`, la reutilización de bloques se
+detiene mientras hay una arena abierta (los objetos creados en una arena deben
+quedar por encima de su marca) y un bloque liberado dentro de una arena abierta
+no se conserva, porque el release lo libera de todos modos; los bloques
+liberados fuera de las arenas, o por debajo de la marca abierta más externa,
+se reutilizan cuando ya no queda ninguna arena abierta. Sin `--gc arena` no
+hay arenas y el montón solo reutiliza los bloques que se quedan pequeños.
 
 ```lua
 --#gc arena

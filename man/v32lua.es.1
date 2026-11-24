@@ -253,8 +253,9 @@ exactos. Equivale a una indicaci\('on
 .BI \-\-gc " mode"
 Gestión del montón. \fImodo\fR es
 .B none
-(por defecto: un asignador incremental que nunca libera, con exactamente el
-código generado antes de existir esta opción) o
+(por defecto: un asignador incremental sin recolector; solo reutiliza, en todos
+los modos, los bloques que deja una tabla al crecer y la cola sin usar del
+texto de un número) o
 .BR arena .
 Con
 .B arena

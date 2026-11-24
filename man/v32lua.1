@@ -251,8 +251,8 @@ hint.
 .BI \-\-gc " mode"
 Heap management. \fImode\fR is
 .B none
-(the default: a bump allocator that never frees, with exactly the code generated
-before this option existed) or
+(the default: a bump allocator with no collector; it only reuses the blocks a
+growing table outgrows and the unused tail of number text, in every mode) or
 .BR arena .
 With
 .B arena

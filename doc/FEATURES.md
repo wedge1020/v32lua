@@ -76,9 +76,13 @@ go through a reserved RAM buffer (`MV_BUF`, 32 values), with the count in
 
 ## The heap: modes and out-of-memory
 
-The heap is a bump allocator. By default (`--gc none`) it never frees, and
-the generated code and RAM use are exactly what they always were. With
-`--gc arena` the program gets `arena.mark()`, `arena.release(m)` and
+The heap is a bump allocator. By default (`--gc none`) there is no garbage
+collector: dead tables, strings and closures are never freed. The runtime
+does give back the blocks it knows are garbage, so a table that outgrows
+its array or hash part hands the old block to the allocator, which reuses
+it for later allocations of any kind (a table grown to 64 elements one at
+a time costs about 75 words instead of 128), and `tostring(number)` keeps
+only the words its text needs. With `--gc arena` the program gets `arena.mark()`, `arena.release(m)` and
 `arena.used()`: releasing a mark frees everything allocated since in one
 step, by resetting the heap top. Tables made before the arena that grow
 inside it get their new storage pinned, and the runtime's long-lived

@@ -42,7 +42,7 @@ Lancez `v32lua --help` pour voir toutes les options ; les plus courantes :
 | `--rate 11025\|22050\|44100` | Fréquence d'échantillonnage du son produit à partir d'une cartouche PICO-8 ou TIC-80. |
 | `--bezel FICHIER`, `--no-bezel` | Panneaux latéraux PICO-8 : vos propres images, ou aucun. |
 | `--fast-circles` | PICO-8/TIC-80 : dessine plus vite les grands cercles pleins (bords légèrement différents). |
-| `--gc none\|arena` | Gestion du tas ([section 7](#7-gestion-du-tas---gc)) : `none` (par défaut) ne libère jamais ; `arena` ajoute `arena.mark()` / `arena.release(m)`, qui libèrent d'un coup tout ce qui a été alloué entre les deux. |
+| `--gc none\|arena` | Gestion du tas ([section 7](#7-gestion-du-tas---gc)) : `none` (par défaut) n'a pas de ramasse-miettes (il ne réutilise que les blocs que les tables laissent en grandissant) ; `arena` ajoute `arena.mark()` / `arena.release(m)`, qui libèrent d'un coup tout ce qui a été alloué entre les deux. |
 | `--gc-check` | Avec `--gc arena` : s'arrête quand une valeur créée dans une arène ouverte est rangée dans quelque chose qui lui survit. Pour les compilations de développement. |
 | `--allow-float-as-clearcolor` | Un nombre Lua donné à `ioports.gpu.clear` ou au `cls()` TIC-80 garde ses bits float32 comme couleur d'effacement, comme les anciennes versions (effacement translucide = traînée de flou). Désactivé par défaut. |
 | `--xml-preserve-paths` | Conserve dans le XML les chemins de `--#texture`/`--#sound` tels qu'écrits et écrit le XML dans le dossier du projet, à côté de la source ou dans son parent quand la source est dans `src/` et la sortie dans un dossier voisin comme `obj/` ([section 3](#3-le-xml-de-la-cartouche)). |
@@ -279,11 +279,22 @@ leur manière.
 
 ## 7. Gestion du tas (`--gc`)
 
-Par défaut (`--gc none`) le tas est un allocateur linéaire qui ne libère
-jamais : chaque chaîne, table et closure créée reste jusqu'à la
+Par défaut (`--gc none`) le tas est un allocateur linéaire sans
+ramasse-miettes : chaque chaîne, table et closure créée reste jusqu'à la
 réinitialisation de la console, donc un jeu qui en crée de nouvelles à chaque
 image finira par manquer de mémoire (un écran rouge « out of memory »). Le
-remède habituel est de réutiliser les tables. L'alternative facultative est
+remède habituel est de réutiliser les tables. La seule chose que le runtime
+libère, dans tous les modes `--gc`, est la poubelle qu'il connaît : quand une
+table dépasse sa partie tableau ou sa partie hachage, l'ancien bloc passe à
+une liste libre (`__mfree`) et les allocations suivantes de tout type
+(chaînes, tables, closures) le réutilisent, premier ajustement par classe de
+taille ; `tostring(nombre)` rend aussi la fin inutilisée de son tampon de
+texte, et ne garde donc qu'environ 5 mots au lieu de 48. Une table qui grandit
+élément par élément jusqu'à 64 coûte environ 75 mots de tas au lieu d'environ
+128. Le coût est de 23 mots de RAM et 2 instructions par allocation tant que
+rien n'a été libéré. Les tables, chaînes et closures mortes ne sont toujours
+pas libérées, et `stat(0)` en mode PICO-8 indique toujours le sommet du tas :
+les mots réutilisables y comptent comme utilisés. L'alternative facultative est
 **`--gc arena`** : vous posez une marque, allouez librement, puis libérez en
 une fois tout ce qui a été alloué depuis la marque.
 
@@ -302,8 +313,14 @@ fois ; libérer une marque extérieure ferme aussi les intérieures. Libérer
 quelque chose qui n'est pas une marque ouverte (jamais ouverte, ou déjà
 libérée) ou ouvrir une 17e marque arrête le programme sur un écran rouge
 `ARENA ERROR`. Mark, release et used coûtent quelques instructions chacun, et
-le temps d'un release ne dépend pas de la quantité allouée. Sans
-`--gc arena`, le code généré est exactement celui de toujours.
+le temps d'un release ne dépend pas de la quantité allouée. Avec
+`--gc arena`, la réutilisation des blocs s'interrompt tant qu'une arène est
+ouverte (les objets créés dans une arène doivent se trouver au-dessus de sa
+marque) et un bloc libéré dans une arène ouverte n'est pas conservé, puisque
+le release le libère de toute façon ; les blocs libérés hors des arènes, ou
+sous la marque ouverte la plus extérieure, sont réutilisés dès qu'aucune
+arène n'est ouverte. Sans `--gc arena`, il n'y a pas d'arènes et le tas ne
+réutilise que les blocs devenus trop petits.
 
 ```lua
 --#gc arena

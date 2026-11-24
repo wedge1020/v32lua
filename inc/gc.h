@@ -7,6 +7,7 @@
 #define GC_MARKSWEEP_RESERVED  2     // parsed only to say "not implemented yet"
 
 #define ARENA_MAX_DEPTH        16    // open arena.mark()s at once
+#define FREE_BIN_COUNT         22    // __malloc free lists: 2^0 .. 2^21 words
 
 extern int  g_gc_mode;
 extern bool g_gc_check;

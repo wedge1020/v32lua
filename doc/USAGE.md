@@ -41,7 +41,7 @@ Run `v32lua --help` for every option; the common ones:
 | `--rate 11025\|22050\|44100` | Sample rate of the sound made from a PICO-8 or TIC-80 cart. |
 | `--bezel FILE`, `--no-bezel` | PICO-8 side panels: your own art, or none. |
 | `--fast-circles` | PICO-8/TIC-80: draw big filled circles faster (slightly different edges). |
-| `--gc none\|arena` | Heap management ([section 7](#7-heap-management---gc)): `none` (default) never frees; `arena` adds `arena.mark()` / `arena.release(m)`, which free everything allocated between them at once. |
+| `--gc none\|arena` | Heap management ([section 7](#7-heap-management---gc)): `none` (default) has no collector (it only reuses the blocks tables outgrow); `arena` adds `arena.mark()` / `arena.release(m)`, which free everything allocated between them at once. |
 | `--gc-check` | With `--gc arena`: panic when a value made in an open arena is stored somewhere that outlives it. For development builds. |
 | `--allow-float-as-clearcolor` | A Lua number given to `ioports.gpu.clear` or TIC-80 `cls()` keeps its float32 bits as the clear color, as in older versions (translucent clear = motion-blur streak). Off by default. |
 | `--xml-preserve-paths` | Keep the `--#texture`/`--#sound` paths in the XML as written and write the XML in the project folder, beside the source or in its parent when the source is in `src/` and the output in a sibling like `obj/` ([section 3](#3-the-cartridge-xml)). |
@@ -266,10 +266,20 @@ the test suites pass it, because they build their own way.
 
 ## 7. Heap management (`--gc`)
 
-By default (`--gc none`) the heap is a bump allocator that never frees:
+By default (`--gc none`) the heap is a bump allocator with no collector:
 every string, table and closure you make stays until the console is reset,
 so a game that makes new ones every frame will eventually run out of memory
-(a red "out of memory" screen). The usual cure is to reuse tables. The
+(a red "out of memory" screen). The usual cure is to reuse tables. The one
+thing the runtime does free, in every `--gc` mode, is garbage it knows
+about: when a table outgrows its array or hash part, the old block goes to
+a free list (`__mfree`) and later allocations of any kind (strings, tables,
+closures) reuse it, first fit by size class; `tostring(number)` likewise
+gives back the unused tail of its number-to-text buffer, so it keeps about
+5 words instead of 48. A table grown one element at a time to 64 elements
+costs about 75 heap words instead of about 128. The cost is 23 RAM words
+and 2 instructions per allocation until something has been freed. Dead
+tables, strings and closures are still never freed, and `stat(0)` in PICO-8
+mode still reports the heap top, so reusable words count as used. The
 opt-in alternative is **`--gc arena`**: you mark a point, allocate freely,
 and release everything allocated since the mark in one step.
 
@@ -287,8 +297,12 @@ error. Marks nest, up to 16 open at once; releasing an outer mark closes the
 inner ones too. Releasing something that is not an open mark (never opened,
 or already released) or opening a 17th mark stops the program with a red
 `ARENA ERROR` screen. Mark, release and used take a few instructions each,
-and the time of a release does not depend on how much was allocated. Without
-`--gc arena` the generated code is exactly what it always was.
+and the time of a release does not depend on how much was allocated. With
+`--gc arena`, block reuse pauses while an arena is open (objects made in an
+arena must lie above its mark) and a block freed inside an open arena is not
+kept, since the release frees it anyway; blocks freed outside arenas, or
+below the outermost open mark, are reused once no arena is open. Without
+`--gc arena` there are no arenas and the heap only reuses outgrown blocks.
 
 ```lua
 --#gc arena

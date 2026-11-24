@@ -363,8 +363,8 @@ works):
   `--no-bezel`: black margins.
 * `--fast-circles`: TIC-80/PICO-8 filled circles above radius 31 drawn as
   a scaled disc.
-* `--gc none|arena`: heap management (default `none`: the heap never
-  frees). `arena` adds `arena.mark()`, `arena.release(m)` and
+* `--gc none|arena`: heap management (default `none`: no collector; only the
+  blocks tables outgrow are reused). `arena` adds `arena.mark()`, `arena.release(m)` and
   `arena.used()`, which free everything allocated since a mark in one step
   (see [doc/USAGE.md](doc/USAGE.md#7-heap-management---gc)).
   `--gc-check`: with `--gc arena`, panic when a value made in an open arena
@@ -1236,8 +1236,9 @@ decision:
   (`0xDEADBEEF`) is rounded. See **Bitwise operators** above.
 * `string.format` as a method (`("%d"):format(x)`) — use
   `string.format(...)`.
-* Garbage collection: the heap is a bump allocator, so every table,
-  closure and runtime string lives until reset. Long-running games should
+* Garbage collection: the heap is a bump allocator (it reuses only the
+  blocks a growing table outgrows and the unused tail of number text), so
+  every table, closure and runtime string lives until reset. Long-running games should
   reuse tables rather than create them per frame. The opt-in alternative is
   `--gc arena`: wrap the per-frame work in `arena.mark()` /
   `arena.release(m)` and everything allocated in between is freed at once

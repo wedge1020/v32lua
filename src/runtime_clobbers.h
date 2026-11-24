@@ -120,6 +120,7 @@ static const struct { const char *label; const char *regs; } runtime_clobbers[] 
     { "__concat_strlen", "R0-R2" },
     { "__malloc", "R0-R3,R6" },
     { "__malloc_owned", "R0-R3,R6" },
+    { "__mfree", "none" },
     { "__mv_from_mem", "R0-R3" },
     { "__mv_shift", "R0,R2-R3" },
     { "__mv_string_byte", "R0-R6" },

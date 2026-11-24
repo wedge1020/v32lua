@@ -378,8 +378,9 @@ modification (`--opt=valeur` fonctionne aussi) :
   `--no-bezel` : marges noires.
 * `--fast-circles` : les cercles pleins TIC-80/PICO-8 de rayon supérieur à
   31 sont dessinés comme un disque mis à l'échelle.
-* `--gc none|arena` : gestion du tas (par défaut `none` : le tas ne libère
-  jamais). `arena` ajoute `arena.mark()`, `arena.release(m)` et
+* `--gc none|arena` : gestion du tas (par défaut `none` : pas de ramasse-miettes ;
+  seuls les blocs que les tables laissent en grandissant sont réutilisés).
+  `arena` ajoute `arena.mark()`, `arena.release(m)` et
   `arena.used()`, qui libèrent d'un coup tout ce qui a été alloué depuis une
   marque (voir [doc/USAGE.fr.md](doc/USAGE.fr.md#7-gestion-du-tas---gc)).
   `--gc-check` : avec `--gc arena`, s'arrête quand une valeur créée dans une
@@ -1341,7 +1342,9 @@ attente d'une décision de conception :
   Voir **Opérateurs bit à bit** ci-dessus.
 * `string.format` comme méthode (`("%d"):format(x)`) — utilisez
   `string.format(...)`.
-* Le ramasse-miettes : le tas est un allocateur linéaire, donc chaque
+* Le ramasse-miettes : le tas est un allocateur linéaire (il ne réutilise
+  que les blocs laissés par une table qui grandit et la fin inutilisée du
+  texte d'un nombre), donc chaque
   table, fermeture et chaîne créée à l'exécution vit jusqu'à la
   réinitialisation. Les jeux qui tournent longtemps devraient réutiliser
   leurs tables plutôt que d'en créer à chaque image. L'alternative

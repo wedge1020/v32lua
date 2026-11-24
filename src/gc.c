@@ -77,16 +77,24 @@ void gc_settle_options (void)
 //   ARENA_DEPTH    number of open marks
 //   ARENA_STACK    the open marks, oldest first (ARENA_MAX_DEPTH words)
 // Returns the number of lines printed (for the source map's line offset).
+//
+// In every mode, the free lists of __malloc / __mfree (memory.s): the
+// blocks a table has outgrown and the unused tails of number texts go back
+// to be reused. FREE_MASK bit k is set while FREE_BINS[k] (blocks of 2^k to
+// 2^(k+1)-1 words) is not empty. 1 + FREE_BIN_COUNT words.
 int gc_emit_defines (FILE *f)
 {
-    if (g_gc_mode != GC_ARENA) return 0;
+    fprintf (f, "%%define  FREE_MASK                0x%.8X\n", next_ram_address);
+    fprintf (f, "%%define  FREE_BINS                0x%.8X\n", next_ram_address + 1);
+    next_ram_address += 1 + FREE_BIN_COUNT;
+    if (g_gc_mode != GC_ARENA) return 2;
     fprintf (f, "%%define  ARENA_FLOOR              0x%.8X\n", next_ram_address);
     fprintf (f, "%%define  ARENA_PIN_TOP            0x%.8X\n", next_ram_address + 1);
     fprintf (f, "%%define  ARENA_DEPTH              0x%.8X\n", next_ram_address + 2);
     fprintf (f, "%%define  ARENA_STACK              0x%.8X\n", next_ram_address + 3);
     fprintf (f, "%%define  ARENA_MAX_DEPTH          %d\n", ARENA_MAX_DEPTH);
     next_ram_address += 3 + ARENA_MAX_DEPTH;
-    return 5;
+    return 7;
 }
 
 // The arena words start at 0 (no arena open, nothing pinned): from
@@ -99,6 +107,9 @@ int gc_emit_defines (FILE *f)
 // arena's garbage below it allocated. 96 words at boot instead.
 void gc_emit_init (void)
 {
+    // Free lists empty (only FREE_MASK is read before a bin is used)
+    emit_asm ("MOV R0, 0\n");
+    emit_asm ("MOV [FREE_MASK], R0 ; no freed blocks yet (memory.s __mfree)\n");
     if (g_gc_mode != GC_ARENA) return;
     emit_asm ("MOV R0, 0\n");
     emit_asm ("MOV [ARENA_FLOOR], R0   ; --gc arena: no arena open\n");

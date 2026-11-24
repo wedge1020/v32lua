@@ -376,8 +376,8 @@ código fuente, así que un cartucho de PICO-8 o TIC-80 compila sin editarlo
   [doc/PICO8.md](doc/PICO8.md#side-panels)); `--no-bezel`: márgenes negros.
 * `--fast-circles`: los círculos rellenos de TIC-80/PICO-8 de radio mayor
   que 31 se dibujan como un disco escalado.
-* `--gc none|arena`: gestión del montón (por defecto `none`: el montón nunca
-  libera). `arena` añade `arena.mark()`, `arena.release(m)` y
+* `--gc none|arena`: gestión del montón (por defecto `none`: sin recolector; solo se
+  reutilizan los bloques que las tablas dejan al crecer). `arena` añade `arena.mark()`, `arena.release(m)` y
   `arena.used()`, que liberan de una vez todo lo reservado desde una marca
   (consulta [doc/USAGE.es.md](doc/USAGE.es.md#7-gestión-del-montón---gc)).
   `--gc-check`: con `--gc arena`, se detiene cuando un valor creado en una
@@ -1322,8 +1322,10 @@ una decisión de diseño:
   Ver **Operadores a nivel de bits** más arriba.
 * `string.format` como método (`("%d"):format(x)`) — use
   `string.format(...)`.
-* Recolección de basura: el heap es un asignador lineal, así que cada
-  tabla, clausura y cadena en tiempo de ejecución vive hasta el reinicio.
+* Recolección de basura: el heap es un asignador lineal (solo reutiliza
+  los bloques que deja una tabla al crecer y la cola sin usar del texto de
+  un número), así que cada tabla, clausura y cadena en tiempo de ejecución
+  vive hasta el reinicio.
   Los juegos de larga duración deberían reutilizar tablas en lugar de
   crearlas en cada fotograma. La alternativa opcional es `--gc arena`:
   envuelve el trabajo de cada fotograma en `arena.mark()` /

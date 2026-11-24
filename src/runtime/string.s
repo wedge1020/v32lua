@@ -739,8 +739,9 @@ __tostring_done:
 ;; Returns: R0 = Raw Heap Pointer to null-terminated ASCII string
 ;; Registers: R0-R13 (R14/BP and R15/SP preserved)
 ;;
-;; This allocates a FRESH, permanent 48-word heap block on every call --
-;; correct and necessary when the resulting string genuinely becomes a
+;; This allocates a FRESH 48-word heap block on every call (the unused
+;; tail is given back at __ftoa_terminate, so the string keeps only its
+;; length + 1 words) -- correct and necessary when the resulting string genuinely becomes a
 ;; Lua value the program may keep (e.g. tostring()'s return value). Where
 ;; the result is instead immediately copied elsewhere or displayed and
 ;; never needed again, use __builtin_ftoa_scratch_a or _scratch_b below
@@ -1104,6 +1105,33 @@ __ftoa_trim_dot:
 __ftoa_terminate:
     MOV  R10, 0
     MOV  [R9], R10               ; null terminator
+
+    ;; A fresh buffer (__builtin_ftoa: tostring() and friends, not the two
+    ;; shared scratch buffers) gives back what the text did not use -- 48
+    ;; words were taken for the longest possible text, "12.5" needs 5. Was
+    ;; 48 words of garbage on every tostring(number).
+    MOV  R10, [FTOA_SCRATCH_PTR_A]
+    IEQ  R10, R2
+    JT   R10, __ftoa_tail_done
+    MOV  R10, [FTOA_SCRATCH_PTR_B]
+    IEQ  R10, R2
+    JT   R10, __ftoa_tail_done
+    MOV  R10, R9
+    IADD R10, 1                  ; R10 = first unused word
+    MOV  R11, R2
+    IADD R11, 48                 ; R11 = end of the buffer
+    MOV  R12, [HEAP_POINTER]
+    IEQ  R12, R11
+    JF   R12, __ftoa_free_tail
+    MOV  [HEAP_POINTER], R10     ; the newest block: just lower the heap top
+    JMP  __ftoa_tail_done
+__ftoa_free_tail:
+    ISUB R11, R10                ; it came from a free list: free the tail
+    PUSH R10
+    PUSH R11
+    CALL __mfree
+    IADD SP, 2
+__ftoa_tail_done:
     MOV  R0, R2                  ; return base pointer
     MOV  SP, BP
     POP  BP

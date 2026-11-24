@@ -643,6 +643,16 @@ __table_hash_grow_next:
     ISUB R7, 1
     JMP  __table_hash_grow_loop
 __table_hash_grow_done:
+    ;; The old block is garbage now (nothing keeps a pointer into it: the
+    ;; header points at the new one): back to __malloc for reuse. R6 ran to
+    ;; its end; its size is 2 + 2 * old capacity = 2 + new capacity.
+    MOV  R7, [R5]
+    IADD R7, 2
+    ISUB R6, R7              ; R6 = the old block
+    PUSH R6
+    PUSH R7
+    CALL __mfree
+    IADD SP, 2
     POP  R8
     POP  R7
     POP  R6
@@ -845,6 +855,14 @@ __table_array_grow_copied:
     AND  R7, 0xFFFF0000
     OR   R7, R6
     MOV  [R1], R7
+    ;; The old array (R2, R5 words; none when the capacity was 0) is
+    ;; garbage now: back to __malloc for reuse
+    JF   R2, __table_array_grow_freed
+    PUSH R2
+    PUSH R5
+    CALL __mfree
+    IADD SP, 2
+__table_array_grow_freed:
     ;; migrate keys old_capacity+1 .. new_capacity out of the hash part
     MOV  R8, [R1+3]
     MOV  R7, R8
