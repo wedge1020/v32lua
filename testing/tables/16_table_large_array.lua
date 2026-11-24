@@ -6,7 +6,9 @@
 --@ Beyond 65535 the rest lives in the hash part and the border (#t)
 --@ follows it, so t[#t+1] = v and table.concat keep working.
 --@ Results stored in global variables for automated memory scraping.
---@ Needs a longer run than the default 30 frames: tools/headless/unittest.py -f 150.
+--@ Needs a longer run than the default 30 frames (the directive below sets
+--@ the cap for tools/headless/unittest.py).
+--@ frames: 150
 
 function test_table_large_array()
     local t = {}

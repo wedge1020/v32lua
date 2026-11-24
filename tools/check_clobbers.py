@@ -94,10 +94,20 @@ def call_targets(instrs, extra):
     return t
 
 def compiler_calls():
-    """labels the compiler's own code calls: CALL __name in src/**/*.c strings"""
+    """labels the compiler's own code calls, from src/**/*.c: `CALL __name` in an
+    emitted string; a literal routine name given to emit_runtime_call_intrinsic(),
+    which emits the CALL itself; and the routine column of a { "name", nargs,
+    "__routine" } table whose entries reach emit_runtime_call_intrinsic()
+    (intrinsics/core.c: setmetatable, rawget, ...). Without the last two,
+    __arena_release and the raw*/metatable routines got no clobbers= hint."""
     names = set()
     for f in glob.glob(os.path.join(ROOT, "src", "**", "*.c"), recursive=True):
-        for m in re.finditer(r'CALL\s+(__\w+)', open(f, errors="replace").read()):
+        text = open(f, errors="replace").read()
+        for m in re.finditer(r'CALL\s+(__\w+)', text):
+            names.add(m.group(1))
+        for m in re.finditer(r'emit_runtime_call_intrinsic\s*\([^;]*?"(__\w+)"', text):
+            names.add(m.group(1))
+        for m in re.finditer(r'\{\s*"[^"]*"\s*,\s*\d+\s*,\s*"(__\w+)"\s*\}', text):
             names.add(m.group(1))
     return names
 

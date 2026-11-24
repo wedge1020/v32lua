@@ -391,3 +391,14 @@ il est donc destiné aux compilations de développement.
 yet »). La ligne de commande l'emporte sur l'indication, et un mode inconnu
 est une erreur. Le mode par défaut peut être changé à la compilation
 (`-DV32LUA_DEFAULT_GC=1`, et `V32LUA_DEFAULT_GC_CHECK`, dans `inc/config.h`).
+
+**Mesurer le tas.** v32sim 20261124-dev et suivants peuvent surveiller le
+tas pendant qu'une cartouche tourne : `v32sim --heap=PROG.asm PROG.v32`, ou
+sans écran `v32orun --heap -a PROG.asm PROG.vbin` (sans `-q`, qui masque les lignes par image). À la fin de chaque image
+s'affiche `HEAP F<image> ptr= used= peak=` (`used` vaut
+`HEAP_POINTER - HEAP_START`), avec `--gc arena` aussi
+`floor= pin= depth= stack=`, puis `HEAP PEAK` et `HEAP END` à la sortie. Un
+`used` qui monte d'image en image est une fuite : en mode arène, cherchez un
+`pin=` qui ne cesse de monter (une table plus ancienne qui grandit dans
+l'arène) ou un `depth=` supérieur à 0 en fin d'image (une arène jamais
+libérée). Le pic indique combien de tas un niveau ou un menu demande.

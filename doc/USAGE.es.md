@@ -384,3 +384,14 @@ con muchas tablas), por lo que está pensado para compilaciones de desarrollo.
 yet»). La línea de órdenes tiene prioridad sobre la pista, y un modo
 desconocido es un error. El modo por defecto puede cambiarse al compilar
 (`-DV32LUA_DEFAULT_GC=1`, y `V32LUA_DEFAULT_GC_CHECK`, en `inc/config.h`).
+
+**Medir el montón.** v32sim 20261124-dev y posteriores pueden vigilar el
+montón mientras corre un cartucho: `v32sim --heap=PROG.asm PROG.v32`, o sin
+pantalla `v32orun --heap -a PROG.asm PROG.vbin` (sin `-q`, que oculta las líneas por fotograma). Al final de cada fotograma
+se imprime `HEAP F<fotograma> ptr= used= peak=` (`used` es
+`HEAP_POINTER - HEAP_START`), con `--gc arena` también
+`floor= pin= depth= stack=`, y al salir `HEAP PEAK` y `HEAP END`. Un `used`
+que sube fotograma tras fotograma es una fuga: en modo arena, busque un
+`pin=` que no deja de subir (una tabla anterior que crece dentro del arena)
+o un `depth=` mayor que 0 al final de un fotograma (un arena que nunca se
+liberó). El pico indica cuánto montón necesita un nivel o un menú.

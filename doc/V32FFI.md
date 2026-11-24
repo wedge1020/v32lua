@@ -76,6 +76,24 @@ dispatch overhead.
 
 ## 3. `v32lua` V32FFI Implementation Mechanics
 
+> [!WARNING]
+> **Corrected 20261124-dev: the unboxing and boxing below do not match
+> v32lua's values.** A Lua number is a plain IEEE-754 float, not a tagged
+> word (doc/NaN_boxing.md): `AND R, 0x003FFFFF` destroys it, and
+> `OR R0, 0x7FF00000` turns a returned integer into a NaN. Marshalling has to
+> go by the C parameter type instead:
+>
+> | C type | Lua -> C | C -> Lua |
+> | --- | --- | --- |
+> | `int` | `CFI R` (the float truncated) | `CIF R0` |
+> | `float` | as is | as is |
+> | `bool` | `true` -> 1, `false`/`nil` -> 0 (a tag test) | 1/0 -> `BOXED_TRUE`/`BOXED_FALSE` |
+> | pointer (`int*`, `char*` of a RAM string, a table header) | `AND R, BOXED_PAYLOAD` on a table or RAM-string value: its raw RAM address (strings are one character per word, NUL-ended) | not returned as a Lua value |
+>
+> A missing trailing argument is padded with 0 as described in section 2.
+> The flow diagram and snippets are kept as the original plan; read them
+> with this table.
+
 In `v32lua`, FFI integration is  implemented directly within the Abstract
 Syntax Tree (AST) code  generator (`NODE_FUNCTION_CALL` in `generate.c`).
 When  `v32lua` encounters  a  call  node, it  checks  symbol metadata  to
@@ -131,7 +149,7 @@ OR  R_dest, 0x7FF00000 ; Apply standard Lua Number tag
 ## 4. Configurable Memory Architecture
 
 The Vircon32 virtual console features 16 MB of flat, word-addressable RAM
-($4,194,304\text{ words}$). Because standard Vircon32 C programs allocate
+($4,194,304\text{ words}$, addresses `0x00000000`-`0x003FFFFF`). Because standard Vircon32 C programs allocate
 global and  static variables  (`.bss` and  `.data` sections)  starting at
 address  `0x00000000`,  `v32lua` must  guarantee  that  its dynamic  heap
 (`heap_pointer`) never overlaps low-memory C variables.
@@ -161,7 +179,7 @@ Heap Start +-------------------------------------------------------+
            |                         v                             |
            |            Allocations grow UPWARD                    |
            |                                                       |
-0x00FFFFFF +-------------------------------------------------------+
+0x003FFFFF +-------------------------------------------------------+  (4M words; the stack grows down from here)
 ```
 
 ### Memory Base Determination Logic
@@ -176,6 +194,9 @@ The formula used to compute the effective heap start address is:
 
 $$\text{Heap Start Address} = \max\left(\text{FFI\_RAM\_RESERVE},\; \text{FFI\_MAX\_MEM} + \text{FFI\_SAFETY\_PADDING}\right)$$
 
+(Superseded by section 5.2, which also counts the C heap and moves all of
+v32lua's RAM words, not only its heap, above the reserve.)
+
 ### Directive Reference
 
 | Directive / Annotation | Source | Description | Example |
@@ -185,13 +206,105 @@ $$\text{Heap Start Address} = \max\left(\text{FFI\_RAM\_RESERVE},\; \text{FFI\_M
 
 ---
 
-## 5. Summary of FFI Configuration Defaults
+## 5. Memory and arena rules (settled 20261124-dev, with v32cc)
+
+The FFI is still unimplemented. These are the rules its implementation
+follows, agreed with v32cc (its `docs/ARENA.md`, "v32lua FFI").
+
+### 5.1 C owns the bottom of RAM, Lua starts at the reserve's end
+
+Today v32lua's own fixed words start at RAM word 0: `HEAP_POINTER` (0),
+`FTOA_SCRATCH_PTR_A`/`_B` (1, 2), then its runtime state, the globals, the
+arena and free-list words, and `HEAP_START` after them (`src/emit.c`
+`emit_variable_map()`). v32cc places C globals from word 0 too, so the two
+collide at words 0-2 before anything else.
+
+**v32lua moves; C keeps its defaults.** With the FFI enabled, every
+v32lua RAM word -- the three low words included -- is laid out from
+**Lua base** upwards instead of from 0:
+
+```
+0x00000000  C globals (.data / .bss), from 0 as v32cc places them
+            C heap (if any), inside the reserve (5.3)
+            FFI_SAFETY_PADDING
+Lua base    HEAP_POINTER, FTOA_SCRATCH_PTR_A/B, runtime words, globals,
+            arena / free-list words
+HEAP_START  the v32lua heap, growing up
+            ...
+0x003FFFFF  the stack, growing down
+```
+
+Nothing changes without the FFI: Lua base is 0. In the compiler this is the
+starting value of `next_ram_address` and the three fixed `%define`s
+(`HEAP_POINTER`, `FTOA_SCRATCH_PTR_A/B`); the runtime reaches them only by
+those names.
+
+### 5.2 Where Lua base comes from
+
+$$\text{Lua base} = \max\left(\text{FFI\_RAM\_RESERVE},\; \text{FFI\_MAX\_MEM} + \text{C heap words} + \text{FFI\_SAFETY\_PADDING}\right)$$
+
+v32lua lays out its RAM at compile time, as numbers, so it needs the C
+side's size as a number when it compiles: **v32cc writes it**. v32cc's link
+already defines `__v32_data_end` (the first RAM word after all C globals);
+a v32cc option will write it, with the C heap size, as the annotation
+v32lua already reads (`src/ast.c`):
+
+```
+;;FFI_MAX_MEM <__v32_data_end>
+;;FFI_C_HEAP <words>        (0 or absent: no C heap)
+```
+
+So the C side is built first and the Lua side reads its annotation file
+(`--#include`d, or given on the command line). `--#config FFI_RAM_RESERVE`
+stays the floor for a hand-made layout.
+
+### 5.3 The C heap lives in the reserve
+
+v32cc's `--hosted` heap defaults to words 1M-3.75M, which is inside
+v32lua's heap. With the FFI, the C heap is part of the reserve (it is
+counted in 5.2): v32lua's FFI start-up calls `v32_set_heap(start, end)` on
+the reserve's heap part before any Lua code runs -- before stdio's first
+allocation -- so a C library needs nothing of its own. C code may use
+`<v32arena.h>` over the same region instead.
+
+### 5.4 Lua values held by C (and arenas)
+
+* A Lua table, RAM string or closure passed to C is **borrowed for the
+  call**: C may read it (and write a table's array words in place) while
+  the call runs.
+* C may **keep** a Lua heap value after the call returns only if the
+  value was made **outside every open arena**. With `--gc none` nothing is
+  freed; with `--gc arena`, `arena.release(m)` frees everything made since
+  `m`, and a value C kept from that span dangles. (Block reuse never frees a
+  live object: only blocks the runtime has replaced.)
+* A C function that keeps a Lua value is declared as such in its binding
+  (a `retains` mark). With `--gc-check`, the call stub checks each heap
+  value it passes to a `retains` function as the escape check does
+  (`__arena_check_store`, `src/runtime/arena.s`) and panics if it was made
+  inside the innermost open arena.
+* C never frees, resizes or allocates in the Lua heap: Lua memory is v32lua's
+  (`__malloc`), C memory is v32cc's.
+* The other direction -- C memory that Lua holds -- is v32cc's side
+  (`v32_arena_owns`, the debug-mode poison).
+
+### 5.5 Out of memory, arena marks
+
+* C running out of memory shows v32lua's red out-of-memory screen: the FFI
+  start-up installs v32lua's `__oom_handler` as the C arena's out-of-memory
+  hook (`v32_arena_set_oom`).
+* Arena marks do not cross the boundary: a Lua mark is a plain number (a
+  heap word address) that only `arena.release` reads, and C has its own
+  arenas. If that ever changes, a plain `int` mark would match v32lua's.
+
+---
+
+## 6. Summary of FFI Configuration Defaults
 
 > [!NOTE]
 > All memory sizes in the Vircon32 system are measured in **32-bit words** ($1\text{ word} = 4\text{ bytes}$).
 
 * **Default Reserved Region**: $65,536\text{ words}$ ($64\text{ kW} / 256\text{ KB}$).
 * **Safety Alignment Buffer**: $256\text{ words}$ ($1\text{ KB}$).
-* **Default Heap Start Address (no FFI configuration)**: `0x00010000` ($65,536$).
+* **Without the FFI** v32lua's RAM starts at word 0 and its heap right after its globals (`HEAP_START`); there is no reserve. The reserve -- and Lua base above it (5.1) -- exists only with the FFI enabled. (`calculate_lua_heap_start()` in `src/emit.c`, which would apply it, has no callers yet.)
 * **Argument Boxing Tag (Lua Number)**: `0x7FF00000`.
 * **Argument Unboxing Mask**: `0x003FFFFF`.

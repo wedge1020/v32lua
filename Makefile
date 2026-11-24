@@ -107,7 +107,7 @@ bin/$(TARGET):
 
 # Clean both the build files in src/ and the generated assembly in testing/
 clean:
-	rm -f err.txt put/* *.zip ../v32lua-project.zip
+	rm -f err.txt put/* *.zip ../v32lua-project.zip ../v32lua-project-[0-9]*.zip
 	$(MAKE) -C src clean
 	$(MAKE) -C testing clean
 	$(MAKE) -C demos clean
@@ -259,4 +259,4 @@ put: context
 	done
 
 archive: clean
-	zip -r ../v32lua-project.zip CMakeLists.txt cmake demos doc inc lib Makefile man README.* scripts src tests v32 testing tools .github *.md
+	zip -r ../v32lua-project-$(shell date +%Y%m%d).zip CMakeLists.txt cmake demos doc inc lib Makefile man README.* scripts src tests v32 testing tools .github *.md

@@ -194,7 +194,10 @@ Both layers' known gaps are listed in the README roadmap and `doc/PICO8.md`,
 - Fix the compiler, don't bend test or demo source to dodge a bug.
 - Add a test: a new `testing/<category>/NN_name.lua` with the expected-output
   block; unit tests are `function main()` wrappers (often `__rawasm__` with
-  `__debugN:` labels). Compiler-refusal cases go in `testing/fail/`.
+  `__debugN:` labels). Compiler-refusal cases go in `testing/fail/`. A test needing
+  more than 30 frames says `--@ frames: N` in its header; a test that must end in a
+  panic screen (`__arena_err_*`, `__oom_handler`) has a `=== EXPECTED TRAP ===` /
+  `label: NAME` block instead of values (`unittest.py` only; `run_tests.sh` skips it).
 - Layout: `src/node/*.c` AST node codegen, `src/intrinsics/*.c` built-in
   calls and `ioports.*` paths (add new ones here), `src/emit.c` assembly and
   XML printing, `src/pathutil.c` path helpers for the XML, `src/buildscript.c` Make.sh/Make.bat, `src/main.c` options
@@ -236,6 +239,7 @@ Both layers' known gaps are listed in the README roadmap and `doc/PICO8.md`,
   or look like `_mvpad_N` / `_mvarg_N`: those are the suffixes the compiler
   generates for user functions (`__NAME_return`), and a clash fails assembly
   (`__ftoa_return` once collided with `lib/string.lua`'s `ftoa`).
+- **Runtime routines and v32opt:** `tools/check_clobbers.py` finds the routines the compiler calls from `CALL __name` strings, literal names passed to `emit_runtime_call_intrinsic()`, and `{ "name", nargs, "__routine" }` tables -- a routine reached any other way gets no `clobbers=` hint (safe, just slower). Avoid reading a register-passed input after a `PUSH Rn ... POP Rn` save around a call: v32opt 20261124-dev took such a register for "not an input" and deleted the caller's setup (`__arena_check_core` hit this). `__malloc` / `__malloc_owned` carry a `nonzero` attribute on their `;@fn` line (doc/HINTS.md).
 - **Allocation in the runtime:** `__malloc` never returns 0 (it goes to the
   out-of-memory panic screen itself), so callers need no check; never bump the
   heap pointer by hand. A new allocation of a block *owned by an existing

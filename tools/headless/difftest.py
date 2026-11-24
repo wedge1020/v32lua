@@ -33,6 +33,9 @@ got = {}; status = ''
 for l in v.stdout.splitlines():
     if l.startswith('CANON R_'):
         p = l.split(' ', 3); got[p[1]] = (p[2], p[3] if len(p) > 3 else '')
+        # v32sim 20261124+ dumps a closure as `closure 0xREC code=.. nupvals=N`;
+        # to reference Lua every function is just `function`
+        if p[2] == 'closure': got[p[1]] = ('function', '')
     elif l.startswith(('STATUS', 'COMPILE FAIL', 'ASSEMBLE FAIL', 'TRAP', '[')) or 'rror' in l:
         status += l + '\n'
 if 'COMPILE FAIL' in v.stdout or 'ASSEMBLE FAIL' in v.stdout:

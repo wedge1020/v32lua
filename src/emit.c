@@ -1165,7 +1165,13 @@ static void emit_runtime_clobbers_hint (const char *line)
     for (size_t i = 0; runtime_clobbers[i].label != NULL; i++) {
         const char *l = runtime_clobbers[i].label;
         if (strlen (l) == n && strncmp (l, line, n) == 0) {
-            fprintf (out(), "    ;@fn %s clobbers=%s\n", l, runtime_clobbers[i].regs);
+            // nonzero: R0 on return is never 0 -- the allocators go to the
+            // out-of-memory screen instead of returning 0 (memory.s), so a
+            // caller's leftover `JF R0, __oom_handler` style check is dead.
+            // Tools that don't know the attribute ignore it.
+            bool nonzero = strcmp (l, "__malloc") == 0 || strcmp (l, "__malloc_owned") == 0;
+            fprintf (out(), "    ;@fn %s clobbers=%s%s\n", l, runtime_clobbers[i].regs,
+                     nonzero ? " nonzero" : "");
             return;
         }
     }

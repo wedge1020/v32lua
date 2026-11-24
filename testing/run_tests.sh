@@ -52,7 +52,11 @@ PFLAGS=
 RUNEVAL="v32sim"
 RFLAGS="-r -C ${UNIT}.cmd -L lua"
 
-if [ -r "${UNIT}.lua" ]; then
+if [ -r "${UNIT}.lua" ] && ! grep -q 'EXPECTED OUTPUT' "${UNIT}.lua" && grep -q '=== EXPECTED TRAP ===' "${UNIT}.lua"; then
+    # trap-only test (expects the cart to reach a panic label): needs
+    # v32orun --expect-reach, so only tools/headless/unittest.py can run it.
+    printf "evaluating: %30s %s\n" "${UNIT}" "(trap test: skipped, use tools/headless/unittest.py)"
+elif [ -r "${UNIT}.lua" ]; then
     if [ "${DEBUG}" = "true" ]; then
         echo    "---------------------------------------------------------------"
         echo    "building ${UNIT}: "

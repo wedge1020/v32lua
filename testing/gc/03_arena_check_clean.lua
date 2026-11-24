@@ -5,7 +5,7 @@
 --@ halt the cart before the results are written.
 --@ (The escaping stores -- a global, an older table's value or key, an
 --@ upvalue, setmetatable, table.insert -- were each checked to reach the
---@ panic screen by hand; the harness has no expected-panic tests.)
+--@ panic screen by hand; see 06-09 for tests that expect a panic label.)
 --@ Results stored in global variables for automated memory scraping.
 --#gc arena
 --#gc-check

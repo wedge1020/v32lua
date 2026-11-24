@@ -181,10 +181,11 @@ __arena_check_global:
 __arena_check_core:
     MOV  R2, [ARENA_FLOOR]
     JF   R2, __arena_check_ok    ; no arena open
-    PUSH R1
     CALL __arena_value_addr      ; R0 = object address, 0 = not a heap object
-    POP  R1
-    JF   R0, __arena_check_ok
+    JF   R0, __arena_check_ok    ; (R1 is not touched: no PUSH/POP R1 around
+                                 ; the call, which v32opt 20261124 misread as
+                                 ; "R1 is not an input" and dropped the
+                                 ; caller's MOV R1, [BP+3])
     MOV  R2, [ARENA_FLOOR]
     IGT  R2, R0                  ; value older than the arena?
     JT   R2, __arena_check_ok
@@ -200,27 +201,27 @@ __arena_check_ok:
 
 ;; __arena_value_addr: R0 = boxed value -> R0 = RAW address of the heap
 ;; object it refers to (table header, RAM string, closure record), or 0.
-;; Clobbers R0-R1.
+;; Clobbers R0 and R2 (not R1: __arena_check_core keeps the container there).
 __arena_value_addr:
-    MOV  R1, R0
-    AND  R1, BOXED_DATA
-    IEQ  R1, BOXED_TABLE
-    JT   R1, __arena_value_payload
-    MOV  R1, R0
-    AND  R1, BOXED_DATA
-    IEQ  R1, BOXED_RAMSTRING
-    JT   R1, __arena_value_ramstring
-    MOV  R1, R0
-    AND  R1, 0xFFE00000
-    IEQ  R1, 0x7FA00000          ; BOXED_FUNCTION | BOXED_CLOSURE_FLAG
-    JT   R1, __arena_value_closure
+    MOV  R2, R0
+    AND  R2, BOXED_DATA
+    IEQ  R2, BOXED_TABLE
+    JT   R2, __arena_value_payload
+    MOV  R2, R0
+    AND  R2, BOXED_DATA
+    IEQ  R2, BOXED_RAMSTRING
+    JT   R2, __arena_value_ramstring
+    MOV  R2, R0
+    AND  R2, 0xFFE00000
+    IEQ  R2, 0x7FA00000          ; BOXED_FUNCTION | BOXED_CLOSURE_FLAG
+    JT   R2, __arena_value_closure
     MOV  R0, 0                   ; number, ROM string, plain function
     RET
 __arena_value_ramstring:
-    MOV  R1, R0
-    AND  R1, BOXED_PAYLOAD
-    ILT  R1, 4                   ; nil / false / true / tombstone
-    JF   R1, __arena_value_payload
+    MOV  R2, R0
+    AND  R2, BOXED_PAYLOAD
+    ILT  R2, 4                   ; nil / false / true / tombstone
+    JF   R2, __arena_value_payload
     MOV  R0, 0
     RET
 __arena_value_closure:

@@ -368,3 +368,13 @@ table-heavy PICO-8 cart), so it is meant for development builds.
 The command line wins over the hint, and an unknown mode is an error. The
 default mode can be changed at build time (`-DV32LUA_DEFAULT_GC=1`, and
 `V32LUA_DEFAULT_GC_CHECK`, in `inc/config.h`).
+
+**Measuring the heap.** v32sim 20261124-dev and later can watch the heap
+while a cart runs: `v32sim --heap=PROG.asm PROG.v32`, or headless
+`v32orun --heap -a PROG.asm PROG.vbin` (without `-q`, which hides the per-frame lines). Every frame end prints
+`HEAP F<frame> ptr= used= peak=` (`used` is `HEAP_POINTER - HEAP_START`),
+with `--gc arena` also `floor= pin= depth= stack=`, then `HEAP PEAK` and
+`HEAP END` at exit. A `used` that climbs frame after frame is a leak: in
+arena mode, look for a `pin=` that keeps rising (an older table growing
+inside the arena) or a `depth=` above 0 at a frame end (an arena that was
+never released). The peak tells you how much heap a level or menu needs.
