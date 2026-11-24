@@ -371,10 +371,23 @@ default mode can be changed at build time (`-DV32LUA_DEFAULT_GC=1`, and
 
 **Measuring the heap.** v32sim 20261124-dev and later can watch the heap
 while a cart runs: `v32sim --heap=PROG.asm PROG.v32`, or headless
-`v32orun --heap -a PROG.asm PROG.vbin` (without `-q`, which hides the per-frame lines). Every frame end prints
-`HEAP F<frame> ptr= used= peak=` (`used` is `HEAP_POINTER - HEAP_START`),
-with `--gc arena` also `floor= pin= depth= stack=`, then `HEAP PEAK` and
-`HEAP END` at exit. A `used` that climbs frame after frame is a leak: in
-arena mode, look for a `pin=` that keeps rising (an older table growing
-inside the arena) or a `depth=` above 0 at a frame end (an arena that was
-never released). The peak tells you how much heap a level or menu needs.
+`v32orun --heap -a PROG.asm PROG.vbin`. Both print the same lines:
+
+```
+HEAP F<n> ptr=0x... used=N peak=N free=N blocks=N floor=0x... pin=0x... depth=N stack=...|-
+HEAP PEAK used=N ptr=0x... frame=F
+HEAP END ptr=0x... used=N peak=N free=N blocks=N frame=F ...
+```
+
+`used` is the heap top minus `HEAP_START`, so it counts blocks sitting on
+the free lists too; `free`/`blocks` total those lists (blocks tables have
+outgrown, waiting to be reused), so `used - free` is the memory actually in
+use. `floor`, `pin`, `depth` and `stack` appear with `--gc arena`.
+`free=? blocks=?` means a list looked corrupt -- report it. Frame numbers
+differ between the two: v32sim counts from power-on (BIOS frames
+included), headless v32orun from 0.
+
+A `used - free` that climbs frame after frame is a leak. In arena mode,
+look for a `pin=` that keeps rising (an older table growing inside the
+arena) or a `depth=` above 0 at a frame end (an arena that was never
+released). The peak tells you how much heap a level or menu needs.

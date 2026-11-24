@@ -223,6 +223,9 @@ __malloc_reuse_done:
 ;; __mfree: give a block back for __malloc to reuse.
 ;; Incoming Stack: [BP+3] = RAW block address, [BP+2] = its size in words
 ;; (exactly what was allocated, or the tail of it). Preserves every register.
+;; The free-list layout -- FREE_MASK bit k while bin k is not empty, 22 bins
+;; at FREE_BINS (bin k: 2^k .. 2^(k+1)-1 words), block header [next, size]
+;; -- is also read by v32sim's --heap report: tell v32sim if it changes.
 ;; Used where the runtime KNOWS a block is garbage: the array or hash part a
 ;; table has just outgrown (table.s), the unused tail of a number's text
 ;; (string.s). Blocks under 2 words are dropped (a free block keeps its

@@ -387,11 +387,26 @@ desconocido es un error. El modo por defecto puede cambiarse al compilar
 
 **Medir el montón.** v32sim 20261124-dev y posteriores pueden vigilar el
 montón mientras corre un cartucho: `v32sim --heap=PROG.asm PROG.v32`, o sin
-pantalla `v32orun --heap -a PROG.asm PROG.vbin` (sin `-q`, que oculta las líneas por fotograma). Al final de cada fotograma
-se imprime `HEAP F<fotograma> ptr= used= peak=` (`used` es
-`HEAP_POINTER - HEAP_START`), con `--gc arena` también
-`floor= pin= depth= stack=`, y al salir `HEAP PEAK` y `HEAP END`. Un `used`
-que sube fotograma tras fotograma es una fuga: en modo arena, busque un
-`pin=` que no deja de subir (una tabla anterior que crece dentro del arena)
-o un `depth=` mayor que 0 al final de un fotograma (un arena que nunca se
-liberó). El pico indica cuánto montón necesita un nivel o un menú.
+pantalla `v32orun --heap -a PROG.asm PROG.vbin`. Ambos imprimen las mismas
+líneas:
+
+```
+HEAP F<n> ptr=0x... used=N peak=N free=N blocks=N floor=0x... pin=0x... depth=N stack=...|-
+HEAP PEAK used=N ptr=0x... frame=F
+HEAP END ptr=0x... used=N peak=N free=N blocks=N frame=F ...
+```
+
+`used` es la cima del montón menos `HEAP_START`, así que también cuenta los
+bloques que esperan en las listas libres; `free`/`blocks` suman esas listas
+(bloques que las tablas dejaron al crecer, a la espera de reutilizarse), de
+modo que `used - free` es la memoria realmente en uso. `floor`, `pin`,
+`depth` y `stack` aparecen con `--gc arena`. `free=? blocks=?` significa que
+una lista parecía corrupta: avísenos. La numeración de fotogramas difiere:
+v32sim cuenta desde el encendido (con los fotogramas de la BIOS) y v32orun
+sin pantalla desde 0.
+
+Un `used - free` que sube fotograma tras fotograma es una fuga. En modo
+arena, busque un `pin=` que no deja de subir (una tabla anterior que crece
+dentro del arena) o un `depth=` mayor que 0 al final de un fotograma (un
+arena que nunca se liberó). El pico indica cuánto montón necesita un nivel
+o un menú.

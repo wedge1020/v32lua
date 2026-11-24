@@ -81,7 +81,9 @@ void gc_settle_options (void)
 // In every mode, the free lists of __malloc / __mfree (memory.s): the
 // blocks a table has outgrown and the unused tails of number texts go back
 // to be reused. FREE_MASK bit k is set while FREE_BINS[k] (blocks of 2^k to
-// 2^(k+1)-1 words) is not empty. 1 + FREE_BIN_COUNT words.
+// 2^(k+1)-1 words) is not empty. 1 + FREE_BIN_COUNT words. v32sim's --heap
+// report decodes these words (and the ARENA_* ones) by name: keep the names
+// and layout, or tell v32sim.
 int gc_emit_defines (FILE *f)
 {
     fprintf (f, "%%define  FREE_MASK                0x%.8X\n", next_ram_address);

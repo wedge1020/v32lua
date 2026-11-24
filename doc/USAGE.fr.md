@@ -394,11 +394,26 @@ est une erreur. Le mode par défaut peut être changé à la compilation
 
 **Mesurer le tas.** v32sim 20261124-dev et suivants peuvent surveiller le
 tas pendant qu'une cartouche tourne : `v32sim --heap=PROG.asm PROG.v32`, ou
-sans écran `v32orun --heap -a PROG.asm PROG.vbin` (sans `-q`, qui masque les lignes par image). À la fin de chaque image
-s'affiche `HEAP F<image> ptr= used= peak=` (`used` vaut
-`HEAP_POINTER - HEAP_START`), avec `--gc arena` aussi
-`floor= pin= depth= stack=`, puis `HEAP PEAK` et `HEAP END` à la sortie. Un
-`used` qui monte d'image en image est une fuite : en mode arène, cherchez un
-`pin=` qui ne cesse de monter (une table plus ancienne qui grandit dans
-l'arène) ou un `depth=` supérieur à 0 en fin d'image (une arène jamais
-libérée). Le pic indique combien de tas un niveau ou un menu demande.
+sans écran `v32orun --heap -a PROG.asm PROG.vbin`. Les deux affichent les
+mêmes lignes :
+
+```
+HEAP F<n> ptr=0x... used=N peak=N free=N blocks=N floor=0x... pin=0x... depth=N stack=...|-
+HEAP PEAK used=N ptr=0x... frame=F
+HEAP END ptr=0x... used=N peak=N free=N blocks=N frame=F ...
+```
+
+`used` est le sommet du tas moins `HEAP_START` : il compte donc aussi les
+blocs en attente dans les listes libres ; `free`/`blocks` totalisent ces
+listes (des blocs que les tables ont laissés en grandissant, en attente de
+réutilisation), si bien que `used - free` est la mémoire réellement
+utilisée. `floor`, `pin`, `depth` et `stack` apparaissent avec
+`--gc arena`. `free=? blocks=?` signifie qu'une liste semblait corrompue :
+signalez-le. La numérotation des images diffère : v32sim compte depuis la
+mise sous tension (images du BIOS comprises), v32orun sans écran depuis 0.
+
+Un `used - free` qui monte d'image en image est une fuite. En mode arène,
+cherchez un `pin=` qui ne cesse de monter (une table plus ancienne qui
+grandit dans l'arène) ou un `depth=` supérieur à 0 en fin d'image (une
+arène jamais libérée). Le pic indique combien de tas un niveau ou un menu
+demande.

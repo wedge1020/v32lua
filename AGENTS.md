@@ -239,6 +239,7 @@ Both layers' known gaps are listed in the README roadmap and `doc/PICO8.md`,
   or look like `_mvpad_N` / `_mvarg_N`: those are the suffixes the compiler
   generates for user functions (`__NAME_return`), and a clash fails assembly
   (`__ftoa_return` once collided with `lib/string.lua`'s `ftoa`).
+- **Heap layout is read by v32sim:** `v32sim --heap` / `v32orun --heap` (v32sim 20261124-dev) decode `HEAP_POINTER`, `HEAP_START`, the arena words (`ARENA_FLOOR`, `ARENA_PIN_TOP`, `ARENA_DEPTH`, `ARENA_STACK`) and the free lists: `FREE_MASK` bit k set while bin k is not empty, 22 bins at `FREE_BINS`, a free block's header `[next, size]`. Changing any of that (the names, the bin count or rule, the header) breaks its report: tell v32sim in the same change.
 - **Runtime routines and v32opt:** `tools/check_clobbers.py` finds the routines the compiler calls from `CALL __name` strings, literal names passed to `emit_runtime_call_intrinsic()`, and `{ "name", nargs, "__routine" }` tables -- a routine reached any other way gets no `clobbers=` hint (safe, just slower). Avoid reading a register-passed input after a `PUSH Rn ... POP Rn` save around a call: v32opt 20261124-dev took such a register for "not an input" and deleted the caller's setup (`__arena_check_core` hit this). `__malloc` / `__malloc_owned` carry a `nonzero` attribute on their `;@fn` line (doc/HINTS.md).
 - **Allocation in the runtime:** `__malloc` never returns 0 (it goes to the
   out-of-memory panic screen itself), so callers need no check; never bump the
