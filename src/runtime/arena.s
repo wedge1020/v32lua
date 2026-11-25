@@ -201,7 +201,7 @@ __arena_check_ok:
 
 ;; __arena_value_addr: R0 = boxed value -> R0 = RAW address of the heap
 ;; object it refers to (table header, RAM string, closure record), or 0.
-;; Clobbers R0 and R2 (not R1: __arena_check_core keeps the container there).
+;; Clobbers: R0, R2 (not R1: __arena_check_core keeps the container there).
 __arena_value_addr:
     MOV  R2, R0
     AND  R2, BOXED_DATA
