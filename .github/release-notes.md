@@ -2,7 +2,7 @@
 
 ## Highlights
 
-- **A practical Lua subset, compiled to native code.** Closures with shared upvalues, tables with metatables (`__index`, `__newindex`, `__call`, `__tostring`, `__len`), varargs and multiple returns, `goto`, bitwise operators, the string library, and inline assembly. Numbers are 32-bit floats (NaN-boxed); there are no coroutines or garbage collection, by design.
+- **A practical Lua subset, compiled to native code.** Closures with shared upvalues, tables with metatables (`__index`, `__newindex`, `__call`, `__tostring`, `__len`), varargs and multiple returns, `goto`, bitwise operators, the string library, and inline assembly. Numbers are 32-bit floats (NaN-boxed); there are no coroutines or garbage collection, by design; `--gc arena` adds explicit `arena.mark()` / `arena.release()` heap management.
 - **Native Vircon32 API.** Video, sound, input, tilemaps, the memory card and raw I/O ports, with keyboard and mouse support through v32io (needs a v32io device).
 - **Run TIC-80 and PICO-8 carts.** Two compatibility layers compile many existing carts, including `.p8` and `.tic` files, to Vircon32 with little or no source change. They are a work in progress: the known gaps are listed in the README and in `doc/PICO8.md` and `doc/TIC80.md`.
 - **Carts without the paperwork.** `--#title`, `--#texture`, `--#sound` and `--#tilemap` hints in your source generate the cartridge XML (and its `v32opt` twin) and ready-to-run `Make.sh` / `Make.bat` build scripts.

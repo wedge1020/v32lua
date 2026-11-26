@@ -123,7 +123,7 @@ quel autre projet Vircon32 (assembler → `packrom` → exécuter sous
 | **`demos`** | Compile toutes les démos sous `demos/` (voir [Compiler les démos](#building-the-demos)). |
 | **`version`** | Affiche la version tirée de `inc/v32lua.h` et l'inscrit dans les pages de manuel et `doc/DEBUGGING.md` (à lancer avant une publication, puis recompiler). `make version VERSION=AAAAMMJJ-statut` écrit d'abord une nouvelle version dans `inc/v32lua.h`. |
 | **`monofiles`**, **`context`**, **`put`** | Rassemblent les sources dans `put/` sous forme de fichiers texte uniques, à coller dans une conversation. |
-| **`archive`** | Nettoie, puis compresse le projet dans `../v32lua-project-YYYYMMDD.zip`. |
+| **`archive`** | Nettoie, puis compresse le projet (avec `.github` et `.gitignore`, sans produits de compilation) dans `../v32lua-project-YYYYMMDD.zip`, la date étant les 8 premiers caractères de `VERSION`. |
 
 La chaîne de version se trouve à un seul endroit, `#define VERSION` dans
 `inc/v32lua.h` ; `v32lua --version` l'affiche et `make version` la copie

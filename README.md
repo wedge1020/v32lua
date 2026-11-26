@@ -120,7 +120,7 @@ any  other  Vircon32  project  (assemble  →  `packrom`  →  run  under
 | **`demos`** | Builds every demo under `demos/` (see [Building the demos](#building-the-demos)). |
 | **`version`** | Prints the version from `inc/v32lua.h` and stamps it into the man pages and `doc/DEBUGGING.md` (run before a release, then rebuild). `make version VERSION=YYYYMMDD-status` writes a new version into `inc/v32lua.h` first. |
 | **`monofiles`**, **`context`**, **`put`** | Gather the sources into `put/` as single text files, for pasting into a conversation. |
-| **`archive`** | Cleans, then zips the project into `../v32lua-project-YYYYMMDD.zip`. |
+| **`archive`** | Cleans, then zips the project (with `.github` and `.gitignore`, without build products) into `../v32lua-project-YYYYMMDD.zip`, the date being the first 8 characters of `VERSION`. |
 
 The version string lives in one place, `#define VERSION` in
 `inc/v32lua.h`; `v32lua --version` prints it and `make version` copies it

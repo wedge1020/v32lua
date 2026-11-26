@@ -107,9 +107,10 @@ bin/$(TARGET):
 
 # Clean both the build files in src/ and the generated assembly in testing/
 clean:
-	rm -f err.txt put/* *.zip ../v32lua-project.zip ../v32lua-project-[0-9]*.zip
+	rm -f err.txt put/* *.zip *.patch ../v32lua-project.zip ../v32lua-project-[0-9]*.zip
 	$(MAKE) -C src clean
 	$(MAKE) -C testing clean
+	rm -f testing/*/Make.sh testing/*/Make.bat
 	$(MAKE) -C demos clean
 
 # clean, plus the out-of-tree CMake build directory (see CMakeLists.txt)
@@ -124,7 +125,8 @@ install: bin/$(TARGET)
 		echo "Installing $(TARGET) to ~/bin/"; \
 		install -m 755 $(BIN) ~/bin/$(TARGET)$(EXE); \
 	else \
-		echo "Skipping: neither ~/bin/bin.$(ARCH) nor ~/bin exist"; \
+		echo "Installing $(TARGET) to ~/bin/ (created)"; \
+		mkdir -p ~/bin && install -m 755 $(BIN) ~/bin/$(TARGET)$(EXE); \
 	fi
 
 uninstall:
@@ -259,4 +261,5 @@ put: context
 	done
 
 archive: clean
-	zip -r ../v32lua-project-$(shell date +%Y%m%d).zip CMakeLists.txt cmake demos doc inc lib Makefile man README.* scripts src tests v32 testing tools .github *.md
+	zip -r ../v32lua-project-$(shell echo '$(VERSION)' | cut -c1-8).zip CMakeLists.txt cmake demos doc inc lib Makefile man README.* scripts src tests testing tools .github .gitignore *.md \
+	    -x '*.zip' '*.patch' '*.DS_Store' 'build/*'

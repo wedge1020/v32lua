@@ -1,5 +1,11 @@
 # Changelog
 
+## 20261126-dev
+- **Release prep.** New top-level `.gitignore`: build outputs (`bin/`, `src/*.o`, the test and demo products under `testing/` and `demos/`), `*.zip` and `*.patch`. The committed generated `src/parser.c`, `src/lexer.c` and `inc/parser.h`, the test fixtures and `demos/primes/*.xml` are not ignored.
+- `make archive` names the zip after the first 8 characters of `VERSION` (it used today's date), includes `.gitignore` and excludes `*.zip`, `*.patch` and `.DS_Store`; `make clean` also removes `*.patch`.
+- `make install` creates `~/bin` when neither `~/bin/bin.<arch>` nor `~/bin` exists, instead of skipping silently.
+- `make version VERSION=20261126-dev` re-stamped `inc/v32lua.h`, the three man pages (English, Spanish, French) and `doc/DEBUGGING.md`; `.github/release-notes.md` mentions `--gc arena`; the README tables (en/es/fr) describe the `archive` rule accurately.
+
 ## 20261124-dev
 - `v32lua --help` fits an 80-column terminal (no line over 79 columns; option descriptions start at column 21, an option too long for its column gets a line to itself). The code-generation switches (`--no-direct-calls`, `--no-inline`, `--no-hints`) have their own "Code generation:" section instead of sitting under "Build scripts:", and the TIC-80 `--tic80-commit` / `--bdr-step` and `--skip-fn` / `--hook-fn` moved to the cartridge options with the other `--#` hint overrides. The texts are the same apart from capitalisation.
 - **Fix: "label `__pico8_sgn_done_26` has already been declared" (and the same for `math.atan2` and PICO-8 `stat()`).** `get_next_label()` counts per function, so a label built from it must also carry the function's name; `sgn()`'s (`__pico8_sgn_done_N`), `atan2()`'s (`__atan2_ok_N` / `__atan2_done_N`) and `stat()`'s mouse-dispatch labels (`__stat_general_N` / `__stat_done_N`) did not, and a cart whose 27th `sgn()` fell in a second function failed to assemble (found on nanoman.p8, a PICO-8 cart, with every compiler since the label scheme). They are now `__<function>_sgn_done_N`, `__<function>_atan2_ok_N`, ... like every other per-function label; the other `get_next_label()` users already were.
